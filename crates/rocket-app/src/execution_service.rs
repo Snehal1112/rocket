@@ -256,6 +256,9 @@ mod tests {
             self.entries.lock().unwrap().clear();
             Ok(())
         }
+        fn search(&self, _: &rocket_history::HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
+            Ok(self.entries.lock().unwrap().clone())
+        }
     }
 
     // No-op cookie repo.
@@ -370,6 +373,9 @@ mod tests {
             }
             fn clear(&self) -> DomainResult<()> {
                 self.0.clear()
+            }
+            fn search(&self, filter: &rocket_history::HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
+                self.0.search(filter)
             }
         }
 

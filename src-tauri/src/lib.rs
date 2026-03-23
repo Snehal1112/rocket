@@ -119,6 +119,7 @@ pub fn run() {
             commands::history::list_history,
             commands::history::get_history_entry,
             commands::history::clear_history,
+            commands::history::search_history,
             commands::templates::list_templates,
             commands::templates::get_template,
             commands::templates::save_template,
