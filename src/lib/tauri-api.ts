@@ -1,0 +1,293 @@
+/**
+ * TypeScript bridge — wraps every Tauri command with a typed invoke() call.
+ * All types mirror the Rust structs (camelCase via serde rename_all).
+ */
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+// ============================================================
+// Domain types (mirror Rust structs)
+// ============================================================
+
+export type HttpMethod =
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE"
+  | "OPTIONS"
+  | "HEAD";
+
+export interface Header {
+  key: string;
+  value: string;
+  enabled: boolean;
+}
+
+export type BodyMode = "none" | "json" | "xml" | "text" | "formdata" | "binary";
+
+export interface FormDataEntry {
+  key: string;
+  value: string;
+  entryType: "text" | "file";
+  enabled: boolean;
+}
+
+export interface Body {
+  mode: BodyMode;
+  content?: string;
+  formData?: FormDataEntry[];
+}
+
+export type Auth =
+  | { authType: "none" }
+  | { authType: "basic"; username: string; password: string }
+  | { authType: "bearer"; token: string }
+  | { authType: "api-key"; key: string; value: string; addTo: "header" | "query" };
+
+export interface RequestOptions {
+  followRedirects: boolean;
+  timeoutMs: number;
+  verifySsl: boolean;
+}
+
+export interface CollectionSummary {
+  name: string;
+  path: string;
+  requestCount: number;
+}
+
+export interface Request {
+  name: string;
+  method: HttpMethod;
+  url: string;
+  headers: Header[];
+  body?: Body;
+  auth: Auth;
+}
+
+export interface Folder {
+  name: string;
+  items: CollectionItem[];
+}
+
+export type CollectionItem =
+  | { type: "request"; request: Request }
+  | { type: "folder"; folder: Folder };
+
+export interface Collection {
+  name: string;
+  root: Folder;
+}
+
+export interface Variable {
+  key: string;
+  value: string;
+  enabled: boolean;
+  secret: boolean;
+}
+
+export interface Environment {
+  name: string;
+  variables: Variable[];
+}
+
+export interface Template {
+  name: string;
+  method: HttpMethod;
+  url: string;
+  headers: Header[];
+  body?: Body;
+}
+
+export interface HistoryEntry {
+  id: string;
+  method: string;
+  url: string;
+  status: number;
+  durationMs: number;
+  responseSize: number;
+  timestamp: string;
+  collection?: string;
+  requestName?: string;
+}
+
+export interface Cookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  expires?: string;
+}
+
+export interface CookieJar {
+  domain: string;
+  cookies: Cookie[];
+}
+
+export interface HttpResponse {
+  status: number;
+  statusText: string;
+  headers: Header[];
+  body: string;
+  durationMs: number;
+  sizeBytes: number;
+}
+
+export interface ExecuteRequestInput {
+  method: HttpMethod;
+  url: string;
+  headers: Header[];
+  body?: Body;
+  auth: Auth;
+  options: RequestOptions;
+  environmentName?: string;
+  collection?: string;
+  requestName?: string;
+}
+
+export interface FileChangedEvent {
+  path: string;
+  eventType: "create" | "modify" | "remove";
+  collection?: string;
+}
+
+// ============================================================
+// Collections
+// ============================================================
+
+export const listCollections = () =>
+  invoke<CollectionSummary[]>("list_collections");
+
+export const getCollection = (name: string) =>
+  invoke<Collection>("get_collection", { name });
+
+export const createCollection = (name: string) =>
+  invoke<Collection>("create_collection", { name });
+
+export const deleteCollection = (name: string) =>
+  invoke<void>("delete_collection", { name });
+
+export const renameCollection = (oldName: string, newName: string) =>
+  invoke<void>("rename_collection", { oldName, newName });
+
+export const saveRequest = (
+  collection: string,
+  path: string,
+  request: Request,
+) => invoke<void>("save_request", { collection, path, request });
+
+export const deleteRequest = (collection: string, path: string) =>
+  invoke<void>("delete_request", { collection, path });
+
+export const createFolder = (collection: string, path: string) =>
+  invoke<void>("create_folder", { collection, path });
+
+export const deleteFolder = (collection: string, path: string) =>
+  invoke<void>("delete_folder", { collection, path });
+
+export const moveItem = (
+  srcCollection: string,
+  srcPath: string,
+  dstCollection: string,
+  dstPath: string,
+) =>
+  invoke<void>("move_item", {
+    srcCollection,
+    srcPath,
+    dstCollection,
+    dstPath,
+  });
+
+// ============================================================
+// Environments
+// ============================================================
+
+export const listEnvironments = () =>
+  invoke<Environment[]>("list_environments");
+
+export const getEnvironment = (name: string) =>
+  invoke<Environment>("get_environment", { name });
+
+export const saveEnvironment = (env: Environment) =>
+  invoke<void>("save_environment", { env });
+
+export const deleteEnvironment = (name: string) =>
+  invoke<void>("delete_environment", { name });
+
+// ============================================================
+// Request execution
+// ============================================================
+
+export const executeRequest = (input: ExecuteRequestInput) =>
+  invoke<HttpResponse>("execute_request", { input });
+
+// ============================================================
+// History
+// ============================================================
+
+export const listHistory = (limit?: number) =>
+  invoke<HistoryEntry[]>("list_history", { limit });
+
+export const getHistoryEntry = (id: string) =>
+  invoke<HistoryEntry>("get_history_entry", { id });
+
+export const clearHistory = () => invoke<void>("clear_history");
+
+// ============================================================
+// Templates
+// ============================================================
+
+export const listTemplates = () => invoke<Template[]>("list_templates");
+
+export const getTemplate = (name: string) =>
+  invoke<Template>("get_template", { name });
+
+export const saveTemplate = (template: Template) =>
+  invoke<void>("save_template", { template });
+
+export const deleteTemplate = (name: string) =>
+  invoke<void>("delete_template", { name });
+
+// ============================================================
+// Cookies
+// ============================================================
+
+export const getCookies = () => invoke<CookieJar[]>("get_cookies");
+
+export const setCookies = (jar: CookieJar) =>
+  invoke<void>("set_cookies", { jar });
+
+export const clearCookies = () => invoke<void>("clear_cookies");
+
+// ============================================================
+// App utility
+// ============================================================
+
+export const getAppDataDir = () => invoke<string>("get_app_data_dir");
+
+export const watchCollections = () => invoke<void>("watch_collections");
+
+export const stopWatching = () => invoke<void>("stop_watching");
+
+// ============================================================
+// Realtime events
+// ============================================================
+
+export const onFileChange = (
+  handler: (event: FileChangedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FileChangedEvent>("file-change", (e) => handler(e.payload));
+
+export const onCollectionChanged = (
+  handler: () => void,
+): Promise<UnlistenFn> =>
+  listen("collection-changed", () => handler());
+
+export const onRequestExecuted = (
+  handler: () => void,
+): Promise<UnlistenFn> =>
+  listen("request-executed", () => handler());

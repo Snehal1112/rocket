@@ -1,49 +1,110 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import {
+  listCollections,
+  createCollection,
+  executeRequest,
+  type CollectionSummary,
+  type HttpResponse,
+} from "./lib/tauri-api";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [requestUrl, setRequestUrl] = useState("https://httpbin.org/get");
+  const [response, setResponse] = useState<HttpResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  useEffect(() => {
+    loadCollections();
+  }, []);
+
+  async function loadCollections() {
+    try {
+      const result = await listCollections();
+      setCollections(result);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCreateCollection(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCollectionName.trim()) return;
+    try {
+      await createCollection(newCollectionName.trim());
+      setNewCollectionName("");
+      await loadCollections();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleExecute(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setResponse(null);
+    try {
+      const result = await executeRequest({
+        method: "GET",
+        url: requestUrl,
+        headers: [],
+        auth: { authType: "none" },
+        options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      });
+      setResponse(result);
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>RocketAPI</h1>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      <section>
+        <h2>Collections ({collections.length})</h2>
+        <ul>
+          {collections.map((c) => (
+            <li key={c.name}>
+              {c.name} — {c.requestCount} request(s)
+            </li>
+          ))}
+        </ul>
+        <form onSubmit={handleCreateCollection} className="row">
+          <input
+            value={newCollectionName}
+            onChange={(e) => setNewCollectionName(e.currentTarget.value)}
+            placeholder="New collection name"
+          />
+          <button type="submit">Create</button>
+        </form>
+      </section>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <section>
+        <h2>Execute Request</h2>
+        <form onSubmit={handleExecute} className="row">
+          <input
+            value={requestUrl}
+            onChange={(e) => setRequestUrl(e.currentTarget.value)}
+            placeholder="https://..."
+            style={{ width: "400px" }}
+          />
+          <button type="submit">Send</button>
+        </form>
+        {response && (
+          <div>
+            <p>
+              Status: <strong>{response.status}</strong> {response.statusText} —{" "}
+              {response.durationMs}ms — {response.sizeBytes} bytes
+            </p>
+            <pre style={{ maxHeight: "200px", overflow: "auto", textAlign: "left" }}>
+              {response.body}
+            </pre>
+          </div>
+        )}
+        {error && <p style={{ color: "red" }}>{error}</p>}
+      </section>
     </main>
   );
 }
