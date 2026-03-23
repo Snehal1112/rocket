@@ -48,6 +48,8 @@ export interface BodyState {
   mode: 'none' | 'json' | 'xml' | 'text' | 'formdata' | 'binary';
   content: string;
   formData: KeyValueEntry[];
+  filePath?: string;
+  fileName?: string;
 }
 
 export interface AuthState {
