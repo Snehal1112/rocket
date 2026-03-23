@@ -8,9 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+# The `_lib` suffix avoids name collision between the lib and bin on Windows.
 name = "rocket_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -18,8 +16,27 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Internal workspace crates
+rocket-shared.workspace = true
+rocket-collection.workspace = true
+rocket-environment.workspace = true
+rocket-http.workspace = true
+rocket-history.workspace = true
+rocket-app.workspace = true
+rocket-infra.workspace = true
+
+# Tauri
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tauri-plugin-shell = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 
+# Shared workspace deps
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+log.workspace = true
+env_logger.workspace = true
+dirs.workspace = true
