@@ -1,0 +1,14 @@
+[package]
+name = "rocket-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared.workspace = true
+rocket-collection.workspace = true
+rocket-environment.workspace = true
+rocket-http.workspace = true
+rocket-history.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+log.workspace = true
