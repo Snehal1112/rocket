@@ -55,6 +55,18 @@ impl FromStr for HttpMethod {
 }
 
 // ============================================================
+// QueryParam
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryParam {
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+// ============================================================
 // Header
 // ============================================================
 
@@ -164,6 +176,14 @@ pub enum ApiKeyLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_param_serialization_roundtrip() {
+        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true };
+        let json = serde_json::to_string(&param).unwrap();
+        let parsed: QueryParam = serde_json::from_str(&json).unwrap();
+        assert_eq!(param, parsed);
+    }
 
     #[test]
     fn http_method_from_string() {

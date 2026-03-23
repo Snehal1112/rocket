@@ -1,4 +1,4 @@
-use rocket_shared::types::{Auth, Body, Header, HttpMethod};
+use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 
 /// An HTTP request ready for execution (resolved variables, all fields populated).
@@ -9,6 +9,7 @@ pub struct HttpRequest {
     pub method: HttpMethod,
     pub url: String,
     pub headers: Vec<Header>,
+    pub query_params: Vec<QueryParam>,
     pub body: Option<Body>,
     pub auth: Auth,
     pub options: RequestOptions,
@@ -44,6 +45,7 @@ impl HttpRequest {
             method,
             url: url.into(),
             headers: Vec::new(),
+            query_params: Vec::new(),
             body: None,
             auth: Auth::None,
             options: RequestOptions::default(),
