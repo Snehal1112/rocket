@@ -138,6 +138,18 @@ fn apply_auth(mut builder: reqwest::RequestBuilder, auth: &Auth) -> reqwest::Req
                 builder = builder.query(&[(key.as_str(), value.as_str())]);
             }
         },
+        Auth::OAuth2 {
+            access_token: Some(token),
+            ..
+        } => {
+            builder = builder.bearer_auth(token);
+        }
+        Auth::OAuth2 { .. } => {
+            // No access token available yet; skip auth header.
+        }
+        Auth::AwsSigV4 { .. } => {
+            // AWS SigV4 signing is not yet implemented.
+        }
     }
     builder
 }

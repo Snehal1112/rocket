@@ -163,6 +163,25 @@ pub enum Auth {
         value: String,
         add_to: ApiKeyLocation,
     },
+    #[serde(rename_all = "camelCase")]
+    OAuth2 {
+        grant_type: String,
+        client_id: String,
+        client_secret: String,
+        token_url: String,
+        scope: Option<String>,
+        access_token: Option<String>,
+        refresh_token: Option<String>,
+        expires_at: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    AwsSigV4 {
+        access_key: String,
+        secret_key: String,
+        region: String,
+        service: String,
+        session_token: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -241,5 +260,43 @@ mod tests {
                 token: "abc123".into()
             }
         );
+    }
+
+    #[test]
+    fn auth_oauth2_serialization_roundtrip() {
+        let auth = Auth::OAuth2 {
+            grant_type: "client_credentials".into(),
+            client_id: "my-client".into(),
+            client_secret: "my-secret".into(),
+            token_url: "https://auth.example.com/token".into(),
+            scope: Some("read write".into()),
+            access_token: Some("tok_abc".into()),
+            refresh_token: None,
+            expires_at: Some("2026-12-31T23:59:59Z".into()),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("\"authType\":\"o-auth2\""));
+        assert!(json.contains("\"grantType\":\"client_credentials\""));
+        assert!(json.contains("\"clientId\":\"my-client\""));
+        assert!(json.contains("\"tokenUrl\":\"https://auth.example.com/token\""));
+        let parsed: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, parsed);
+    }
+
+    #[test]
+    fn auth_aws_sig_v4_serialization_roundtrip() {
+        let auth = Auth::AwsSigV4 {
+            access_key: "AKIAIOSFODNN7EXAMPLE".into(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
+            region: "us-east-1".into(),
+            service: "s3".into(),
+            session_token: Some("FwoGZXIvY...".into()),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("\"authType\":\"aws-sig-v4\""));
+        assert!(json.contains("\"accessKey\":\"AKIAIOSFODNN7EXAMPLE\""));
+        assert!(json.contains("\"sessionToken\":\"FwoGZXIvY...\""));
+        let parsed: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, parsed);
     }
 }
