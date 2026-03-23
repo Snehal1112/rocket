@@ -79,6 +79,7 @@ pub fn run() {
                 Box::new(FsEnvironmentRepo::new(environments_dir)),
                 Box::new(ReqwestExecutor::new()),
                 Box::new(FsHistoryRepo::new(history_dir)),
+                Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(NullEventPublisher),
             );

@@ -165,6 +165,12 @@ mod tests {
         fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
             unimplemented!()
         }
+        fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
+            Ok(rocket_collection::CollectionSettings::default())
+        }
+        fn save_settings(&self, _: &str, _: &rocket_collection::CollectionSettings) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     fn make_service() -> CollectionService {
