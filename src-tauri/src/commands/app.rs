@@ -20,7 +20,7 @@ pub fn watch_collections(watcher: State<'_, NotifyFileWatcher>) -> Result<(), Do
     let publisher = Arc::new(rocket_shared::events::NullEventPublisher);
     watcher
         .start(collections_dir, publisher)
-        .map_err(|e| DomainError::Internal(e))
+        .map_err(DomainError::Internal)
 }
 
 #[tauri::command]
