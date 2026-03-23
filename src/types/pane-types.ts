@@ -51,10 +51,26 @@ export interface BodyState {
 }
 
 export interface AuthState {
-  authType: 'none' | 'basic' | 'bearer' | 'api-key';
+  authType: 'none' | 'basic' | 'bearer' | 'api-key' | 'oauth2' | 'aws-sig-v4';
   basic?: { username: string; password: string };
   bearer?: { token: string };
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };
+  oauth2?: {
+    grantType: 'client_credentials' | 'password' | 'authorization_code';
+    clientId: string;
+    clientSecret: string;
+    tokenUrl: string;
+    scope: string;
+    accessToken: string;
+    refreshToken: string;
+  };
+  awsSigV4?: {
+    accessKey: string;
+    secretKey: string;
+    region: string;
+    service: string;
+    sessionToken: string;
+  };
 }
 
 export interface ResponseState {
