@@ -27,7 +27,7 @@ impl HistoryRepository for FsHistoryRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 let content = fs::read_to_string(&path)?;
                 if let Ok(h) = serde_json::from_str::<HistoryEntry>(&content) {
                     entries.push(h);
@@ -63,7 +63,7 @@ impl HistoryRepository for FsHistoryRepo {
             for entry in fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "json") {
+                if path.extension().is_some_and(|e| e == "json") {
                     fs::remove_file(&path)?;
                 }
             }

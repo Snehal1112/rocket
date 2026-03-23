@@ -168,7 +168,7 @@ fn count_request_files(dir: &Path) -> usize {
 }
 
 fn is_request_file(path: &Path) -> bool {
-    path.extension().map_or(false, |ext| ext == "json" || ext == "bru")
+    path.extension().is_some_and(|ext| ext == "json" || ext == "bru")
 }
 
 fn build_folder_tree(current: &Path) -> DomainResult<Folder> {

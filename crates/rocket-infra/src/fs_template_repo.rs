@@ -27,7 +27,7 @@ impl TemplateRepository for FsTemplateRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 let content = fs::read_to_string(&path)?;
                 if let Ok(t) = serde_json::from_str::<Template>(&content) {
                     result.push(t);
