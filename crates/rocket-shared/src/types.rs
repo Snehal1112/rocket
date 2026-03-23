@@ -133,9 +133,10 @@ pub enum FormDataType {
 // Auth
 // ============================================================
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(tag = "authType", rename_all = "kebab-case")]
 pub enum Auth {
+    #[default]
     None,
     Basic {
         username: String,
@@ -159,11 +160,6 @@ pub enum ApiKeyLocation {
     Query,
 }
 
-impl Default for Auth {
-    fn default() -> Self {
-        Auth::None
-    }
-}
 
 #[cfg(test)]
 mod tests {
