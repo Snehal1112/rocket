@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rocket_collection::{Collection, CollectionRepository, CollectionSummary, Folder};
+use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
 use rocket_shared::error::{DomainError, DomainResult};
 
 pub struct FsCollectionRepo {
@@ -15,6 +15,10 @@ impl FsCollectionRepo {
 
     fn collection_path(&self, name: &str) -> PathBuf {
         self.base_dir.join(name)
+    }
+
+    fn settings_path(&self, name: &str) -> PathBuf {
+        self.collection_path(name).join("collection.json")
     }
 }
 
@@ -150,6 +154,25 @@ impl CollectionRepository for FsCollectionRepo {
         fs::rename(&src, &dst)?;
         Ok(())
     }
+
+    fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+        let path = self.settings_path(name);
+        if !path.exists() {
+            return Ok(CollectionSettings::default());
+        }
+        let content = fs::read_to_string(&path)?;
+        Ok(serde_json::from_str(&content)?)
+    }
+
+    fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
+        let path = self.settings_path(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(settings)?;
+        fs::write(&path, json)?;
+        Ok(())
+    }
 }
 
 fn count_request_files(dir: &Path) -> usize {
@@ -168,6 +191,10 @@ fn count_request_files(dir: &Path) -> usize {
 }
 
 fn is_request_file(path: &Path) -> bool {
+    // Exclude the reserved collection settings file.
+    if path.file_name().is_some_and(|n| n == "collection.json") {
+        return false;
+    }
     path.extension().is_some_and(|ext| ext == "json" || ext == "bru")
 }
 
@@ -303,5 +330,49 @@ mod tests {
         repo.move_item("my-api", "old/test.json", "my-api", "new/test.json").unwrap();
         assert!(repo.get_request("my-api", "old/test.json").is_err());
         assert!(repo.get_request("my-api", "new/test.json").is_ok());
+    }
+
+    #[test]
+    fn settings_default_when_no_file() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let settings = repo.get_settings("my-api").unwrap();
+        assert_eq!(settings, rocket_collection::CollectionSettings::default());
+        assert!(settings.auth.is_none());
+        assert!(settings.headers.is_empty());
+    }
+
+    #[test]
+    fn settings_roundtrip() {
+        use rocket_shared::types::{Auth, Header};
+
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+
+        let original = rocket_collection::CollectionSettings {
+            auth: Some(Auth::Bearer { token: "tok_abc".into() }),
+            headers: vec![Header::new("X-Tenant", "acme")],
+        };
+        repo.save_settings("my-api", &original).unwrap();
+        let loaded = repo.get_settings("my-api").unwrap();
+        assert_eq!(loaded, original);
+    }
+
+    #[test]
+    fn settings_file_not_counted_as_request() {
+        use rocket_shared::types::Auth;
+
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+
+        // Save settings, then verify the request count stays zero.
+        let settings = rocket_collection::CollectionSettings {
+            auth: Some(Auth::None),
+            headers: vec![],
+        };
+        repo.save_settings("my-api", &settings).unwrap();
+
+        let list = repo.list().unwrap();
+        assert_eq!(list[0].request_count, 0);
     }
 }
