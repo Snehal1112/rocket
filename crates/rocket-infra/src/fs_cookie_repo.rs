@@ -15,7 +15,7 @@ impl FsCookieRepo {
 
     /// Sanitize domain for use as a filename (replace dots and colons).
     fn file_path(&self, domain: &str) -> PathBuf {
-        let sanitized = domain.replace('.', "_").replace(':', "_");
+        let sanitized = domain.replace(['.', ':'], "_");
         self.dir.join(format!("{}.json", sanitized))
     }
 }
@@ -29,7 +29,7 @@ impl CookieRepository for FsCookieRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 let content = fs::read_to_string(&path)?;
                 if let Ok(jar) = serde_json::from_str::<CookieJar>(&content) {
                     result.push(jar);
@@ -60,7 +60,7 @@ impl CookieRepository for FsCookieRepo {
             for entry in fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "json") {
+                if path.extension().is_some_and(|e| e == "json") {
                     fs::remove_file(&path)?;
                 }
             }
