@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, FileUp } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -18,6 +19,7 @@ const MODES: { label: string; value: BodyMode }[] = [
   { label: 'XML', value: 'xml' },
   { label: 'Text', value: 'text' },
   { label: 'Form Data', value: 'formdata' },
+  { label: 'Binary', value: 'binary' },
 ];
 
 export function BodyEditor({ body, onChange }: BodyEditorProps) {
@@ -35,6 +37,25 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
     (formData: KeyValueEntry[]) => onChange({ ...body, formData }),
     [body, onChange],
   );
+
+  const handlePickFile = useCallback(async () => {
+    const result = await open({
+      multiple: false,
+      title: 'Select file for request body',
+    });
+    if (result) {
+      const path = result as string;
+      onChange({
+        ...body,
+        filePath: path,
+        fileName: path.split('/').pop() ?? 'unknown',
+      });
+    }
+  }, [body, onChange]);
+
+  const handleClear = useCallback(() => {
+    onChange({ ...body, filePath: undefined, fileName: undefined });
+  }, [body, onChange]);
 
   return (
     <div className="space-y-3">
@@ -82,6 +103,25 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
       {body.mode === 'formdata' && (
         <FormDataEditor formData={body.formData} onChange={setFormData} />
+      )}
+
+      {body.mode === 'binary' && (
+        <div className="flex items-center gap-2 py-1">
+          {body.filePath ? (
+            <>
+              <FileUp className="size-4 text-muted-foreground" />
+              <span className="text-sm">{body.fileName}</span>
+              <Button variant="ghost" size="sm" onClick={handleClear}>
+                Clear
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={handlePickFile}>
+              <FileUp className="size-4 mr-2" />
+              Choose file
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );
