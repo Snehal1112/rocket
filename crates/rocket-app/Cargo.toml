@@ -9,6 +9,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
+serde.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 log.workspace = true

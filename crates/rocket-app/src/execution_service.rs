@@ -6,7 +6,10 @@ use rocket_http::{CookieRepository, HttpExecutor, HttpRequest, HttpResponse, Req
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod};
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecuteRequestInput {
     pub method: HttpMethod,
     pub url: String,
