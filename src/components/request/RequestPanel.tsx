@@ -16,6 +16,7 @@ import { PathParamsPanel } from './PathParamsPanel';
 import { HeadersEditor } from './HeadersEditor';
 import { BodyEditor } from './BodyEditor';
 import { AuthEditor } from './AuthEditor';
+import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import type {
   Tab,
   HttpMethod,
@@ -364,11 +365,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </span>
           </div>
 
-          {/* Response body. */}
-          <div className="max-h-64 overflow-auto p-3">
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs">
-              {response.body}
-            </pre>
+          {/* Response body — tabbed viewer with pretty-print, raw, preview, headers. */}
+          <div className="h-64 overflow-hidden">
+            <ResponseBodyViewer response={response} />
           </div>
         </div>
       )}
