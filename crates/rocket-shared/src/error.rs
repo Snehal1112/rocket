@@ -1,7 +1,7 @@
 use serde::Serialize;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum DomainError {
     #[error("Not found: {0}")]
     NotFound(String),
@@ -13,7 +13,7 @@ pub enum DomainError {
     AlreadyExists(String),
 
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
     #[error("Serialization error: {0}")]
     Serialization(String),
@@ -23,6 +23,12 @@ pub enum DomainError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+}
+
+impl From<std::io::Error> for DomainError {
+    fn from(err: std::io::Error) -> Self {
+        DomainError::Io(err.to_string())
+    }
 }
 
 impl Serialize for DomainError {
