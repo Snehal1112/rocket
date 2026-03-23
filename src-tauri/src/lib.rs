@@ -48,9 +48,11 @@ pub fn run() {
                 std::fs::create_dir_all(dir).ok();
             }
 
-            // Event bus for collection service — publishes domain events to the frontend.
+            // Event buses — publish domain events to the frontend.
             let event_bus =
-                Box::new(tauri_event_bus::TauriEventBus::new(app_handle));
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
+            let watcher_bus =
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle));
 
             // Application services with injected infra repos.
             let collection_svc = CollectionService::new(
@@ -91,10 +93,7 @@ pub fn run() {
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
-            let _ = watcher.start(
-                collections_dir,
-                Arc::new(NullEventPublisher),
-            );
+            let _ = watcher.start(collections_dir, watcher_bus);
             app.manage(watcher);
 
             log::info!("RocketAPI initialized at {:?}", data_dir);
