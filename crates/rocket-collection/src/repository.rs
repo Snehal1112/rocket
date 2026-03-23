@@ -2,6 +2,7 @@ use rocket_shared::error::DomainResult;
 
 use crate::collection::Collection;
 use crate::request::Request;
+use crate::settings::CollectionSettings;
 use crate::summary::CollectionSummary;
 
 /// Repository trait for Collection persistence.
@@ -45,6 +46,13 @@ pub trait CollectionRepository: Send + Sync {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()>;
+
+    /// Read collection-level settings (auth, headers) from collection.json.
+    /// Returns default settings if the file does not exist.
+    fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings>;
+
+    /// Persist collection-level settings to collection.json.
+    fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()>;
 }
 
 #[cfg(test)]
