@@ -4,3 +4,4 @@ pub mod fs_environment_repo;
 pub mod fs_history_repo;
 pub mod fs_template_repo;
 pub mod reqwest_executor;
+pub mod file_watcher;
