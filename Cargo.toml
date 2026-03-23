@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rocket-shared",
+    "crates/rocket-collection",
+    "crates/rocket-environment",
+    "crates/rocket-http",
+    "crates/rocket-history",
+    "crates/rocket-app",
+    "crates/rocket-infra",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# Shared across crates — declare versions once here
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "multipart"] }
+notify = "6"
+sha2 = "0.10"
+base64 = "0.22"
+dirs = "5"
+log = "0.4"
+env_logger = "0.11"
+async-trait = "0.1"
+
+# Internal crates
+rocket-shared = { path = "crates/rocket-shared" }
+rocket-collection = { path = "crates/rocket-collection" }
+rocket-environment = { path = "crates/rocket-environment" }
+rocket-http = { path = "crates/rocket-http" }
+rocket-history = { path = "crates/rocket-history" }
+rocket-app = { path = "crates/rocket-app" }
+rocket-infra = { path = "crates/rocket-infra" }
