@@ -1,1 +1,1 @@
-// Bounded context: Environment & variable management
+pub mod variable;
