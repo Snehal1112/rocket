@@ -123,6 +123,9 @@ pub struct Body {
     pub mode: BodyMode,
     pub content: Option<String>,
     pub form_data: Option<Vec<FormDataEntry>>,
+    /// Path to a local file used when mode is Binary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -229,6 +232,7 @@ mod tests {
             mode: BodyMode::Json,
             content: Some("{\"key\":\"value\"}".into()),
             form_data: None,
+            file_path: None,
         };
         let json = serde_json::to_string(&body).unwrap();
         assert!(json.contains("\"mode\":\"json\""));
