@@ -113,6 +113,13 @@ export interface HistoryEntry {
   requestName?: string;
 }
 
+export interface HistoryFilter {
+  method?: string;
+  urlContains?: string;
+  statusMin?: number;
+  statusMax?: number;
+}
+
 export interface Cookie {
   name: string;
   value: string;
@@ -236,6 +243,9 @@ export const getHistoryEntry = (id: string) =>
   invoke<HistoryEntry>("get_history_entry", { id });
 
 export const clearHistory = () => invoke<void>("clear_history");
+
+export const searchHistory = (filter: HistoryFilter) =>
+  invoke<HistoryEntry[]>("search_history", { filter });
 
 // ============================================================
 // Templates

@@ -1,5 +1,5 @@
 use rocket_app::HistoryService;
-use rocket_history::HistoryEntry;
+use rocket_history::{HistoryEntry, HistoryFilter};
 use rocket_shared::error::DomainError;
 use tauri::State;
 
@@ -22,4 +22,12 @@ pub fn get_history_entry(
 #[tauri::command]
 pub fn clear_history(svc: State<'_, HistoryService>) -> Result<(), DomainError> {
     svc.clear()
+}
+
+#[tauri::command]
+pub fn search_history(
+    filter: HistoryFilter,
+    svc: State<'_, HistoryService>,
+) -> Result<Vec<HistoryEntry>, DomainError> {
+    svc.search(&filter)
 }
