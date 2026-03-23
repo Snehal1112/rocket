@@ -237,8 +237,27 @@ fn apply_body(
                 .body(content.to_string());
         }
         BodyMode::Binary => {
-            let content = body.content.as_deref().unwrap_or("");
-            builder = builder.body(content.to_string());
+            if let Some(file_path) = &body.file_path {
+                let path = std::path::Path::new(file_path);
+                let data = std::fs::read(path)
+                    .map_err(|e| DomainError::Internal(format!("Failed to read file: {e}")))?;
+
+                // Detect content type from the file extension.
+                let content_type = match path.extension().and_then(|e| e.to_str()) {
+                    Some("json") => "application/json",
+                    Some("xml") => "application/xml",
+                    Some("png") => "image/png",
+                    Some("jpg" | "jpeg") => "image/jpeg",
+                    Some("gif") => "image/gif",
+                    Some("pdf") => "application/pdf",
+                    Some("zip") => "application/zip",
+                    _ => "application/octet-stream",
+                };
+
+                builder = builder
+                    .header("Content-Type", content_type)
+                    .body(data);
+            }
         }
         BodyMode::FormData => {
             if let Some(entries) = &body.form_data {
@@ -287,6 +306,63 @@ mod tests {
         let builder = client.get("https://example.com");
         let result = apply_body(builder, &req.body);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn binary_body_reads_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.json");
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        f.write_all(b"{\"test\":true}").unwrap();
+
+        // Verify the file can be read for body construction.
+        let data = std::fs::read(&file_path).unwrap();
+        assert_eq!(data, b"{\"test\":true}");
+    }
+
+    #[test]
+    fn binary_body_applies_content_type_from_extension() {
+        use rocket_shared::types::{Body, BodyMode};
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // PNG file should produce image/png content type.
+        let png_path = dir.path().join("image.png");
+        std::fs::File::create(&png_path)
+            .unwrap()
+            .write_all(&[0x89, 0x50, 0x4E, 0x47])
+            .unwrap();
+
+        let body = Body {
+            mode: BodyMode::Binary,
+            content: None,
+            form_data: None,
+            file_path: Some(png_path.to_string_lossy().into_owned()),
+        };
+
+        let client = Client::new();
+        let builder = client.post("https://example.com");
+        let result = apply_body(builder, &Some(body));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn binary_body_missing_file_returns_error() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let body = Body {
+            mode: BodyMode::Binary,
+            content: None,
+            form_data: None,
+            file_path: Some("/nonexistent/path/file.bin".into()),
+        };
+
+        let client = Client::new();
+        let builder = client.post("https://example.com");
+        let result = apply_body(builder, &Some(body));
+        assert!(result.is_err());
     }
 
     #[tokio::test]

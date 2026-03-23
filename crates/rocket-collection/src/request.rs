@@ -82,6 +82,7 @@ mod tests {
                 mode: BodyMode::Json,
                 content: Some("{\"key\":\"val\"}".into()),
                 form_data: None,
+                file_path: None,
             });
         let json = serde_json::to_string_pretty(&req).unwrap();
         let deserialized: Request = serde_json::from_str(&json).unwrap();
