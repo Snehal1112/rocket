@@ -48,7 +48,7 @@ impl HttpExecutor for ReqwestExecutor {
         }
 
         // Apply authentication.
-        builder = apply_auth(builder, &request.auth);
+        builder = apply_auth(builder, &request.auth, &request.method)?;
 
         // Apply request body.
         builder = apply_body(builder, &request.body)?;
@@ -121,7 +121,11 @@ fn map_method(method: &rocket_shared::types::HttpMethod) -> Method {
     }
 }
 
-fn apply_auth(mut builder: reqwest::RequestBuilder, auth: &Auth) -> reqwest::RequestBuilder {
+fn apply_auth(
+    mut builder: reqwest::RequestBuilder,
+    auth: &Auth,
+    method: &rocket_shared::types::HttpMethod,
+) -> DomainResult<reqwest::RequestBuilder> {
     match auth {
         Auth::None => {}
         Auth::Basic { username, password } => {
@@ -147,11 +151,61 @@ fn apply_auth(mut builder: reqwest::RequestBuilder, auth: &Auth) -> reqwest::Req
         Auth::OAuth2 { .. } => {
             // No access token available yet; skip auth header.
         }
-        Auth::AwsSigV4 { .. } => {
-            // AWS SigV4 signing is not yet implemented.
+        Auth::AwsSigV4 {
+            access_key,
+            secret_key,
+            region,
+            service,
+            session_token,
+        } => {
+            use rocket_http::aws_sig::{sign_request, AwsCredentials};
+
+            let creds = AwsCredentials {
+                access_key: access_key.clone(),
+                secret_key: secret_key.clone(),
+                region: region.clone(),
+                service: service.clone(),
+                session_token: session_token.clone(),
+            };
+
+            let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+            let method_str = method.to_string();
+
+            // Build a temporary copy to extract the final URL.
+            let url_str = builder
+                .try_clone()
+                .ok_or_else(|| {
+                    DomainError::Internal("Cannot clone request builder for signing".into())
+                })?
+                .build()
+                .map_err(|e| DomainError::Internal(format!("Cannot build request for signing: {e}")))?
+                .url()
+                .to_string();
+
+            // Include the host header for signing.
+            let host = reqwest::Url::parse(&url_str)
+                .map_err(|e| DomainError::Internal(format!("Invalid URL during signing: {e}")))?
+                .host_str()
+                .unwrap_or("")
+                .to_string();
+
+            let headers: Vec<(String, String)> =
+                vec![("host".to_string(), host)];
+
+            let signed = sign_request(&method_str, &url_str, &headers, b"", &creds, &timestamp)
+                .map_err(|e| DomainError::Internal(format!("AWS signing failed: {e}")))?;
+
+            builder = builder
+                .header("Authorization", &signed.authorization)
+                .header("x-amz-date", &signed.x_amz_date)
+                .header("x-amz-content-sha256", &signed.x_amz_content_sha256);
+
+            if let Some(token) = &signed.x_amz_security_token {
+                builder = builder.header("x-amz-security-token", token);
+            }
         }
     }
-    builder
+    Ok(builder)
 }
 
 fn apply_body(
