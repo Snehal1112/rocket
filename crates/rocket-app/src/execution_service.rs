@@ -5,7 +5,7 @@ use rocket_history::{HistoryEntry, HistoryRepository};
 use rocket_http::{CookieRepository, HttpExecutor, HttpRequest, HttpResponse, RequestOptions};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_shared::types::{Auth, Body, Header, HttpMethod};
+use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +14,7 @@ pub struct ExecuteRequestInput {
     pub method: HttpMethod,
     pub url: String,
     pub headers: Vec<Header>,
+    pub query_params: Vec<QueryParam>,
     pub body: Option<Body>,
     pub auth: Auth,
     pub options: RequestOptions,
@@ -64,6 +65,7 @@ impl RequestExecutionService {
             method: input.method,
             url: resolved_url.clone(),
             headers: resolved_headers,
+            query_params: input.query_params,
             body: input.body,
             auth: input.auth,
             options: input.options,
@@ -242,6 +244,7 @@ mod tests {
             method: HttpMethod::Get,
             url: url.to_string(),
             headers: vec![],
+            query_params: vec![],
             body: None,
             auth: rocket_shared::types::Auth::None,
             options: RequestOptions::default(),

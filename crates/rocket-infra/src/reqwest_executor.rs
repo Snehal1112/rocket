@@ -28,7 +28,19 @@ impl HttpExecutor for ReqwestExecutor {
         let method = map_method(&request.method);
         let start = Instant::now();
 
-        let mut builder = client.request(method, &request.url);
+        // Merge enabled query params into the URL.
+        let mut url = reqwest::Url::parse(&request.url)
+            .map_err(|e| DomainError::InvalidInput(format!("Invalid URL: {e}")))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for p in &request.query_params {
+                if p.enabled {
+                    pairs.append_pair(&p.key, &p.value);
+                }
+            }
+        }
+
+        let mut builder = client.request(method, url);
 
         // Add enabled headers.
         for header in request.headers.iter().filter(|h| h.enabled) {
