@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { usePaneStore } from '../pane-store';
 import type { LeafNode, SplitNode, ResponseState } from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
 
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
@@ -239,6 +240,7 @@ describe('pane-store', () => {
     usePaneStore.getState().updateRequest(tabId, { url: 'https://api.test', method: 'POST' });
     const updated = getLeaf();
     const tab = updated.tabs.find((t) => t.id === tabId)!;
+    if (!isRequestTab(tab)) throw new Error('Expected request tab');
     expect(tab.request.url).toBe('https://api.test');
     expect(tab.request.method).toBe('POST');
     expect(tab.isDirty).toBe(true);
@@ -261,6 +263,7 @@ describe('pane-store', () => {
     usePaneStore.getState().setResponse(tabId, response);
     const updated = getLeaf();
     const tab = updated.tabs.find((t) => t.id === tabId)!;
+    if (!isRequestTab(tab)) throw new Error('Expected request tab');
     expect(tab.response).toEqual(response);
   });
 

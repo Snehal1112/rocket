@@ -11,15 +11,15 @@ import { saveRequest } from '@/lib/tauri-api';
 import { toApiAuth } from '@/lib/execute-request';
 import { usePaneStore } from '@/stores/pane-store';
 import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
-import type { Tab } from '@/types/pane-types';
+import type { RequestTab } from '@/types/pane-types';
 
 interface SaveRequestButtonProps {
-  tab: Tab;
+  tab: RequestTab;
   groupId: string;
 }
 
 // Builds the API-compatible request payload from the current tab state.
-function buildRequestPayload(tab: Tab) {
+function buildRequestPayload(tab: RequestTab) {
   return {
     uid: '',
     name: tab.title,

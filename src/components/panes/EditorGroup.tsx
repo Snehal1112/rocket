@@ -1,6 +1,7 @@
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import type { LeafNode } from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
 
 // Renders a tab bar at the top and the active tab content below.
 export function EditorGroup({ node }: { node: LeafNode }) {
@@ -11,7 +12,13 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       <TabBar node={node} />
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
-          <RequestPanel tab={activeTab} groupId={node.groupId} />
+          isRequestTab(activeTab) ? (
+            <RequestPanel tab={activeTab} groupId={node.groupId} />
+          ) : (
+            <div className="p-4 text-sm text-muted-foreground">
+              Collection: {activeTab.collectionName}
+            </div>
+          )
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No open tabs

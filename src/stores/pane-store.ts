@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode } from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import {
   createDefaultTab,
@@ -118,7 +119,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Save the tab before closing if it's dirty.
     const { root } = get();
     const found = findTabInTree(root, tabId);
-    if (found?.tab.isDirty && found.tab.source) {
+    if (found?.tab.isDirty && found.tab.source && isRequestTab(found.tab)) {
       scheduleAutoSave(tabId, found.tab.source.collection, found.tab.source.path, found.tab.title, found.tab.request);
     }
     const leaf = (() => {
@@ -169,7 +170,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const leaf = findActiveLeaf(root, groupId);
     if (leaf.groupId === groupId) {
       const prevTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
-      if (prevTab?.isDirty && prevTab.source) {
+      if (prevTab?.isDirty && prevTab.source && isRequestTab(prevTab)) {
         scheduleAutoSave(prevTab.id, prevTab.source.collection, prevTab.source.path, prevTab.title, prevTab.request);
       }
     }
@@ -239,20 +240,19 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   updateRequest(tabId, patch) {
     const { root } = get();
-    const newRoot = updateTabInTree(root, tabId, (tab) => ({
-      ...tab,
-      request: { ...tab.request, ...patch },
-      isDirty: true,
-    }));
+    const newRoot = updateTabInTree(root, tabId, (tab) => {
+      if (!isRequestTab(tab)) return tab;
+      return { ...tab, request: { ...tab.request, ...patch }, isDirty: true };
+    });
     set({ root: newRoot });
   },
 
   setResponse(tabId, response) {
     const { root } = get();
-    const newRoot = updateTabInTree(root, tabId, (tab) => ({
-      ...tab,
-      response,
-    }));
+    const newRoot = updateTabInTree(root, tabId, (tab) => {
+      if (!isRequestTab(tab)) return tab;
+      return { ...tab, response };
+    });
     set({ root: newRoot });
   },
 

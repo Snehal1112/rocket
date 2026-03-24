@@ -6,7 +6,7 @@ import { listHistory, searchHistory } from '@/lib/tauri-api';
 import type { HistoryEntry } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { createDefaultRequest } from '@/lib/pane-utils';
-import type { Tab } from '@/types/pane-types';
+import type { RequestTab } from '@/types/pane-types';
 
 // HTTP method filter options.
 const METHOD_OPTIONS = ['All', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -121,13 +121,13 @@ export function HistoryPanel() {
 
   // Opens a history entry as a read-only history tab in the active pane.
   function openEntry(entry: HistoryEntry) {
-    const tab: Tab = {
+    const tab: RequestTab = {
       id: `history-${entry.id}`,
       title: `${entry.method} ${displayUrl(entry.url)}`,
       tabType: 'history',
       request: {
         ...createDefaultRequest(),
-        method: entry.method as Tab['request']['method'],
+        method: entry.method as RequestTab['request']['method'],
         url: entry.url,
       },
       response: null,
