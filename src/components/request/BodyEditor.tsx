@@ -75,35 +75,39 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
   }, [body, onChange]);
 
   return (
-    <div className="space-y-3">
+    <div className="flex h-full flex-col space-y-2">
       {/* Mode selector dropdown. */}
-      <Select value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
-        <SelectTrigger className="h-8 w-[140px] text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {MODES.map((m) => (
-            <SelectItem key={m.value} value={m.value} className="text-xs">
-              {m.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="flex items-center gap-2 shrink-0">
+        <Select value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
+          <SelectTrigger className="w-[140px] h-7 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MODES.map((m) => (
+              <SelectItem key={m.value} value={m.value} className="text-xs">
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-      {/* Content area. */}
+      {/* Content area — fills remaining height. */}
       {body.mode === 'none' && (
-        <p className="text-xs text-muted-foreground">
-          This request has no body.
-        </p>
+        <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+          No body content
+        </div>
       )}
 
       {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
-        <MonacoWrapper
-          value={body.content}
-          onChange={(val) => setContent(val)}
-          bodyMode={body.mode}
-          height="250px"
-        />
+        <div className="flex-1 border rounded min-h-[200px]">
+          <MonacoWrapper
+            value={body.content}
+            onChange={(val) => setContent(val)}
+            bodyMode={body.mode}
+            height="100%"
+          />
+        </div>
       )}
 
       {body.mode === 'formdata' && (
