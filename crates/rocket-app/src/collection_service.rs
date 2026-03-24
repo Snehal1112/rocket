@@ -85,6 +85,20 @@ impl CollectionService {
         });
         Ok(())
     }
+
+    pub fn save_settings(
+        &self,
+        name: &str,
+        settings: &rocket_collection::CollectionSettings,
+    ) -> DomainResult<()> {
+        self.repo.save_settings(name, settings)?;
+        // Use RequestSaved event to trigger collection-changed in the frontend.
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: name.to_string(),
+            path: "collection.json".to_string(),
+        });
+        Ok(())
+    }
 }
 
 #[cfg(test)]

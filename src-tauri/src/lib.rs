@@ -111,6 +111,7 @@ pub fn run() {
             commands::collections::create_folder,
             commands::collections::delete_folder,
             commands::collections::move_item,
+            commands::collections::save_collection_settings,
             commands::environments::list_environments,
             commands::environments::get_environment,
             commands::environments::save_environment,
