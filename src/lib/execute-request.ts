@@ -1,4 +1,5 @@
 import { usePaneStore } from '@/stores/pane-store';
+import { useEnvStore } from '@/stores/env-store';
 import {
   executeRequest,
   type Auth,
@@ -12,35 +13,35 @@ import type {
   ResponseState,
 } from '@/types/pane-types';
 
-function toApiAuth(auth: AuthState): Auth {
+function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
     case 'basic':
       return {
         authType: 'basic',
-        username: auth.basic?.username ?? '',
-        password: auth.basic?.password ?? '',
+        username: resolve(auth.basic?.username ?? ''),
+        password: resolve(auth.basic?.password ?? ''),
       };
     case 'bearer':
-      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
+      return { authType: 'bearer', token: resolve(auth.bearer?.token ?? '') };
     case 'api-key':
       return {
         authType: 'api-key',
-        key: auth.apiKey?.key ?? '',
-        value: auth.apiKey?.value ?? '',
+        key: resolve(auth.apiKey?.key ?? ''),
+        value: resolve(auth.apiKey?.value ?? ''),
         addTo: auth.apiKey?.addTo ?? 'header',
       };
     case 'oauth2':
       // Send the stored access token as a bearer token.
       return {
         authType: 'bearer',
-        token: auth.oauth2?.accessToken ?? '',
+        token: resolve(auth.oauth2?.accessToken ?? ''),
       };
     default:
       return { authType: 'none' };
   }
 }
 
-function toApiBody(body: BodyState): Body | undefined {
+function toApiBody(body: BodyState, resolve = (s: string) => s): Body | undefined {
   if (body.mode === 'none') return undefined;
   if (body.mode === 'formdata') {
     return {
@@ -48,31 +49,38 @@ function toApiBody(body: BodyState): Body | undefined {
       formData: body.formData
         .filter((e) => e.enabled)
         .map((e) => ({
-          key: e.key,
-          value: e.value,
+          key: resolve(e.key),
+          value: resolve(e.value),
           entryType: 'text' as const,
           enabled: e.enabled,
         })),
     };
   }
-  return { mode: body.mode as Body['mode'], content: body.content };
+  return { mode: body.mode as Body['mode'], content: resolve(body.content) };
 }
 
 // Executes a request and writes the response into the pane store.
 // This is a plain async function so it can be called from both React
 // components and non-React contexts (e.g. keyboard shortcut handlers).
 export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
-  const headers: Header[] = request.headers
+  const resolve = useEnvStore.getState().resolveVariables;
+
+  // Resolve environment variables in all request fields.
+  const resolvedUrl = resolve(request.url);
+  const resolvedHeaders: Header[] = request.headers
     .filter((h) => h.enabled)
-    .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled }));
+    .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: h.enabled }));
+
+  const resolvedBody = toApiBody(request.body, resolve);
+  const resolvedAuth = toApiAuth(request.auth, resolve);
 
   try {
     const result = await executeRequest({
       method: request.method,
-      url: request.url,
-      headers,
-      body: toApiBody(request.body),
-      auth: toApiAuth(request.auth),
+      url: resolvedUrl,
+      headers: resolvedHeaders,
+      body: resolvedBody,
+      auth: resolvedAuth,
       options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
     });
 
