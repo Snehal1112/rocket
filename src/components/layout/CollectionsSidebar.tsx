@@ -4,6 +4,10 @@ import {
   getCollection,
   onCollectionChanged,
   createCollection,
+  saveRequest,
+  createFolder,
+  deleteCollection,
+  moveItem,
   type CollectionSummary,
   type Collection,
   type CollectionItem,
@@ -11,6 +15,16 @@ import {
 import { usePaneStore } from '@/stores/pane-store';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { Tab, RequestState } from '@/types/pane-types';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -51,11 +65,15 @@ function RequestNode({
   method,
   collectionName,
   path,
+  summaries,
+  onMove,
 }: {
   name: string;
   method: string;
   collectionName: string;
   path: string;
+  summaries: CollectionSummary[];
+  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
 }) {
   function handleClick() {
     const tabId = `${collectionName}/${path}`;
@@ -76,38 +94,71 @@ function RequestNode({
   }
 
   return (
-    <div className="group relative flex items-center">
-      <button
-        type="button"
-        className="flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-        onClick={handleClick}
-        aria-label={`Open ${method} ${name}`}
-      >
-        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className={cn('w-9 shrink-0 font-semibold text-[10px]', methodColor(method))}>
-          {method}
-        </span>
-        <span className="truncate text-foreground">{name}</span>
-      </button>
-      <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          type="button"
-          className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-          onClick={(e) => { e.stopPropagation(); }}
-          title="Duplicate"
-        >
-          <Copy className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
-          onClick={(e) => { e.stopPropagation(); }}
-          title="Delete"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      </div>
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="group relative flex items-center">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+            onClick={handleClick}
+            aria-label={`Open ${method} ${name}`}
+          >
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className={cn('w-9 shrink-0 font-semibold text-[10px]', methodColor(method))}>
+              {method}
+            </span>
+            <span className="truncate text-foreground">{name}</span>
+          </button>
+          <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+              onClick={(e) => { e.stopPropagation(); }}
+              title="Duplicate"
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
+              onClick={(e) => { e.stopPropagation(); }}
+              title="Delete"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onClick={() => {}}>
+          Duplicate
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => {}}>
+          Rename
+        </ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>Move to...</ContextMenuSubTrigger>
+          <ContextMenuSubContent className="w-48">
+            {summaries.map((s) => (
+              <ContextMenuItem
+                key={s.name}
+                onClick={() => onMove(collectionName, path, s.name, '')}
+                disabled={s.name === collectionName}
+              >
+                {s.name}
+              </ContextMenuItem>
+            ))}
+            {summaries.length === 0 && (
+              <ContextMenuItem disabled>No collections</ContextMenuItem>
+            )}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem className="text-destructive" onClick={() => {}}>
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -119,6 +170,10 @@ function FolderNode({
   basePath,
   depth,
   filter,
+  summaries,
+  onNewRequest,
+  onNewFolder,
+  onMove,
 }: {
   name: string;
   items: CollectionItem[];
@@ -126,6 +181,10 @@ function FolderNode({
   basePath: string;
   depth: number;
   filter: string;
+  summaries: CollectionSummary[];
+  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
+  onNewFolder: (collection: string, folderPath: string) => Promise<void>;
+  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
 
@@ -147,45 +206,61 @@ function FolderNode({
 
   return (
     <div>
-      <div className="group relative flex items-center">
-        <button
-          type="button"
-          className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-          onClick={() => setExpanded((prev) => !prev)}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} folder ${name}`}
-        >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
-          {expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="truncate font-medium text-foreground">{name}</span>
-        </button>
-        <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-            onClick={(e) => { e.stopPropagation(); }}
-            title="New Request"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-            onClick={(e) => { e.stopPropagation(); }}
-            title="New Folder"
-          >
-            <FolderPlus className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="group relative flex items-center">
+            <button
+              type="button"
+              className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+              onClick={() => setExpanded((prev) => !prev)}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? 'Collapse' : 'Expand'} folder ${name}`}
+            >
+              {expanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              {expanded ? (
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate font-medium text-foreground">{name}</span>
+            </button>
+            <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); void onNewRequest(collectionName, basePath); }}
+                title="New Request"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); void onNewFolder(collectionName, basePath); }}
+                title="New Folder"
+              >
+                <FolderPlus className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem onClick={() => void onNewRequest(collectionName, basePath)}>
+            New Request
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
+            New Folder
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem className="text-destructive" onClick={() => {}}>
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {expanded && (
         <div className="pl-3">
           {filteredItems.map((item, idx) => {
@@ -200,6 +275,10 @@ function FolderNode({
                   basePath={folderPath}
                   depth={depth + 1}
                   filter={filter}
+                  summaries={summaries}
+                  onNewRequest={onNewRequest}
+                  onNewFolder={onNewFolder}
+                  onMove={onMove}
                 />
               );
             }
@@ -213,6 +292,8 @@ function FolderNode({
                 method={item.request.method}
                 collectionName={collectionName}
                 path={requestPath}
+                summaries={summaries}
+                onMove={onMove}
               />
             );
           })}
@@ -226,9 +307,17 @@ function FolderNode({
 function CollectionNode({
   summary,
   filter,
+  summaries,
+  onNewRequest,
+  onNewFolder,
+  onMove,
 }: {
   summary: CollectionSummary;
   filter: string;
+  summaries: CollectionSummary[];
+  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
+  onNewFolder: (collection: string, folderPath: string) => Promise<void>;
+  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -249,54 +338,70 @@ function CollectionNode({
 
   return (
     <div>
-      <div className="group relative flex items-center">
-        <button
-          type="button"
-          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-          onClick={() => setExpanded((prev) => !prev)}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} collection ${summary.name}`}
-        >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          )}
-          {expanded ? (
-            <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-          ) : (
-            <Folder className="h-4 w-4 shrink-0 text-primary" />
-          )}
-          <span className="truncate font-medium text-foreground">{summary.name}</span>
-          <span className="ml-auto text-[10px] text-muted-foreground">{summary.requestCount}</span>
-        </button>
-        <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-            onClick={(e) => { e.stopPropagation(); }}
-            title="New Request"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-            onClick={(e) => { e.stopPropagation(); }}
-            title="New Folder"
-          >
-            <FolderPlus className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-            onClick={(e) => { e.stopPropagation(); }}
-            title="Settings"
-          >
-            <Settings className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="group relative flex items-center">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+              onClick={() => setExpanded((prev) => !prev)}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? 'Collapse' : 'Expand'} collection ${summary.name}`}
+            >
+              {expanded ? (
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )}
+              {expanded ? (
+                <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
+              ) : (
+                <Folder className="h-4 w-4 shrink-0 text-primary" />
+              )}
+              <span className="truncate font-medium text-foreground">{summary.name}</span>
+              <span className="ml-auto text-[10px] text-muted-foreground">{summary.requestCount}</span>
+            </button>
+            <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); void onNewRequest(summary.name, ''); }}
+                title="New Request"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); void onNewFolder(summary.name, ''); }}
+                title="New Folder"
+              >
+                <FolderPlus className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); }}
+                title="Settings"
+              >
+                <Settings className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem onClick={() => void onNewRequest(summary.name, '')}>
+            New Request
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>
+            New Folder
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem className="text-destructive" onClick={() => void deleteCollection(summary.name)}>
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {expanded && collection && (
         <div className="pl-2">
           {collection.root.items.map((item, idx) => {
@@ -310,6 +415,10 @@ function CollectionNode({
                   basePath={item.folder.name}
                   depth={1}
                   filter={filter}
+                  summaries={summaries}
+                  onNewRequest={onNewRequest}
+                  onNewFolder={onNewFolder}
+                  onMove={onMove}
                 />
               );
             }
@@ -320,6 +429,8 @@ function CollectionNode({
                 method={item.request.method}
                 collectionName={summary.name}
                 path={item.request.name}
+                summaries={summaries}
+                onMove={onMove}
               />
             );
           })}
@@ -361,6 +472,38 @@ export function CollectionsSidebar() {
       setCreateError(err instanceof Error ? err.message : 'Failed to create collection.');
     }
   }, [newName]);
+
+  const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
+    const name = 'New Request';
+    const path = folderPath ? `${folderPath}/${name}` : name;
+    await saveRequest(collection, path, {
+      name,
+      method: 'GET',
+      url: '',
+      headers: [],
+      auth: { authType: 'none' },
+    });
+    const tab: Tab = {
+      id: `${collection}/${path}`,
+      title: name,
+      tabType: 'request',
+      request: createDefaultRequest(),
+      response: null,
+      isDirty: false,
+      source: { collection, path },
+    };
+    usePaneStore.getState().openTab(tab);
+  }, []);
+
+  const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
+    const name = 'New Folder';
+    const path = folderPath ? `${folderPath}/${name}` : name;
+    await createFolder(collection, path);
+  }, []);
+
+  const handleMove = useCallback(async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
+    await moveItem(srcCollection, srcPath, dstCollection, dstPath);
+  }, []);
 
   const fetchCollections = useCallback(async () => {
     try {
@@ -446,7 +589,15 @@ export function CollectionsSidebar() {
                 </p>
               ) : (
                 summaries.map((s) => (
-                  <CollectionNode key={s.name} summary={s} filter={filter} />
+                  <CollectionNode
+                    key={s.name}
+                    summary={s}
+                    filter={filter}
+                    summaries={summaries}
+                    onNewRequest={handleNewRequest}
+                    onNewFolder={handleNewFolder}
+                    onMove={handleMove}
+                  />
                 ))
               )}
             </div>
