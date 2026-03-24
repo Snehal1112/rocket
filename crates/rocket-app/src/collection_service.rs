@@ -32,8 +32,9 @@ impl CollectionService {
         self.repo.rename(old_name, new_name)
     }
 
-    pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<()> {
-        self.repo.save_request(collection, path, request)
+    pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
+        self.repo.save_request(collection, path, request)?;
+        self.repo.get_request(collection, path)
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
