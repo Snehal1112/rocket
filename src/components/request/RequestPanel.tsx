@@ -320,7 +320,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
           <div className="flex-1 overflow-auto p-3">
             <TabsContent value="params" className="mt-0 h-full">
-              <div className="space-y-4">
+              <div className="space-y-2">
                 <PathParamsPanel url={request.url} onUrlChange={handlePathUrlChange} />
                 <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
