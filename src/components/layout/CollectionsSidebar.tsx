@@ -671,21 +671,27 @@ export function CollectionsSidebar() {
     await moveItem(srcCollection, srcPath, dstCollection, dstPath);
   }, []);
 
-  // Load collections on mount. Debounce file watcher events so rapid
-  // filesystem changes (rename = write + delete) collapse into one refresh.
-  const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Load collections on mount. Only refetch the list when the collection
+  // structure changes (create/delete/rename directory), not on content changes.
   useEffect(() => {
     void fetchCollections();
     let unlisten: (() => void) | undefined;
-    onCollectionChanged(() => {
-      if (listDebounce.current) clearTimeout(listDebounce.current);
-      listDebounce.current = setTimeout(() => void fetchCollections(), 300);
+    onCollectionChanged((event) => {
+      const t = event.type;
+      // Only refetch the collection list for structural changes.
+      if (t === 'collectionCreated' || t === 'collectionDeleted' || t === 'collectionRenamed') {
+        void fetchCollections();
+      }
+      // fileChanged with Create/Remove at the top-level directory depth
+      // also needs list refresh (e.g. someone creates a collection folder externally).
+      if (t === 'fileChanged' && event.eventType === 'create') {
+        void fetchCollections();
+      }
     }).then((fn) => {
       unlisten = fn;
     });
     return () => {
       unlisten?.();
-      if (listDebounce.current) clearTimeout(listDebounce.current);
     };
   }, [fetchCollections]);
 
