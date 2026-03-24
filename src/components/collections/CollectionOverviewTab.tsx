@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Folder as FolderIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -174,32 +175,36 @@ export function CollectionOverviewTab({ collectionName }: CollectionOverviewTabP
         {/* Method breakdown. */}
         <MethodBreakdown items={items} />
 
-        {/* Auth / Headers / Requests tabs. */}
-        <Tabs defaultValue="requests">
-          <TabsList className="w-full justify-start">
-            <TabsTrigger value="auth">Auth</TabsTrigger>
-            <TabsTrigger value="headers">Headers</TabsTrigger>
-            <TabsTrigger value="requests">Requests</TabsTrigger>
-          </TabsList>
+        {/* Auth / Headers / Requests tabs inside a card. */}
+        <Card>
+          <CardContent className="pt-4">
+            <Tabs defaultValue="requests">
+              <TabsList className="w-full justify-start">
+                <TabsTrigger value="auth">Auth</TabsTrigger>
+                <TabsTrigger value="headers">Headers</TabsTrigger>
+                <TabsTrigger value="requests">Requests</TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="auth" className="mt-4 space-y-4">
-            <AuthEditor auth={auth} onChange={setAuth} />
-            <div className="flex justify-end">
-              <Button size="sm" onClick={handleSaveSettings}>Save</Button>
-            </div>
-          </TabsContent>
+              <TabsContent value="auth" className="mt-4 space-y-4">
+                <AuthEditor auth={auth} onChange={setAuth} />
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={handleSaveSettings}>Save</Button>
+                </div>
+              </TabsContent>
 
-          <TabsContent value="headers" className="mt-4 space-y-4">
-            <HeadersEditor headers={headers} onChange={setHeaders} />
-            <div className="flex justify-end">
-              <Button size="sm" onClick={handleSaveSettings}>Save</Button>
-            </div>
-          </TabsContent>
+              <TabsContent value="headers" className="mt-4 space-y-4">
+                <HeadersEditor headers={headers} onChange={setHeaders} />
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={handleSaveSettings}>Save</Button>
+                </div>
+              </TabsContent>
 
-          <TabsContent value="requests" className="mt-4">
-            <RequestList items={items} collectionName={collectionName} />
-          </TabsContent>
-        </Tabs>
+              <TabsContent value="requests" className="mt-4">
+                <RequestList items={items} collectionName={collectionName} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
 
       </div>
     </ScrollArea>
