@@ -180,6 +180,13 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           </TabsContent>
 
           <TabsContent value="preview" className="mt-0">
+            {/*
+             * Security invariant: sandbox="" must remain an empty string.
+             * An empty sandbox attribute blocks all permissions (scripts,
+             * forms, popups, same-origin access), which prevents untrusted
+             * server-controlled response content from executing code.
+             * Do NOT add any sandbox tokens (e.g. allow-scripts) here.
+             */}
             <iframe
               srcDoc={response.body}
               sandbox=""
