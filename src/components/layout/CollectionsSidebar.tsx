@@ -41,7 +41,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   ChevronRight,
@@ -55,7 +61,9 @@ import {
   Trash2,
   FolderPlus,
   Settings,
+  Upload,
 } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
 
 // Returns Tailwind text color for an HTTP method.
@@ -507,6 +515,18 @@ export function CollectionsSidebar() {
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const filter = searchQuery.toLowerCase().trim();
+
+  const [view, setView] = useState<'collections' | 'history'>('collections');
+
+  const handleImport = useCallback(async () => {
+    const file = await open({
+      multiple: false,
+      filters: [{ name: 'Collection', extensions: ['json'] }],
+    });
+    if (file) {
+      console.log('Import file selected:', file);
+    }
+  }, []);
 
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
