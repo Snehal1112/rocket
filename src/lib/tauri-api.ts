@@ -65,6 +65,7 @@ export interface Request {
   headers: Header[];
   body?: Body;
   auth: Auth;
+  fileName?: string;
 }
 
 export interface Folder {
