@@ -1,5 +1,13 @@
 import { useMemo } from 'react';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { extractPathParams } from '@/lib/url-params';
 
 interface PathParamsPanelProps {
@@ -36,27 +44,36 @@ export function PathParamsPanel({ url, onUrlChange }: PathParamsPanelProps) {
       <h4 className="text-xs font-medium text-muted-foreground">
         Path Parameters
       </h4>
-      <div className="grid grid-cols-[8rem_1fr] gap-1">
-        {paramNames.map((name) => (
-          <div
-            key={name}
-            className="col-span-2 grid grid-cols-subgrid items-center gap-1"
-          >
-            <span className="truncate rounded bg-muted px-2 py-1 text-xs font-mono">
-              {name}
-            </span>
-            <Input
-              className="h-7 text-xs"
-              placeholder={`value for :${name}`}
-              onChange={(e) => {
-                const newUrl = replacePathParam(url, name, e.target.value);
-                onUrlChange(newUrl);
-              }}
-              aria-label={`Value for path parameter ${name}`}
-            />
-          </div>
-        ))}
-      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="h-7 w-[8rem] text-xs">Name</TableHead>
+            <TableHead className="h-7 text-xs">Value</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {paramNames.map((name) => (
+            <TableRow key={name}>
+              <TableCell className="p-1">
+                <span className="truncate rounded bg-muted px-2 py-1 text-xs font-mono">
+                  {name}
+                </span>
+              </TableCell>
+              <TableCell className="p-1">
+                <Input
+                  className="h-7 text-xs"
+                  placeholder={`value for :${name}`}
+                  onChange={(e) => {
+                    const newUrl = replacePathParam(url, name, e.target.value);
+                    onUrlChange(newUrl);
+                  }}
+                  aria-label={`Value for path parameter ${name}`}
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }

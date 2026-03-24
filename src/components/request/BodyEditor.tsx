@@ -1,9 +1,20 @@
 import { useCallback } from 'react';
-import { X, Plus, FileUp } from 'lucide-react';
+import { Trash2, Plus, FileUp } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { MonacoWrapper } from '@/components/editor/MonacoWrapper';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 
 type BodyMode = BodyState['mode'];
@@ -59,75 +70,78 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
   return (
     <div className="space-y-3">
-      {/* Mode selector tabs. */}
-      <div className="flex gap-1 border-b border-border pb-1">
-        {MODES.map((m) => (
-          <button
-            key={m.value}
-            type="button"
-            className={cn(
-              'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-              body.mode === m.value
-                ? 'bg-muted text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() => setMode(m.value)}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      {/* Mode selector using shadcn Tabs. */}
+      <Tabs value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
+        <TabsList className="h-8">
+          {MODES.map((m) => (
+            <TabsTrigger key={m.value} value={m.value} className="h-7 text-xs">
+              {m.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-      {/* Content area. */}
-      {body.mode === 'none' && (
-        <p className="text-xs text-muted-foreground">
-          This request has no body.
-        </p>
-      )}
+        {/* Content area. */}
+        <TabsContent value="none" className="mt-3">
+          <p className="text-xs text-muted-foreground">
+            This request has no body.
+          </p>
+        </TabsContent>
 
-      {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
-        <textarea
-          className="h-48 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none"
-          placeholder={
-            body.mode === 'json'
-              ? '{ "key": "value" }'
-              : body.mode === 'xml'
-                ? '<root></root>'
-                : 'Plain text body...'
-          }
-          value={body.content}
-          onChange={(e) => setContent(e.target.value)}
-          aria-label={`${body.mode.toUpperCase()} body content`}
-        />
-      )}
+        <TabsContent value="json" className="mt-3">
+          <MonacoWrapper
+            value={body.content}
+            onChange={(val) => setContent(val)}
+            bodyMode="json"
+            height="250px"
+          />
+        </TabsContent>
 
-      {body.mode === 'formdata' && (
-        <FormDataEditor formData={body.formData} onChange={setFormData} />
-      )}
+        <TabsContent value="xml" className="mt-3">
+          <MonacoWrapper
+            value={body.content}
+            onChange={(val) => setContent(val)}
+            bodyMode="xml"
+            height="250px"
+          />
+        </TabsContent>
 
-      {body.mode === 'binary' && (
-        <div className="flex items-center gap-2 py-1">
+        <TabsContent value="text" className="mt-3">
+          <MonacoWrapper
+            value={body.content}
+            onChange={(val) => setContent(val)}
+            bodyMode="text"
+            height="250px"
+          />
+        </TabsContent>
+
+        <TabsContent value="formdata" className="mt-3">
+          <FormDataEditor formData={body.formData} onChange={setFormData} />
+        </TabsContent>
+
+        <TabsContent value="binary" className="mt-3">
           {body.filePath ? (
-            <>
-              <FileUp className="size-4 text-muted-foreground" />
-              <span className="text-sm">{body.fileName}</span>
-              <Button variant="ghost" size="sm" onClick={handleClear}>
-                Clear
-              </Button>
-            </>
+            <Card className="max-w-sm">
+              <CardContent className="flex items-center gap-3 p-4">
+                <FileUp className="size-5 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate text-sm">{body.fileName}</span>
+                <Button variant="ghost" size="sm" onClick={handleClear}>
+                  Clear
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
             <Button variant="outline" onClick={handlePickFile}>
-              <FileUp className="size-4 mr-2" />
+              <FileUp className="mr-2 size-4" />
               Choose file
             </Button>
           )}
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
-// Sub-component for form data entries.
+// Sub-component for form data entries using shadcn Table.
 function FormDataEditor({
   formData,
   onChange,
@@ -158,52 +172,59 @@ function FormDataEditor({
 
   return (
     <div className="space-y-1">
-      <div className="grid grid-cols-[1fr_1fr_2.5rem_2rem] gap-1 px-1 text-xs font-medium text-muted-foreground">
-        <span>Key</span>
-        <span>Value</span>
-        <span className="text-center">On</span>
-        <span />
-      </div>
-
-      {formData.map((entry) => (
-        <div
-          key={entry.id}
-          className="grid grid-cols-[1fr_1fr_2.5rem_2rem] items-center gap-1"
-        >
-          <Input
-            className="h-7 text-xs"
-            placeholder="field name"
-            value={entry.key}
-            onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-          />
-          <Input
-            className="h-7 text-xs"
-            placeholder="field value"
-            value={entry.value}
-            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-          />
-          <div className="flex justify-center">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-primary"
-              checked={entry.enabled}
-              onChange={(e) =>
-                updateEntry(entry.id, { enabled: e.target.checked })
-              }
-              aria-label={`Enable field ${entry.key || 'unnamed'}`}
-            />
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => removeEntry(entry.id)}
-            aria-label={`Remove field ${entry.key || 'unnamed'}`}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ))}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="h-7 text-xs">Key</TableHead>
+            <TableHead className="h-7 text-xs">Value</TableHead>
+            <TableHead className="h-7 w-10 text-center text-xs">On</TableHead>
+            <TableHead className="h-7 w-8" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {formData.map((entry) => (
+            <TableRow key={entry.id}>
+              <TableCell className="p-1">
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="field name"
+                  value={entry.key}
+                  onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+                />
+              </TableCell>
+              <TableCell className="p-1">
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="field value"
+                  value={entry.value}
+                  onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+                />
+              </TableCell>
+              <TableCell className="p-1 text-center">
+                <Checkbox
+                  checked={entry.enabled}
+                  onCheckedChange={(checked) =>
+                    updateEntry(entry.id, { enabled: checked === true })
+                  }
+                  aria-label={`Enable field ${entry.key || 'unnamed'}`}
+                  className="h-3.5 w-3.5"
+                />
+              </TableCell>
+              <TableCell className="p-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => removeEntry(entry.id)}
+                  aria-label={`Remove field ${entry.key || 'unnamed'}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
 
       <Button
         variant="ghost"

@@ -1,7 +1,26 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Send, ChevronDown } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 import { parseQueryParams, buildUrl, splitUrl } from '@/lib/url-params';
@@ -95,12 +114,12 @@ function toApiBody(body: { mode: string; content: string; formData: KeyValueEntr
   return { mode: body.mode as Body['mode'], content: body.content };
 }
 
-// Status code color helper.
-function statusColor(status: number): string {
-  if (status < 300) return 'text-emerald-500';
-  if (status < 400) return 'text-blue-500';
-  if (status < 500) return 'text-amber-500';
-  return 'text-red-500';
+// Status badge variant based on HTTP status code.
+function statusBadgeVariant(status: number): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (status === 0) return 'destructive';
+  if (status < 300) return 'default';
+  if (status < 400) return 'secondary';
+  return 'destructive';
 }
 
 // Human-friendly byte size.
@@ -115,8 +134,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const updateRequest = usePaneStore((s) => s.updateRequest);
 
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
-  const [methodOpen, setMethodOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
 
   // Debounce timer ref for URL-to-params sync.
   const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,7 +161,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, updateRequest],
   );
 
-  // Handle query param changes — immediately rebuild URL.
+  // Handle query param changes -- immediately rebuild URL.
   const handleParamsChange = useCallback(
     (params: KeyValueEntry[]) => {
       const { base } = splitUrl(request.url);
@@ -222,42 +241,25 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     <div className="flex h-full flex-col">
       {/* URL bar. */}
       <div className="flex items-center gap-2 border-b border-border p-2">
-        {/* Method selector. */}
-        <div className="relative">
-          <button
-            type="button"
-            className={cn(
-              'flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-bold',
-              METHOD_COLORS[request.method],
-            )}
-            onClick={() => setMethodOpen((v) => !v)}
+        {/* Method selector using shadcn Select. */}
+        <Select
+          value={request.method}
+          onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
+        >
+          <SelectTrigger
+            className={cn('h-8 w-[7rem] text-xs font-bold', METHOD_COLORS[request.method])}
             aria-label="Select HTTP method"
-            aria-expanded={methodOpen}
           >
-            {request.method}
-            <ChevronDown className="h-3 w-3" />
-          </button>
-          {methodOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 min-w-[6rem] rounded-md border border-border bg-popover p-1 shadow-md">
-              {METHODS.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={cn(
-                    'block w-full rounded px-2 py-1 text-left text-xs font-bold hover:bg-muted',
-                    METHOD_COLORS[m],
-                  )}
-                  onClick={() => {
-                    updateRequest(tab.id, { method: m });
-                    setMethodOpen(false);
-                  }}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {METHODS.map((m) => (
+              <SelectItem key={m} value={m} className={cn('text-xs font-bold', METHOD_COLORS[m])}>
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* URL input. */}
         <Input
@@ -283,78 +285,85 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </Button>
       </div>
 
-      {/* Section tabs. */}
-      <div className="flex gap-1 border-b border-border px-2">
-        <SectionTabButton
-          label="Params"
-          count={enabledParamCount}
-          active={activeSection === 'params'}
-          onClick={() => setActiveSection('params')}
-        />
-        <SectionTabButton
-          label="Headers"
-          count={enabledHeaderCount}
-          active={activeSection === 'headers'}
-          onClick={() => setActiveSection('headers')}
-        />
-        <SectionTabButton
-          label="Body"
-          active={activeSection === 'body'}
-          onClick={() => setActiveSection('body')}
-        />
-        <SectionTabButton
-          label="Auth"
-          active={activeSection === 'auth'}
-          onClick={() => setActiveSection('auth')}
-        />
-      </div>
+      {/* Section tabs using shadcn Tabs. */}
+      <Tabs
+        value={activeSection}
+        onValueChange={(val) => setActiveSection(val as SectionTab)}
+      >
+        <div className="border-b border-border px-2">
+          <TabsList className="h-8 bg-transparent p-0">
+            <TabsTrigger value="params" className="relative h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Params
+              {enabledParamCount > 0 && (
+                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold">
+                  {enabledParamCount}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="headers" className="relative h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Headers
+              {enabledHeaderCount > 0 && (
+                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold">
+                  {enabledHeaderCount}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="body" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Body
+            </TabsTrigger>
+            <TabsTrigger value="auth" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Auth
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      {/* Section content. */}
-      <div className="flex-1 overflow-auto p-3">
-        {activeSection === 'params' && (
-          <div className="space-y-4">
-            <PathParamsPanel
-              url={request.url}
-              onUrlChange={handlePathUrlChange}
+        {/* Section content. */}
+        <div className="flex-1 overflow-auto p-3">
+          <TabsContent value="params" className="mt-0">
+            <div className="space-y-4">
+              <PathParamsPanel
+                url={request.url}
+                onUrlChange={handlePathUrlChange}
+              />
+              <QueryParamsEditor
+                params={request.queryParams}
+                onChange={handleParamsChange}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="headers" className="mt-0">
+            <HeadersEditor
+              headers={request.headers}
+              onChange={(headers) => updateRequest(tab.id, { headers })}
             />
-            <QueryParamsEditor
-              params={request.queryParams}
-              onChange={handleParamsChange}
+          </TabsContent>
+
+          <TabsContent value="body" className="mt-0">
+            <BodyEditor
+              body={request.body}
+              onChange={(body) => updateRequest(tab.id, { body })}
             />
-          </div>
-        )}
+          </TabsContent>
 
-        {activeSection === 'headers' && (
-          <HeadersEditor
-            headers={request.headers}
-            onChange={(headers) => updateRequest(tab.id, { headers })}
-          />
-        )}
+          <TabsContent value="auth" className="mt-0">
+            <AuthEditor
+              auth={request.auth}
+              onChange={(auth) => updateRequest(tab.id, { auth })}
+            />
+          </TabsContent>
+        </div>
+      </Tabs>
 
-        {activeSection === 'body' && (
-          <BodyEditor
-            body={request.body}
-            onChange={(body) => updateRequest(tab.id, { body })}
-          />
-        )}
-
-        {activeSection === 'auth' && (
-          <AuthEditor
-            auth={request.auth}
-            onChange={(auth) => updateRequest(tab.id, { auth })}
-          />
-        )}
-      </div>
-
-      {/* Response area — shown only when a response exists. */}
+      {/* Response area -- shown only when a response exists. */}
       {response && (
         <div className="border-t-2 border-border">
-          {/* Response status bar. */}
+          {/* Response status bar with Badge. */}
           <div className="flex items-center gap-3 border-b border-border px-3 py-1.5 text-xs">
-            <span className={cn('font-bold', statusColor(response.status))}>
+            <Badge variant={statusBadgeVariant(response.status)} className="text-xs">
               {response.status === 0 ? 'ERR' : response.status}{' '}
               {response.statusText}
-            </span>
+            </Badge>
             {response.durationMs > 0 && (
               <span className="text-muted-foreground">
                 {response.durationMs} ms
@@ -365,48 +374,30 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </span>
           </div>
 
-          {/* Response body — tabbed viewer with pretty-print, raw, preview, headers. */}
+          {/* Response body -- tabbed viewer with pretty-print, raw, preview, headers. */}
           <div className="h-64 overflow-hidden">
             <ResponseBodyViewer response={response} />
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// Small helper component for section tab buttons.
-function SectionTabButton({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count?: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'relative px-3 py-2 text-xs font-medium transition-colors',
-        active
-          ? 'text-foreground'
-          : 'text-muted-foreground hover:text-foreground',
-      )}
-      onClick={onClick}
-    >
-      {label}
-      {count != null && count > 0 && (
-        <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold">
-          {count}
-        </span>
-      )}
-      {active && (
-        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-      )}
-    </button>
+      {/* Unsaved changes dialog. */}
+      <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              This tab has unsaved changes. Do you want to discard them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => setUnsavedDialogOpen(false)}>
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

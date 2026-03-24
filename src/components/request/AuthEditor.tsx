@@ -1,7 +1,14 @@
 import { useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { AuthState } from '@/types/pane-types';
 
 type AuthType = AuthState['authType'];
@@ -21,21 +28,21 @@ const AUTH_TYPES: { label: string; value: AuthType }[] = [
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
 ];
 
-// Shared select style matches the api-key "Add to" select.
-const SELECT_CLASS =
-  'mt-1 block h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]';
-
 // Two-column grid row: label on the left, input on the right.
 function FieldRow({
   label,
+  htmlFor,
   children,
 }: {
   label: string;
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="grid grid-cols-[7rem_1fr] items-center gap-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
+      <Label htmlFor={htmlFor} className="text-sm text-muted-foreground">
+        {label}
+      </Label>
       {children}
     </div>
   );
@@ -90,23 +97,21 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
 
   return (
     <div className="space-y-3">
-      {/* Type selector. */}
-      <div className="flex flex-wrap gap-1 border-b border-border pb-1">
-        {AUTH_TYPES.map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            className={cn(
-              'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-              auth.authType === t.value
-                ? 'bg-muted text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() => setType(t.value)}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* Auth type selector using shadcn Select. */}
+      <div className="max-w-xs">
+        <Label className="mb-1 block text-xs text-muted-foreground">Auth Type</Label>
+        <Select value={auth.authType} onValueChange={(val) => setType(val as AuthType)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AUTH_TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value} className="text-xs">
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Auth fields. */}
@@ -118,9 +123,12 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
 
       {auth.authType === 'basic' && auth.basic && (
         <div className="space-y-2">
-          <label className="block text-xs font-medium text-muted-foreground">
-            Username
+          <div>
+            <Label htmlFor="auth-basic-username" className="text-xs text-muted-foreground">
+              Username
+            </Label>
             <Input
+              id="auth-basic-username"
               className="mt-1 h-7 text-xs"
               value={auth.basic.username}
               onChange={(e) =>
@@ -130,10 +138,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 })
               }
             />
-          </label>
-          <label className="block text-xs font-medium text-muted-foreground">
-            Password
+          </div>
+          <div>
+            <Label htmlFor="auth-basic-password" className="text-xs text-muted-foreground">
+              Password
+            </Label>
             <Input
+              id="auth-basic-password"
               className="mt-1 h-7 text-xs"
               type="password"
               value={auth.basic.password}
@@ -144,14 +155,17 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 })
               }
             />
-          </label>
+          </div>
         </div>
       )}
 
       {auth.authType === 'bearer' && auth.bearer && (
-        <label className="block text-xs font-medium text-muted-foreground">
-          Token
+        <div>
+          <Label htmlFor="auth-bearer-token" className="text-xs text-muted-foreground">
+            Token
+          </Label>
           <Input
+            id="auth-bearer-token"
             className="mt-1 h-7 text-xs"
             placeholder="Bearer token"
             value={auth.bearer.token}
@@ -162,14 +176,17 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               })
             }
           />
-        </label>
+        </div>
       )}
 
       {auth.authType === 'api-key' && auth.apiKey && (
         <div className="space-y-2">
-          <label className="block text-xs font-medium text-muted-foreground">
-            Key
+          <div>
+            <Label htmlFor="auth-apikey-key" className="text-xs text-muted-foreground">
+              Key
+            </Label>
             <Input
+              id="auth-apikey-key"
               className="mt-1 h-7 text-xs"
               placeholder="X-API-Key"
               value={auth.apiKey.key}
@@ -180,10 +197,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 })
               }
             />
-          </label>
-          <label className="block text-xs font-medium text-muted-foreground">
-            Value
+          </div>
+          <div>
+            <Label htmlFor="auth-apikey-value" className="text-xs text-muted-foreground">
+              Value
+            </Label>
             <Input
+              id="auth-apikey-value"
               className="mt-1 h-7 text-xs"
               placeholder="api-key-value"
               value={auth.apiKey.value}
@@ -194,26 +214,30 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 })
               }
             />
-          </label>
-          <label className="block text-xs font-medium text-muted-foreground">
-            Add to
-            <select
-              className={SELECT_CLASS}
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Add to</Label>
+            <Select
               value={auth.apiKey.addTo}
-              onChange={(e) =>
+              onValueChange={(val) =>
                 onChange({
                   ...auth,
                   apiKey: {
                     ...auth.apiKey!,
-                    addTo: e.target.value as 'header' | 'query',
+                    addTo: val as 'header' | 'query',
                   },
                 })
               }
             >
-              <option value="header">Header</option>
-              <option value="query">Query Param</option>
-            </select>
-          </label>
+              <SelectTrigger className="mt-1 h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="header" className="text-xs">Header</SelectItem>
+                <SelectItem value="query" className="text-xs">Query Param</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       )}
 
@@ -221,17 +245,21 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       {auth.authType === 'oauth2' && auth.oauth2 && (
         <div className="space-y-2">
           <FieldRow label="Grant type">
-            <select
-              className={SELECT_CLASS}
+            <Select
               value={auth.oauth2.grantType}
-              onChange={(e) =>
-                patchOAuth2({ grantType: e.target.value as OAuth2GrantType })
+              onValueChange={(val) =>
+                patchOAuth2({ grantType: val as OAuth2GrantType })
               }
             >
-              <option value="client_credentials">Client Credentials</option>
-              <option value="password">Password</option>
-              <option value="authorization_code">Authorization Code</option>
-            </select>
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="client_credentials" className="text-xs">Client Credentials</SelectItem>
+                <SelectItem value="password" className="text-xs">Password</SelectItem>
+                <SelectItem value="authorization_code" className="text-xs">Authorization Code</SelectItem>
+              </SelectContent>
+            </Select>
           </FieldRow>
 
           <FieldRow label="Client ID">
