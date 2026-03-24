@@ -37,16 +37,11 @@ impl CollectionService {
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
-        // Update the name field inside the JSON.
+        // Only update the name field inside the JSON. The filename stays the same.
+        // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
-        // Write updated content to the old file first.
-        self.repo.save_request(collection, old_path, &request)?;
-        // Rename the file on disk (single fs::rename, one event).
-        if old_path != new_name {
-            self.repo.rename_request(collection, old_path, new_name)?;
-        }
-        Ok(())
+        self.repo.save_request(collection, old_path, &request)
     }
 
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
