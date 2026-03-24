@@ -52,6 +52,21 @@ impl CollectionService {
         Ok(())
     }
 
+    pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
+        let mut request = self.repo.get_request(collection, old_path)?;
+        request.name = new_name.to_string();
+        self.repo.save_request(collection, new_name, &request)?;
+        // Only delete the old file if the name actually changed.
+        if old_path != new_name {
+            let _ = self.repo.delete_request(collection, old_path);
+        }
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: new_name.to_string(),
+        });
+        Ok(())
+    }
+
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.repo.delete_request(collection, path)?;
         self.events.publish(DomainEvent::RequestDeleted {

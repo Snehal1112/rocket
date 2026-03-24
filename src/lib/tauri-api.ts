@@ -187,6 +187,9 @@ export const saveRequest = (
   request: Request,
 ) => invoke<void>("save_request", { collection, path, request });
 
+export const renameRequest = (collection: string, oldPath: string, newName: string) =>
+  invoke<void>("rename_request", { collection, oldPath, newName });
+
 export const deleteRequest = (collection: string, path: string) =>
   invoke<void>("delete_request", { collection, path });
 

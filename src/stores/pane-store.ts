@@ -283,8 +283,22 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   updateTabTitle(tabId, title) {
     const { root } = get();
+    // Find the tab to check if it has a collection source.
+    const found = findTabInTree(root, tabId);
     set({
-      root: updateTabInTree(root, tabId, (tab) => ({ ...tab, title })),
+      root: updateTabInTree(root, tabId, (tab) => ({
+        ...tab,
+        title,
+        // Update source path so future saves use the new name.
+        source: tab.source ? { ...tab.source, path: title } : tab.source,
+      })),
     });
+    // Persist rename to disk if the tab is collection-owned.
+    if (found?.tab.source) {
+      import('@/lib/tauri-api').then(({ renameRequest }) => {
+        renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
+          .catch((err) => console.error('[pane-store] rename failed:', err));
+      });
+    }
   },
 }));
