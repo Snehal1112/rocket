@@ -470,7 +470,7 @@ function CollectionNode({
               <button
                 type="button"
                 className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); void onNewRequest(summary.name, ''); }}
+                onClick={(e) => { e.stopPropagation(); setExpanded(true); void onNewRequest(summary.name, ''); }}
                 title="New Request"
               >
                 <Plus className="h-3 w-3" />
@@ -478,7 +478,7 @@ function CollectionNode({
               <button
                 type="button"
                 className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); void onNewFolder(summary.name, ''); }}
+                onClick={(e) => { e.stopPropagation(); setExpanded(true); void onNewFolder(summary.name, ''); }}
                 title="New Folder"
               >
                 <FolderPlus className="h-3 w-3" />
@@ -665,7 +665,11 @@ export function CollectionsSidebar() {
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
     const name = 'New Folder';
     const path = folderPath ? `${folderPath}/${name}` : name;
-    await createFolder(collection, path);
+    try {
+      await createFolder(collection, path);
+    } catch (err) {
+      console.error('[CollectionsSidebar] create folder failed:', err);
+    }
   }, []);
 
   const handleMove = useCallback(async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
