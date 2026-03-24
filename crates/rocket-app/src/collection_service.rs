@@ -37,11 +37,14 @@ impl CollectionService {
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
+        // Update the name field inside the JSON.
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
-        self.repo.save_request(collection, new_name, &request)?;
+        // Write updated content to the old file first.
+        self.repo.save_request(collection, old_path, &request)?;
+        // Rename the file on disk (single fs::rename, one event).
         if old_path != new_name {
-            let _ = self.repo.delete_request(collection, old_path);
+            self.repo.rename_request(collection, old_path, new_name)?;
         }
         Ok(())
     }
@@ -138,6 +141,7 @@ mod tests {
 
         fn get_request(&self, _: &str, _: &str) -> DomainResult<Request> { unimplemented!() }
         fn save_request(&self, _: &str, _: &str, _: &Request) -> DomainResult<()> { unimplemented!() }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }

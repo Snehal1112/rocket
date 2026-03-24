@@ -308,6 +308,7 @@ mod tests {
             Err(DomainError::NotFound("stub".into()))
         }
         fn save_request(&self, _: &str, _: &str, _: &CollectionRequest) -> DomainResult<()> { Ok(()) }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
