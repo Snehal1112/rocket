@@ -52,11 +52,18 @@ export interface RequestOptions {
   verifySsl: boolean;
 }
 
+export interface CollectionSettings {
+  description?: string;
+  auth?: Auth;
+  headers: Header[];
+}
+
 export interface CollectionSummary {
   uid: string;
   name: string;
   path: string;
   requestCount: number;
+  modifiedAt?: string;
 }
 
 export interface Request {
@@ -83,6 +90,7 @@ export type CollectionItem =
 export interface Collection {
   name: string;
   root: Folder;
+  settings: CollectionSettings;
 }
 
 export interface Variable {
