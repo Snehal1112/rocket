@@ -20,6 +20,46 @@ impl FsCollectionRepo {
     fn settings_path(&self, name: &str) -> PathBuf {
         self.collection_path(name).join("collection.json")
     }
+
+    /// Resolves `path` under `base` and verifies it stays inside `base`.
+    /// Works for paths that do not exist yet by canonicalizing the nearest
+    /// existing ancestor and then appending the remaining components.
+    fn validate_path(&self, base: &Path, path: &Path) -> Result<PathBuf, DomainError> {
+        let full = base.join(path);
+
+        let canonical_base = base
+            .canonicalize()
+            .map_err(|_| DomainError::NotFound("Base dir not found".into()))?;
+
+        // Walk up to find the deepest ancestor that already exists on disk.
+        let mut existing = full.as_path();
+        while !existing.exists() {
+            match existing.parent() {
+                Some(p) => existing = p,
+                None => {
+                    return Err(DomainError::NotFound("Path not found".into()));
+                }
+            }
+        }
+
+        let canonical_existing = existing
+            .canonicalize()
+            .map_err(|_| DomainError::NotFound("Path not found".into()))?;
+
+        // Reconstruct the full canonical path by appending any not-yet-existing suffix.
+        let suffix = full.strip_prefix(existing).unwrap_or(Path::new(""));
+        let canonical_full = if suffix == Path::new("") {
+            canonical_existing
+        } else {
+            canonical_existing.join(suffix)
+        };
+
+        if !canonical_full.starts_with(&canonical_base) {
+            return Err(DomainError::InvalidInput("Path traversal detected".into()));
+        }
+
+        Ok(canonical_full)
+    }
 }
 
 impl CollectionRepository for FsCollectionRepo {
@@ -91,7 +131,8 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<rocket_collection::Request> {
-        let file_path = self.collection_path(collection).join(path);
+        let collection_dir = self.collection_path(collection);
+        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
@@ -100,7 +141,8 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<()> {
-        let file_path = self.collection_path(collection).join(path);
+        let collection_dir = self.collection_path(collection);
+        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -110,7 +152,8 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
-        let file_path = self.collection_path(collection).join(path);
+        let collection_dir = self.collection_path(collection);
+        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
@@ -119,13 +162,15 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        let dir_path = self.collection_path(collection).join(path);
+        let collection_dir = self.collection_path(collection);
+        let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         fs::create_dir_all(&dir_path)?;
         Ok(())
     }
 
     fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        let dir_path = self.collection_path(collection).join(path);
+        let collection_dir = self.collection_path(collection);
+        let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         if !dir_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
@@ -140,8 +185,10 @@ impl CollectionRepository for FsCollectionRepo {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        let src = self.collection_path(src_collection).join(src_path);
-        let dst = self.collection_path(dst_collection).join(dst_path);
+        let src_collection_dir = self.collection_path(src_collection);
+        let dst_collection_dir = self.collection_path(dst_collection);
+        let src = self.validate_path(&src_collection_dir, Path::new(src_path))?;
+        let dst = self.validate_path(&dst_collection_dir, Path::new(dst_path))?;
         if !src.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", src_collection, src_path)));
         }
@@ -374,5 +421,106 @@ mod tests {
 
         let list = repo.list().unwrap();
         assert_eq!(list[0].request_count, 0);
+    }
+
+    #[test]
+    fn path_traversal_in_get_request_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.get_request("my-api", "../../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_save_request_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("Bad", rocket_shared::types::HttpMethod::Get, "/bad");
+        let result = repo.save_request("my-api", "../../evil.json", &req);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_delete_request_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.delete_request("my-api", "../../etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_create_folder_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.create_folder("my-api", "../../evil-dir");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_delete_folder_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.delete_folder("my-api", "../../etc");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_move_item_src_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.move_item("my-api", "../../etc/passwd", "my-api", "dest.json");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn path_traversal_in_move_item_dst_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("T", rocket_shared::types::HttpMethod::Get, "/t");
+        repo.save_request("my-api", "src.json", &req).unwrap();
+        let result = repo.move_item("my-api", "src.json", "my-api", "../../evil.json");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
     }
 }
