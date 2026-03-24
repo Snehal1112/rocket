@@ -3,6 +3,7 @@ import type {
   SplitNode,
   LeafNode,
   Tab,
+  RequestTab,
   RequestState,
   AuthState,
   BodyState,
@@ -81,7 +82,7 @@ export function createDefaultRequest(): RequestState {
 }
 
 // Creates a new unsaved draft tab with a fresh UUID.
-export function createDefaultTab(): Tab {
+export function createDefaultTab(): RequestTab {
   const id = crypto.randomUUID();
   return {
     id,

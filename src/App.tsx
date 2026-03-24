@@ -8,6 +8,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
 import { findTabInTree } from '@/lib/pane-utils';
+import { isRequestTab } from '@/types/pane-types';
 import { useState, useEffect } from 'react';
 
 function App() {
@@ -73,7 +74,7 @@ function App() {
         </main>
       </div>
       <StatusBar />
-      {saveTab && (
+      {saveTab && isRequestTab(saveTab) && (
         <SaveToCollectionDialog
           open={!!saveDialogTabId}
           onOpenChange={(open) => { if (!open) setSaveDialogTabId(null); }}
