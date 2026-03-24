@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, lazy, Suspense } from 'react';
 import { Check, X, Plus, FileUp } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MonacoWrapper } from '@/components/editor/MonacoWrapper';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
+
+// Lazy-load Monaco so it stays out of the initial JS bundle.
+const MonacoWrapper = lazy(() =>
+  import('@/components/editor/MonacoWrapper').then((m) => ({
+    default: m.MonacoWrapper,
+  })),
+);
 
 type BodyMode = BodyState['mode'];
 
@@ -92,12 +98,20 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
       {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
         <div className="flex-1 border rounded min-h-[200px]">
-          <MonacoWrapper
-            value={body.content}
-            onChange={(val) => setContent(val)}
-            bodyMode={body.mode}
-            height="100%"
-          />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                Loading editor...
+              </div>
+            }
+          >
+            <MonacoWrapper
+              value={body.content}
+              onChange={(val) => setContent(val)}
+              bodyMode={body.mode}
+              height="100%"
+            />
+          </Suspense>
         </div>
       )}
 
