@@ -2,6 +2,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 use crate::folder::Folder;
+use crate::settings::CollectionSettings;
 
 /// Collection aggregate root.
 /// A collection is a named group of API requests organized in a folder tree.
@@ -11,6 +12,7 @@ use crate::folder::Folder;
 pub struct Collection {
     pub name: String,
     pub root: Folder,
+    pub settings: CollectionSettings,
 }
 
 impl Collection {
@@ -19,6 +21,7 @@ impl Collection {
         Self {
             root: Folder::new(&name),
             name,
+            settings: CollectionSettings::default(),
         }
     }
 

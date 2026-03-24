@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSettings {
+    /// Optional human-readable description for this collection.
+    #[serde(default)]
+    pub description: Option<String>,
+
     /// Optional auth applied to all requests in this collection.
     #[serde(default)]
     pub auth: Option<Auth>,

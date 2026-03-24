@@ -92,11 +92,17 @@ impl CollectionRepository for FsCollectionRepo {
                 }
                 let count = count_request_files(&path);
                 let uid = read_or_create_uid(&path);
+                let modified_at = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs().to_string());
                 result.push(CollectionSummary::new(
                     uid,
                     &name,
                     path.to_string_lossy().to_string(),
                     count,
+                    modified_at,
                 ));
             }
         }
@@ -110,7 +116,8 @@ impl CollectionRepository for FsCollectionRepo {
             return Err(DomainError::NotFound(format!("Collection '{}'", name)));
         }
         let root = build_folder_tree(&path)?;
-        Ok(Collection { name: name.to_string(), root })
+        let settings = self.get_settings(name).unwrap_or_default();
+        Ok(Collection { name: name.to_string(), root, settings })
     }
 
     fn create(&self, name: &str) -> DomainResult<Collection> {
@@ -442,6 +449,7 @@ mod tests {
         repo.create("my-api").unwrap();
 
         let original = rocket_collection::CollectionSettings {
+            description: None,
             auth: Some(Auth::Bearer { token: "tok_abc".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
         };
@@ -459,6 +467,7 @@ mod tests {
 
         // Save settings, then verify the request count stays zero.
         let settings = rocket_collection::CollectionSettings {
+            description: None,
             auth: Some(Auth::None),
             headers: vec![],
         };
