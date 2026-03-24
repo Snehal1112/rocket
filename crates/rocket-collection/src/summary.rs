@@ -8,15 +8,17 @@ pub struct CollectionSummary {
     pub name: String,
     pub path: String,
     pub request_count: usize,
+    pub modified_at: Option<String>,
 }
 
 impl CollectionSummary {
-    pub fn new(uid: impl Into<String>, name: impl Into<String>, path: impl Into<String>, request_count: usize) -> Self {
+    pub fn new(uid: impl Into<String>, name: impl Into<String>, path: impl Into<String>, request_count: usize, modified_at: Option<String>) -> Self {
         Self {
             uid: uid.into(),
             name: name.into(),
             path: path.into(),
             request_count,
+            modified_at,
         }
     }
 }
@@ -27,7 +29,7 @@ mod tests {
 
     #[test]
     fn summary_creation() {
-        let s = CollectionSummary::new(String::new(), "my-api", "/path/to/my-api", 5);
+        let s = CollectionSummary::new(String::new(), "my-api", "/path/to/my-api", 5, None);
         assert_eq!(s.name, "my-api");
         assert_eq!(s.request_count, 5);
     }
