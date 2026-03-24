@@ -70,24 +70,6 @@ export function findTabInTree(
   return findTabInTree(node.children[0], tabId) ?? findTabInTree(node.children[1], tabId);
 }
 
-// Searches all leaves for a tab matching a collection source path.
-export function findTabBySource(
-  node: PaneNode,
-  collection: string,
-  path: string,
-): { leaf: LeafNode; tab: Tab } | null {
-  if (node.type === 'leaf') {
-    const tab = node.tabs.find(
-      (t) => t.source?.collection === collection && t.source?.path === path,
-    );
-    return tab ? { leaf: node, tab } : null;
-  }
-  return (
-    findTabBySource(node.children[0], collection, path) ??
-    findTabBySource(node.children[1], collection, path)
-  );
-}
-
 // Returns the leftmost/topmost leaf in the tree.
 export function findFirstLeaf(node: PaneNode): LeafNode {
   if (node.type === 'leaf') return node;
