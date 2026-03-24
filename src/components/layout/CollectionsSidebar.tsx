@@ -470,7 +470,12 @@ function CollectionNode({
               <button
                 type="button"
                 className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); setExpanded(true); void onNewRequest(summary.name, ''); }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await onNewRequest(summary.name, '');
+                  setExpanded(true);
+                  setCollection(null);
+                }}
                 title="New Request"
               >
                 <Plus className="h-3 w-3" />
@@ -478,7 +483,12 @@ function CollectionNode({
               <button
                 type="button"
                 className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); setExpanded(true); void onNewFolder(summary.name, ''); }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await onNewFolder(summary.name, '');
+                  setExpanded(true);
+                  setCollection(null);
+                }}
                 title="New Folder"
               >
                 <FolderPlus className="h-3 w-3" />
