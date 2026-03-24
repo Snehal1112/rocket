@@ -49,7 +49,7 @@ pub fn save_request(
     path: String,
     request: Request,
     svc: State<'_, CollectionService>,
-) -> Result<(), DomainError> {
+) -> Result<Request, DomainError> {
     svc.save_request(&collection, &path, &request)
 }
 
