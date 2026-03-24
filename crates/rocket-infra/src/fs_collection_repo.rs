@@ -132,7 +132,10 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<rocket_collection::Request> {
         let collection_dir = self.collection_path(collection);
-        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
+        // Try with .json extension first, then without (for legacy files).
+        let with_ext = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
+        let file_path = self.validate_path(&collection_dir, Path::new(&with_ext))
+            .or_else(|_| self.validate_path(&collection_dir, Path::new(path)))?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
@@ -142,7 +145,13 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<()> {
         let collection_dir = self.collection_path(collection);
-        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
+        // Ensure path ends with .json so it is recognized on read-back.
+        let normalized = if path.ends_with(".json") {
+            path.to_string()
+        } else {
+            format!("{}.json", path)
+        };
+        let file_path = self.validate_path(&collection_dir, Path::new(&normalized))?;
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -153,7 +162,9 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         let collection_dir = self.collection_path(collection);
-        let file_path = self.validate_path(&collection_dir, Path::new(path))?;
+        let with_ext = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
+        let file_path = self.validate_path(&collection_dir, Path::new(&with_ext))
+            .or_else(|_| self.validate_path(&collection_dir, Path::new(path)))?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
