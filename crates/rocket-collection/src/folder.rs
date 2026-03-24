@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// A recursive tree node: either a Request or a nested Folder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "itemType", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum CollectionItem {
     #[serde(rename = "request")]
     Request(Request),

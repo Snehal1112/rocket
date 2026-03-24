@@ -73,8 +73,8 @@ export interface Folder {
 }
 
 export type CollectionItem =
-  | { type: "request"; request: Request }
-  | { type: "folder"; folder: Folder };
+  | ({ type: "request" } & Request)
+  | ({ type: "folder" } & Folder);
 
 export interface Collection {
   name: string;
