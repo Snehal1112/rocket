@@ -285,6 +285,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     // Find the tab to check if it has a collection source.
     const found = findTabInTree(root, tabId);
+    // Skip if the title hasn't actually changed.
+    if (found?.tab.title === title) return;
     set({
       root: updateTabInTree(root, tabId, (tab) => ({
         ...tab,
@@ -298,7 +300,6 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       import('@/lib/tauri-api').then(({ renameRequest }) => {
         renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
           .then(() => {
-            // Signal sidebar to refresh.
             window.dispatchEvent(new CustomEvent('rocket:collections-changed'));
           })
           .catch((err) => console.error('[pane-store] rename failed:', err));
