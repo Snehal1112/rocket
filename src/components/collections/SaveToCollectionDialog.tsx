@@ -66,7 +66,7 @@ export function SaveToCollectionDialog({
               tabType: 'request',
               title: requestName.trim(),
               isDirty: false,
-              source: { collection: selectedCollection, path: requestName.trim() },
+              source: { collection: selectedCollection, path: requestName.trim().endsWith('.json') ? requestName.trim() : `${requestName.trim()}.json` },
             };
             return { ...node, tabs };
           }

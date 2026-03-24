@@ -656,7 +656,7 @@ export function CollectionsSidebar() {
       request: createDefaultRequest(),
       response: null,
       isDirty: false,
-      source: { collection, path },
+      source: { collection, path: path.endsWith('.json') ? path : `${path}.json` },
     };
     usePaneStore.getState().openTab(tab);
   }, []);
