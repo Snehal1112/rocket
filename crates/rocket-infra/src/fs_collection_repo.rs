@@ -4,6 +4,20 @@ use std::path::{Path, PathBuf};
 use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
 use rocket_shared::error::{DomainError, DomainResult};
 
+/// Reads the .uid file from a directory. If missing, generates a UUID and writes it.
+fn read_or_create_uid(dir: &Path) -> String {
+    let uid_path = dir.join(".uid");
+    if let Ok(uid) = fs::read_to_string(&uid_path) {
+        let trimmed = uid.trim().to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    let uid = uuid::Uuid::new_v4().to_string();
+    let _ = fs::write(&uid_path, &uid);
+    uid
+}
+
 pub struct FsCollectionRepo {
     base_dir: PathBuf,
 }
@@ -77,8 +91,9 @@ impl CollectionRepository for FsCollectionRepo {
                     continue;
                 }
                 let count = count_request_files(&path);
+                let uid = read_or_create_uid(&path);
                 result.push(CollectionSummary::new(
-                    String::new(),
+                    uid,
                     &name,
                     path.to_string_lossy().to_string(),
                     count,
@@ -188,6 +203,7 @@ impl CollectionRepository for FsCollectionRepo {
         let collection_dir = self.collection_path(collection);
         let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         fs::create_dir_all(&dir_path)?;
+        read_or_create_uid(&dir_path);
         Ok(())
     }
 
@@ -274,6 +290,7 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let mut folder = Folder::new(name);
+    folder.uid = read_or_create_uid(current);
 
     if !current.exists() {
         return Ok(folder);
@@ -293,7 +310,11 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         } else if is_request_file(&path) {
             let content = fs::read_to_string(&path)?;
             if let Ok(mut request) = serde_json::from_str::<rocket_collection::Request>(&content) {
-                request.file_name = Some(entry_name);
+                request.file_name = Some(entry_name.clone());
+                // Migrate: persist uid if the file doesn't have one yet.
+                if !content.contains("\"uid\"") {
+                    let _ = fs::write(&path, serde_json::to_string_pretty(&request).unwrap_or_default());
+                }
                 folder.add_request(request);
             }
         }
