@@ -103,9 +103,28 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         setTokenError(json.error_description || json.error);
         return;
       }
+
+      // Validate the token is a non-empty string within a sane size bound.
+      const MAX_TOKEN_BYTES = 8 * 1024;
+      if (
+        typeof json.access_token !== 'string' ||
+        json.access_token.length === 0 ||
+        json.access_token.length > MAX_TOKEN_BYTES
+      ) {
+        setTokenError('Server returned an invalid or missing access_token.');
+        return;
+      }
+
+      const refreshToken =
+        typeof json.refresh_token === 'string' &&
+        json.refresh_token.length > 0 &&
+        json.refresh_token.length <= MAX_TOKEN_BYTES
+          ? json.refresh_token
+          : '';
+
       patchOAuth2({
-        accessToken: json.access_token ?? '',
-        refreshToken: json.refresh_token ?? '',
+        accessToken: json.access_token,
+        refreshToken,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
