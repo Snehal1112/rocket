@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { Sun, Moon, Rocket } from 'lucide-react';
+import { Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
 
 // Top header bar with logo, title, and theme toggle.
@@ -9,7 +9,7 @@ export function Header() {
   return (
     <header className="h-14 border-b border-border/70 flex items-center px-4 bg-card/70 backdrop-blur-md shrink-0">
       <div className="flex items-center gap-2.5">
-        <Rocket className="w-7 h-7 text-primary" />
+        <img src="/rocket.png" alt="Rocket API" className="w-7 h-7 object-contain" />
         <div className="leading-tight">
           <p className="font-semibold tracking-tight text-foreground">Rocket</p>
           <p className="text-[11px] text-muted-foreground">API Workspace</p>
