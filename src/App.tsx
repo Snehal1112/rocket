@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Header } from '@/components/layout/Header';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { StatusBar } from '@/components/layout/StatusBar';
@@ -40,7 +41,9 @@ function App() {
         {!sidebarCollapsed && (
           <>
             <div style={{ width: `${sidebarWidth}px` }} className="shrink-0">
-              <CollectionsSidebar />
+              <ErrorBoundary>
+                <CollectionsSidebar />
+              </ErrorBoundary>
             </div>
             <div
               role="separator"
@@ -64,7 +67,9 @@ function App() {
           </>
         )}
         <main className="flex-1 flex flex-col min-w-0">
-          <PaneRenderer node={root} />
+          <ErrorBoundary>
+            <PaneRenderer node={root} />
+          </ErrorBoundary>
         </main>
       </div>
       <StatusBar />
