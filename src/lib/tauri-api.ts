@@ -300,10 +300,19 @@ export const onFileChange = (
 ): Promise<UnlistenFn> =>
   listen<FileChangedEvent>("file-change", (e) => handler(e.payload));
 
+export interface CollectionChangedEvent {
+  type: string;
+  collection?: string;
+  name?: string;
+  oldName?: string;
+  newName?: string;
+  path?: string;
+}
+
 export const onCollectionChanged = (
-  handler: () => void,
+  handler: (event: CollectionChangedEvent) => void,
 ): Promise<UnlistenFn> =>
-  listen("collection-changed", () => handler());
+  listen<CollectionChangedEvent>("collection-changed", (e) => handler(e.payload));
 
 export const onRequestExecuted = (
   handler: () => void,
