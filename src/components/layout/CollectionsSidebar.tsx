@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   listCollections,
   getCollection,
@@ -400,19 +400,24 @@ function CollectionNode({
   }, [expanded, collection, refreshTree]);
 
   // Refresh the expanded tree only when THIS collection is affected.
+  // Debounced to collapse rapid filesystem events into one refresh.
+  const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!expanded) return;
     let unlisten: (() => void) | undefined;
     onCollectionChanged((event) => {
       const affected = event.collection ?? event.name;
-      // Only refetch if the event targets this collection (or if unknown, refresh to be safe).
       if (!affected || affected === summary.name) {
-        refreshTree();
+        if (treeDebounce.current) clearTimeout(treeDebounce.current);
+        treeDebounce.current = setTimeout(() => refreshTree(), 300);
       }
     }).then((fn) => {
       unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      if (treeDebounce.current) clearTimeout(treeDebounce.current);
+    };
   }, [expanded, refreshTree, summary.name]);
 
   // Auto-expand when a filter is active.
@@ -666,25 +671,22 @@ export function CollectionsSidebar() {
     await moveItem(srcCollection, srcPath, dstCollection, dstPath);
   }, []);
 
-  // Load collections on mount. Refetch the full list only when collections
-  // are created, deleted, or renamed — not on every request save.
+  // Load collections on mount. Debounce file watcher events so rapid
+  // filesystem changes (rename = write + delete) collapse into one refresh.
+  const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     void fetchCollections();
     let unlisten: (() => void) | undefined;
-    onCollectionChanged((event) => {
-      const t = event.type;
-      if (
-        t === 'collectionCreated' ||
-        t === 'collectionDeleted' ||
-        t === 'collectionRenamed' ||
-        t === 'fileChanged'
-      ) {
-        void fetchCollections();
-      }
+    onCollectionChanged(() => {
+      if (listDebounce.current) clearTimeout(listDebounce.current);
+      listDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
       unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      if (listDebounce.current) clearTimeout(listDebounce.current);
+    };
   }, [fetchCollections]);
 
   return (
