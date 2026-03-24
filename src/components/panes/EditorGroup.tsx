@@ -1,5 +1,6 @@
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
+import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import type { LeafNode } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 
@@ -15,9 +16,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : (
-            <div className="p-4 text-sm text-muted-foreground">
-              Collection: {activeTab.collectionName}
-            </div>
+            <CollectionOverviewTab collectionName={activeTab.collectionName} />
           )
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
