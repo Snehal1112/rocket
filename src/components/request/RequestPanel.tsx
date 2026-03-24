@@ -24,12 +24,7 @@ import {
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 import { parseQueryParams, buildUrl, splitUrl } from '@/lib/url-params';
-import {
-  executeRequest,
-  type Auth,
-  type Body,
-  type Header,
-} from '@/lib/tauri-api';
+import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { PathParamsPanel } from './PathParamsPanel';
 import { HeadersEditor } from './HeadersEditor';
@@ -40,8 +35,6 @@ import type {
   Tab,
   HttpMethod,
   KeyValueEntry,
-  AuthState,
-  ResponseState,
 } from '@/types/pane-types';
 
 const METHODS: HttpMethod[] = [
@@ -65,45 +58,6 @@ interface RequestPanelProps {
   groupId: string;
 }
 
-function toApiAuth(auth: AuthState): Auth {
-  switch (auth.authType) {
-    case 'basic':
-      return {
-        authType: 'basic',
-        username: auth.basic?.username ?? '',
-        password: auth.basic?.password ?? '',
-      };
-    case 'bearer':
-      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
-    case 'api-key':
-      return {
-        authType: 'api-key',
-        key: auth.apiKey?.key ?? '',
-        value: auth.apiKey?.value ?? '',
-        addTo: auth.apiKey?.addTo ?? 'header',
-      };
-    default:
-      return { authType: 'none' };
-  }
-}
-
-function toApiBody(body: { mode: string; content: string; formData: KeyValueEntry[] }): Body | undefined {
-  if (body.mode === 'none') return undefined;
-  if (body.mode === 'formdata') {
-    return {
-      mode: 'formdata',
-      formData: body.formData
-        .filter((e) => e.enabled)
-        .map((e) => ({
-          key: e.key,
-          value: e.value,
-          entryType: 'text' as const,
-          enabled: e.enabled,
-        })),
-    };
-  }
-  return { mode: body.mode as Body['mode'], content: body.content };
-}
 
 function statusColor(status: number): string {
   if (status >= 500) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
@@ -123,8 +77,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { request, response } = tab;
   const updateRequest = usePaneStore((s) => s.updateRequest);
 
+  const { send, sending } = useExecuteRequest(tab.id);
+
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
-  const [sending, setSending] = useState(false);
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
 
   // Resizable split: request height as percentage.
@@ -189,53 +144,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, request.url, updateRequest],
   );
 
-  const handleSend = useCallback(async () => {
-    setSending(true);
-    try {
-      const headers: Header[] = request.headers
-        .filter((h) => h.enabled)
-        .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled }));
-
-      const result = await executeRequest({
-        method: request.method,
-        url: request.url,
-        headers,
-        body: toApiBody(request.body),
-        auth: toApiAuth(request.auth),
-        options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
-      });
-
-      const responseState: ResponseState = {
-        status: result.status,
-        statusText: result.statusText,
-        headers: result.headers.map((h) => ({
-          id: crypto.randomUUID(),
-          key: h.key,
-          value: h.value,
-          enabled: h.enabled,
-        })),
-        body: result.body,
-        durationMs: result.durationMs,
-        sizeBytes: result.sizeBytes,
-        activeView: 'pretty',
-      };
-      usePaneStore.getState().setResponse(tab.id, responseState);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      usePaneStore.getState().setResponse(tab.id, {
-        status: 0,
-        statusText: 'Error',
-        headers: [],
-        body: msg,
-        durationMs: 0,
-        sizeBytes: msg.length,
-        activeView: 'raw',
-      });
-    } finally {
-      setSending(false);
-    }
-  }, [tab.id, request]);
-
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
 
@@ -271,10 +179,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             placeholder="https://api.example.com/resource"
             value={request.url}
             onChange={(e) => handleUrlChange(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSend(); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
           />
 
-          <Button size="sm" className="h-8 px-3" disabled={sending} onClick={handleSend}>
+          <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => send(request)}>
             <Send className="mr-1 h-3.5 w-3.5" />
             {sending ? 'Sending...' : 'Send'}
           </Button>
