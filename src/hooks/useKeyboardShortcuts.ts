@@ -24,6 +24,16 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Cmd/Ctrl+S — save draft to collection.
+      if (e.key === 's') {
+        e.preventDefault();
+        const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
+        if (tab && tab.tabType === 'draft') {
+          window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }));
+        }
+        return;
+      }
+
       // Cmd/Ctrl+N — open a new draft tab in the active group.
       if (e.key === 'n') {
         e.preventDefault();
