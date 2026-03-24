@@ -107,6 +107,7 @@ pub fn run() {
             commands::collections::delete_collection,
             commands::collections::rename_collection,
             commands::collections::save_request,
+            commands::collections::rename_request,
             commands::collections::delete_request,
             commands::collections::create_folder,
             commands::collections::delete_folder,
