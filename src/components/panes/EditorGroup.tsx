@@ -1,20 +1,20 @@
-import type { LeafNode } from '@/types/pane-types';
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
+import type { LeafNode } from '@/types/pane-types';
 
 // Renders a tab bar at the top and the active tab content below.
 export function EditorGroup({ node }: { node: LeafNode }) {
   const activeTab = node.tabs.find((t) => t.id === node.activeTabId);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col h-full">
       <TabBar node={node} />
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
           <RequestPanel tab={activeTab} groupId={node.groupId} />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            No active tab
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            No open tabs
           </div>
         )}
       </div>
