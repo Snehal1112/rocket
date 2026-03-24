@@ -5,6 +5,7 @@ import {
   createDefaultTab,
   createDefaultLeaf,
   findTabInTree,
+  findTabBySource,
   findActiveLeaf,
   updateLeaf,
   removeLeaf,
@@ -96,11 +97,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   openTab(tab, groupId) {
     const { root, activeGroupId } = get();
     // If the tab already exists anywhere in the tree, just activate it.
-    const existing = findTabInTree(root, tab.id);
+    // Match by tab ID first, then by source path (handles renamed tabs).
+    const existing = findTabInTree(root, tab.id)
+      ?? (tab.source ? findTabBySource(root, tab.source.collection, tab.source.path) : null);
     if (existing) {
       const newRoot = updateLeaf(root, existing.leaf.groupId, (leaf) => ({
         ...leaf,
-        activeTabId: tab.id,
+        activeTabId: existing.tab.id,
       }));
       set({ root: newRoot, activeGroupId: existing.leaf.groupId });
       return;

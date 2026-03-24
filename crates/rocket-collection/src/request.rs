@@ -13,6 +13,9 @@ pub struct Request {
     pub body: Option<Body>,
     #[serde(default)]
     pub auth: Auth,
+    /// The filename on disk (e.g. "New Request.json"). Populated by build_folder_tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
 }
 
 impl Request {
@@ -28,6 +31,7 @@ impl Request {
             headers: Vec::new(),
             body: None,
             auth: Auth::None,
+            file_name: None,
         }
     }
 

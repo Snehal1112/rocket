@@ -291,7 +291,8 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             folder.add_subfolder(build_folder_tree(&path)?);
         } else if is_request_file(&path) {
             let content = fs::read_to_string(&path)?;
-            if let Ok(request) = serde_json::from_str::<rocket_collection::Request>(&content) {
+            if let Ok(mut request) = serde_json::from_str::<rocket_collection::Request>(&content) {
+                request.file_name = Some(entry_name);
                 folder.add_request(request);
             }
         }
