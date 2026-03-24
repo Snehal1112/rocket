@@ -767,15 +767,12 @@ export function CollectionsSidebar() {
       const folderPath = pathParts.join('/');
       const newPath = folderPath ? `${folderPath}/${copyName}` : copyName;
 
-      // Save the duplicate — backend generates a new uid.
+      // Save the duplicate with all source data. New uid and name, rest copied.
+      const { type: _t, uid: _u, name: _n, fileName: _f, ...requestData } = source;
       await saveRequest(collection, newPath, {
+        ...requestData,
         uid: '',
         name: copyName,
-        method: source.method,
-        url: source.url,
-        headers: source.headers,
-        body: source.body,
-        auth: source.auth,
       });
     } catch (err) {
       console.error('[CollectionsSidebar] duplicate failed:', err);
