@@ -54,6 +54,16 @@ pub fn save_request(
 }
 
 #[tauri::command]
+pub fn rename_request(
+    collection: String,
+    old_path: String,
+    new_name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.rename_request(&collection, &old_path, &new_name)
+}
+
+#[tauri::command]
 pub fn delete_request(
     collection: String,
     path: String,
