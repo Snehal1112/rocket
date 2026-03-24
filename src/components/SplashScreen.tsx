@@ -8,6 +8,11 @@ interface SplashScreenProps {
 export function SplashScreen({ onComplete }: SplashScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [fading, setFading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    requestAnimationFrame(() => setMounted(true));
+  }, []);
 
   useEffect(() => {
     // Load lottie.min.js from public/ via a script tag.
@@ -48,7 +53,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         fading ? 'opacity-0' : 'opacity-100',
       )}
     >
-      <div ref={containerRef} className="w-[300px] h-[300px]" />
+      <div ref={containerRef} className="w-[300px] h-[300px] overflow-hidden" />
       <p className="mt-4 text-2xl font-bold text-foreground tracking-tight">
         Rocket
       </p>
