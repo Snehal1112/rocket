@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { usePaneStore } from '@/stores/pane-store';
 import { findActiveLeaf } from '@/lib/pane-utils';
+import { sendRequest } from '@/lib/execute-request';
 
 // Registers global keyboard shortcuts for tab management across all pane groups.
 export function useKeyboardShortcuts() {
@@ -13,10 +14,13 @@ export function useKeyboardShortcuts() {
       const { root, activeGroupId } = store;
       const activeLeaf = findActiveLeaf(root, activeGroupId);
 
-      // Cmd/Ctrl+Enter — send the active tab's request (stub).
+      // Cmd/Ctrl+Enter — send the active tab's request.
       if (e.key === 'Enter') {
         e.preventDefault();
-        console.log('TODO: send request', activeLeaf.activeTabId);
+        const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
+        if (tab) {
+          sendRequest(tab.id, tab.request);
+        }
         return;
       }
 
