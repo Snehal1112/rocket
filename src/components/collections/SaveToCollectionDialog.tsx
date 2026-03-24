@@ -78,8 +78,6 @@ export function SaveToCollectionDialog({
         return { root: updateTab(state.root) };
       });
       onOpenChange(false);
-      // Signal sidebar to refresh immediately.
-      window.dispatchEvent(new CustomEvent('rocket:collections-changed'));
     } catch (err) {
       console.error('[SaveToCollection] Failed:', err);
     }

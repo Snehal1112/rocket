@@ -49,15 +49,13 @@ pub fn run() {
             }
 
             // Event buses — publish domain events to the frontend.
-            let event_bus =
-                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
             let watcher_bus =
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle));
 
-            // Application services with injected infra repos.
+            // Application services — no event publishing.
+            // The file watcher is the single source of truth for sidebar updates.
             let collection_svc = CollectionService::new(
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
-                event_bus,
             );
             let env_svc = EnvironmentService::new(
                 Box::new(FsEnvironmentRepo::new(environments_dir.clone())),

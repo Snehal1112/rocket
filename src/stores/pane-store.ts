@@ -299,9 +299,6 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (found?.tab.source) {
       import('@/lib/tauri-api').then(({ renameRequest }) => {
         renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
-          .then(() => {
-            window.dispatchEvent(new CustomEvent('rocket:collections-changed'));
-          })
           .catch((err) => console.error('[pane-store] rename failed:', err));
       });
     }
