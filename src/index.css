@@ -8,7 +8,7 @@
 
 /* Map CSS variables to Tailwind theme tokens. */
 @theme inline {
-  --font-sans: "JetBrains Mono", monospace;
+  --font-sans: "Inter", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
   --color-background: var(--background);
@@ -44,102 +44,95 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 }
 
-/* Preset: b2CkJ2CsV — style: mira, base: taupe, theme: teal, charts: emerald. */
+/* Theme from legacy rocket-api — blue primary, HSL-based. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.7rem;
 
-  /* Taupe base (warm gray-brown, hue ~78). */
-  --background: oklch(0.99 0.004 78);
-  --foreground: oklch(0.147 0.012 78);
-  --card: oklch(0.985 0.006 78);
-  --card-foreground: oklch(0.147 0.012 78);
-  --popover: oklch(0.99 0.004 78);
-  --popover-foreground: oklch(0.147 0.012 78);
+  --background: hsl(214 44% 98%);
+  --foreground: hsl(222 47% 11%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 47% 11%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 47% 11%);
+  --primary: hsl(213 88% 42%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(210 40% 95%);
+  --secondary-foreground: hsl(222 47% 11%);
+  --muted: hsl(213 35% 94%);
+  --muted-foreground: hsl(215 17% 40%);
+  --accent: hsl(212 86% 94%);
+  --accent-foreground: hsl(213 88% 30%);
+  --destructive: hsl(0 84.2% 60.2%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(214 31% 88%);
+  --input: hsl(214 31% 88%);
+  --ring: hsl(213 88% 42%);
 
-  /* Teal primary. */
-  --primary: oklch(0.52 0.135 185);
-  --primary-foreground: oklch(0.985 0.002 185);
+  --chart-1: hsl(213 88% 42%);
+  --chart-2: hsl(171 65% 35%);
+  --chart-3: hsl(28 91% 52%);
+  --chart-4: hsl(283 52% 49%);
+  --chart-5: hsl(343 74% 52%);
 
-  --secondary: oklch(0.96 0.009 78);
-  --secondary-foreground: oklch(0.21 0.013 78);
-  --muted: oklch(0.96 0.009 78);
-  --muted-foreground: oklch(0.555 0.016 78);
-
-  /* Very light teal accent. */
-  --accent: oklch(0.94 0.016 185);
-  --accent-foreground: oklch(0.32 0.1 185);
-
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.912 0.013 78);
-  --input: oklch(0.912 0.013 78);
-  --ring: oklch(0.52 0.135 185);
-
-  /* Emerald chart colors. */
-  --chart-1: oklch(0.65 0.176 152);
-  --chart-2: oklch(0.52 0.135 185);
-  --chart-3: oklch(0.72 0.16 142);
-  --chart-4: oklch(0.45 0.11 200);
-  --chart-5: oklch(0.78 0.18 160);
-
-  /* Sidebar: inverted-translucent (dark teal on light content). */
-  --sidebar: oklch(0.19 0.025 185);
-  --sidebar-foreground: oklch(0.92 0.008 78);
-  --sidebar-primary: oklch(0.65 0.15 185);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.26 0.035 185);
-  --sidebar-accent-foreground: oklch(0.92 0.008 78);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.65 0.15 185);
+  /* Sidebar: dark blue sidebar. */
+  --sidebar: hsl(222 47% 11%);
+  --sidebar-foreground: hsl(210 40% 95%);
+  --sidebar-primary: hsl(213 88% 52%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(213 50% 20%);
+  --sidebar-accent-foreground: hsl(210 40% 95%);
+  --sidebar-border: hsl(214 31% 25%);
+  --sidebar-ring: hsl(213 88% 42%);
 }
 
 .dark {
-  --background: oklch(0.142 0.012 78);
-  --foreground: oklch(0.97 0.005 78);
-  --card: oklch(0.19 0.015 78);
-  --card-foreground: oklch(0.97 0.005 78);
-  --popover: oklch(0.19 0.015 78);
-  --popover-foreground: oklch(0.97 0.005 78);
+  --background: hsl(0 0% 12%);
+  --foreground: hsl(0 0% 87%);
+  --card: hsl(0 0% 10%);
+  --card-foreground: hsl(0 0% 87%);
+  --popover: hsl(0 0% 10%);
+  --popover-foreground: hsl(0 0% 87%);
+  --primary: hsl(207 100% 42%);
+  --primary-foreground: hsl(0 0% 98%);
+  --secondary: hsl(0 0% 15%);
+  --secondary-foreground: hsl(0 0% 87%);
+  --muted: hsl(0 0% 14%);
+  --muted-foreground: hsl(0 0% 60%);
+  --accent: hsl(204 100% 18%);
+  --accent-foreground: hsl(0 0% 90%);
+  --destructive: hsl(0 72% 45%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(0 0% 19%);
+  --input: hsl(0 0% 19%);
+  --ring: hsl(207 100% 42%);
 
-  --primary: oklch(0.63 0.148 185);
-  --primary-foreground: oklch(0.09 0.02 185);
+  --chart-1: hsl(207 100% 42%);
+  --chart-2: hsl(160 63% 39%);
+  --chart-3: hsl(30 94% 55%);
+  --chart-4: hsl(282 60% 62%);
+  --chart-5: hsl(340 78% 61%);
 
-  --secondary: oklch(0.255 0.016 78);
-  --secondary-foreground: oklch(0.97 0.005 78);
-  --muted: oklch(0.255 0.016 78);
-  --muted-foreground: oklch(0.695 0.015 78);
+  --sidebar: hsl(0 0% 8%);
+  --sidebar-foreground: hsl(0 0% 87%);
+  --sidebar-primary: hsl(207 100% 52%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(0 0% 15%);
+  --sidebar-accent-foreground: hsl(0 0% 87%);
+  --sidebar-border: hsl(0 0% 19%);
+  --sidebar-ring: hsl(207 100% 42%);
+}
 
-  --accent: oklch(0.265 0.04 185);
-  --accent-foreground: oklch(0.88 0.06 185);
-
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.56 0.135 185);
-
-  --chart-1: oklch(0.62 0.168 152);
-  --chart-2: oklch(0.63 0.148 185);
-  --chart-3: oklch(0.72 0.16 142);
-  --chart-4: oklch(0.48 0.13 200);
-  --chart-5: oklch(0.78 0.18 160);
-
-  /* Sidebar stays dark teal in both modes (inverted-translucent). */
-  --sidebar: oklch(0.19 0.025 185);
-  --sidebar-foreground: oklch(0.92 0.008 78);
-  --sidebar-primary: oklch(0.65 0.15 185);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.26 0.035 185);
-  --sidebar-accent-foreground: oklch(0.92 0.008 78);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.65 0.15 185);
+/* Thin scrollbars matching the legacy design. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
 }
 
 @layer base {
@@ -148,6 +141,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "JetBrains Mono", monospace;
+    font-family: "Inter", "Segoe UI", sans-serif;
   }
 }
