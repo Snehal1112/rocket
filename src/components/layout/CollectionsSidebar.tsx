@@ -10,6 +10,7 @@ import {
   deleteFolder,
   deleteRequest,
   renameCollection,
+  renameRequest,
   moveItem,
   type CollectionSummary,
   type Collection,
@@ -122,6 +123,20 @@ function RequestNode({
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
 
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(name);
+
+  const handleRename = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === name) { setIsRenaming(false); return; }
+    try {
+      await renameRequest(collectionName, path, trimmed);
+      setIsRenaming(false);
+    } catch (err) {
+      console.error('Rename request failed:', err);
+    }
+  };
+
   function handleClick() {
     const request: RequestState = mapApiRequestToState(itemData);
     const tab: Tab = {
@@ -153,7 +168,22 @@ function RequestNode({
             <span className={cn('w-9 shrink-0 font-semibold text-[10px]', methodColor(method))}>
               {method}
             </span>
-            <span className="truncate text-foreground">{name}</span>
+            {isRenaming ? (
+              <Input
+                autoFocus
+                className="h-6 text-xs flex-1"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleRename();
+                  if (e.key === 'Escape') setIsRenaming(false);
+                }}
+                onBlur={() => void handleRename()}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="truncate text-foreground">{name}</span>
+            )}
           </button>
           <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -179,7 +209,7 @@ function RequestNode({
         <ContextMenuItem onClick={(e) => { e.stopPropagation(); void onDuplicate(collectionName, path, name); }}>
           Duplicate
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => {}}>
+        <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>
           Rename
         </ContextMenuItem>
         <ContextMenuSub>
@@ -237,6 +267,23 @@ function FolderNode({
   onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(name);
+
+  const handleRename = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === name) { setIsRenaming(false); return; }
+    // Build the new path by replacing the last segment of basePath with the new name.
+    const parts = basePath.split('/');
+    parts[parts.length - 1] = trimmed;
+    const newPath = parts.join('/');
+    try {
+      await moveItem(collectionName, basePath, collectionName, newPath);
+      setIsRenaming(false);
+    } catch (err) {
+      console.error('Rename folder failed:', err);
+    }
+  };
 
   // Auto-expand when a search filter is active.
   useEffect(() => {
@@ -276,7 +323,22 @@ function FolderNode({
               ) : (
                 <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
-              <span className="truncate font-medium text-foreground">{name}</span>
+              {isRenaming ? (
+                <Input
+                  autoFocus
+                  className="h-6 text-xs flex-1"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                  onBlur={() => void handleRename()}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="truncate font-medium text-foreground">{name}</span>
+              )}
             </button>
             <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
@@ -306,6 +368,9 @@ function FolderNode({
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>
+            Rename
+          </ContextMenuItem>
           <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'folder', collection: collectionName, path: basePath, name })}>
             Delete
           </ContextMenuItem>
