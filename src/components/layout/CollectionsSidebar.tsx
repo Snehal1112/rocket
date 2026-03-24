@@ -96,6 +96,7 @@ type DeleteTarget = {
 
 // Renders a single request item in the collection tree.
 function RequestNode({
+  uid,
   name,
   method,
   collectionName,
@@ -104,6 +105,7 @@ function RequestNode({
   onMove,
   onDelete,
 }: {
+  uid: string;
   name: string;
   method: string;
   collectionName: string;
@@ -113,8 +115,7 @@ function RequestNode({
   onDelete: (target: DeleteTarget) => void;
 }) {
   const root = usePaneStore((s) => s.root);
-  const tabId = `${collectionName}/${path}`;
-  const active = isActiveRequest(root, tabId);
+  const active = isActiveRequest(root, uid);
 
   function handleClick() {
     const request: RequestState = {
@@ -122,7 +123,7 @@ function RequestNode({
       method: method as RequestState['method'],
     };
     const tab: Tab = {
-      id: tabId,
+      id: uid,
       title: name,
       tabType: 'request',
       request,
@@ -335,6 +336,7 @@ function FolderNode({
             return (
               <RequestNode
                 key={`request-${requestPath}-${idx}`}
+                uid={item.uid}
                 name={item.name}
                 method={item.method}
                 collectionName={collectionName}
@@ -544,6 +546,7 @@ function CollectionNode({
             return (
               <RequestNode
                 key={`request-${item.fileName ?? item.name}-${idx}`}
+                uid={item.uid}
                 name={item.name}
                 method={item.method}
                 collectionName={summary.name}
@@ -666,7 +669,8 @@ export function CollectionsSidebar() {
       }
     } catch { /* Use default name if fetch fails. */ }
     const path = folderPath ? `${folderPath}/${name}` : name;
-    await saveRequest(collection, path, {
+    const saved = await saveRequest(collection, path, {
+      uid: '',
       name,
       method: 'GET',
       url: '',
@@ -674,13 +678,13 @@ export function CollectionsSidebar() {
       auth: { authType: 'none' },
     });
     const tab: Tab = {
-      id: `${collection}/${path}.json`,
+      id: saved.uid,
       title: name,
       tabType: 'request',
       request: createDefaultRequest(),
       response: null,
       isDirty: false,
-      source: { collection, path: path.endsWith('.json') ? path : `${path}.json` },
+      source: { collection, path: saved.fileName ?? (path.endsWith('.json') ? path : `${path}.json`) },
     };
     usePaneStore.getState().openTab(tab);
   }, []);
