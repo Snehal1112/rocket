@@ -468,6 +468,7 @@ function CollectionNode({
   const [collection, setCollection] = useState<Collection | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(summary.name);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleRename = async () => {
     const trimmed = renameValue.trim();
@@ -530,9 +531,17 @@ function CollectionNode({
               type="button"
               data-sidebar-item
               className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-              onClick={() => setExpanded((prev) => !prev)}
+              onClick={() => {
+                // Delay expand to distinguish from double-click.
+                if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; return; }
+                clickTimer.current = setTimeout(() => {
+                  clickTimer.current = null;
+                  setExpanded((prev) => !prev);
+                }, 250);
+              }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
+                if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
                 const tab: CollectionTab = {
                   id: summary.uid,
                   title: summary.name,
