@@ -229,7 +229,7 @@ function FolderNode({
   const filteredItems = filter
     ? items.filter((item) => {
         if (item.type === 'request') {
-          return item.request.name.toLowerCase().includes(filter);
+          return item.name.toLowerCase().includes(filter);
         }
         return true;
       })
@@ -298,12 +298,12 @@ function FolderNode({
         <div className="pl-3">
           {filteredItems.map((item, idx) => {
             if (item.type === 'folder') {
-              const folderPath = basePath ? `${basePath}/${item.folder.name}` : item.folder.name;
+              const folderPath = basePath ? `${basePath}/${item.name}` : item.name;
               return (
                 <FolderNode
                   key={`folder-${folderPath}`}
-                  name={item.folder.name}
-                  items={item.folder.items}
+                  name={item.name}
+                  items={item.items}
                   collectionName={collectionName}
                   basePath={folderPath}
                   depth={depth + 1}
@@ -317,13 +317,13 @@ function FolderNode({
               );
             }
             const requestPath = basePath
-              ? `${basePath}/${item.request.name}`
-              : item.request.name;
+              ? `${basePath}/${item.name}`
+              : item.name;
             return (
               <RequestNode
                 key={`request-${requestPath}-${idx}`}
-                name={item.request.name}
-                method={item.request.method}
+                name={item.name}
+                method={item.method}
                 collectionName={collectionName}
                 path={requestPath}
                 summaries={summaries}
@@ -476,11 +476,11 @@ function CollectionNode({
             if (item.type === 'folder') {
               return (
                 <FolderNode
-                  key={`folder-${item.folder.name}`}
-                  name={item.folder.name}
-                  items={item.folder.items}
+                  key={`folder-${item.name}`}
+                  name={item.name}
+                  items={item.items}
                   collectionName={summary.name}
-                  basePath={item.folder.name}
+                  basePath={item.name}
                   depth={1}
                   filter={filter}
                   summaries={summaries}
@@ -493,11 +493,11 @@ function CollectionNode({
             }
             return (
               <RequestNode
-                key={`request-${item.request.name}-${idx}`}
-                name={item.request.name}
-                method={item.request.method}
+                key={`request-${item.name}-${idx}`}
+                name={item.name}
+                method={item.method}
                 collectionName={summary.name}
-                path={item.request.name}
+                path={item.name}
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
