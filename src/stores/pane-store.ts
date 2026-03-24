@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode } from '@/types/pane-types';
+import { scheduleAutoSave, cancelAutoSave } from '@/lib/auto-save';
 import {
   createDefaultTab,
   createDefaultLeaf,
@@ -111,6 +112,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   closeTab(tabId, groupId) {
+    cancelAutoSave(tabId);
     const { root } = get();
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
@@ -222,11 +224,24 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   updateRequest(tabId, patch) {
     const { root } = get();
-    const newRoot = updateTabInTree(root, tabId, (tab) => ({
-      ...tab,
-      request: { ...tab.request, ...patch },
-      isDirty: true,
-    }));
+    const newRoot = updateTabInTree(root, tabId, (tab) => {
+      const updatedTab = {
+        ...tab,
+        request: { ...tab.request, ...patch },
+        isDirty: true,
+      };
+      // Auto-save for collection-owned tabs.
+      if (tab.source) {
+        scheduleAutoSave(
+          tabId,
+          tab.source.collection,
+          tab.source.path,
+          tab.title,
+          updatedTab.request,
+        );
+      }
+      return updatedTab;
+    });
     set({ root: newRoot });
   },
 
