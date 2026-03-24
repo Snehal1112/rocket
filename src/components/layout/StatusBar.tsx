@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { usePaneStore } from '@/stores/pane-store';
+import { EnvironmentSwitcher } from '@/components/layout/EnvironmentSwitcher';
 
-// Bottom status bar with quick actions.
+// Bottom status bar with quick actions and global context.
 export function StatusBar() {
   function handleNew() {
     const { activeGroupId, newDraftTab } = usePaneStore.getState();
@@ -20,6 +21,9 @@ export function StatusBar() {
         <Plus className="h-3 w-3 mr-1" />
         New
       </Button>
+      <div className="ml-auto">
+        <EnvironmentSwitcher />
+      </div>
     </div>
   );
 }
