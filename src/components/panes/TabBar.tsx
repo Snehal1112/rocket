@@ -33,6 +33,15 @@ export function TabBar({ node }: { node: LeafNode }) {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
+            <ContextMenuItem
+              disabled={!tab.isDirty && !!tab.source}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }));
+              }}
+            >
+              {tab.source ? 'Save' : 'Save to collection...'}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => closeTab(tab.id, node.groupId)}>
               Close
             </ContextMenuItem>
