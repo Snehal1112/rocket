@@ -3697,6 +3697,7 @@ dependencies = [
  "rocket-shared",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
