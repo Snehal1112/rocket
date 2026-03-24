@@ -291,8 +291,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       root: updateTabInTree(root, tabId, (tab) => ({
         ...tab,
         title,
-        // Update source path so future saves use the new name.
-        source: tab.source ? { ...tab.source, path: title } : tab.source,
+        // source.path stays unchanged — the filename on disk doesn't change,
+        // only the name field inside the JSON is updated.
       })),
     });
     // Persist rename to disk if the tab is collection-owned.
