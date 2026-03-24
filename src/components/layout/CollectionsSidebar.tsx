@@ -104,6 +104,7 @@ function RequestNode({
   summaries,
   onMove,
   onDelete,
+  onDuplicate,
 }: {
   uid: string;
   name: string;
@@ -113,6 +114,7 @@ function RequestNode({
   summaries: CollectionSummary[];
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
+  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
@@ -157,7 +159,7 @@ function RequestNode({
             <button
               type="button"
               className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-              onClick={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.stopPropagation(); void onDuplicate(collectionName, path, name); }}
               title="Duplicate"
             >
               <Copy className="h-3 w-3" />
@@ -174,7 +176,7 @@ function RequestNode({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => {}}>
+        <ContextMenuItem onClick={(e) => { e.stopPropagation(); void onDuplicate(collectionName, path, name); }}>
           Duplicate
         </ContextMenuItem>
         <ContextMenuItem onClick={() => {}}>
@@ -219,6 +221,7 @@ function FolderNode({
   onNewFolder,
   onMove,
   onDelete,
+  onDuplicate,
 }: {
   name: string;
   items: CollectionItem[];
@@ -231,6 +234,7 @@ function FolderNode({
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
+  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
 
@@ -326,6 +330,7 @@ function FolderNode({
                   onNewFolder={onNewFolder}
                   onMove={onMove}
                   onDelete={onDelete}
+                  onDuplicate={onDuplicate}
                 />
               );
             }
@@ -344,6 +349,7 @@ function FolderNode({
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
+                onDuplicate={onDuplicate}
               />
             );
           })}
@@ -362,6 +368,7 @@ function CollectionNode({
   onNewFolder,
   onMove,
   onDelete,
+  onDuplicate,
 }: {
   summary: CollectionSummary;
   filter: string;
@@ -370,6 +377,7 @@ function CollectionNode({
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
+  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -540,6 +548,7 @@ function CollectionNode({
                   onNewFolder={onNewFolder}
                   onMove={onMove}
                   onDelete={onDelete}
+                  onDuplicate={onDuplicate}
                 />
               );
             }
@@ -554,6 +563,7 @@ function CollectionNode({
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
+                onDuplicate={onDuplicate}
               />
             );
           })}
@@ -716,6 +726,62 @@ export function CollectionsSidebar() {
     await moveItem(srcCollection, srcPath, dstCollection, dstPath);
   }, []);
 
+  const handleDuplicate = useCallback(async (collection: string, path: string, name: string) => {
+    try {
+      // Read the existing collection to locate the source request.
+      const col = await getCollection(collection);
+      const items = col.root.items;
+
+      // Recursively find the request by fileName or name.
+      const findRequest = (nodes: CollectionItem[], targetPath: string): CollectionItem | undefined => {
+        for (const item of nodes) {
+          if (item.type === 'request') {
+            const fn = item.fileName ?? item.name;
+            if (fn === targetPath || item.name === name) return item;
+          }
+          if (item.type === 'folder') {
+            const found = findRequest(item.items, targetPath);
+            if (found) return found;
+          }
+        }
+        return undefined;
+      };
+
+      const source = findRequest(items, path.split('/').pop() ?? path);
+      if (!source || source.type !== 'request') return;
+
+      // Collect existing names at the top level to find a unique copy name.
+      const existing = new Set(
+        items.filter((i: CollectionItem) => i.type === 'request').map((i: CollectionItem) => i.name),
+      );
+      let copyName = `${name} copy`;
+      let counter = 1;
+      while (existing.has(copyName)) {
+        counter++;
+        copyName = `${name} copy ${counter}`;
+      }
+
+      // Preserve the folder prefix from the original path.
+      const pathParts = path.split('/');
+      pathParts.pop();
+      const folderPath = pathParts.join('/');
+      const newPath = folderPath ? `${folderPath}/${copyName}` : copyName;
+
+      // Save the duplicate — backend generates a new uid.
+      await saveRequest(collection, newPath, {
+        uid: '',
+        name: copyName,
+        method: source.method,
+        url: source.url,
+        headers: source.headers,
+        body: source.body,
+        auth: source.auth,
+      });
+    } catch (err) {
+      console.error('[CollectionsSidebar] duplicate failed:', err);
+    }
+  }, []);
+
   // Load collections on mount. Debounce file watcher events so rapid
   // filesystem changes collapse into one refresh.
   const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -824,6 +890,7 @@ export function CollectionsSidebar() {
                     onNewFolder={handleNewFolder}
                     onMove={handleMove}
                     onDelete={setDeleteTarget}
+                    onDuplicate={handleDuplicate}
                   />
                 ))
               )}
