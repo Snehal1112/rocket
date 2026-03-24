@@ -5,7 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -70,73 +76,58 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
   return (
     <div className="space-y-3">
-      {/* Mode selector using shadcn Tabs. */}
-      <Tabs value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
-        <TabsList className="h-8">
+      {/* Mode selector dropdown. */}
+      <Select value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
+        <SelectTrigger className="h-8 w-[140px] text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
           {MODES.map((m) => (
-            <TabsTrigger key={m.value} value={m.value} className="h-7 text-xs">
+            <SelectItem key={m.value} value={m.value} className="text-xs">
               {m.label}
-            </TabsTrigger>
+            </SelectItem>
           ))}
-        </TabsList>
+        </SelectContent>
+      </Select>
 
-        {/* Content area. */}
-        <TabsContent value="none" className="mt-3">
-          <p className="text-xs text-muted-foreground">
-            This request has no body.
-          </p>
-        </TabsContent>
+      {/* Content area. */}
+      {body.mode === 'none' && (
+        <p className="text-xs text-muted-foreground">
+          This request has no body.
+        </p>
+      )}
 
-        <TabsContent value="json" className="mt-3">
-          <MonacoWrapper
-            value={body.content}
-            onChange={(val) => setContent(val)}
-            bodyMode="json"
-            height="250px"
-          />
-        </TabsContent>
+      {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
+        <MonacoWrapper
+          value={body.content}
+          onChange={(val) => setContent(val)}
+          bodyMode={body.mode}
+          height="250px"
+        />
+      )}
 
-        <TabsContent value="xml" className="mt-3">
-          <MonacoWrapper
-            value={body.content}
-            onChange={(val) => setContent(val)}
-            bodyMode="xml"
-            height="250px"
-          />
-        </TabsContent>
+      {body.mode === 'formdata' && (
+        <FormDataEditor formData={body.formData} onChange={setFormData} />
+      )}
 
-        <TabsContent value="text" className="mt-3">
-          <MonacoWrapper
-            value={body.content}
-            onChange={(val) => setContent(val)}
-            bodyMode="text"
-            height="250px"
-          />
-        </TabsContent>
-
-        <TabsContent value="formdata" className="mt-3">
-          <FormDataEditor formData={body.formData} onChange={setFormData} />
-        </TabsContent>
-
-        <TabsContent value="binary" className="mt-3">
-          {body.filePath ? (
-            <Card className="max-w-sm">
-              <CardContent className="flex items-center gap-3 p-4">
-                <FileUp className="size-5 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate text-sm">{body.fileName}</span>
-                <Button variant="ghost" size="sm" onClick={handleClear}>
-                  Clear
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <Button variant="outline" onClick={handlePickFile}>
-              <FileUp className="mr-2 size-4" />
-              Choose file
-            </Button>
-          )}
-        </TabsContent>
-      </Tabs>
+      {body.mode === 'binary' && (
+        body.filePath ? (
+          <Card className="max-w-sm">
+            <CardContent className="flex items-center gap-3 p-4">
+              <FileUp className="size-5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-sm">{body.fileName}</span>
+              <Button variant="ghost" size="sm" onClick={handleClear}>
+                Clear
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <Button variant="outline" onClick={handlePickFile}>
+            <FileUp className="mr-2 size-4" />
+            Choose file
+          </Button>
+        )
+      )}
     </div>
   );
 }
