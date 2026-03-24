@@ -4,7 +4,62 @@ import type {
   LeafNode,
   Tab,
   RequestState,
+  AuthState,
+  BodyState,
 } from '@/types/pane-types';
+import type { Request as ApiRequest } from '@/lib/tauri-api';
+import { parseQueryParams } from '@/lib/url-params';
+
+// Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
+export function mapApiRequestToState(req: ApiRequest): RequestState {
+  // Map auth from the tagged-union API type to the frontend AuthState.
+  let auth: AuthState;
+  switch (req.auth.authType) {
+    case 'basic':
+      auth = { authType: 'basic', basic: { username: req.auth.username, password: req.auth.password } };
+      break;
+    case 'bearer':
+      auth = { authType: 'bearer', bearer: { token: req.auth.token } };
+      break;
+    case 'api-key':
+      auth = { authType: 'api-key', apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.addTo } };
+      break;
+    default:
+      auth = { authType: 'none' };
+  }
+
+  // Map body from the optional API Body to the always-present frontend BodyState.
+  let body: BodyState;
+  if (req.body) {
+    body = {
+      mode: req.body.mode as BodyState['mode'],
+      content: req.body.content ?? '',
+      formData: (req.body.formData ?? []).map((entry) => ({
+        id: crypto.randomUUID(),
+        key: entry.key,
+        value: entry.value,
+        enabled: entry.enabled,
+      })),
+    };
+  } else {
+    body = { mode: 'none', content: '', formData: [] };
+  }
+
+  return {
+    method: req.method as RequestState['method'],
+    url: req.url,
+    queryParams: parseQueryParams(req.url),
+    pathParams: [],
+    headers: req.headers.map((h) => ({
+      id: crypto.randomUUID(),
+      key: h.key,
+      value: h.value,
+      enabled: h.enabled,
+    })),
+    body,
+    auth,
+  };
+}
 
 // Creates a blank GET request with no params, headers, body, or auth.
 export function createDefaultRequest(): RequestState {

@@ -16,7 +16,7 @@ import {
   type CollectionItem,
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { createDefaultRequest } from '@/lib/pane-utils';
+import { createDefaultRequest, mapApiRequestToState } from '@/lib/pane-utils';
 import type { Tab, RequestState, PaneNode } from '@/types/pane-types';
 import {
   ContextMenu,
@@ -101,6 +101,7 @@ function RequestNode({
   method,
   collectionName,
   path,
+  itemData,
   summaries,
   onMove,
   onDelete,
@@ -111,6 +112,8 @@ function RequestNode({
   method: string;
   collectionName: string;
   path: string;
+  // Full request data from the collection tree, used to populate the new tab.
+  itemData: Extract<CollectionItem, { type: 'request' }>;
   summaries: CollectionSummary[];
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
@@ -120,10 +123,7 @@ function RequestNode({
   const active = isActiveRequest(root, uid);
 
   function handleClick() {
-    const request: RequestState = {
-      ...createDefaultRequest(),
-      method: method as RequestState['method'],
-    };
+    const request: RequestState = mapApiRequestToState(itemData);
     const tab: Tab = {
       id: uid,
       title: name,
@@ -346,6 +346,7 @@ function FolderNode({
                 method={item.method}
                 collectionName={collectionName}
                 path={requestPath}
+                itemData={item}
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
@@ -560,6 +561,7 @@ function CollectionNode({
                 method={item.method}
                 collectionName={summary.name}
                 path={item.fileName ?? item.name}
+                itemData={item}
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
