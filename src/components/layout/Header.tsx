@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/hooks/useTheme';
+import { EnvironmentSwitcher } from '@/components/layout/EnvironmentSwitcher';
 
 // Top header bar with logo, title, and theme toggle.
 export function Header() {
@@ -15,6 +16,7 @@ export function Header() {
           <p className="text-[11px] text-muted-foreground">API Workspace</p>
         </div>
       </div>
+      <EnvironmentSwitcher />
       <div className="flex-1" />
       <div className="flex items-center gap-2">
         <Button
