@@ -384,19 +384,28 @@ function CollectionNode({
     }
   };
 
-  // Fetch full collection data when expanded.
+  // Fetch full collection tree.
+  const refreshTree = useCallback(() => {
+    if (!expanded) return;
+    getCollection(summary.name)
+      .then(setCollection)
+      .catch((err) => console.error('[CollectionsSidebar] fetch error', err));
+  }, [expanded, summary.name]);
+
+  // Fetch when first expanded.
   useEffect(() => {
     if (expanded && !collection) {
-      getCollection(summary.name)
-        .then(setCollection)
-        .catch((err) => console.error('[CollectionsSidebar] fetch error', err));
+      refreshTree();
     }
-  }, [expanded, collection, summary.name]);
+  }, [expanded, collection, refreshTree]);
 
-  // Invalidate cached tree when summary changes (e.g. request count updates after save).
+  // Refresh the expanded tree on any collection mutation.
   useEffect(() => {
-    setCollection(null);
-  }, [summary.requestCount]);
+    if (!expanded) return;
+    const handler = () => refreshTree();
+    window.addEventListener('rocket:collections-changed', handler);
+    return () => window.removeEventListener('rocket:collections-changed', handler);
+  }, [expanded, refreshTree]);
 
   // Auto-expand when a filter is active.
   useEffect(() => {
