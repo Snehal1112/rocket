@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
-import { Trash2, Plus, FileUp } from 'lucide-react';
+import { Check, X, Plus, FileUp } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Select,
@@ -12,14 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { MonacoWrapper } from '@/components/editor/MonacoWrapper';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 
@@ -94,7 +85,7 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
       {/* Content area — fills remaining height. */}
       {body.mode === 'none' && (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+        <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
           No body content
         </div>
       )}
@@ -136,7 +127,7 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
   );
 }
 
-// Sub-component for form data entries using shadcn Table.
+// Sub-component for form data entries using flex rows matching legacy pattern.
 function FormDataEditor({
   formData,
   onChange,
@@ -166,69 +157,48 @@ function FormDataEditor({
   }, [formData, onChange]);
 
   return (
-    <div className="space-y-1">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="h-7 text-xs">Key</TableHead>
-            <TableHead className="h-7 text-xs">Value</TableHead>
-            <TableHead className="h-7 w-10 text-center text-xs">On</TableHead>
-            <TableHead className="h-7 w-8" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {formData.map((entry) => (
-            <TableRow key={entry.id}>
-              <TableCell className="p-1">
-                <Input
-                  className="h-7 text-xs"
-                  placeholder="field name"
-                  value={entry.key}
-                  onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-                />
-              </TableCell>
-              <TableCell className="p-1">
-                <Input
-                  className="h-7 text-xs"
-                  placeholder="field value"
-                  value={entry.value}
-                  onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-                />
-              </TableCell>
-              <TableCell className="p-1 text-center">
-                <Checkbox
-                  checked={entry.enabled}
-                  onCheckedChange={(checked) =>
-                    updateEntry(entry.id, { enabled: checked === true })
-                  }
-                  aria-label={`Enable field ${entry.key || 'unnamed'}`}
-                  className="h-3.5 w-3.5"
-                />
-              </TableCell>
-              <TableCell className="p-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => removeEntry(entry.id)}
-                  aria-label={`Remove field ${entry.key || 'unnamed'}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-1 h-7 text-xs text-muted-foreground"
-        onClick={addEntry}
-      >
-        <Plus className="mr-1 h-3.5 w-3.5" />
-        Add field
+    <div className="space-y-2">
+      {formData.map((entry) => (
+        <div key={entry.id} className="flex gap-2 items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => updateEntry(entry.id, { enabled: !entry.enabled })}
+            className={`w-4 h-4 rounded border p-0 ${
+              entry.enabled
+                ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
+                : 'border-gray-300 hover:bg-muted'
+            }`}
+            aria-label={`${entry.enabled ? 'Disable' : 'Enable'} field ${entry.key || 'unnamed'}`}
+          >
+            {entry.enabled && <Check className="h-3 w-3" />}
+          </Button>
+          <Input
+            placeholder="Key"
+            value={entry.key}
+            onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+            className="flex-1 text-xs h-8"
+          />
+          <Input
+            placeholder="Value"
+            value={entry.value}
+            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+            className="flex-1 text-xs h-8"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => removeEntry(entry.id)}
+            className="h-7 w-7"
+            aria-label={`Remove field ${entry.key || 'unnamed'}`}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="ghost" size="sm" onClick={addEntry} className="text-xs">
+        <Plus className="h-3 w-3 mr-1" />
+        Add Field
       </Button>
     </div>
   );
