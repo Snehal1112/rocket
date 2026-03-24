@@ -33,17 +33,17 @@ export function useMonacoTheme() {
       base: 'vs',
       inherit: true,
       rules: [
-        { token: 'string', foreground: '0d9488' },   // teal
-        { token: 'number', foreground: 'd97706' },   // amber
-        { token: 'keyword', foreground: '7c3aed' },  // purple
-        { token: 'comment', foreground: '9ca3af' },  // gray
-        { token: 'type', foreground: '2563eb' },     // blue
+        { token: 'string', foreground: '16a34a' },   // green-600
+        { token: 'number', foreground: 'd97706' },   // amber-600
+        { token: 'keyword', foreground: '7c3aed' },  // purple-600
+        { token: 'comment', foreground: '9ca3af' },  // gray-400
+        { token: 'type', foreground: '2563eb' },     // blue-600
       ],
       colors: {
-        'editor.background': '#faf9f8',
-        'editor.foreground': '#1c1917',
-        'editor.lineHighlightBackground': '#f5f5f4',
-        'editorLineNumber.foreground': '#a8a29e',
+        'editor.background': '#f5f8fc',
+        'editor.foreground': '#1a1f36',
+        'editor.lineHighlightBackground': '#eef2f9',
+        'editorLineNumber.foreground': '#9ca3af',
       },
     });
 
@@ -51,17 +51,17 @@ export function useMonacoTheme() {
       base: 'vs-dark',
       inherit: true,
       rules: [
-        { token: 'string', foreground: '5eead4' },   // teal-light
-        { token: 'number', foreground: 'fbbf24' },   // amber-light
-        { token: 'keyword', foreground: 'a78bfa' },  // purple-light
-        { token: 'comment', foreground: '6b7280' },  // gray
-        { token: 'type', foreground: '60a5fa' },     // blue-light
+        { token: 'string', foreground: '4ade80' },   // green-400
+        { token: 'number', foreground: 'fbbf24' },   // amber-300
+        { token: 'keyword', foreground: 'a78bfa' },  // purple-400
+        { token: 'comment', foreground: '6b7280' },  // gray-500
+        { token: 'type', foreground: '60a5fa' },     // blue-400
       ],
       colors: {
-        'editor.background': '#1a1816',
-        'editor.foreground': '#e7e5e4',
-        'editor.lineHighlightBackground': '#292524',
-        'editorLineNumber.foreground': '#78716c',
+        'editor.background': '#1f1f1f',
+        'editor.foreground': '#dedede',
+        'editor.lineHighlightBackground': '#242424',
+        'editorLineNumber.foreground': '#666666',
       },
     });
   }
