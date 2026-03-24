@@ -29,11 +29,13 @@ Four targeted fixes to connect existing UI elements to backend functionality.
 - Enter confirms: calls `createCollection(name)` from `tauri-api.ts`
 - `onCollectionChanged` listener already refreshes the sidebar on success
 - Escape or blur cancels, restores the button
+- **Validation:** Empty name is ignored (same as Escape). Duplicate name shows an inline error toast. Name validation rejects characters invalid for filesystem paths (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`)
 
 ### 1.2 — Collection Settings Save
 
 - Currently: `handleSave()` in `CollectionSettingsDialog.tsx` logs to console
 - Fix: Wire to Tauri command `save_collection_settings(collection_name, settings)`
+- The `settings` payload matches the `CollectionSettings` VO defined in the SP2 spec: `{ auth: Option<Auth>, headers: Vec<Header> }`. Serialize as JSON to the Tauri command.
 - Route: `src-tauri` command -> `CollectionService` -> `CollectionRepository`
 - If the Tauri command doesn't exist yet, register it and connect to `CollectionService`
 - Close dialog on success
@@ -42,13 +44,15 @@ Four targeted fixes to connect existing UI elements to backend functionality.
 
 - Currently: `onClick` handler is empty in `AuthEditor.tsx`
 - Fix: Frontend-orchestrated flow using existing `executeRequest()`
+- The token fetch request is constructed as a standalone HTTP request with `auth: { authType: "none" }` — the OAuth token endpoint itself does not use the app's configured auth
 - Build a token request from the OAuth fields (token URL, client ID, client secret, grant type)
-- For `client_credentials`: POST with form-encoded body
-- For `password`: POST with username + password in body
-- For `authorization_code`: POST with code + redirect_uri in body
+- For `client_credentials`: POST with `grant_type=client_credentials` + client credentials as form-encoded body (or Basic auth header per RFC 6749)
+- For `password`: POST with `grant_type=password` + username + password in form-encoded body
+- **`authorization_code` is out of scope for this spec.** It requires browser-based redirect handling (authorization URL, PKCE, redirect capture) which is a separate feature. The UI should disable the "Get Token" button when `authorization_code` grant is selected, with a tooltip: "Authorization code flow coming soon."
 - Parse JSON response for `access_token`, `refresh_token`, `expires_in`
 - Store token in the tab's auth state (`request.auth.accessToken`)
 - Show error in a toast/inline message if token fetch fails
+- **Note:** The `Auth` type in `tauri-api.ts` currently only has `none`, `basic`, `bearer`, `api-key`. The `AuthState` in `pane-types.ts` already includes `oauth2` and `aws-sig-v4`. The bridge type in `tauri-api.ts` must be extended to match, or the execution service must translate `oauth2` auth into a bearer token header before sending.
 
 ### 1.4 — Cmd+Enter to Send Request
 
@@ -79,6 +83,7 @@ interface EnvState {
 ```
 
 - `loadEnvironments()` calls `listEnvironments()` from tauri-api on app mount
+- Both `createEnvironment` and `updateEnvironment` delegate to `saveEnvironment()` from tauri-api. `createEnvironment(name)` constructs a default `Environment` object with `{ name, variables: [] }` and calls `saveEnvironment(env)`.
 - `resolveVariables(text)` replaces `{{key}}` patterns using active environment's variable map
 - Variables with `enabled: false` are excluded from resolution
 
@@ -103,7 +108,7 @@ interface EnvState {
   - **Right panel:** Key-value editor for selected environment's variables
 - Key-value rows follow the same pattern as `QueryParamsEditor`:
   - Checkbox (enabled/disable), Key input, Value input, Secret toggle (eye icon), Delete button
-- Secret toggle masks the value display (shows dots) and sets `isSecret: true`
+- Secret toggle masks the value display (shows dots) and sets `secret: true` on the `Variable` (matching the existing `Variable` type in tauri-api.ts)
 - Auto-save with 500ms debounce: each edit calls `updateEnvironment()` via tauri-api
 - New environment: prompts for name, creates with empty variables array
 
@@ -111,7 +116,7 @@ interface EnvState {
 
 - Applied in the frontend before calling `executeRequest()`
 - Resolution targets: URL, header values, query param values, body text, auth field values (token URL, username, password, API key value, etc.)
-- `resolveVariables(text)` does regex replacement: `/\{\{(\w+)\}\}/g`
+- `resolveVariables(text)` does regex replacement: `/\{\{([\w.-]+)\}\}/g` (supports alphanumeric, underscore, hyphen, and dot in variable names)
 - Unresolved variables (no matching key in active env) are left as `{{key}}` literal
 - No visual highlighting in URL bar for v1 (plain text input). Future enhancement can add token coloring.
 
@@ -160,7 +165,7 @@ Uses shadcn `ContextMenu` (already installed).
 **Request:**
 - Duplicate
 - Rename
-- Move to... (sub-menu listing collections/folders)
+- Move to... (sub-menu listing collections, each expandable to show top-level folders only; disabled if no collections exist)
 - Delete (with confirmation)
 
 ### 3.3 — Inline Rename
@@ -184,6 +189,7 @@ Uses shadcn `ContextMenu` (already installed).
 - Implementation: side effect in pane-store's `updateRequest` action
 - Debounced at 500ms using a module-level debounce map keyed by `tabId`
 - Calls `saveRequest(source.collection, source.path, request)` from tauri-api
+- **Cleanup:** When a tab is closed, cancel any pending debounce timer and remove the entry from the debounce map
 - No dirty indicator shown for collection requests (they're always saved)
 - Draft tabs (no `source`) keep the existing `isDirty` flag behavior
 
@@ -204,9 +210,10 @@ Uses shadcn `ContextMenu` (already installed).
 
 - Uses shadcn `AlertDialog` (already installed)
 - Collection delete: "Delete collection '{name}'? This removes all requests inside it."
+- Folder delete: "Delete folder '{name}' and all requests inside it?" Close all tabs whose `source.path` starts with the deleted folder's path.
 - Request delete: "Delete request '{name}'?"
-- On confirm: calls `deleteCollection()` or `deleteRequest()` via tauri-api
-- If the deleted item is open in a tab, close that tab automatically
+- On confirm: calls `deleteCollection()`, `deleteFolder()`, or `deleteRequest()` via tauri-api
+- If the deleted item (or any contained item) is open in a tab, close that tab automatically
 - Sidebar refreshes via existing `onCollectionChanged` listener
 
 ---
