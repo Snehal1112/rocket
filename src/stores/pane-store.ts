@@ -73,6 +73,8 @@ export interface PaneState {
 
   // Utility.
   reset: () => void;
+
+  updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -266,5 +268,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   reset() {
     set(buildInitialState());
+  },
+
+  updateTabSource(tabId, source) {
+    const { root } = get();
+    set({
+      root: updateTabInTree(root, tabId, (tab) => ({
+        ...tab,
+        source,
+      })),
+    });
   },
 }));
