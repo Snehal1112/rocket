@@ -295,16 +295,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         // only the name field inside the JSON is updated.
       })),
     });
-    // Persist rename to disk and tell the sidebar to refresh.
+    // Persist rename to disk. The file watcher detects the write and
+    // emits collection-changed, which refreshes the sidebar automatically.
     if (found?.tab.source) {
       import('@/lib/tauri-api').then(({ renameRequest }) => {
         renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
-          .then(() => {
-            // Tell the sidebar to refetch this collection's tree.
-            window.dispatchEvent(new CustomEvent('rocket:refresh-collection', {
-              detail: { collection: found.tab.source!.collection },
-            }));
-          })
           .catch((err) => console.error('[pane-store] rename failed:', err));
       });
     }
