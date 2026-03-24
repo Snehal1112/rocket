@@ -1,7 +1,16 @@
 import { useCallback } from 'react';
-import { X, Plus } from 'lucide-react';
+import { Trash2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface HeadersEditorProps {
@@ -33,52 +42,59 @@ export function HeadersEditor({ headers, onChange }: HeadersEditorProps) {
 
   return (
     <div className="space-y-1">
-      <div className="grid grid-cols-[1fr_1fr_2.5rem_2rem] gap-1 px-1 text-xs font-medium text-muted-foreground">
-        <span>Key</span>
-        <span>Value</span>
-        <span className="text-center">On</span>
-        <span />
-      </div>
-
-      {headers.map((entry) => (
-        <div
-          key={entry.id}
-          className="grid grid-cols-[1fr_1fr_2.5rem_2rem] items-center gap-1"
-        >
-          <Input
-            className="h-7 text-xs"
-            placeholder="Header name"
-            value={entry.key}
-            onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-          />
-          <Input
-            className="h-7 text-xs"
-            placeholder="Header value"
-            value={entry.value}
-            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-          />
-          <div className="flex justify-center">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-primary"
-              checked={entry.enabled}
-              onChange={(e) =>
-                updateEntry(entry.id, { enabled: e.target.checked })
-              }
-              aria-label={`Enable header ${entry.key || 'unnamed'}`}
-            />
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => removeEntry(entry.id)}
-            aria-label={`Remove header ${entry.key || 'unnamed'}`}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ))}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="h-7 text-xs">Key</TableHead>
+            <TableHead className="h-7 text-xs">Value</TableHead>
+            <TableHead className="h-7 w-10 text-center text-xs">On</TableHead>
+            <TableHead className="h-7 w-8" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {headers.map((entry) => (
+            <TableRow key={entry.id}>
+              <TableCell className="p-1">
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="Header name"
+                  value={entry.key}
+                  onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+                />
+              </TableCell>
+              <TableCell className="p-1">
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="Header value"
+                  value={entry.value}
+                  onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+                />
+              </TableCell>
+              <TableCell className="p-1 text-center">
+                <Checkbox
+                  checked={entry.enabled}
+                  onCheckedChange={(checked) =>
+                    updateEntry(entry.id, { enabled: checked === true })
+                  }
+                  aria-label={`Enable header ${entry.key || 'unnamed'}`}
+                  className="h-3.5 w-3.5"
+                />
+              </TableCell>
+              <TableCell className="p-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => removeEntry(entry.id)}
+                  aria-label={`Remove header ${entry.key || 'unnamed'}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
 
       <Button
         variant="ghost"

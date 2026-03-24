@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import type { ResponseState } from '@/types/pane-types';
 
@@ -9,7 +9,7 @@ interface ResponseBodyViewerProps {
   response: ResponseState;
 }
 
-// ─── JSON syntax highlighting ────────────────────────────────────────────────
+// ---- JSON syntax highlighting ------------------------------------------------
 
 // Token types produced by the JSON tokenizer.
 type TokenType = 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation';
@@ -120,37 +120,7 @@ function formatXml(xml: string): string {
   }
 }
 
-// ─── Tab button ──────────────────────────────────────────────────────────────
-
-function ViewTabButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'relative px-3 py-1.5 text-xs font-medium transition-colors',
-        active
-          ? 'text-foreground'
-          : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {label}
-      {active && (
-        <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-      )}
-    </button>
-  );
-}
-
-// ─── Main component ──────────────────────────────────────────────────────────
+// ---- Main component ----------------------------------------------------------
 
 export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
   // Fall back to 'pretty' if activeView is not set.
@@ -174,59 +144,55 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* View tab switcher. */}
-      <div className="flex gap-1 border-b border-border px-1">
-        <ViewTabButton
-          label="Pretty"
-          active={activeView === 'pretty'}
-          onClick={() => setActiveView('pretty')}
-        />
-        <ViewTabButton
-          label="Raw"
-          active={activeView === 'raw'}
-          onClick={() => setActiveView('raw')}
-        />
-        <ViewTabButton
-          label="Preview"
-          active={activeView === 'preview'}
-          onClick={() => setActiveView('preview')}
-        />
-        <ViewTabButton
-          label="Headers"
-          active={activeView === 'headers'}
-          onClick={() => setActiveView('headers')}
-        />
-      </div>
+      {/* View tab switcher using shadcn Tabs. */}
+      <Tabs value={activeView} onValueChange={(val) => setActiveView(val as ViewTab)}>
+        <div className="border-b border-border px-1">
+          <TabsList className="h-8 bg-transparent p-0">
+            <TabsTrigger value="pretty" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Pretty
+            </TabsTrigger>
+            <TabsTrigger value="raw" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Raw
+            </TabsTrigger>
+            <TabsTrigger value="preview" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Preview
+            </TabsTrigger>
+            <TabsTrigger value="headers" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
+              Headers
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      {/* View content. */}
-      <div className="flex-1 overflow-auto p-3">
-        {activeView === 'pretty' && (
-          <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5">
-            {isJson
-              ? highlightJson(prettyBody)
-              : prettyBody}
-          </pre>
-        )}
+        {/* View content. */}
+        <div className="flex-1 overflow-auto p-3">
+          <TabsContent value="pretty" className="mt-0">
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5">
+              {isJson
+                ? highlightJson(prettyBody)
+                : prettyBody}
+            </pre>
+          </TabsContent>
 
-        {activeView === 'raw' && (
-          <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-foreground">
-            {response.body}
-          </pre>
-        )}
+          <TabsContent value="raw" className="mt-0">
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-foreground">
+              {response.body}
+            </pre>
+          </TabsContent>
 
-        {activeView === 'preview' && (
-          <iframe
-            srcDoc={response.body}
-            sandbox=""
-            className="h-full min-h-48 w-full border-0 bg-white"
-            title="Response preview"
-          />
-        )}
+          <TabsContent value="preview" className="mt-0">
+            <iframe
+              srcDoc={response.body}
+              sandbox=""
+              className="h-full min-h-48 w-full border-0 bg-white"
+              title="Response preview"
+            />
+          </TabsContent>
 
-        {activeView === 'headers' && (
-          <ResponseHeadersTable headers={response.headers} />
-        )}
-      </div>
+          <TabsContent value="headers" className="mt-0">
+            <ResponseHeadersTable headers={response.headers} />
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 }
