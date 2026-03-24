@@ -420,6 +420,19 @@ function CollectionNode({
     };
   }, [expanded, refreshTree, summary.name]);
 
+  // Refresh when explicitly requested (e.g. after rename from pane store).
+  useEffect(() => {
+    if (!expanded) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ collection: string }>).detail;
+      if (detail?.collection === summary.name) {
+        refreshTree();
+      }
+    };
+    window.addEventListener('rocket:refresh-collection', handler);
+    return () => window.removeEventListener('rocket:refresh-collection', handler);
+  }, [expanded, refreshTree, summary.name]);
+
   // Auto-expand when a filter is active.
   useEffect(() => {
     if (filter) setExpanded(true);
