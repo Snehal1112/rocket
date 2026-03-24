@@ -644,18 +644,44 @@ export function CollectionsSidebar() {
 
   return (
     <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
-      <Tabs defaultValue="collections" className="flex-1 flex flex-col">
-        <TabsList className="mx-2 mt-2 mb-1 h-8 bg-muted/60">
-          <TabsTrigger value="collections" className="text-xs px-3 py-1">
-            Collections
-          </TabsTrigger>
-          <TabsTrigger value="history" className="text-xs px-3 py-1">
-            History
-          </TabsTrigger>
-        </TabsList>
+      {/* View selector and action icons. */}
+      <div className="flex items-center gap-1 px-2 pt-2 pb-1">
+        <Select value={view} onValueChange={(v) => setView(v as 'collections' | 'history')}>
+          <SelectTrigger className="h-8 flex-1 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="collections">Collections</SelectItem>
+            <SelectItem value="history">History</SelectItem>
+          </SelectContent>
+        </Select>
+        {view === 'collections' && (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setIsCreating(true)}
+              title="New Collection"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => void handleImport()}
+              title="Import Collection"
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+      </div>
 
-        <TabsContent value="collections" className="flex-1 flex flex-col mt-0 overflow-hidden">
-          {/* Search and new collection. */}
+      {view === 'collections' ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Search and inline create. */}
           <div className="px-2 pb-2 space-y-1.5">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -667,7 +693,7 @@ export function CollectionsSidebar() {
                 aria-label="Search collections"
               />
             </div>
-            {isCreating ? (
+            {isCreating && (
               <div className="px-1">
                 <Input
                   autoFocus
@@ -685,16 +711,6 @@ export function CollectionsSidebar() {
                   <p className="text-[10px] text-destructive mt-0.5 px-1">{createError}</p>
                 )}
               </div>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start h-7 text-xs text-muted-foreground hover:text-foreground"
-                onClick={() => setIsCreating(true)}
-              >
-                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                New Collection
-              </Button>
             )}
           </div>
 
@@ -721,12 +737,12 @@ export function CollectionsSidebar() {
               )}
             </div>
           </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="history" className="flex-1 mt-0 overflow-hidden">
+        </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
           <HistoryPanel />
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
