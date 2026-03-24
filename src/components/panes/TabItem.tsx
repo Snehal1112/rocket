@@ -1,5 +1,6 @@
-import { X } from 'lucide-react';
+import { X, Folder } from 'lucide-react';
 import type { Tab, HttpMethod } from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
 
 // Method text colors matching legacy constants.
 const METHOD_TEXT_COLORS: Record<HttpMethod, string> = {
@@ -14,7 +15,7 @@ const METHOD_TEXT_COLORS: Record<HttpMethod, string> = {
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
-  if (tab.request.url) {
+  if (isRequestTab(tab) && tab.request.url) {
     try { return new URL(tab.request.url).hostname; } catch { return tab.request.url; }
   }
   return 'New request';
@@ -48,9 +49,13 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           : 'hover:bg-accent/50 text-muted-foreground'
       }`}
     >
-      <span className={`font-semibold text-[10px] shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
-        {tab.request.method}
-      </span>
+      {isRequestTab(tab) ? (
+        <span className={`font-semibold text-[10px] shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
+          {tab.request.method}
+        </span>
+      ) : (
+        <Folder className="h-3 w-3 shrink-0 text-primary" />
+      )}
       <span className="truncate">{getTabTitle(tab)}</span>
       {tab.isDirty && (
         <span className="text-primary shrink-0 text-[10px]" aria-label="Unsaved changes">

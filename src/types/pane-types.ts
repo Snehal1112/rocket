@@ -18,14 +18,28 @@ export interface LeafNode {
   activeTabId: string;
 }
 
-export interface Tab {
+interface BaseTab {
   id: string;
   title: string;
+  isDirty: boolean;
+  source?: { collection: string; path: string };
+}
+
+export interface RequestTab extends BaseTab {
   tabType: 'request' | 'draft' | 'history';
   request: RequestState;
   response: ResponseState | null;
-  isDirty: boolean;
-  source?: { collection: string; path: string };
+}
+
+export interface CollectionTab extends BaseTab {
+  tabType: 'collection';
+  collectionName: string;
+}
+
+export type Tab = RequestTab | CollectionTab;
+
+export function isRequestTab(tab: Tab): tab is RequestTab {
+  return tab.tabType !== 'collection';
 }
 
 export interface RequestState {

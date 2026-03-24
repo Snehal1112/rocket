@@ -33,7 +33,7 @@ import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import { SaveRequestButton } from './SaveRequestButton';
 import type {
-  Tab,
+  RequestTab,
   HttpMethod,
   KeyValueEntry,
 } from '@/types/pane-types';
@@ -55,7 +55,7 @@ const METHOD_COLORS: Record<HttpMethod, string> = {
 type SectionTab = 'params' | 'headers' | 'body' | 'auth';
 
 interface RequestPanelProps {
-  tab: Tab;
+  tab: RequestTab;
   groupId: string;
 }
 

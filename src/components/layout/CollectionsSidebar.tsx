@@ -18,7 +18,7 @@ import {
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { createDefaultRequest, mapApiRequestToState } from '@/lib/pane-utils';
-import type { Tab, RequestState, PaneNode } from '@/types/pane-types';
+import type { RequestTab, RequestState, PaneNode } from '@/types/pane-types';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -140,7 +140,7 @@ function RequestNode({
 
   function handleClick() {
     const request: RequestState = mapApiRequestToState(itemData);
-    const tab: Tab = {
+    const tab: RequestTab = {
       id: uid,
       title: name,
       tabType: 'request',
@@ -774,7 +774,7 @@ export function CollectionsSidebar() {
       headers: [],
       auth: { authType: 'none' },
     });
-    const tab: Tab = {
+    const tab: RequestTab = {
       id: saved.uid,
       title: name,
       tabType: 'request',
