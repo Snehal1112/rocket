@@ -78,6 +78,7 @@ impl CollectionRepository for FsCollectionRepo {
                 }
                 let count = count_request_files(&path);
                 result.push(CollectionSummary::new(
+                    String::new(),
                     &name,
                     path.to_string_lossy().to_string(),
                     count,
