@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -6,6 +7,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Plus, PanelRight, PanelBottom } from 'lucide-react';
 import { TabItem } from './TabItem';
 import { usePaneStore } from '@/stores/pane-store';
@@ -17,6 +19,15 @@ export function TabBar({ node }: { node: LeafNode }) {
   const closeTab = usePaneStore((s) => s.closeTab);
   const newDraftTab = usePaneStore((s) => s.newDraftTab);
   const splitGroup = usePaneStore((s) => s.splitGroup);
+  const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
+
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  function commitRename(tabId: string, fallback: string) {
+    updateTabTitle(tabId, renameValue.trim() || fallback);
+    setRenamingTabId(null);
+  }
 
   return (
     <div className="flex items-center border-b border-border/70 bg-card/70 backdrop-blur-sm overflow-x-auto overflow-y-hidden shrink-0">
@@ -24,12 +35,34 @@ export function TabBar({ node }: { node: LeafNode }) {
         <ContextMenu key={tab.id}>
           <ContextMenuTrigger asChild>
             <div>
-              <TabItem
-                tab={tab}
-                isActive={tab.id === node.activeTabId}
-                onSelect={() => setActiveTab(tab.id, node.groupId)}
-                onClose={() => closeTab(tab.id, node.groupId)}
-              />
+              {renamingTabId === tab.id ? (
+                // Inline rename input replacing the tab item.
+                <div className="flex items-center px-2 py-1 border-r border-border/70 bg-background/95 border-b-2 border-b-primary -mb-px shrink-0">
+                  <Input
+                    autoFocus
+                    className="h-5 w-28 text-xs px-1"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitRename(tab.id, tab.title);
+                      if (e.key === 'Escape') setRenamingTabId(null);
+                    }}
+                    onBlur={() => commitRename(tab.id, tab.title)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              ) : (
+                <TabItem
+                  tab={tab}
+                  isActive={tab.id === node.activeTabId}
+                  onSelect={() => setActiveTab(tab.id, node.groupId)}
+                  onClose={() => closeTab(tab.id, node.groupId)}
+                  onDoubleClick={() => {
+                    setRenamingTabId(tab.id);
+                    setRenameValue(tab.title);
+                  }}
+                />
+              )}
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
@@ -40,6 +73,14 @@ export function TabBar({ node }: { node: LeafNode }) {
               }}
             >
               {tab.source ? 'Save' : 'Save to collection...'}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                setRenamingTabId(tab.id);
+                setRenameValue(tab.title);
+              }}
+            >
+              Rename
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => closeTab(tab.id, node.groupId)}>
