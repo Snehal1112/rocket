@@ -33,6 +33,7 @@ export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) 
 
   return (
     <div className="space-y-2">
+      <div className="pt-2 text-sm font-medium text-muted-foreground">Query Params</div>
       {params.map((entry) => (
         <div key={entry.id} className="flex gap-2 items-center">
           <Button
