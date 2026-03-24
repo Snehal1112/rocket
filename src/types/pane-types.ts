@@ -31,6 +31,7 @@ export interface Tab {
 export interface RequestState {
   method: HttpMethod;
   url: string;
+  pathParams: KeyValueEntry[];
   queryParams: KeyValueEntry[];
   headers: KeyValueEntry[];
   body: BodyState;

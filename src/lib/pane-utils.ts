@@ -11,6 +11,7 @@ export function createDefaultRequest(): RequestState {
   return {
     method: 'GET',
     url: '',
+    pathParams: [],
     queryParams: [],
     headers: [],
     body: {
