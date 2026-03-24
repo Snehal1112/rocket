@@ -307,6 +307,7 @@ export interface CollectionChangedEvent {
   oldName?: string;
   newName?: string;
   path?: string;
+  eventType?: string;
 }
 
 export const onCollectionChanged = (
