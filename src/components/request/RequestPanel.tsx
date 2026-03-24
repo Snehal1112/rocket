@@ -287,59 +287,57 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </Button>
         </div>
 
-        {/* Section tabs. */}
+        {/* Section tabs — matching legacy TabsList styling. */}
         <Tabs
           value={activeSection}
           onValueChange={(val) => setActiveSection(val as SectionTab)}
-          className="flex flex-1 flex-col overflow-hidden"
+          className="flex-1 flex flex-col min-h-0"
         >
-          <div className="border-b border-border/70 px-2 bg-card/50">
-            <TabsList className="h-8 bg-transparent p-0">
-              <TabsTrigger value="params" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
-                Params
-                {enabledParamCount > 0 && (
-                  <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold">
-                    {enabledParamCount}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="headers" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
-                Headers
-                {enabledHeaderCount > 0 && (
-                  <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold">
-                    {enabledHeaderCount}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="body" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
-                Body
-              </TabsTrigger>
-              <TabsTrigger value="auth" className="h-8 rounded-none bg-transparent text-xs data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary">
-                Auth
-              </TabsTrigger>
-            </TabsList>
-          </div>
+          <TabsList className="w-full justify-start rounded-none border-b border-border/70 bg-card/60 h-9 px-3">
+            <TabsTrigger value="params" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+              Params
+              {enabledParamCount > 0 && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  ({enabledParamCount})
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="headers" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+              Headers
+              {enabledHeaderCount > 0 && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  ({enabledHeaderCount})
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="body" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+              Body
+            </TabsTrigger>
+            <TabsTrigger value="auth" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+              Auth
+            </TabsTrigger>
+          </TabsList>
 
           <div className="flex-1 overflow-auto p-3">
-            <TabsContent value="params" className="mt-0">
+            <TabsContent value="params" className="mt-0 h-full">
               <div className="space-y-4">
                 <PathParamsPanel url={request.url} onUrlChange={handlePathUrlChange} />
                 <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
             </TabsContent>
-            <TabsContent value="headers" className="mt-0">
+            <TabsContent value="headers" className="mt-0 h-full">
               <HeadersEditor
                 headers={request.headers}
                 onChange={(headers) => updateRequest(tab.id, { headers })}
               />
             </TabsContent>
-            <TabsContent value="body" className="mt-0">
+            <TabsContent value="body" className="mt-0 h-full">
               <BodyEditor
                 body={request.body}
                 onChange={(body) => updateRequest(tab.id, { body })}
               />
             </TabsContent>
-            <TabsContent value="auth" className="mt-0">
+            <TabsContent value="auth" className="mt-0 h-full">
               <AuthEditor
                 auth={request.auth}
                 onChange={(auth) => updateRequest(tab.id, { auth })}
