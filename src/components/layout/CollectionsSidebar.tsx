@@ -7,6 +7,9 @@ import {
   saveRequest,
   createFolder,
   deleteCollection,
+  deleteFolder,
+  deleteRequest,
+  renameCollection,
   moveItem,
   type CollectionSummary,
   type Collection,
@@ -14,7 +17,7 @@ import {
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { createDefaultRequest } from '@/lib/pane-utils';
-import type { Tab, RequestState } from '@/types/pane-types';
+import type { Tab, RequestState, PaneNode } from '@/types/pane-types';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -25,6 +28,16 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -59,6 +72,14 @@ function methodColor(method: string): string {
   }
 }
 
+// Delete target descriptor used by the shared confirmation dialog.
+type DeleteTarget = {
+  type: 'collection' | 'folder' | 'request';
+  collection: string;
+  path?: string;
+  name: string;
+};
+
 // Renders a single request item in the collection tree.
 function RequestNode({
   name,
@@ -67,6 +88,7 @@ function RequestNode({
   path,
   summaries,
   onMove,
+  onDelete,
 }: {
   name: string;
   method: string;
@@ -74,6 +96,7 @@ function RequestNode({
   path: string;
   summaries: CollectionSummary[];
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
+  onDelete: (target: DeleteTarget) => void;
 }) {
   function handleClick() {
     const tabId = `${collectionName}/${path}`;
@@ -121,7 +144,7 @@ function RequestNode({
             <button
               type="button"
               className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
-              onClick={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.stopPropagation(); onDelete({ type: 'request', collection: collectionName, path, name }); }}
               title="Delete"
             >
               <Trash2 className="h-3 w-3" />
@@ -154,7 +177,7 @@ function RequestNode({
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
-        <ContextMenuItem className="text-destructive" onClick={() => {}}>
+        <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}>
           Delete
         </ContextMenuItem>
       </ContextMenuContent>
@@ -174,6 +197,7 @@ function FolderNode({
   onNewRequest,
   onNewFolder,
   onMove,
+  onDelete,
 }: {
   name: string;
   items: CollectionItem[];
@@ -185,6 +209,7 @@ function FolderNode({
   onNewRequest: (collection: string, folderPath: string) => Promise<void>;
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
+  onDelete: (target: DeleteTarget) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
 
@@ -256,7 +281,7 @@ function FolderNode({
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem className="text-destructive" onClick={() => {}}>
+          <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'folder', collection: collectionName, path: basePath, name })}>
             Delete
           </ContextMenuItem>
         </ContextMenuContent>
@@ -279,6 +304,7 @@ function FolderNode({
                   onNewRequest={onNewRequest}
                   onNewFolder={onNewFolder}
                   onMove={onMove}
+                  onDelete={onDelete}
                 />
               );
             }
@@ -294,6 +320,7 @@ function FolderNode({
                 path={requestPath}
                 summaries={summaries}
                 onMove={onMove}
+                onDelete={onDelete}
               />
             );
           })}
@@ -311,6 +338,7 @@ function CollectionNode({
   onNewRequest,
   onNewFolder,
   onMove,
+  onDelete,
 }: {
   summary: CollectionSummary;
   filter: string;
@@ -318,9 +346,23 @@ function CollectionNode({
   onNewRequest: (collection: string, folderPath: string) => Promise<void>;
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
+  onDelete: (target: DeleteTarget) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [collection, setCollection] = useState<Collection | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(summary.name);
+
+  const handleRename = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === summary.name) { setIsRenaming(false); return; }
+    try {
+      await renameCollection(summary.name, trimmed);
+      setIsRenaming(false);
+    } catch (err) {
+      console.error('Rename failed:', err);
+    }
+  };
 
   // Fetch full collection data when expanded.
   useEffect(() => {
@@ -358,7 +400,22 @@ function CollectionNode({
               ) : (
                 <Folder className="h-4 w-4 shrink-0 text-primary" />
               )}
-              <span className="truncate font-medium text-foreground">{summary.name}</span>
+              {isRenaming ? (
+                <Input
+                  autoFocus
+                  className="h-6 text-xs flex-1"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                  onBlur={() => void handleRename()}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="truncate font-medium text-foreground">{summary.name}</span>
+              )}
               <span className="ml-auto text-[10px] text-muted-foreground">{summary.requestCount}</span>
             </button>
             <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -397,7 +454,10 @@ function CollectionNode({
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem className="text-destructive" onClick={() => void deleteCollection(summary.name)}>
+          <ContextMenuItem onClick={() => setIsRenaming(true)}>
+            Rename
+          </ContextMenuItem>
+          <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'collection', collection: summary.name, name: summary.name })}>
             Delete
           </ContextMenuItem>
         </ContextMenuContent>
@@ -419,6 +479,7 @@ function CollectionNode({
                   onNewRequest={onNewRequest}
                   onNewFolder={onNewFolder}
                   onMove={onMove}
+                  onDelete={onDelete}
                 />
               );
             }
@@ -431,6 +492,7 @@ function CollectionNode({
                 path={item.request.name}
                 summaries={summaries}
                 onMove={onMove}
+                onDelete={onDelete}
               />
             );
           })}
@@ -449,6 +511,42 @@ export function CollectionsSidebar() {
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [createError, setCreateError] = useState('');
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      if (deleteTarget.type === 'collection') {
+        await deleteCollection(deleteTarget.collection);
+      } else if (deleteTarget.type === 'folder') {
+        await deleteFolder(deleteTarget.collection, deleteTarget.path!);
+      } else {
+        await deleteRequest(deleteTarget.collection, deleteTarget.path!);
+      }
+      // Close open tabs for deleted items.
+      const store = usePaneStore.getState();
+      const closeTabs = (node: PaneNode): void => {
+        if (node.type === 'leaf') {
+          for (const tab of node.tabs) {
+            if (!tab.source) continue;
+            const matches =
+              (deleteTarget.type === 'collection' && tab.source.collection === deleteTarget.collection) ||
+              (deleteTarget.type === 'request' && tab.source.collection === deleteTarget.collection && tab.source.path === deleteTarget.path) ||
+              (deleteTarget.type === 'folder' && tab.source.collection === deleteTarget.collection && tab.source.path.startsWith(deleteTarget.path!));
+            if (matches) store.closeTab(tab.id, node.groupId);
+          }
+        } else {
+          closeTabs(node.children[0]);
+          closeTabs(node.children[1]);
+        }
+      };
+      closeTabs(store.root);
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+    setDeleteTarget(null);
+  }, [deleteTarget]);
 
   const INVALID_CHARS = /[/\\:*?"<>|]/;
 
@@ -597,6 +695,7 @@ export function CollectionsSidebar() {
                     onNewRequest={handleNewRequest}
                     onNewFolder={handleNewFolder}
                     onMove={handleMove}
+                    onDelete={setDeleteTarget}
                   />
                 ))
               )}
@@ -608,6 +707,25 @@ export function CollectionsSidebar() {
           <HistoryPanel />
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === 'collection'
+                ? `Delete collection '${deleteTarget.name}'? This removes all requests inside it.`
+                : deleteTarget?.type === 'folder'
+                ? `Delete folder '${deleteTarget.name}' and all requests inside it?`
+                : `Delete request '${deleteTarget?.name}'?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDelete()}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
