@@ -7,7 +7,7 @@ interface SplashScreenProps {
 
 export function SplashScreen({ onComplete }: SplashScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [fading, setFading] = useState(false);
+  const [liftingOff, setLiftingOff] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -33,8 +33,8 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
       });
 
       anim.addEventListener('complete', () => {
-        setFading(true);
-        setTimeout(onComplete, 500);
+        setLiftingOff(true);
+        setTimeout(onComplete, 1000);
       });
 
       return () => anim.destroy();
@@ -49,14 +49,18 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex flex-col items-center justify-center bg-background transition-opacity duration-500',
-        fading ? 'opacity-0' : 'opacity-100',
+        'fixed inset-0 z-50 flex flex-col items-center justify-center bg-background',
+        liftingOff
+          ? 'opacity-0 transition-opacity duration-[400ms] delay-[600ms]'
+          : 'opacity-100',
       )}
     >
       <div
         className={cn(
-          'transition-all duration-300',
           mounted ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
+          liftingOff
+            ? 'transition-transform duration-[800ms] ease-in -translate-y-[100vh]'
+            : 'transition-all duration-300',
         )}
       >
         <div className="relative flex flex-col items-center">
