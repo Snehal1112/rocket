@@ -13,7 +13,7 @@ import type {
   ResponseState,
 } from '@/types/pane-types';
 
-function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
+export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
     case 'basic':
       return {
@@ -36,8 +36,15 @@ function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
         authType: 'bearer',
         token: resolve(auth.oauth2?.accessToken ?? ''),
       };
-    default:
+    case 'aws-sig-v4':
+      // AWS Signature V4 is not yet supported by the backend; falling back to none.
+      console.warn('Auth type aws-sig-v4 is not yet supported, falling back to none.');
       return { authType: 'none' };
+    default: {
+      const unsupported = (auth as AuthState).authType;
+      console.warn(`Unsupported auth type: ${unsupported}, falling back to none.`);
+      return { authType: 'none' };
+    }
   }
 }
 
