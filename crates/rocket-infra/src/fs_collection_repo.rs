@@ -160,6 +160,17 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(())
     }
 
+    fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()> {
+        let collection_dir = self.collection_path(collection);
+        let old_ext = if old_path.ends_with(".json") { old_path.to_string() } else { format!("{}.json", old_path) };
+        let new_ext = if new_path.ends_with(".json") { new_path.to_string() } else { format!("{}.json", new_path) };
+        let old_file = self.validate_path(&collection_dir, Path::new(&old_ext))
+            .or_else(|_| self.validate_path(&collection_dir, Path::new(old_path)))?;
+        let new_file = self.validate_path(&collection_dir, Path::new(&new_ext))?;
+        fs::rename(&old_file, &new_file)?;
+        Ok(())
+    }
+
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         let collection_dir = self.collection_path(collection);
         let with_ext = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
