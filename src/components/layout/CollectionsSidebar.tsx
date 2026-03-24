@@ -63,6 +63,7 @@ import {
   FolderPlus,
   Settings,
   Upload,
+  Pencil,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
@@ -356,6 +357,22 @@ function FolderNode({
                 title="New Folder"
               >
                 <FolderPlus className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
+                onClick={(e) => { e.stopPropagation(); setIsRenaming(true); setRenameValue(name); }}
+                title="Rename"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
+                onClick={(e) => { e.stopPropagation(); onDelete({ type: 'folder', collection: collectionName, path: basePath, name }); }}
+                title="Delete"
+              >
+                <Trash2 className="h-3 w-3" />
               </button>
             </div>
           </div>
@@ -940,9 +957,19 @@ export function CollectionsSidebar() {
           <ScrollArea className="flex-1">
             <div className="px-1 pb-2">
               {summaries.length === 0 ? (
-                <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                  No collections yet.
-                </p>
+                <div className="flex flex-col items-center justify-center py-8 px-4">
+                  <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                  <p className="text-xs text-muted-foreground mb-3">No collections yet.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setIsCreating(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1.5" />
+                    Create Collection
+                  </Button>
+                </div>
               ) : (
                 summaries.map((s) => (
                   <CollectionNode
