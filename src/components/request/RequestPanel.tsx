@@ -189,13 +189,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, request.url, updateRequest],
   );
 
-  const handlePathUrlChange = useCallback(
-    (newUrl: string) => {
-      updateRequest(tab.id, { url: newUrl });
-    },
-    [tab.id, updateRequest],
-  );
-
   const handleSend = useCallback(async () => {
     setSending(true);
     try {
@@ -321,7 +314,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <div className="flex-1 overflow-auto p-3">
             <TabsContent value="params" className="mt-0 h-full">
               <div className="space-y-2">
-                <PathParamsPanel url={request.url} onUrlChange={handlePathUrlChange} />
+                <PathParamsPanel
+                  params={request.pathParams}
+                  onChange={(pathParams) => updateRequest(tab.id, { pathParams })}
+                />
                 <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
             </TabsContent>

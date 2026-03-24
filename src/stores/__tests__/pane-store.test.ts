@@ -77,6 +77,7 @@ describe('pane-store', () => {
       request: {
         method: 'GET' as const,
         url: 'https://example.com',
+        pathParams: [],
         queryParams: [],
         headers: [],
         body: { mode: 'none' as const, content: '', formData: [] },
