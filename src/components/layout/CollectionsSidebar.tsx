@@ -551,6 +551,15 @@ export function CollectionsSidebar() {
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
+  const fetchCollections = useCallback(async () => {
+    try {
+      const results = await listCollections();
+      setSummaries(results);
+    } catch (err) {
+      console.error('[CollectionsSidebar] list error', err);
+    }
+  }, []);
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     try {
@@ -579,11 +588,12 @@ export function CollectionsSidebar() {
         }
       };
       closeTabs(store.root);
+      void fetchCollections();
     } catch (err) {
       console.error('Delete failed:', err);
     }
     setDeleteTarget(null);
-  }, [deleteTarget]);
+  }, [deleteTarget, fetchCollections]);
 
   const INVALID_CHARS = /[/\\:*?"<>|]/;
 
@@ -603,10 +613,11 @@ export function CollectionsSidebar() {
       setIsCreating(false);
       setNewName('');
       setCreateError('');
+      void fetchCollections();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create collection.');
     }
-  }, [newName]);
+  }, [newName, fetchCollections]);
 
   const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
     const name = 'New Request';
@@ -628,35 +639,36 @@ export function CollectionsSidebar() {
       source: { collection, path },
     };
     usePaneStore.getState().openTab(tab);
-  }, []);
+    void fetchCollections();
+  }, [fetchCollections]);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
     const name = 'New Folder';
     const path = folderPath ? `${folderPath}/${name}` : name;
     await createFolder(collection, path);
-  }, []);
+    void fetchCollections();
+  }, [fetchCollections]);
 
   const handleMove = useCallback(async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
     await moveItem(srcCollection, srcPath, dstCollection, dstPath);
-  }, []);
-
-  const fetchCollections = useCallback(async () => {
-    try {
-      const results = await listCollections();
-      setSummaries(results);
-    } catch (err) {
-      console.error('[CollectionsSidebar] list error', err);
-    }
-  }, []);
+    void fetchCollections();
+  }, [fetchCollections]);
 
   // Load collections on mount and subscribe to changes.
   useEffect(() => {
     void fetchCollections();
+    // Listen for Tauri backend events (file watcher, external changes).
     let unlisten: (() => void) | undefined;
     onCollectionChanged(() => void fetchCollections()).then((fn) => {
       unlisten = fn;
     });
-    return () => unlisten?.();
+    // Listen for frontend-initiated changes (rename, save from pane store).
+    const handleLocalChange = () => void fetchCollections();
+    window.addEventListener('rocket:collections-changed', handleLocalChange);
+    return () => {
+      unlisten?.();
+      window.removeEventListener('rocket:collections-changed', handleLocalChange);
+    };
   }, [fetchCollections]);
 
   return (

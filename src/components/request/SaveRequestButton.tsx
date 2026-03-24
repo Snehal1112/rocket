@@ -45,6 +45,7 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
     try {
       await saveRequest(tab.source.collection, tab.source.path, buildRequestPayload(tab));
       markClean(tab.id);
+      window.dispatchEvent(new CustomEvent('rocket:collections-changed'));
     } catch (err) {
       console.error('[SaveRequestButton] Direct save failed:', err);
     }
