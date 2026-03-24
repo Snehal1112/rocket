@@ -25,8 +25,10 @@ export function TabBar({ node }: { node: LeafNode }) {
   const [renameValue, setRenameValue] = useState('');
 
   function commitRename(tabId: string, fallback: string) {
-    updateTabTitle(tabId, renameValue.trim() || fallback);
+    if (renamingTabId !== tabId) return;
+    const newTitle = renameValue.trim() || fallback;
     setRenamingTabId(null);
+    updateTabTitle(tabId, newTitle);
   }
 
   return (
