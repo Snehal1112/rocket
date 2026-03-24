@@ -1,16 +1,7 @@
 import { useCallback } from 'react';
-import { Trash2, Plus } from 'lucide-react';
+import { Check, X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface QueryParamsEditorProps {
@@ -41,69 +32,48 @@ export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) 
   }, [params, onChange]);
 
   return (
-    <div className="space-y-1">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="h-7 text-xs">Key</TableHead>
-            <TableHead className="h-7 text-xs">Value</TableHead>
-            <TableHead className="h-7 w-10 text-center text-xs">On</TableHead>
-            <TableHead className="h-7 w-8" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {params.map((entry) => (
-            <TableRow key={entry.id}>
-              <TableCell className="p-1">
-                <Input
-                  className="h-7 text-xs"
-                  placeholder="key"
-                  value={entry.key}
-                  onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-                />
-              </TableCell>
-              <TableCell className="p-1">
-                <Input
-                  className="h-7 text-xs"
-                  placeholder="value"
-                  value={entry.value}
-                  onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-                />
-              </TableCell>
-              <TableCell className="p-1 text-center">
-                <Checkbox
-                  checked={entry.enabled}
-                  onCheckedChange={(checked) =>
-                    updateEntry(entry.id, { enabled: checked === true })
-                  }
-                  aria-label={`Enable parameter ${entry.key || 'unnamed'}`}
-                  className="h-3.5 w-3.5"
-                />
-              </TableCell>
-              <TableCell className="p-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => removeEntry(entry.id)}
-                  aria-label={`Remove parameter ${entry.key || 'unnamed'}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-1 h-7 text-xs text-muted-foreground"
-        onClick={addEntry}
-      >
-        <Plus className="mr-1 h-3.5 w-3.5" />
-        Add parameter
+    <div className="space-y-2">
+      {params.map((entry) => (
+        <div key={entry.id} className="flex gap-2 items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => updateEntry(entry.id, { enabled: !entry.enabled })}
+            className={`w-4 h-4 rounded border p-0 ${
+              entry.enabled
+                ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
+                : 'border-gray-300 hover:bg-muted'
+            }`}
+            aria-label={`${entry.enabled ? 'Disable' : 'Enable'} param ${entry.key || 'unnamed'}`}
+          >
+            {entry.enabled && <Check className="h-3 w-3" />}
+          </Button>
+          <Input
+            placeholder="Key"
+            value={entry.key}
+            onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
+            className="flex-1 text-xs h-8"
+          />
+          <Input
+            placeholder="Value"
+            value={entry.value}
+            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+            className="flex-1 text-xs h-8"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => removeEntry(entry.id)}
+            className="h-7 w-7"
+            aria-label={`Remove param ${entry.key || 'unnamed'}`}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="ghost" size="sm" onClick={addEntry} className="text-xs">
+        <Plus className="h-3 w-3 mr-1" />
+        Add Query Param
       </Button>
     </div>
   );
