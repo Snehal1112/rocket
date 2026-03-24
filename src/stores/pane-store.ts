@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode } from '@/types/pane-types';
-import { scheduleAutoSave, cancelAutoSave } from '@/lib/auto-save';
+import { scheduleAutoSave } from '@/lib/auto-save';
 import {
   createDefaultTab,
   createDefaultLeaf,
@@ -115,8 +115,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   closeTab(tabId, groupId) {
-    cancelAutoSave(tabId);
+    // Save the tab before closing if it's dirty.
     const { root } = get();
+    const found = findTabInTree(root, tabId);
+    if (found?.tab.isDirty && found.tab.source) {
+      scheduleAutoSave(tabId, found.tab.source.collection, found.tab.source.path, found.tab.title, found.tab.request);
+    }
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
       return result.groupId === groupId ? result : null;
@@ -161,8 +165,16 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   setActiveTab(tabId, groupId) {
     const { root } = get();
-    const newRoot = updateLeaf(root, groupId, (leaf) => ({
-      ...leaf,
+    // Save the previously active tab if it's dirty.
+    const leaf = findActiveLeaf(root, groupId);
+    if (leaf.groupId === groupId) {
+      const prevTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
+      if (prevTab?.isDirty && prevTab.source) {
+        scheduleAutoSave(prevTab.id, prevTab.source.collection, prevTab.source.path, prevTab.title, prevTab.request);
+      }
+    }
+    const newRoot = updateLeaf(root, groupId, (l) => ({
+      ...l,
       activeTabId: tabId,
     }));
     set({ root: newRoot, activeGroupId: groupId });
@@ -227,24 +239,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   updateRequest(tabId, patch) {
     const { root } = get();
-    const newRoot = updateTabInTree(root, tabId, (tab) => {
-      const updatedTab = {
-        ...tab,
-        request: { ...tab.request, ...patch },
-        isDirty: true,
-      };
-      // Auto-save for collection-owned tabs.
-      if (tab.source) {
-        scheduleAutoSave(
-          tabId,
-          tab.source.collection,
-          tab.source.path,
-          tab.title,
-          updatedTab.request,
-        );
-      }
-      return updatedTab;
-    });
+    const newRoot = updateTabInTree(root, tabId, (tab) => ({
+      ...tab,
+      request: { ...tab.request, ...patch },
+      isDirty: true,
+    }));
     set({ root: newRoot });
   },
 
