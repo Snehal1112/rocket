@@ -53,12 +53,14 @@ export interface RequestOptions {
 }
 
 export interface CollectionSummary {
+  uid: string;
   name: string;
   path: string;
   requestCount: number;
 }
 
 export interface Request {
+  uid: string;
   name: string;
   method: HttpMethod;
   url: string;
@@ -69,6 +71,7 @@ export interface Request {
 }
 
 export interface Folder {
+  uid: string;
   name: string;
   items: CollectionItem[];
 }
@@ -186,7 +189,7 @@ export const saveRequest = (
   collection: string,
   path: string,
   request: Request,
-) => invoke<void>("save_request", { collection, path, request });
+) => invoke<Request>("save_request", { collection, path, request });
 
 export const renameRequest = (collection: string, oldPath: string, newName: string) =>
   invoke<void>("rename_request", { collection, oldPath, newName });
