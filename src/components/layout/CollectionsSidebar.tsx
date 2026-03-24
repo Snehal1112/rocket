@@ -651,7 +651,20 @@ export function CollectionsSidebar() {
   }, [newName]);
 
   const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
-    const name = 'New Request';
+    // Find next available name (New Request, New Request 2, New Request 3...).
+    let name = 'New Request';
+    try {
+      const col = await getCollection(collection);
+      const items = col.root.items;
+      const existing = new Set(
+        items.filter((i: CollectionItem) => i.type === 'request').map((i: CollectionItem) => i.name),
+      );
+      let counter = 1;
+      while (existing.has(name)) {
+        counter++;
+        name = `New Request ${counter}`;
+      }
+    } catch { /* Use default name if fetch fails. */ }
     const path = folderPath ? `${folderPath}/${name}` : name;
     await saveRequest(collection, path, {
       name,
@@ -661,7 +674,7 @@ export function CollectionsSidebar() {
       auth: { authType: 'none' },
     });
     const tab: Tab = {
-      id: `${collection}/${path}`,
+      id: `${collection}/${path}.json`,
       title: name,
       tabType: 'request',
       request: createDefaultRequest(),
@@ -673,7 +686,20 @@ export function CollectionsSidebar() {
   }, []);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
-    const name = 'New Folder';
+    // Find next available name (New Folder, New Folder 2, New Folder 3...).
+    let name = 'New Folder';
+    try {
+      const col = await getCollection(collection);
+      const items = col.root.items;
+      const existing = new Set(
+        items.filter((i: CollectionItem) => i.type === 'folder').map((i: CollectionItem) => i.name),
+      );
+      let counter = 1;
+      while (existing.has(name)) {
+        counter++;
+        name = `New Folder ${counter}`;
+      }
+    } catch { /* Use default name if fetch fails. */ }
     const path = folderPath ? `${folderPath}/${name}` : name;
     try {
       await createFolder(collection, path);
