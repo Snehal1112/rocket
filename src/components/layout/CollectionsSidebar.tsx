@@ -399,15 +399,21 @@ function CollectionNode({
     }
   }, [expanded, collection, refreshTree]);
 
-  // Refresh the expanded tree on any collection mutation (via Tauri event bus).
+  // Refresh the expanded tree only when THIS collection is affected.
   useEffect(() => {
     if (!expanded) return;
     let unlisten: (() => void) | undefined;
-    onCollectionChanged(() => refreshTree()).then((fn) => {
+    onCollectionChanged((event) => {
+      const affected = event.collection ?? event.name;
+      // Only refetch if the event targets this collection (or if unknown, refresh to be safe).
+      if (!affected || affected === summary.name) {
+        refreshTree();
+      }
+    }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [expanded, refreshTree]);
+  }, [expanded, refreshTree, summary.name]);
 
   // Auto-expand when a filter is active.
   useEffect(() => {
@@ -599,12 +605,11 @@ export function CollectionsSidebar() {
         }
       };
       closeTabs(store.root);
-      void fetchCollections();
     } catch (err) {
       console.error('Delete failed:', err);
     }
     setDeleteTarget(null);
-  }, [deleteTarget, fetchCollections]);
+  }, [deleteTarget]);
 
   const INVALID_CHARS = /[/\\:*?"<>|]/;
 
@@ -624,11 +629,10 @@ export function CollectionsSidebar() {
       setIsCreating(false);
       setNewName('');
       setCreateError('');
-      void fetchCollections();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create collection.');
     }
-  }, [newName, fetchCollections]);
+  }, [newName]);
 
   const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
     const name = 'New Request';
@@ -650,27 +654,34 @@ export function CollectionsSidebar() {
       source: { collection, path },
     };
     usePaneStore.getState().openTab(tab);
-    void fetchCollections();
-  }, [fetchCollections]);
+  }, []);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
     const name = 'New Folder';
     const path = folderPath ? `${folderPath}/${name}` : name;
     await createFolder(collection, path);
-    void fetchCollections();
-  }, [fetchCollections]);
+  }, []);
 
   const handleMove = useCallback(async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
     await moveItem(srcCollection, srcPath, dstCollection, dstPath);
-    void fetchCollections();
-  }, [fetchCollections]);
+  }, []);
 
-  // Load collections on mount and subscribe to all changes via Tauri event bus.
-  // The file watcher, collection service, and all mutations emit "collection-changed".
+  // Load collections on mount. Refetch the full list only when collections
+  // are created, deleted, or renamed — not on every request save.
   useEffect(() => {
     void fetchCollections();
     let unlisten: (() => void) | undefined;
-    onCollectionChanged(() => void fetchCollections()).then((fn) => {
+    onCollectionChanged((event) => {
+      const t = event.type;
+      if (
+        t === 'collectionCreated' ||
+        t === 'collectionDeleted' ||
+        t === 'collectionRenamed' ||
+        t === 'fileChanged'
+      ) {
+        void fetchCollections();
+      }
+    }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
