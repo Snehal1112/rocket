@@ -1,4 +1,5 @@
 import { saveRequest, type Request } from '@/lib/tauri-api';
+import { toApiAuth } from '@/lib/execute-request';
 import type { RequestState } from '@/types/pane-types';
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -14,7 +15,7 @@ function toApiRequest(name: string, request: RequestState): Request {
     body: request.body.mode !== 'none'
       ? { mode: request.body.mode, content: request.body.content }
       : undefined,
-    auth: { authType: request.auth.authType } as any,
+    auth: toApiAuth(request.auth),
   };
 }
 
