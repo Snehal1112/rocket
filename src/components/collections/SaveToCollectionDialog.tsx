@@ -9,6 +9,7 @@ import {
   saveRequest as saveReq,
   type CollectionSummary,
 } from '@/lib/tauri-api';
+import { toApiAuth } from '@/lib/execute-request';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
 
@@ -51,7 +52,7 @@ export function SaveToCollectionDialog({
         body: request.body.mode !== 'none'
           ? { mode: request.body.mode, content: request.body.content }
           : undefined,
-        auth: { authType: request.auth.authType } as any,
+        auth: toApiAuth(request.auth),
       });
       // Update the tab to be collection-owned after a successful save.
       usePaneStore.setState((state) => {
