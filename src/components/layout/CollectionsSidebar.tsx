@@ -18,7 +18,7 @@ import {
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { createDefaultRequest, mapApiRequestToState } from '@/lib/pane-utils';
-import type { RequestTab, RequestState, PaneNode } from '@/types/pane-types';
+import type { RequestTab, CollectionTab, RequestState, PaneNode } from '@/types/pane-types';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -531,6 +531,18 @@ function CollectionNode({
               data-sidebar-item
               className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
               onClick={() => setExpanded((prev) => !prev)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                const tab: CollectionTab = {
+                  id: summary.uid,
+                  title: summary.name,
+                  tabType: 'collection',
+                  collectionName: summary.name,
+                  isDirty: false,
+                  source: { collection: summary.name, path: '' },
+                };
+                usePaneStore.getState().openTab(tab);
+              }}
               aria-expanded={expanded}
               aria-label={`${expanded ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
@@ -601,6 +613,20 @@ function CollectionNode({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
+          <ContextMenuItem onClick={() => {
+            const tab: CollectionTab = {
+              id: summary.uid,
+              title: summary.name,
+              tabType: 'collection',
+              collectionName: summary.name,
+              isDirty: false,
+              source: { collection: summary.name, path: '' },
+            };
+            usePaneStore.getState().openTab(tab);
+          }}>
+            Overview
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem onClick={() => void onNewRequest(summary.name, '')}>
             New Request
           </ContextMenuItem>
