@@ -328,9 +328,10 @@ function FolderNode({
                 />
               );
             }
+            const fileName = item.fileName ?? item.name;
             const requestPath = basePath
-              ? `${basePath}/${item.name}`
-              : item.name;
+              ? `${basePath}/${fileName}`
+              : fileName;
             return (
               <RequestNode
                 key={`request-${requestPath}-${idx}`}
@@ -532,11 +533,11 @@ function CollectionNode({
             }
             return (
               <RequestNode
-                key={`request-${item.name}-${idx}`}
+                key={`request-${item.fileName ?? item.name}-${idx}`}
                 name={item.name}
                 method={item.method}
                 collectionName={summary.name}
-                path={item.name}
+                path={item.fileName ?? item.name}
                 summaries={summaries}
                 onMove={onMove}
                 onDelete={onDelete}
