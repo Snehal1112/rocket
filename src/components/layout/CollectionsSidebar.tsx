@@ -158,6 +158,7 @@ function RequestNode({
         <div className="group relative flex items-center">
           <button
             type="button"
+            data-sidebar-item
             className={cn(
               'flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer',
               active && 'bg-accent/50 text-accent-foreground',
@@ -309,6 +310,7 @@ function FolderNode({
           <div className="group relative flex items-center">
             <button
               type="button"
+              data-sidebar-item
               className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
               onClick={() => setExpanded((prev) => !prev)}
               aria-expanded={expanded}
@@ -526,6 +528,7 @@ function CollectionNode({
           <div className="group relative flex items-center">
             <button
               type="button"
+              data-sidebar-item
               className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
               onClick={() => setExpanded((prev) => !prev)}
               aria-expanded={expanded}
@@ -863,6 +866,56 @@ export function CollectionsSidebar() {
     }
   }, []);
 
+  // Keyboard navigation for the collection tree.
+  const handleTreeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const items = Array.from(
+      e.currentTarget.querySelectorAll<HTMLElement>('[data-sidebar-item]')
+    );
+    if (items.length === 0) return;
+
+    const current = document.activeElement as HTMLElement;
+    const currentIdx = items.indexOf(current);
+
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault();
+        const next = items[currentIdx + 1] ?? items[0];
+        next.focus();
+        break;
+      }
+      case 'ArrowUp': {
+        e.preventDefault();
+        const prev = items[currentIdx - 1] ?? items[items.length - 1];
+        prev.focus();
+        break;
+      }
+      case 'ArrowRight': {
+        // Expand a collapsed collection or folder.
+        if (current?.getAttribute('aria-expanded') === 'false') {
+          e.preventDefault();
+          current.click();
+        }
+        break;
+      }
+      case 'ArrowLeft': {
+        // Collapse an expanded collection or folder.
+        if (current?.getAttribute('aria-expanded') === 'true') {
+          e.preventDefault();
+          current.click();
+        }
+        break;
+      }
+      case 'Enter': {
+        // Activate the focused item.
+        if (current && items.includes(current)) {
+          e.preventDefault();
+          current.click();
+        }
+        break;
+      }
+    }
+  }, []);
+
   // Load collections on mount. Debounce file watcher events so rapid
   // filesystem changes collapse into one refresh.
   const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -955,7 +1008,7 @@ export function CollectionsSidebar() {
 
           {/* Collection tree. */}
           <ScrollArea className="flex-1">
-            <div className="px-1 pb-2">
+            <div className="px-1 pb-2" tabIndex={0} onKeyDown={handleTreeKeyDown}>
               {summaries.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 px-4">
                   <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
