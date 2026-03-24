@@ -2,6 +2,7 @@ import { Header } from '@/components/layout/Header';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
+import { SplashScreen } from '@/components/SplashScreen';
 import { usePaneStore } from '@/stores/pane-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
@@ -10,6 +11,7 @@ import { useState, useEffect } from 'react';
 
 function App() {
   const root = usePaneStore((s) => s.root);
+  const [showSplash, setShowSplash] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [sidebarCollapsed] = useState(false);
   const [saveDialogTabId, setSaveDialogTabId] = useState<string | null>(null);
@@ -75,6 +77,7 @@ function App() {
           request={saveTab.request}
         />
       )}
+      {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
     </div>
   );
 }
