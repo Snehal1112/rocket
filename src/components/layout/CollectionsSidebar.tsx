@@ -80,6 +80,12 @@ function methodColor(method: string): string {
   }
 }
 
+// Returns true if any active tab in the pane tree matches the given tabId.
+function isActiveRequest(node: PaneNode, tabId: string): boolean {
+  if (node.type === 'leaf') return node.activeTabId === tabId;
+  return isActiveRequest(node.children[0], tabId) || isActiveRequest(node.children[1], tabId);
+}
+
 // Delete target descriptor used by the shared confirmation dialog.
 type DeleteTarget = {
   type: 'collection' | 'folder' | 'request';
@@ -106,8 +112,11 @@ function RequestNode({
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
 }) {
+  const root = usePaneStore((s) => s.root);
+  const tabId = `${collectionName}/${path}`;
+  const active = isActiveRequest(root, tabId);
+
   function handleClick() {
-    const tabId = `${collectionName}/${path}`;
     const request: RequestState = {
       ...createDefaultRequest(),
       method: method as RequestState['method'],
@@ -130,7 +139,10 @@ function RequestNode({
         <div className="group relative flex items-center">
           <button
             type="button"
-            className="flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
+            className={cn(
+              'flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer',
+              active && 'bg-accent/50 text-accent-foreground',
+            )}
             onClick={handleClick}
             aria-label={`Open ${method} ${name}`}
           >
@@ -380,6 +392,11 @@ function CollectionNode({
         .catch((err) => console.error('[CollectionsSidebar] fetch error', err));
     }
   }, [expanded, collection, summary.name]);
+
+  // Invalidate cached tree when summary changes (e.g. request count updates after save).
+  useEffect(() => {
+    setCollection(null);
+  }, [summary.requestCount]);
 
   // Auto-expand when a filter is active.
   useEffect(() => {

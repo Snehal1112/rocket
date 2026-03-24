@@ -25,15 +25,17 @@ interface TabItemProps {
   isActive: boolean;
   onSelect: () => void;
   onClose: () => void;
+  onDoubleClick?: () => void;
 }
 
-export function TabItem({ tab, isActive, onSelect, onClose }: TabItemProps) {
+export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: TabItemProps) {
   return (
     <div
       role="tab"
       tabIndex={0}
       aria-selected={isActive}
       onClick={onSelect}
+      onDoubleClick={onDoubleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
