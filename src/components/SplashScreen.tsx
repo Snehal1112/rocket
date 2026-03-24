@@ -53,10 +53,31 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         fading ? 'opacity-0' : 'opacity-100',
       )}
     >
-      <div ref={containerRef} className="w-[300px] h-[300px] overflow-hidden" />
-      <p className="mt-4 text-2xl font-bold text-foreground tracking-tight">
-        Rocket
-      </p>
+      <div
+        className={cn(
+          'transition-all duration-300',
+          mounted ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
+        )}
+      >
+        <div className="relative flex flex-col items-center">
+          {/* Radial glow behind rocket. */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-[200px] h-[200px] rounded-full bg-blue-500/5 blur-2xl" />
+          </div>
+          {/* Lottie animation container. */}
+          <div
+            ref={containerRef}
+            className="w-[160px] h-[160px] overflow-hidden relative z-10"
+          />
+          {/* App name and subtitle. */}
+          <p className="mt-2 text-2xl font-bold text-foreground tracking-tight">
+            Rocket
+          </p>
+          <p className="text-sm text-muted-foreground tracking-wide">
+            API Workspace
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
