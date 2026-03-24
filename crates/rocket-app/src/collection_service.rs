@@ -96,7 +96,7 @@ mod tests {
             let cols = self.collections.lock().unwrap();
             Ok(cols
                 .iter()
-                .map(|c| CollectionSummary::new(&c.name, "", c.request_count()))
+                .map(|c| CollectionSummary::new(String::new(), &c.name, "", c.request_count()))
                 .collect())
         }
 

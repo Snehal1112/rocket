@@ -1,6 +1,10 @@
 use crate::request::Request;
 use serde::{Deserialize, Serialize};
 
+fn generate_uid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 /// A recursive tree node: either a Request or a nested Folder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -16,6 +20,8 @@ pub enum CollectionItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Folder {
+    #[serde(default = "generate_uid")]
+    pub uid: String,
     pub name: String,
     pub items: Vec<CollectionItem>,
 }
@@ -23,6 +29,7 @@ pub struct Folder {
 impl Folder {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
+            uid: generate_uid(),
             name: name.into(),
             items: Vec::new(),
         }
