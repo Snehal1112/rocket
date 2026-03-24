@@ -21,6 +21,7 @@ interface SaveRequestButtonProps {
 // Builds the API-compatible request payload from the current tab state.
 function buildRequestPayload(tab: Tab) {
   return {
+    uid: '',
     name: tab.title,
     method: tab.request.method,
     url: tab.request.url,

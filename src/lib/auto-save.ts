@@ -6,6 +6,7 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function toApiRequest(name: string, request: RequestState): Request {
   return {
+    uid: '',
     name,
     method: request.method,
     url: request.url,
