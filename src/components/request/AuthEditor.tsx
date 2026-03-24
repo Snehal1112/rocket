@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { User, Lock, Key } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { AuthState } from '@/types/pane-types';
+import { executeRequest } from '@/lib/tauri-api';
 
 type AuthType = AuthState['authType'];
 type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
@@ -66,6 +67,52 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
     },
     [auth, onChange],
   );
+
+  const [tokenError, setTokenError] = useState('');
+
+  const handleGetToken = useCallback(async () => {
+    const oauth = auth.oauth2;
+    if (!oauth || !oauth.tokenUrl) return;
+    if (oauth.grantType === 'authorization_code') return;
+
+    setTokenError('');
+    const params = new URLSearchParams();
+    params.set('grant_type', oauth.grantType);
+    params.set('client_id', oauth.clientId);
+    params.set('client_secret', oauth.clientSecret);
+    // Note: password grant reuses clientId/clientSecret as username/password.
+    // This is a v1 limitation; dedicated username/password fields can be added later.
+    if (oauth.grantType === 'password') {
+      params.set('username', oauth.clientId);
+      params.set('password', oauth.clientSecret);
+    }
+    if (oauth.scope) params.set('scope', oauth.scope);
+
+    try {
+      const result = await executeRequest({
+        method: 'POST',
+        url: oauth.tokenUrl,
+        headers: [{ key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true }],
+        body: { mode: 'text', content: params.toString() },
+        auth: { authType: 'none' },
+        options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      });
+
+      const json = JSON.parse(result.body);
+      if (json.error) {
+        setTokenError(json.error_description || json.error);
+        return;
+      }
+      patchOAuth2({
+        accessToken: json.access_token ?? '',
+        refreshToken: json.refresh_token ?? '',
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTokenError(msg);
+      patchOAuth2({ accessToken: '' });
+    }
+  }, [auth.oauth2, patchOAuth2]);
 
   // Helper: patch awsSigV4 fields without losing other auth state.
   const patchAWS = useCallback(
@@ -291,11 +338,20 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 variant="outline"
                 size="sm"
                 className="h-8 shrink-0 px-2 text-xs"
-                onClick={() => {}}
+                disabled={auth.oauth2.grantType === 'authorization_code' || !auth.oauth2.tokenUrl}
+                onClick={handleGetToken}
+                title={
+                  auth.oauth2.grantType === 'authorization_code'
+                    ? 'Authorization code flow coming soon.'
+                    : undefined
+                }
               >
                 Get Token
               </Button>
             </div>
+            {tokenError && (
+              <p className="text-[11px] text-destructive mt-1">{tokenError}</p>
+            )}
           </div>
 
           {auth.oauth2.refreshToken && (
