@@ -399,12 +399,14 @@ function CollectionNode({
     }
   }, [expanded, collection, refreshTree]);
 
-  // Refresh the expanded tree on any collection mutation.
+  // Refresh the expanded tree on any collection mutation (via Tauri event bus).
   useEffect(() => {
     if (!expanded) return;
-    const handler = () => refreshTree();
-    window.addEventListener('rocket:collections-changed', handler);
-    return () => window.removeEventListener('rocket:collections-changed', handler);
+    let unlisten: (() => void) | undefined;
+    onCollectionChanged(() => refreshTree()).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
   }, [expanded, refreshTree]);
 
   // Auto-expand when a filter is active.
@@ -663,21 +665,15 @@ export function CollectionsSidebar() {
     void fetchCollections();
   }, [fetchCollections]);
 
-  // Load collections on mount and subscribe to changes.
+  // Load collections on mount and subscribe to all changes via Tauri event bus.
+  // The file watcher, collection service, and all mutations emit "collection-changed".
   useEffect(() => {
     void fetchCollections();
-    // Listen for Tauri backend events (file watcher, external changes).
     let unlisten: (() => void) | undefined;
     onCollectionChanged(() => void fetchCollections()).then((fn) => {
       unlisten = fn;
     });
-    // Listen for frontend-initiated changes (rename, save from pane store).
-    const handleLocalChange = () => void fetchCollections();
-    window.addEventListener('rocket:collections-changed', handleLocalChange);
-    return () => {
-      unlisten?.();
-      window.removeEventListener('rocket:collections-changed', handleLocalChange);
-    };
+    return () => unlisten?.();
   }, [fetchCollections]);
 
   return (

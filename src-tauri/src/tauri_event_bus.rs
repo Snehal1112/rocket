@@ -14,7 +14,9 @@ impl TauriEventBus {
 impl EventPublisher for TauriEventBus {
     fn publish(&self, event: DomainEvent) {
         let event_name = match &event {
-            DomainEvent::FileChanged { .. } => "file-change",
+            // File watcher events are collection changes — the sidebar
+            // needs to refresh when files are created/modified/deleted.
+            DomainEvent::FileChanged { .. } => "collection-changed",
             DomainEvent::RequestExecuted { .. } => "request-executed",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
