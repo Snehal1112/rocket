@@ -31,6 +31,7 @@ import { HeadersEditor } from './HeadersEditor';
 import { BodyEditor } from './BodyEditor';
 import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
+import { SaveRequestButton } from './SaveRequestButton';
 import type {
   Tab,
   HttpMethod,
@@ -181,6 +182,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onChange={(e) => handleUrlChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
           />
+
+          <SaveRequestButton tab={tab} groupId={_groupId} />
 
           <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => send(request)}>
             <Send className="mr-1 h-3.5 w-3.5" />
