@@ -4,13 +4,32 @@ import { StatusBar } from '@/components/layout/StatusBar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { usePaneStore } from '@/stores/pane-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useState } from 'react';
+import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
+import { findTabInTree } from '@/lib/pane-utils';
+import { useState, useEffect } from 'react';
 
 function App() {
   const root = usePaneStore((s) => s.root);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [sidebarCollapsed] = useState(false);
+  const [saveDialogTabId, setSaveDialogTabId] = useState<string | null>(null);
   useKeyboardShortcuts();
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tabId = (e as CustomEvent<{ tabId: string }>).detail.tabId;
+      setSaveDialogTabId(tabId);
+    };
+    window.addEventListener('rocket:save-draft', handler);
+    return () => window.removeEventListener('rocket:save-draft', handler);
+  }, []);
+
+  const saveTab = saveDialogTabId
+    ? (() => {
+        const found = findTabInTree(root, saveDialogTabId);
+        return found?.tab ?? null;
+      })()
+    : null;
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-accent/25 text-sm">
@@ -47,6 +66,15 @@ function App() {
         </main>
       </div>
       <StatusBar />
+      {saveTab && (
+        <SaveToCollectionDialog
+          open={!!saveDialogTabId}
+          onOpenChange={(open) => { if (!open) setSaveDialogTabId(null); }}
+          tabId={saveDialogTabId!}
+          title={saveTab.title}
+          request={saveTab.request}
+        />
+      )}
     </div>
   );
 }
