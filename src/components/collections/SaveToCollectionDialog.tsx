@@ -42,7 +42,8 @@ export function SaveToCollectionDialog({
   const handleSave = useCallback(async () => {
     if (!selectedCollection || !requestName.trim()) return;
     try {
-      await saveReq(selectedCollection, requestName.trim(), {
+      const saved = await saveReq(selectedCollection, requestName.trim(), {
+        uid: '',
         name: requestName.trim(),
         method: request.method,
         url: request.url,
@@ -55,6 +56,7 @@ export function SaveToCollectionDialog({
         auth: toApiAuth(request.auth),
       });
       // Update the tab to be collection-owned after a successful save.
+      // Use the uid returned by the backend as the new stable tab id.
       usePaneStore.setState((state) => {
         const updateTab = (node: any): any => {
           if (node.type === 'leaf') {
@@ -63,12 +65,13 @@ export function SaveToCollectionDialog({
             const tabs = [...node.tabs];
             tabs[idx] = {
               ...tabs[idx],
+              id: saved.uid,
               tabType: 'request',
               title: requestName.trim(),
               isDirty: false,
-              source: { collection: selectedCollection, path: requestName.trim().endsWith('.json') ? requestName.trim() : `${requestName.trim()}.json` },
+              source: { collection: selectedCollection, path: saved.fileName ?? `${requestName.trim()}.json` },
             };
-            return { ...node, tabs };
+            return { ...node, tabs, activeTabId: node.activeTabId === tabId ? saved.uid : node.activeTabId };
           }
           return {
             ...node,
