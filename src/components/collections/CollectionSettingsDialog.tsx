@@ -4,6 +4,7 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { cn } from '@/lib/utils';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
+import { saveCollectionSettings } from '@/lib/tauri-api';
 
 interface CollectionSettingsDialogProps {
   collectionName: string;
@@ -28,10 +29,16 @@ export function CollectionSettingsDialog({
   const [auth, setAuth] = useState<AuthState>(DEFAULT_AUTH);
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
 
-  function handleSave() {
-    // Stub: persist collection-level settings via Tauri in a later task.
-    console.log('[CollectionSettings] save', { collection: collectionName, auth, headers });
-    onClose();
+  async function handleSave() {
+    try {
+      await saveCollectionSettings(collectionName, {
+        auth: auth.authType !== 'none' ? auth : undefined,
+        headers: headers.filter((h) => h.key),
+      });
+      onClose();
+    } catch (err) {
+      console.error('[CollectionSettings] save failed', err);
+    }
   }
 
   return (

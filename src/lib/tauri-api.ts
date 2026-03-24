@@ -209,6 +209,11 @@ export const moveItem = (
     dstPath,
   });
 
+export const saveCollectionSettings = (
+  collection: string,
+  settings: { auth?: any; headers?: { key: string; value: string; enabled: boolean }[] },
+) => invoke<void>("save_collection_settings", { collection, settings });
+
 // ============================================================
 // Environments
 // ============================================================
