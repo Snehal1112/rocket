@@ -3,6 +3,7 @@ import {
   listCollections,
   getCollection,
   onCollectionChanged,
+  createCollection,
   type CollectionSummary,
   type Collection,
   type CollectionItem,
@@ -262,6 +263,33 @@ export function CollectionsSidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const filter = searchQuery.toLowerCase().trim();
 
+  const [isCreating, setIsCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [createError, setCreateError] = useState('');
+
+  const INVALID_CHARS = /[/\\:*?"<>|]/;
+
+  const handleCreateCollection = useCallback(async () => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setIsCreating(false);
+      setNewName('');
+      return;
+    }
+    if (INVALID_CHARS.test(trimmed)) {
+      setCreateError('Name contains invalid characters.');
+      return;
+    }
+    try {
+      await createCollection(trimmed);
+      setIsCreating(false);
+      setNewName('');
+      setCreateError('');
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create collection.');
+    }
+  }, [newName]);
+
   const fetchCollections = useCallback(async () => {
     try {
       const results = await listCollections();
@@ -306,14 +334,35 @@ export function CollectionsSidebar() {
                 aria-label="Search collections"
               />
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start h-7 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New Collection
-            </Button>
+            {isCreating ? (
+              <div className="px-1">
+                <Input
+                  autoFocus
+                  className="h-7 text-xs"
+                  placeholder="Collection name"
+                  value={newName}
+                  onChange={(e) => { setNewName(e.target.value); setCreateError(''); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreateCollection();
+                    if (e.key === 'Escape') { setIsCreating(false); setNewName(''); setCreateError(''); }
+                  }}
+                  onBlur={() => { setIsCreating(false); setNewName(''); setCreateError(''); }}
+                />
+                {createError && (
+                  <p className="text-[10px] text-destructive mt-0.5 px-1">{createError}</p>
+                )}
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start h-7 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setIsCreating(true)}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                New Collection
+              </Button>
+            )}
           </div>
 
           {/* Collection tree. */}
