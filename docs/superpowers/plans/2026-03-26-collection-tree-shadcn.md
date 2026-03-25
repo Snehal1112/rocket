@@ -584,7 +584,7 @@ export function FolderNode({
                     key={`request-${requestPath}-${idx}`}
                     uid={item.uid} name={item.name} method={item.method}
                     collectionName={collectionName} path={requestPath}
-                    itemData={item} summaries={summaries} filter={filter}
+                    itemData={item} summaries={summaries} dragDisabled={!!filter}
                     onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
                   />
                 );
@@ -873,7 +873,7 @@ export function CollectionNode({
                     key={`request-${item.fileName ?? item.name}-${idx}`}
                     uid={item.uid} name={item.name} method={item.method}
                     collectionName={summary.name} path={item.fileName ?? item.name}
-                    itemData={item} summaries={summaries} filter={filter}
+                    itemData={item} summaries={summaries} dragDisabled={!!filter}
                     onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
                   />
                 );
