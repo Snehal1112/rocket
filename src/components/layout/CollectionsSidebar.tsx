@@ -229,14 +229,17 @@ export function CollectionsSidebar() {
   const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     void fetchCollections();
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onCollectionChanged(() => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
-      unlisten = fn;
+      if (cancelled) fn(); // Already unmounted — immediately unsubscribe.
+      else unlisten = fn;
     });
     return () => {
+      cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
       unlisten?.();
     };
