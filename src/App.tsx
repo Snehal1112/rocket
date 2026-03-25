@@ -36,7 +36,7 @@ function App() {
     : null;
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-background via-background to-accent/25 text-sm">
+    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
       <Header />
       <div className="flex-1 flex overflow-hidden">
         {!sidebarCollapsed && (
