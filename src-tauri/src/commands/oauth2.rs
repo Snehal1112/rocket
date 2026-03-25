@@ -18,6 +18,7 @@ pub async fn oauth2_auth_code_flow(
     client_id: String,
     client_secret: String,
     scope: Option<String>,
+    callback_url: Option<String>,
 ) -> Result<OAuthToken, DomainError> {
     // 1. Generate PKCE pair.
     let pkce = generate_pkce();
@@ -25,15 +26,21 @@ pub async fn oauth2_auth_code_flow(
     // 2. Generate random state for CSRF protection.
     let state = uuid::Uuid::new_v4().to_string();
 
-    // 3. Bind callback server to a random port.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    // 3. Bind callback server. Use the user's callback URL port if provided,
+    //    otherwise bind to a random port.
+    let bind_port = callback_url
+        .as_ref()
+        .and_then(|url| url::Url::parse(url).ok())
+        .and_then(|u| u.port())
+        .unwrap_or(0);
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{bind_port}"))
         .await
-        .map_err(|e| DomainError::Internal(format!("Failed to start callback server: {e}")))?;
+        .map_err(|e| DomainError::Internal(format!("Failed to start callback server on port {bind_port}: {e}")))?;
     let port = listener
         .local_addr()
         .map_err(|e| DomainError::Internal(format!("Failed to get port: {e}")))?
         .port();
-    let redirect_uri = format!("http://localhost:{port}/callback");
+    let redirect_uri = callback_url.unwrap_or_else(|| format!("http://localhost:{port}/callback"));
 
     // 4. Build the authorization URL with all required query parameters.
     let separator = if authorization_url.contains('?') { "&" } else { "?" };
