@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   getCollection,
-  getCollectionSettings,
   saveCollectionSettings,
   type Collection,
   type CollectionItem,
@@ -191,20 +190,18 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     updateCollectionSection(tab.id, section);
   }, [tab.id, updateCollectionSection]);
 
-  // Load the collection on mount.
+  // Load the collection on mount (settings are included in the response).
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([
-      getCollection(collectionName),
-      getCollectionSettings(collectionName),
-    ])
-      .then(([col, settings]) => {
+    getCollection(collectionName)
+      .then((col) => {
         setCollection(col);
-        setDescription(settings.description ?? '');
-        setAuth(toAuthState(settings.auth));
-        setHeaders(toKeyValueEntries(settings.headers));
-        setVariables(settings.variables ?? []);
+        const s = col.settings;
+        setDescription(s.description ?? '');
+        setAuth(toAuthState(s.auth));
+        setHeaders(toKeyValueEntries(s.headers));
+        setVariables(s.variables ?? []);
       })
       .catch((err) => {
         console.error('[CollectionOverviewTab] load failed', err);
