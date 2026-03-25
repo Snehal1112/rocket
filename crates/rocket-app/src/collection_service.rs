@@ -67,6 +67,10 @@ impl CollectionService {
         self.repo.move_item(src_collection, src_path, dst_collection, dst_path)
     }
 
+    pub fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
+        self.repo.get_settings(name)
+    }
+
     pub fn save_settings(
         &self,
         name: &str,

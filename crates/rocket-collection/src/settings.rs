@@ -1,7 +1,22 @@
 use rocket_shared::types::{Auth, Header};
 use serde::{Deserialize, Serialize};
 
-/// Per-collection default auth and headers, stored in collection.json.
+/// A collection-scoped variable (like Postman/Bruno collection variables).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionVariable {
+    pub key: String,
+    pub value: String,
+    /// Initial/default value (for Postman export compatibility).
+    #[serde(default)]
+    pub initial_value: String,
+    pub enabled: bool,
+    /// Mark as secret to hide in the UI (like Bruno).
+    #[serde(default)]
+    pub secret: bool,
+}
+
+/// Per-collection default auth, headers, and variables, stored in collection.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSettings {
@@ -16,4 +31,8 @@ pub struct CollectionSettings {
     /// Default headers prepended to every request in this collection.
     #[serde(default)]
     pub headers: Vec<Header>,
+
+    /// Collection-scoped variables, resolved alongside environment variables.
+    #[serde(default)]
+    pub variables: Vec<CollectionVariable>,
 }

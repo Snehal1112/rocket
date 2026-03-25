@@ -48,8 +48,25 @@ impl RequestExecutionService {
     }
 
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
-        // Step 1: Build variable map from the selected environment.
-        let vars = self.build_variable_map(&input.environment_name)?;
+        // Step 1: Build variable map — collection variables first, then env overrides.
+        let mut vars = HashMap::new();
+        if let Some(col) = &input.collection {
+            let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+            // Load collection variables (lower priority).
+            for cv in &settings.variables {
+                if cv.enabled {
+                    vars.insert(cv.key.clone(), cv.value.clone());
+                }
+            }
+        }
+        // Layer environment variables on top (higher priority, overrides collection vars).
+        if let Some(name) = &input.environment_name {
+            if let Ok(env) = self.env_repo.get(name) {
+                for (k, v) in env.enabled_variables() {
+                    vars.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
 
         // Step 2: Load collection settings and merge with request-level values.
         let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
@@ -108,20 +125,6 @@ impl RequestExecutionService {
         Ok(response)
     }
 
-    fn build_variable_map(
-        &self,
-        env_name: &Option<String>,
-    ) -> DomainResult<HashMap<String, String>> {
-        let mut vars = HashMap::new();
-        if let Some(name) = env_name {
-            if let Ok(env) = self.env_repo.get(name) {
-                for (k, v) in env.enabled_variables() {
-                    vars.insert(k.to_string(), v.to_string());
-                }
-            }
-        }
-        Ok(vars)
-    }
 }
 
 /// Use the collection auth when the request carries no auth of its own.
@@ -513,6 +516,7 @@ mod tests {
             description: None,
             auth: Some(Auth::Bearer { token: "col_tok".into() }),
             headers: vec![],
+            variables: vec![],
         };
 
         // Use a mock executor that captures the request auth.

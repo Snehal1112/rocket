@@ -1,19 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Folder as FolderIcon } from 'lucide-react';
+import { Folder as FolderIcon, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   getCollection,
+  getCollectionSettings,
   saveCollectionSettings,
   type Collection,
   type CollectionItem,
+  type CollectionVariable,
 } from '@/lib/tauri-api';
 import { MethodBreakdown } from './MethodBreakdown';
 import { RequestList } from './RequestList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
+import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 import { usePaneStore } from '@/stores/pane-store';
 import type { AuthState, KeyValueEntry, CollectionTab, CollectionSection } from '@/types/pane-types';
 
@@ -21,7 +22,6 @@ interface CollectionOverviewTabProps {
   tab: CollectionTab;
 }
 
-// Recursively counts requests (leaf nodes) across the entire tree.
 function countRequests(items: CollectionItem[]): number {
   let n = 0;
   for (const item of items) {
@@ -31,7 +31,6 @@ function countRequests(items: CollectionItem[]): number {
   return n;
 }
 
-// Recursively counts folders (directory nodes) across the entire tree.
 function countFolders(items: CollectionItem[]): number {
   let n = 0;
   for (const item of items) {
@@ -47,15 +46,11 @@ function plural(n: number, singular: string, pluralForm: string): string {
   return `${n} ${n === 1 ? singular : pluralForm}`;
 }
 
-// Maps a CollectionSettings auth value to an AuthState shape for AuthEditor.
 function toAuthState(auth: Collection['settings']['auth']): AuthState {
   if (!auth) return { authType: 'none' };
-  // Auth from tauri-api and AuthState share the same discriminant structure
-  // for none/basic/bearer/api-key.  Cast is safe for these shared variants.
   return auth as unknown as AuthState;
 }
 
-// Maps a collection Header array to KeyValueEntry[] for HeadersEditor.
 function toKeyValueEntries(
   headers: { key: string; value: string; enabled: boolean }[],
 ): KeyValueEntry[] {
@@ -67,6 +62,12 @@ function toKeyValueEntries(
   }));
 }
 
+const TABS: { label: string; value: CollectionSection }[] = [
+  { label: 'Overview', value: 'overview' },
+  { label: 'Authorization', value: 'auth' },
+  { label: 'Variables', value: 'variables' },
+];
+
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const collectionName = tab.collectionName;
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
@@ -75,25 +76,32 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Editable fields mirroring the loaded settings.
+  // Editable settings state.
   const [description, setDescription] = useState('');
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
+  const [variables, setVariables] = useState<CollectionVariable[]>([]);
 
-  const handleSectionChange = useCallback((section: string) => {
-    updateCollectionSection(tab.id, section as CollectionSection);
+  const activeSection = tab.activeSection ?? 'overview';
+
+  const handleSectionChange = useCallback((section: CollectionSection) => {
+    updateCollectionSection(tab.id, section);
   }, [tab.id, updateCollectionSection]);
 
   // Load the collection on mount.
   useEffect(() => {
     setLoading(true);
     setError(null);
-    getCollection(collectionName)
-      .then((col) => {
+    Promise.all([
+      getCollection(collectionName),
+      getCollectionSettings(collectionName),
+    ])
+      .then(([col, settings]) => {
         setCollection(col);
-        setDescription(col.settings.description ?? '');
-        setAuth(toAuthState(col.settings.auth));
-        setHeaders(toKeyValueEntries(col.settings.headers));
+        setDescription(settings.description ?? '');
+        setAuth(toAuthState(settings.auth));
+        setHeaders(toKeyValueEntries(settings.headers));
+        setVariables(settings.variables ?? []);
       })
       .catch((err) => {
         console.error('[CollectionOverviewTab] load failed', err);
@@ -102,36 +110,29 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       .finally(() => setLoading(false));
   }, [collectionName]);
 
-  // Save description on textarea blur.
-  const handleDescriptionBlur = useCallback(async () => {
+  // Save all settings to disk.
+  const handleSave = useCallback(async () => {
     try {
       await saveCollectionSettings(collectionName, {
         auth: auth.authType !== 'none' ? (auth as unknown as any) : undefined,
         headers: headers.filter((h) => h.key),
-        description,
+        description: description || undefined,
+        variables,
       } as any);
     } catch (err) {
-      console.error('[CollectionOverviewTab] description save failed', err);
+      console.error('[CollectionOverviewTab] save failed', err);
     }
-  }, [collectionName, auth, headers, description]);
+  }, [collectionName, auth, headers, description, variables]);
 
-  // Save auth + headers together (called from the explicit Save button).
-  const handleSaveSettings = useCallback(async () => {
-    try {
-      await saveCollectionSettings(collectionName, {
-        auth: auth.authType !== 'none' ? (auth as unknown as any) : undefined,
-        headers: headers.filter((h) => h.key),
-        description,
-      } as any);
-    } catch (err) {
-      console.error('[CollectionOverviewTab] settings save failed', err);
-    }
-  }, [collectionName, auth, headers, description]);
+  // Save description on blur.
+  const handleDescriptionBlur = useCallback(async () => {
+    await handleSave();
+  }, [handleSave]);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Loading…
+        Loading...
       </div>
     );
   }
@@ -150,71 +151,125 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const statsLine = `${plural(reqCount, 'request', 'requests')} · ${plural(folderCount, 'folder', 'folders')}`;
 
   return (
-    <ScrollArea className="h-full">
-      <div className="p-6 space-y-6 max-w-3xl mx-auto">
-
-        {/* Header: icon + name + stats. */}
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <FolderIcon className="h-5 w-5 text-muted-foreground shrink-0" />
-            <h1 className="text-lg font-semibold leading-tight truncate">
-              {collection.name}
-            </h1>
-          </div>
-          <p className="text-xs text-muted-foreground pl-7">{statsLine}</p>
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Collection header. */}
+      <div className="shrink-0 border-b border-border/70 px-6 pt-4 pb-0">
+        <div className="flex items-center gap-2 mb-1">
+          <FolderIcon className="h-5 w-5 text-muted-foreground shrink-0" />
+          <h1 className="text-lg font-semibold leading-tight truncate">
+            {collection.name}
+          </h1>
         </div>
+        <p className="text-xs text-muted-foreground pl-7 mb-3">{statsLine}</p>
 
-        {/* Description textarea — saves on blur. */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="col-description">
-            Description
-          </label>
-          <textarea
-            id="col-description"
-            rows={3}
-            placeholder="Add a description…"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onBlur={handleDescriptionBlur}
-            className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          />
+        {/* Tab bar. */}
+        <div className="flex items-center gap-0">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => handleSectionChange(t.value)}
+              className={`h-8 px-4 text-xs font-medium transition-colors ${
+                activeSection === t.value
+                  ? 'border-b-2 border-primary text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t.label}
+              {t.value === 'variables' && variables.length > 0 && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  ({variables.filter(v => v.enabled).length})
+                </span>
+              )}
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* Method breakdown. */}
-        <MethodBreakdown items={items} />
+      {/* Tab content. */}
+      <ScrollArea className="flex-1">
+        <div className="p-6 max-w-3xl mx-auto space-y-6">
 
-        {/* Auth / Headers / Requests tabs inside a card. */}
-        <Card>
-          <CardContent className="pt-4">
-            <Tabs value={tab.activeSection ?? 'requests'} onValueChange={handleSectionChange}>
-              <TabsList className="w-full justify-start">
-                <TabsTrigger value="auth">Auth</TabsTrigger>
-                <TabsTrigger value="headers">Headers</TabsTrigger>
-                <TabsTrigger value="requests">Requests</TabsTrigger>
-              </TabsList>
+          {/* Overview tab. */}
+          {activeSection === 'overview' && (
+            <>
+              {/* Description. */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="col-description">
+                  Description
+                </label>
+                <textarea
+                  id="col-description"
+                  rows={3}
+                  placeholder="Add a description..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  onBlur={handleDescriptionBlur}
+                  className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
 
-              <TabsContent value="auth" className="mt-4 space-y-4">
-                <AuthEditor auth={auth} onChange={setAuth} />
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSaveSettings}>Save</Button>
-                </div>
-              </TabsContent>
+              {/* Method breakdown. */}
+              <MethodBreakdown items={items} />
 
-              <TabsContent value="headers" className="mt-4 space-y-4">
+              {/* Default headers. */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-medium text-muted-foreground">Default Headers</h3>
                 <HeadersEditor headers={headers} onChange={setHeaders} />
                 <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSaveSettings}>Save</Button>
+                  <Button size="sm" onClick={handleSave} className="gap-1.5">
+                    <Save className="h-3.5 w-3.5" />
+                    Save
+                  </Button>
                 </div>
-              </TabsContent>
+              </div>
 
-              <TabsContent value="requests" className="mt-4">
+              {/* Requests list. */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-medium text-muted-foreground">Requests</h3>
                 <RequestList items={items} collectionName={collectionName} />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
+              </div>
+            </>
+          )}
 
-      </div>
-    </ScrollArea>
+          {/* Authorization tab. */}
+          {activeSection === 'auth' && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">
+                  This authorization method will be used for every request in this collection.
+                  You can override this by specifying one in the request.
+                </p>
+              </div>
+
+              <AuthEditor auth={auth} onChange={setAuth} />
+
+              <div className="flex justify-end">
+                <Button size="sm" onClick={handleSave} className="gap-1.5">
+                  <Save className="h-3.5 w-3.5" />
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Variables tab. */}
+          {activeSection === 'variables' && (
+            <div className="space-y-4">
+              <CollectionVariablesEditor
+                variables={variables}
+                onChange={setVariables}
+              />
+
+              <div className="flex justify-end">
+                <Button size="sm" onClick={handleSave} className="gap-1.5">
+                  <Save className="h-3.5 w-3.5" />
+                  Save
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
