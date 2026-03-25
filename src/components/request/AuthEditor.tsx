@@ -55,7 +55,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
           grantType: 'client_credentials',
           authorizationUrl: '',
           tokenUrl: '',
-          callbackUrl: 'http://localhost:9876/callback',
+          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
           clientId: '',
           clientSecret: '',
           scope: '',

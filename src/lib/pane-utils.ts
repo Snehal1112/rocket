@@ -33,7 +33,7 @@ export function mapApiRequestToState(req: ApiRequest): RequestState {
           grantType: (a.grantType ?? 'client_credentials') as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
           authorizationUrl: (a.authorizationUrl as string) ?? '',
           tokenUrl: (a.tokenUrl as string) ?? '',
-          callbackUrl: (a.callbackUrl as string) ?? 'http://localhost:9876/callback',
+          callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
           clientId: (a.clientId as string) ?? '',
           clientSecret: (a.clientSecret as string) ?? '',
           scope: (a.scope as string) ?? '',
