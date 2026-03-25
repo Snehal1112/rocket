@@ -27,7 +27,9 @@ pub async fn oauth2_auth_code_flow(
     client_secret: String,
     scope: Option<String>,
     callback_url: Option<String>,
+    verify_ssl: Option<bool>,
 ) -> Result<OAuthToken, DomainError> {
+    let skip_tls_verify = !verify_ssl.unwrap_or(true);
     let pkce = generate_pkce();
     let state = uuid::Uuid::new_v4().to_string();
     let redirect_uri = callback_url
@@ -76,6 +78,20 @@ pub async fn oauth2_auth_code_flow(
     })
     .build()
     .map_err(|e| DomainError::Internal(format!("Failed to open auth window: {e}")))?;
+
+    // On Linux, allow self-signed / internal CA certificates when verify_ssl is off.
+    #[cfg(target_os = "linux")]
+    if skip_tls_verify {
+        window
+            .with_webview(|webview| {
+                use webkit2gtk::{WebViewExt, WebsiteDataManagerExt};
+                let wv = webview.inner();
+                if let Some(dm) = wv.website_data_manager() {
+                    dm.set_tls_errors_policy(webkit2gtk::TLSErrorsPolicy::Ignore);
+                }
+            })
+            .ok();
+    }
 
     // Wait for the callback with a 120s timeout.
     let result = tokio::time::timeout(Duration::from_secs(120), rx).await;

@@ -43,6 +43,7 @@ export function mapApiRequestToState(req: ApiRequest): RequestState {
           clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
           headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
           addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
+          verifySsl: (a.verifySsl as boolean) ?? true,
           accessToken: (a.accessToken as string) ?? '',
           refreshToken: (a.refreshToken as string) ?? '',
           expiresIn: (a.expiresIn as number) ?? null,
