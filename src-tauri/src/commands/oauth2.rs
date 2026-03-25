@@ -130,7 +130,11 @@ pub async fn oauth2_auth_code_flow(
     }
 
     // Exchange the authorization code for an access token.
-    let client = reqwest::Client::new();
+    // When TLS verification is disabled, the reqwest client must also skip it.
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(skip_tls_verify)
+        .build()
+        .map_err(|e| DomainError::Internal(format!("Failed to create HTTP client: {e}")))?;
     let config = OAuthConfig {
         grant_type: "authorization_code".into(),
         client_id,
