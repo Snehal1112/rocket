@@ -54,16 +54,18 @@ pub async fn oauth2_auth_code_flow(
         let _ = existing.close();
     }
 
-    // Open webview window.
+    // Build the webview with about:blank first so we can configure TLS
+    // policy before navigating to the auth URL (avoids race condition
+    // where WebKitGTK rejects the cert before our policy takes effect).
+    let parsed_auth_url: url::Url = auth_url
+        .parse()
+        .map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?;
+
     // on_navigation must be Fn (not FnOnce), hence Mutex<Option<Sender>>.
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         "oauth2-auth",
-        tauri::WebviewUrl::External(
-            auth_url
-                .parse()
-                .map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?,
-        ),
+        tauri::WebviewUrl::External("about:blank".parse().unwrap()),
     )
     .title("Sign In")
     .inner_size(500.0, 700.0)
@@ -80,6 +82,7 @@ pub async fn oauth2_auth_code_flow(
     .map_err(|e| DomainError::Internal(format!("Failed to open auth window: {e}")))?;
 
     // On Linux, allow self-signed / internal CA certificates when verify_ssl is off.
+    // This MUST happen before navigate() to avoid a TLS rejection race.
     #[cfg(target_os = "linux")]
     if skip_tls_verify {
         window
@@ -92,6 +95,11 @@ pub async fn oauth2_auth_code_flow(
             })
             .ok();
     }
+
+    // Now navigate to the auth URL after TLS policy is configured.
+    window
+        .navigate(parsed_auth_url)
+        .map_err(|e| DomainError::Internal(format!("Failed to navigate auth window: {e}")))?;
 
     // Wait for the callback with a 120s timeout.
     let result = tokio::time::timeout(Duration::from_secs(120), rx).await;
