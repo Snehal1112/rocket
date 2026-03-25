@@ -331,3 +331,25 @@ export const onRequestExecuted = (
   handler: () => void,
 ): Promise<UnlistenFn> =>
   listen("request-executed", () => handler());
+
+// ============================================================
+// OAuth2
+// ============================================================
+
+export interface OAuth2TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+}
+
+export const oauth2AuthCodeFlow = (
+  authorizationUrl: string,
+  tokenUrl: string,
+  clientId: string,
+  clientSecret: string,
+  scope?: string,
+) => invoke<OAuth2TokenResponse>("oauth2_auth_code_flow", {
+  authorizationUrl, tokenUrl, clientId, clientSecret, scope,
+});
