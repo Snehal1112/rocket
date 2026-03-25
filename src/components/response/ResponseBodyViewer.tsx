@@ -1,93 +1,20 @@
-import { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { Copy, Check, Clock, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import type { ResponseState } from '@/types/pane-types';
 
 type ViewTab = ResponseState['activeView'];
 
+// Lazy-load Monaco so it stays out of the initial JS bundle.
+const MonacoWrapper = lazy(() =>
+  import('@/components/editor/MonacoWrapper').then((m) => ({
+    default: m.MonacoWrapper,
+  })),
+);
+
 interface ResponseBodyViewerProps {
   response: ResponseState;
-}
-
-// ---- JSON syntax highlighting ------------------------------------------------
-
-// Token types produced by the JSON tokenizer.
-type TokenType = 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation';
-
-interface Token {
-  type: TokenType;
-  value: string;
-}
-
-// Color map for each token type.
-const TOKEN_COLORS: Record<TokenType, string> = {
-  key: 'text-purple-500',
-  string: 'text-emerald-500',
-  number: 'text-amber-500',
-  boolean: 'text-blue-500',
-  null: 'text-gray-500',
-  punctuation: 'text-muted-foreground',
-};
-
-// Regex that matches the next meaningful JSON token in a string.
-const TOKEN_RE =
-  /("(?:[^"\\]|\\.)*")\s*(:)|("(?:[^"\\]|\\.)*")|(true|false)|(null)|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)|([{}\[\],:])/g;
-
-function tokenizeLine(line: string): Token[] {
-  const tokens: Token[] = [];
-  let lastIndex = 0;
-  TOKEN_RE.lastIndex = 0;
-
-  let match: RegExpExecArray | null;
-  while ((match = TOKEN_RE.exec(line)) !== null) {
-    // Emit any plain text that precedes this token as punctuation.
-    if (match.index > lastIndex) {
-      tokens.push({ type: 'punctuation', value: line.slice(lastIndex, match.index) });
-    }
-
-    if (match[1] !== undefined) {
-      // Object key (string followed by colon).
-      tokens.push({ type: 'key', value: match[1] });
-      // Emit the colon separately.
-      tokens.push({ type: 'punctuation', value: ':' });
-      TOKEN_RE.lastIndex = match.index + match[1].length + match[0].length - match[1].length - 1;
-    } else if (match[3] !== undefined) {
-      tokens.push({ type: 'string', value: match[3] });
-    } else if (match[4] !== undefined) {
-      tokens.push({ type: 'boolean', value: match[4] });
-    } else if (match[5] !== undefined) {
-      tokens.push({ type: 'null', value: match[5] });
-    } else if (match[6] !== undefined) {
-      tokens.push({ type: 'number', value: match[6] });
-    } else if (match[7] !== undefined) {
-      tokens.push({ type: 'punctuation', value: match[7] });
-    }
-
-    lastIndex = TOKEN_RE.lastIndex;
-  }
-
-  // Trailing plain text.
-  if (lastIndex < line.length) {
-    tokens.push({ type: 'punctuation', value: line.slice(lastIndex) });
-  }
-
-  return tokens;
-}
-
-// Renders a pretty-printed JSON string with per-token color spans.
-function highlightJson(json: string): React.ReactNode[] {
-  return json.split('\n').map((line, lineIdx) => {
-    const tokens = tokenizeLine(line);
-    return (
-      <div key={lineIdx}>
-        {tokens.map((tok, i) => (
-          <span key={i} className={TOKEN_COLORS[tok.type]}>
-            {tok.value}
-          </span>
-        ))}
-      </div>
-    );
-  });
 }
 
 // Try to detect and pretty-print JSON; fall back to raw body.
@@ -100,16 +27,13 @@ function formatBody(body: string): { formatted: string; isJson: boolean } {
   }
 }
 
-// Attempt basic XML indentation by re-serialising through DOMParser.
+// Attempt basic XML indentation via DOMParser.
 function formatXml(xml: string): string {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, 'application/xml');
-    const error = doc.querySelector('parsererror');
-    if (error) return xml;
-    // Serialise with indentation via XMLSerializer + a simple indent pass.
+    if (doc.querySelector('parsererror')) return xml;
     const serialised = new XMLSerializer().serializeToString(doc);
-    // Basic indent: add newlines around tags.
     return serialised
       .replace(/></g, '>\n<')
       .split('\n')
@@ -120,86 +44,223 @@ function formatXml(xml: string): string {
   }
 }
 
-// ---- Main component ----------------------------------------------------------
+// Detect content type from response headers.
+function getContentType(headers: { key: string; value: string }[]): string {
+  return (
+    headers.find((h) => h.key.toLowerCase() === 'content-type')?.value.toLowerCase() ?? ''
+  );
+}
+
+// Detect the Monaco language from the content type.
+function detectResponseLanguage(contentType: string, isJson: boolean, isXml: boolean): string {
+  if (isJson || contentType.includes('json')) return 'json';
+  if (isXml || contentType.includes('xml')) return 'xml';
+  if (contentType.includes('html')) return 'html';
+  if (contentType.includes('javascript')) return 'javascript';
+  if (contentType.includes('css')) return 'css';
+  return 'plaintext';
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+// Color-coded status badge based on HTTP status range.
+function statusClasses(status: number): string {
+  if (status >= 500) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+  if (status >= 400) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+  if (status >= 300) return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800';
+  if (status >= 200) return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
+  return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+}
+
+// Color-coded time: green (<200ms), yellow (200-1000ms), red (>1s).
+function timeClasses(ms: number): string {
+  if (ms <= 200) return 'text-green-600 dark:text-green-400';
+  if (ms <= 1000) return 'text-yellow-600 dark:text-yellow-400';
+  return 'text-red-600 dark:text-red-400';
+}
 
 export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
-  // Fall back to 'pretty' if activeView is not set.
   const [activeView, setActiveView] = useState<ViewTab>(
     response.activeView ?? 'pretty',
   );
+  const [copied, setCopied] = useState(false);
 
-  const { formatted, isJson } = formatBody(response.body);
+  const contentType = getContentType(response.headers);
 
-  // Detect XML from Content-Type header.
-  const contentType = response.headers
-    .find((h) => h.key.toLowerCase() === 'content-type')
-    ?.value.toLowerCase() ?? '';
+  // Memoize the formatted body to avoid re-parsing on every render.
+  const { formatted, isJson } = useMemo(
+    () => formatBody(response.body),
+    [response.body],
+  );
+
   const isXml = contentType.includes('xml') || (!isJson && response.body.trimStart().startsWith('<'));
 
-  const prettyBody = isJson
-    ? formatted
-    : isXml
-    ? formatXml(response.body)
-    : response.body;
+  const prettyBody = useMemo(() => {
+    if (isJson) return formatted;
+    if (isXml) return formatXml(response.body);
+    return response.body;
+  }, [formatted, isJson, isXml, response.body]);
+
+  const language = detectResponseLanguage(contentType, isJson, isXml);
+
+  const handleCopyBody = async () => {
+    try {
+      await navigator.clipboard.writeText(prettyBody);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API not available.
+    }
+  };
+
+  const headerCount = response.headers.length;
 
   return (
-    <div className="flex h-full flex-col">
-      {/* View tab switcher using shadcn Tabs. */}
-      <Tabs value={activeView} onValueChange={(val) => setActiveView(val as ViewTab)}>
-        <div className="border-b border-border px-1">
-          <TabsList className="h-8 bg-transparent p-0">
-            <TabsTrigger value="pretty" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
-              Pretty
-            </TabsTrigger>
-            <TabsTrigger value="raw" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
-              Raw
-            </TabsTrigger>
-            <TabsTrigger value="preview" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
-              Preview
-            </TabsTrigger>
-            <TabsTrigger value="headers" className="h-7 rounded-none bg-transparent text-xs data-[state=active]:shadow-none">
-              Headers
-            </TabsTrigger>
-          </TabsList>
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Status bar — status code, duration, size. */}
+      <div className="flex items-center gap-2 border-b border-border/70 px-3 py-1.5 shrink-0">
+        {/* Status badge. */}
+        <span
+          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${statusClasses(response.status)}`}
+        >
+          {response.status === 0 ? 'ERR' : response.status} {response.statusText}
+        </span>
+
+        {/* Time badge with clock icon, color-coded. */}
+        {response.durationMs > 0 && (
+          <span className={`inline-flex items-center gap-1 text-xs font-medium ${timeClasses(response.durationMs)}`}>
+            <Clock className="h-3 w-3" />
+            {formatDuration(response.durationMs)}
+          </span>
+        )}
+
+        {/* Size badge with file icon. */}
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <FileText className="h-3 w-3" />
+          {formatBytes(response.sizeBytes)}
+        </span>
+      </div>
+
+      {/* Tab bar with copy button. */}
+      <div className="flex items-center border-b border-border/70 px-1 shrink-0">
+        <div className="flex h-8 flex-1 items-center gap-0">
+          {(['pretty', 'raw', 'preview', 'headers'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveView(tab)}
+              className={`h-7 px-3 text-xs capitalize transition-colors ${
+                activeView === tab
+                  ? 'border-b-2 border-primary text-foreground font-medium'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab}
+              {tab === 'headers' && headerCount > 0 && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  ({headerCount})
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
-        {/* View content. */}
-        <div className="flex-1 overflow-auto p-3">
-          <TabsContent value="pretty" className="mt-0">
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5">
-              {isJson
-                ? highlightJson(prettyBody)
-                : prettyBody}
-            </pre>
-          </TabsContent>
+        {/* Copy body button — visible on body tabs. */}
+        {(activeView === 'pretty' || activeView === 'raw') && response.body && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 mr-1 shrink-0"
+            title="Copy response body"
+            onClick={handleCopyBody}
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-emerald-500" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </Button>
+        )}
+      </div>
 
-          <TabsContent value="raw" className="mt-0">
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-foreground">
-              {response.body}
-            </pre>
-          </TabsContent>
+      {/* Tab content — fills remaining height. */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {activeView === 'pretty' && (
+          response.body ? (
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  Loading editor...
+                </div>
+              }
+            >
+              <MonacoWrapper
+                value={prettyBody}
+                language={language}
+                readOnly
+                height="100%"
+              />
+            </Suspense>
+          ) : (
+            <div className="flex items-center justify-center h-32 text-muted-foreground text-xs">
+              No response body
+            </div>
+          )
+        )}
 
-          <TabsContent value="preview" className="mt-0">
+        {activeView === 'raw' && (
+          response.body ? (
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  Loading editor...
+                </div>
+              }
+            >
+              <MonacoWrapper
+                value={response.body}
+                language="plaintext"
+                readOnly
+                height="100%"
+              />
+            </Suspense>
+          ) : (
+            <div className="flex items-center justify-center h-32 text-muted-foreground text-xs">
+              No response body
+            </div>
+          )
+        )}
+
+        {activeView === 'preview' && (
+          <div className="h-full p-3 overflow-auto">
             {/*
-             * Security invariant: sandbox="" must remain an empty string.
-             * An empty sandbox attribute blocks all permissions (scripts,
-             * forms, popups, same-origin access), which prevents untrusted
-             * server-controlled response content from executing code.
-             * Do NOT add any sandbox tokens (e.g. allow-scripts) here.
+             * Security: sandbox="" blocks all permissions (scripts, forms, popups,
+             * same-origin access), preventing untrusted response content from
+             * executing code. Do NOT add any sandbox tokens here.
              */}
             <iframe
               srcDoc={response.body}
               sandbox=""
-              className="h-full min-h-48 w-full border-0 bg-white"
+              className="h-full min-h-48 w-full border-0 bg-white rounded"
               title="Response preview"
             />
-          </TabsContent>
+          </div>
+        )}
 
-          <TabsContent value="headers" className="mt-0">
+        {activeView === 'headers' && (
+          <div className="h-full p-3 overflow-auto">
             <ResponseHeadersTable headers={response.headers} />
-          </TabsContent>
-        </div>
-      </Tabs>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
