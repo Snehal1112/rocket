@@ -310,7 +310,7 @@ mod tests {
         fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
             Err(DomainError::NotFound("stub".into()))
         }
-        fn save_request(&self, _: &str, _: &str, _: &CollectionRequest) -> DomainResult<()> { Ok(()) }
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> { Ok(path.to_string()) }
         fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }

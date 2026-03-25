@@ -27,7 +27,8 @@ pub trait CollectionRepository: Send + Sync {
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request>;
 
     /// Save a request to a specific path within a collection.
-    fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<()>;
+    /// Returns the actual filename used (may differ from `path` if a unique name was generated).
+    fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String>;
 
     /// Rename a request file within a collection (fs::rename, single event).
     fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()>;

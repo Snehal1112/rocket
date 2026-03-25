@@ -166,21 +166,51 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(serde_json::from_str(&content)?)
     }
 
-    fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<()> {
+    fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
         let collection_dir = self.collection_path(collection);
         // Ensure path ends with .json so it is recognized on read-back.
-        let normalized = if path.ends_with(".json") {
+        let base = if path.ends_with(".json") {
             path.to_string()
         } else {
             format!("{}.json", path)
         };
-        let file_path = self.validate_path(&collection_dir, Path::new(&normalized))?;
+        let mut file_path = self.validate_path(&collection_dir, Path::new(&base))?;
+
+        // For new requests (empty UID), avoid overwriting an existing file
+        // that belongs to a different request. Append a counter to find a
+        // unique filename.
+        if request.uid.is_empty() && file_path.exists() {
+            let stem = Path::new(&base).file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let parent_rel = Path::new(&base).parent().unwrap_or(Path::new(""));
+            let mut counter = 1u32;
+            loop {
+                let candidate = if parent_rel.as_os_str().is_empty() {
+                    format!("{} {}.json", stem, counter)
+                } else {
+                    format!("{}/{} {}.json", parent_rel.display(), stem, counter)
+                };
+                let candidate_path = self.validate_path(&collection_dir, Path::new(&candidate))?;
+                if !candidate_path.exists() {
+                    file_path = candidate_path;
+                    break;
+                }
+                counter += 1;
+            }
+        }
+
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(request)?;
         fs::write(&file_path, json)?;
-        Ok(())
+
+        // Return the actual filename relative to the collection directory.
+        let actual = file_path
+            .strip_prefix(&collection_dir)
+            .unwrap_or(&file_path)
+            .to_string_lossy()
+            .to_string();
+        Ok(actual)
     }
 
     fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()> {

@@ -33,8 +33,8 @@ impl CollectionService {
     }
 
     pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
-        self.repo.save_request(collection, path, request)?;
-        self.repo.get_request(collection, path)
+        let actual_path = self.repo.save_request(collection, path, request)?;
+        self.repo.get_request(collection, &actual_path)
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
@@ -42,7 +42,8 @@ impl CollectionService {
         // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
-        self.repo.save_request(collection, old_path, &request)
+        self.repo.save_request(collection, old_path, &request)?;
+        Ok(())
     }
 
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
@@ -140,7 +141,7 @@ mod tests {
         }
 
         fn get_request(&self, _: &str, _: &str) -> DomainResult<Request> { unimplemented!() }
-        fn save_request(&self, _: &str, _: &str, _: &Request) -> DomainResult<()> { unimplemented!() }
+        fn save_request(&self, _: &str, path: &str, _: &Request) -> DomainResult<String> { Ok(path.to_string()) }
         fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
