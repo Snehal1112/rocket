@@ -234,6 +234,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               <AuthEditor
                 auth={request.auth}
                 onChange={(auth) => updateRequest(tab.id, { auth })}
+                showInherit={!!tab.source}
               />
             </TabsContent>
           </div>

@@ -18,9 +18,11 @@ type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
 interface AuthEditorProps {
   auth: AuthState;
   onChange: (auth: AuthState) => void;
+  /** Show "Inherit from parent" option. Use for request-level auth only. */
+  showInherit?: boolean;
 }
 
-const AUTH_TYPES: { label: string; value: AuthType }[] = [
+const BASE_AUTH_TYPES: { label: string; value: AuthType }[] = [
   { label: 'None', value: 'none' },
   { label: 'Basic', value: 'basic' },
   { label: 'Bearer', value: 'bearer' },
@@ -28,6 +30,10 @@ const AUTH_TYPES: { label: string; value: AuthType }[] = [
   { label: 'OAuth 2.0', value: 'oauth2' },
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
 ];
+
+const INHERIT_OPTION: { label: string; value: AuthType } = {
+  label: 'Inherit from parent', value: 'inherit',
+};
 
 function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null): string {
   if (!expiresIn || !acquiredAt) return 'No expiry';
@@ -42,7 +48,8 @@ function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null)
   return `Expires in ${Math.floor(remaining / 3600)}h (at ${time})`;
 }
 
-export function AuthEditor({ auth, onChange }: AuthEditorProps) {
+export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorProps) {
+  const authTypes = showInherit ? [INHERIT_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES;
   const setType = useCallback(
     (authType: AuthType) => {
       const next: AuthState = { authType };
@@ -251,13 +258,23 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {AUTH_TYPES.map((t) => (
+          {authTypes.map((t) => (
             <SelectItem key={t.value} value={t.value} className="text-xs">
               {t.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+
+      {/* Inherit: shows message about collection auth. */}
+      {auth.authType === 'inherit' && (
+        <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
+          <p className="text-xs text-muted-foreground">
+            This request inherits authorization from the collection settings.
+            To override, select a different auth type above.
+          </p>
+        </div>
+      )}
 
       {/* None: no fields shown. */}
       {auth.authType === 'none' && (

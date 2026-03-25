@@ -15,6 +15,7 @@ import type {
 
 export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
+    case 'inherit':
     case 'none':
       return { authType: 'none' };
     case 'basic':
