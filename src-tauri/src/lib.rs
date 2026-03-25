@@ -130,6 +130,7 @@ pub fn run() {
             commands::app::get_app_data_dir,
             commands::app::watch_collections,
             commands::app::stop_watching,
+            commands::oauth2::oauth2_auth_code_flow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
