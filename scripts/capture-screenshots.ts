@@ -9,7 +9,11 @@
 
 import { chromium, type Page, type Browser } from 'playwright';
 import { spawn, type ChildProcess } from 'child_process';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const BASE_URL = 'http://localhost:1420';
 const SCREENSHOT_DIR = resolve(__dirname, '../docs/manual/screenshots');
