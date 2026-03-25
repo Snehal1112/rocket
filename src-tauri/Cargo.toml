@@ -40,3 +40,5 @@ tokio.workspace = true
 log.workspace = true
 env_logger.workspace = true
 dirs.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
