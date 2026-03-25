@@ -247,7 +247,7 @@ export const getCollectionSettings = (name: string) =>
 
 export const saveCollectionSettings = (
   collection: string,
-  settings: { auth?: any; headers?: { key: string; value: string; enabled: boolean }[] },
+  settings: Partial<CollectionSettings>,
 ) => invoke<void>("save_collection_settings", { collection, settings });
 
 // ============================================================
