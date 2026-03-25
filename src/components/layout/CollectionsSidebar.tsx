@@ -9,26 +9,12 @@ import {
   deleteCollection,
   deleteFolder,
   deleteRequest,
-  renameCollection,
-  renameRequest,
   moveItem,
   type CollectionSummary,
-  type Collection,
   type CollectionItem,
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { mapApiRequestToState } from '@/lib/pane-utils';
-import type { RequestTab, CollectionTab, RequestState, PaneNode } from '@/types/pane-types';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+import type { PaneNode } from '@/types/pane-types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,657 +35,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
 import {
-  ChevronRight,
-  ChevronDown,
   Folder,
-  FolderOpen,
-  FileText,
   Search,
   Plus,
-  Copy,
-  Trash2,
-  FolderPlus,
-  Settings,
   Upload,
-  Pencil,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
-
-// Returns Tailwind text color for an HTTP method.
-function methodColor(method: string): string {
-  switch (method.toUpperCase()) {
-    case 'GET':    return 'text-emerald-500';
-    case 'POST':   return 'text-amber-500';
-    case 'PUT':    return 'text-blue-500';
-    case 'PATCH':  return 'text-violet-500';
-    case 'DELETE': return 'text-red-500';
-    case 'OPTIONS': return 'text-cyan-500';
-    case 'HEAD':   return 'text-pink-500';
-    default:       return 'text-muted-foreground';
-  }
-}
-
-// Returns true if any active tab in the pane tree matches the given tabId.
-function isActiveRequest(node: PaneNode, tabId: string): boolean {
-  if (node.type === 'leaf') return node.activeTabId === tabId;
-  return isActiveRequest(node.children[0], tabId) || isActiveRequest(node.children[1], tabId);
-}
-
-// Delete target descriptor used by the shared confirmation dialog.
-type DeleteTarget = {
-  type: 'collection' | 'folder' | 'request';
-  collection: string;
-  path?: string;
-  name: string;
-};
-
-// Renders a single request item in the collection tree.
-function RequestNode({
-  uid,
-  name,
-  method,
-  collectionName,
-  path,
-  itemData,
-  summaries,
-  onMove,
-  onDelete,
-  onDuplicate,
-}: {
-  uid: string;
-  name: string;
-  method: string;
-  collectionName: string;
-  path: string;
-  // Full request data from the collection tree, used to populate the new tab.
-  itemData: Extract<CollectionItem, { type: 'request' }>;
-  summaries: CollectionSummary[];
-  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
-  onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
-}) {
-  const root = usePaneStore((s) => s.root);
-  const active = isActiveRequest(root, uid);
-
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(name);
-
-  const handleRename = async () => {
-    const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === name) { setIsRenaming(false); return; }
-    try {
-      await renameRequest(collectionName, path, trimmed);
-      setIsRenaming(false);
-    } catch (err) {
-      console.error('Rename request failed:', err);
-    }
-  };
-
-  function handleClick() {
-    const request: RequestState = mapApiRequestToState(itemData, true);
-    const tab: RequestTab = {
-      id: uid,
-      title: name,
-      tabType: 'request',
-      request,
-      response: null,
-      isDirty: false,
-      source: { collection: collectionName, path },
-    };
-    usePaneStore.getState().openTab(tab);
-  }
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="group relative flex items-center">
-          <button
-            type="button"
-            data-sidebar-item
-            className={cn(
-              'flex items-center gap-1.5 w-full px-2 py-1 text-left text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer',
-              active && 'bg-accent/50 text-accent-foreground',
-            )}
-            onClick={handleClick}
-            aria-label={`Open ${method} ${name}`}
-          >
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className={cn('w-9 shrink-0 font-semibold text-[10px]', methodColor(method))}>
-              {method}
-            </span>
-            {isRenaming ? (
-              <Input
-                autoFocus
-                className="h-6 text-xs flex-1"
-                value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleRename();
-                  if (e.key === 'Escape') setIsRenaming(false);
-                }}
-                onBlur={() => void handleRename()}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span className="truncate text-foreground">{name}</span>
-            )}
-          </button>
-          <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-              onClick={(e) => { e.stopPropagation(); void onDuplicate(collectionName, path, name); }}
-              title="Duplicate"
-            >
-              <Copy className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
-              onClick={(e) => { e.stopPropagation(); onDelete({ type: 'request', collection: collectionName, path, name }); }}
-              title="Delete"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          </div>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={(e) => { e.stopPropagation(); void onDuplicate(collectionName, path, name); }}>
-          Duplicate
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>
-          Rename
-        </ContextMenuItem>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>Move to...</ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48">
-            {summaries.map((s) => (
-              <ContextMenuItem
-                key={s.name}
-                onClick={() => onMove(collectionName, path, s.name, '')}
-                disabled={s.name === collectionName}
-              >
-                {s.name}
-              </ContextMenuItem>
-            ))}
-            {summaries.length === 0 && (
-              <ContextMenuItem disabled>No collections</ContextMenuItem>
-            )}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        <ContextMenuSeparator />
-        <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}>
-          Delete
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
-// Renders a folder node with expandable children.
-function FolderNode({
-  name,
-  items,
-  collectionName,
-  basePath,
-  depth,
-  filter,
-  summaries,
-  onNewRequest,
-  onNewFolder,
-  onMove,
-  onDelete,
-  onDuplicate,
-}: {
-  name: string;
-  items: CollectionItem[];
-  collectionName: string;
-  basePath: string;
-  depth: number;
-  filter: string;
-  summaries: CollectionSummary[];
-  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
-  onNewFolder: (collection: string, folderPath: string) => Promise<void>;
-  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
-  onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(depth < 2);
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(name);
-
-  const handleRename = async () => {
-    const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === name) { setIsRenaming(false); return; }
-    // Build the new path by replacing the last segment of basePath with the new name.
-    const parts = basePath.split('/');
-    parts[parts.length - 1] = trimmed;
-    const newPath = parts.join('/');
-    try {
-      await moveItem(collectionName, basePath, collectionName, newPath);
-      setIsRenaming(false);
-    } catch (err) {
-      console.error('Rename folder failed:', err);
-    }
-  };
-
-  // Auto-expand when a search filter is active.
-  useEffect(() => {
-    if (filter) setExpanded(true);
-  }, [filter]);
-
-  const filteredItems = filter
-    ? items.filter((item) => {
-        if (item.type === 'request') {
-          return item.name.toLowerCase().includes(filter);
-        }
-        return true;
-      })
-    : items;
-
-  if (filter && filteredItems.length === 0) return null;
-
-  return (
-    <div>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="group relative flex items-center">
-            <button
-              type="button"
-              data-sidebar-item
-              className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-              onClick={() => setExpanded((prev) => !prev)}
-              aria-expanded={expanded}
-              aria-label={`${expanded ? 'Collapse' : 'Expand'} folder ${name}`}
-            >
-              {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              {expanded ? (
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              {isRenaming ? (
-                <Input
-                  autoFocus
-                  className="h-6 text-xs flex-1"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleRename();
-                    if (e.key === 'Escape') setIsRenaming(false);
-                  }}
-                  onBlur={() => void handleRename()}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="truncate font-medium text-foreground">{name}</span>
-              )}
-            </button>
-            <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); void onNewRequest(collectionName, basePath); }}
-                title="New Request"
-              >
-                <Plus className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); void onNewFolder(collectionName, basePath); }}
-                title="New Folder"
-              >
-                <FolderPlus className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); setIsRenaming(true); setRenameValue(name); }}
-                title="Rename"
-              >
-                <Pencil className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-destructive"
-                onClick={(e) => { e.stopPropagation(); onDelete({ type: 'folder', collection: collectionName, path: basePath, name }); }}
-                title="Delete"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
-          <ContextMenuItem onClick={() => void onNewRequest(collectionName, basePath)}>
-            New Request
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
-            New Folder
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'folder', collection: collectionName, path: basePath, name })}>
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {expanded && (
-        <div className="pl-3">
-          {filteredItems.map((item, idx) => {
-            if (item.type === 'folder') {
-              const folderPath = basePath ? `${basePath}/${item.name}` : item.name;
-              return (
-                <FolderNode
-                  key={`folder-${folderPath}`}
-                  name={item.name}
-                  items={item.items}
-                  collectionName={collectionName}
-                  basePath={folderPath}
-                  depth={depth + 1}
-                  filter={filter}
-                  summaries={summaries}
-                  onNewRequest={onNewRequest}
-                  onNewFolder={onNewFolder}
-                  onMove={onMove}
-                  onDelete={onDelete}
-                  onDuplicate={onDuplicate}
-                />
-              );
-            }
-            const fileName = item.fileName ?? item.name;
-            const requestPath = basePath
-              ? `${basePath}/${fileName}`
-              : fileName;
-            return (
-              <RequestNode
-                key={`request-${requestPath}-${idx}`}
-                uid={item.uid}
-                name={item.name}
-                method={item.method}
-                collectionName={collectionName}
-                path={requestPath}
-                itemData={item}
-                summaries={summaries}
-                onMove={onMove}
-                onDelete={onDelete}
-                onDuplicate={onDuplicate}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Renders a top-level collection as an expandable tree node.
-function CollectionNode({
-  summary,
-  filter,
-  summaries,
-  onNewRequest,
-  onNewFolder,
-  onMove,
-  onDelete,
-  onDuplicate,
-}: {
-  summary: CollectionSummary;
-  filter: string;
-  summaries: CollectionSummary[];
-  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
-  onNewFolder: (collection: string, folderPath: string) => Promise<void>;
-  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
-  onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [collection, setCollection] = useState<Collection | null>(null);
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(summary.name);
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleRename = async () => {
-    const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === summary.name) { setIsRenaming(false); return; }
-    try {
-      await renameCollection(summary.name, trimmed);
-      setIsRenaming(false);
-    } catch (err) {
-      console.error('Rename failed:', err);
-    }
-  };
-
-  // Fetch full collection tree.
-  const refreshTree = useCallback(() => {
-    if (!expanded) return;
-    getCollection(summary.name)
-      .then(setCollection)
-      .catch((err) => console.error('[CollectionsSidebar] fetch error', err));
-  }, [expanded, summary.name]);
-
-  // Fetch when first expanded.
-  useEffect(() => {
-    if (expanded && !collection) {
-      refreshTree();
-    }
-  }, [expanded, collection, refreshTree]);
-
-  // Refresh the expanded tree only when THIS collection is affected.
-  // Debounced to collapse rapid filesystem events into one refresh.
-  const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!expanded) return;
-    let unlisten: (() => void) | undefined;
-    onCollectionChanged((event) => {
-      const affected = event.collection ?? event.name;
-      if (!affected || affected === summary.name) {
-        if (treeDebounce.current) clearTimeout(treeDebounce.current);
-        treeDebounce.current = setTimeout(() => refreshTree(), 300);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      unlisten?.();
-      if (treeDebounce.current) clearTimeout(treeDebounce.current);
-    };
-  }, [expanded, refreshTree, summary.name]);
-
-  // Auto-expand when a filter is active.
-  useEffect(() => {
-    if (filter) setExpanded(true);
-  }, [filter]);
-
-  return (
-    <div>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="group relative flex items-center">
-            <button
-              type="button"
-              data-sidebar-item
-              className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer"
-              onClick={() => {
-                // Delay expand to distinguish from double-click.
-                if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; return; }
-                clickTimer.current = setTimeout(() => {
-                  clickTimer.current = null;
-                  setExpanded((prev) => !prev);
-                }, 250);
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
-                const tab: CollectionTab = {
-                  id: summary.uid,
-                  title: summary.name,
-                  tabType: 'collection',
-                  collectionName: summary.name,
-                  isDirty: false,
-                  source: { collection: summary.name, path: '' },
-                };
-                usePaneStore.getState().openTab(tab);
-              }}
-              aria-expanded={expanded}
-              aria-label={`${expanded ? 'Collapse' : 'Expand'} collection ${summary.name}`}
-            >
-              {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              {expanded ? (
-                <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-              ) : (
-                <Folder className="h-4 w-4 shrink-0 text-primary" />
-              )}
-              {isRenaming ? (
-                <Input
-                  autoFocus
-                  className="h-6 text-xs flex-1"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleRename();
-                    if (e.key === 'Escape') setIsRenaming(false);
-                  }}
-                  onBlur={() => void handleRename()}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="truncate font-medium text-foreground">{summary.name}</span>
-              )}
-              <span className="ml-auto text-[10px] text-muted-foreground">{summary.requestCount}</span>
-            </button>
-            <div className="absolute right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  await onNewRequest(summary.name, '');
-                  setExpanded(true);
-                  setCollection(null);
-                }}
-                title="New Request"
-              >
-                <Plus className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  await onNewFolder(summary.name, '');
-                  setExpanded(true);
-                  setCollection(null);
-                }}
-                title="New Folder"
-              >
-                <FolderPlus className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                className="h-5 w-5 flex items-center justify-center rounded-sm hover:bg-muted text-muted-foreground"
-                onClick={(e) => { e.stopPropagation(); }}
-                title="Settings"
-              >
-                <Settings className="h-3 w-3" />
-              </button>
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
-          <ContextMenuItem onClick={() => {
-            const tab: CollectionTab = {
-              id: summary.uid,
-              title: summary.name,
-              tabType: 'collection',
-              collectionName: summary.name,
-              isDirty: false,
-              source: { collection: summary.name, path: '' },
-            };
-            usePaneStore.getState().openTab(tab);
-          }}>
-            Overview
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => void onNewRequest(summary.name, '')}>
-            New Request
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>
-            New Folder
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => setIsRenaming(true)}>
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'collection', collection: summary.name, name: summary.name })}>
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {expanded && collection && (
-        <div className="pl-2">
-          {collection.root.items.map((item, idx) => {
-            if (item.type === 'folder') {
-              return (
-                <FolderNode
-                  key={`folder-${item.name}`}
-                  name={item.name}
-                  items={item.items}
-                  collectionName={summary.name}
-                  basePath={item.name}
-                  depth={1}
-                  filter={filter}
-                  summaries={summaries}
-                  onNewRequest={onNewRequest}
-                  onNewFolder={onNewFolder}
-                  onMove={onMove}
-                  onDelete={onDelete}
-                  onDuplicate={onDuplicate}
-                />
-              );
-            }
-            return (
-              <RequestNode
-                key={`request-${item.fileName ?? item.name}-${idx}`}
-                uid={item.uid}
-                name={item.name}
-                method={item.method}
-                collectionName={summary.name}
-                path={item.fileName ?? item.name}
-                itemData={item}
-                summaries={summaries}
-                onMove={onMove}
-                onDelete={onDelete}
-                onDuplicate={onDuplicate}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
+import { Tree } from '@/components/ui/tree';
+import { CollectionNode } from '@/components/collections/CollectionNode';
+import type { DeleteTarget } from '@/components/collections/tree-utils';
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const filter = searchQuery.toLowerCase().trim();
+  const [selectedId, setSelectedId] = useState<string>('');
 
   const [view, setView] = useState<'collections' | 'history'>('collections');
 
@@ -785,10 +138,10 @@ export function CollectionsSidebar() {
     }
   }, [newName]);
 
-  const handleNewRequest = useCallback(async (collection: string, _folderPath: string) => {
+  const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
     // Create a draft tab pre-linked to this collection so Save works
     // directly without prompting the "Save to Collection" dialog.
-    usePaneStore.getState().newDraftTab(undefined, collection);
+    usePaneStore.getState().newDraftTab(undefined, collection, folderPath || undefined);
   }, []);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
@@ -868,56 +221,6 @@ export function CollectionsSidebar() {
       });
     } catch (err) {
       console.error('[CollectionsSidebar] duplicate failed:', err);
-    }
-  }, []);
-
-  // Keyboard navigation for the collection tree.
-  const handleTreeKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const items = Array.from(
-      e.currentTarget.querySelectorAll<HTMLElement>('[data-sidebar-item]')
-    );
-    if (items.length === 0) return;
-
-    const current = document.activeElement as HTMLElement;
-    const currentIdx = items.indexOf(current);
-
-    switch (e.key) {
-      case 'ArrowDown': {
-        e.preventDefault();
-        const next = items[currentIdx + 1] ?? items[0];
-        next.focus();
-        break;
-      }
-      case 'ArrowUp': {
-        e.preventDefault();
-        const prev = items[currentIdx - 1] ?? items[items.length - 1];
-        prev.focus();
-        break;
-      }
-      case 'ArrowRight': {
-        // Expand a collapsed collection or folder.
-        if (current?.getAttribute('aria-expanded') === 'false') {
-          e.preventDefault();
-          current.click();
-        }
-        break;
-      }
-      case 'ArrowLeft': {
-        // Collapse an expanded collection or folder.
-        if (current?.getAttribute('aria-expanded') === 'true') {
-          e.preventDefault();
-          current.click();
-        }
-        break;
-      }
-      case 'Enter': {
-        // Activate the focused item.
-        if (current && items.includes(current)) {
-          e.preventDefault();
-          current.click();
-        }
-        break;
-      }
     }
   }, []);
 
@@ -1013,37 +316,39 @@ export function CollectionsSidebar() {
 
           {/* Collection tree. */}
           <ScrollArea className="flex-1">
-            <div className="px-1 pb-2" tabIndex={0} onKeyDown={handleTreeKeyDown}>
-              {summaries.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 px-4">
-                  <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                  <p className="text-xs text-muted-foreground mb-3">No collections yet.</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => setIsCreating(true)}
-                  >
-                    <Plus className="h-3.5 w-3.5 mr-1.5" />
-                    Create Collection
-                  </Button>
-                </div>
-              ) : (
-                summaries.map((s) => (
-                  <CollectionNode
-                    key={s.name}
-                    summary={s}
-                    filter={filter}
-                    summaries={summaries}
-                    onNewRequest={handleNewRequest}
-                    onNewFolder={handleNewFolder}
-                    onMove={handleMove}
-                    onDelete={setDeleteTarget}
-                    onDuplicate={handleDuplicate}
-                  />
-                ))
-              )}
-            </div>
+            <Tree value={selectedId} onValueChange={setSelectedId}>
+              <div className="px-1 pb-2">
+                {summaries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 px-4">
+                    <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                    <p className="text-xs text-muted-foreground mb-3">No collections yet.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => setIsCreating(true)}
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1.5" />
+                      Create Collection
+                    </Button>
+                  </div>
+                ) : (
+                  summaries.map((s) => (
+                    <CollectionNode
+                      key={s.name}
+                      summary={s}
+                      filter={filter}
+                      summaries={summaries}
+                      onNewRequest={handleNewRequest}
+                      onNewFolder={handleNewFolder}
+                      onMove={handleMove}
+                      onDelete={setDeleteTarget}
+                      onDuplicate={handleDuplicate}
+                    />
+                  ))
+                )}
+              </div>
+            </Tree>
           </ScrollArea>
         </div>
       ) : (
