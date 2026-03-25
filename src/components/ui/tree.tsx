@@ -4,29 +4,29 @@ import { cn } from "@/lib/utils";
 
 // Context shared between Tree and all TreeItem descendants.
 type TreeContextValue = {
-  selectedId: string | undefined;
-  onSelect: (id: string) => void;
+  value: string | undefined;
+  onValueChange: (id: string) => void;
 };
 
 const TreeContext = React.createContext<TreeContextValue>({
-  selectedId: undefined,
-  onSelect: () => {},
+  value: undefined,
+  onValueChange: () => {},
 });
 
 // Root tree container.
 function Tree({
   className,
-  selectedId,
-  onSelect,
+  value,
+  onValueChange,
   children,
   ...props
 }: React.ComponentProps<"ul"> & {
-  selectedId?: string;
-  onSelect?: (id: string) => void;
+  value?: string;
+  onValueChange?: (id: string) => void;
 }) {
   return (
     <TreeContext.Provider
-      value={{ selectedId, onSelect: onSelect ?? (() => {}) }}
+      value={{ value, onValueChange: onValueChange ?? (() => {}) }}
     >
       <ul
         data-slot="tree"
@@ -49,18 +49,26 @@ const TreeItemContext = React.createContext<TreeItemContextValue>({ depth: 0 });
 
 // A single tree node. Handles expand/collapse when children are present.
 function TreeItem({
-  id,
+  value,
   className,
+  open: openProp,
+  onOpenChange,
   children,
   ...props
 }: React.ComponentProps<"li"> & {
-  id: string;
+  value: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const { selectedId, onSelect } = React.useContext(TreeContext);
+  const [openState, setOpenState] = React.useState(false);
+  // Use controlled open when the caller provides it, otherwise fall back to
+  // internal state (uncontrolled mode).
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : openState;
+  const { value: selectedValue, onValueChange } = React.useContext(TreeContext);
   const { depth } = React.useContext(TreeItemContext);
 
-  const isSelected = selectedId === id;
+  const isSelected = selectedValue === value;
 
   // Separate TreeItemContent children from nested Tree children so we can
   // render the expand toggle only when sub-trees exist.
@@ -78,8 +86,12 @@ function TreeItem({
   const hasChildren = subTreeChildren.length > 0;
 
   function handleSelect() {
-    onSelect(id);
-    if (hasChildren) setOpen((prev) => !prev);
+    onValueChange(value);
+    if (hasChildren) {
+      const next = !open;
+      if (!isControlled) setOpenState(next);
+      onOpenChange?.(next);
+    }
   }
 
   return (
