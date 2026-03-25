@@ -242,7 +242,6 @@ export const moveItem = (
     dstPath,
   });
 
-// Stub — backend command will be implemented in Task 7.
 export async function reorderItems(collection: string, folderPath: string, orderedNames: string[]): Promise<void> {
   return invoke('reorder_items', { collection, folderPath, orderedNames });
 }
