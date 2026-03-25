@@ -785,12 +785,10 @@ export function CollectionsSidebar() {
     }
   }, [newName]);
 
-  const handleNewRequest = useCallback(async (_collection: string, _folderPath: string) => {
-    // Create a draft tab — the file is only written to disk when the user
-    // explicitly saves (via the Save button or Cmd+S). This avoids creating
-    // empty placeholder files and prevents filename collisions from two
-    // request-creation paths.
-    usePaneStore.getState().newDraftTab();
+  const handleNewRequest = useCallback(async (collection: string, _folderPath: string) => {
+    // Create a draft tab pre-linked to this collection so Save works
+    // directly without prompting the "Save to Collection" dialog.
+    usePaneStore.getState().newDraftTab(undefined, collection);
   }, []);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {

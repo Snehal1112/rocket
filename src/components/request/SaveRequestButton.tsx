@@ -99,6 +99,39 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
     }
   }, [tab, markClean]);
 
+  // Saves a draft directly to its defaultCollection (no dialog).
+  const handleDraftSaveToCollection = useCallback(async () => {
+    if (!tab.defaultCollection) return;
+    const collection = tab.defaultCollection;
+    const name = tab.title || 'New Request';
+    try {
+      const saved = await saveRequest(collection, name, buildRequestPayload(tab));
+      // Convert the draft tab into a collection-owned request tab.
+      usePaneStore.setState((state) => {
+        const updateNode = (node: any): any => {
+          if (node.type === 'leaf') {
+            const idx = node.tabs.findIndex((t: any) => t.id === tab.id);
+            if (idx === -1) return node;
+            const tabs = [...node.tabs];
+            tabs[idx] = {
+              ...tabs[idx],
+              id: saved.uid,
+              tabType: 'request',
+              isDirty: false,
+              defaultCollection: undefined,
+              source: { collection, path: saved.fileName ?? `${name}.json` },
+            };
+            return { ...node, tabs, activeTabId: node.activeTabId === tab.id ? saved.uid : node.activeTabId };
+          }
+          return { ...node, children: [updateNode(node.children[0]), updateNode(node.children[1])] };
+        };
+        return { root: updateNode(state.root) };
+      });
+    } catch (err) {
+      console.error('[SaveRequestButton] Draft save to collection failed:', err);
+    }
+  }, [tab]);
+
   // Listen for Cmd+S events dispatched from the global keyboard handler.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -106,15 +139,32 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
       if (detail?.tabId !== tab.id) return;
       if (tab.source) {
         void handleDirectSave();
+      } else if (tab.defaultCollection) {
+        void handleDraftSaveToCollection();
       } else {
         setSaveAsOpen(true);
       }
     };
     window.addEventListener('rocket:save-draft', handler);
     return () => window.removeEventListener('rocket:save-draft', handler);
-  }, [tab.id, tab.source, handleDirectSave]);
+  }, [tab.id, tab.source, tab.defaultCollection, handleDirectSave, handleDraftSaveToCollection]);
 
-  // Draft tab — single button that opens the save-as dialog.
+  // Draft tab with a default collection — save directly, no dialog needed.
+  if (!tab.source && tab.defaultCollection) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 px-3"
+        onClick={() => void handleDraftSaveToCollection()}
+      >
+        <Save className="mr-1 h-3.5 w-3.5" />
+        Save
+      </Button>
+    );
+  }
+
+  // Draft tab without a default collection — opens the save-as dialog.
   if (!tab.source) {
     return (
       <>
