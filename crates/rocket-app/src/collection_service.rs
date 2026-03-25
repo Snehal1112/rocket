@@ -68,6 +68,10 @@ impl CollectionService {
         self.repo.move_item(src_collection, src_path, dst_collection, dst_path)
     }
 
+    pub fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
+        self.repo.reorder_items(collection, folder_path, ordered_names)
+    }
+
     pub fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
         self.repo.get_settings(name)
     }
@@ -147,6 +151,7 @@ mod tests {
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
         fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
             Ok(rocket_collection::CollectionSettings::default())
         }

@@ -102,6 +102,16 @@ pub fn move_item(
 }
 
 #[tauri::command]
+pub fn reorder_items(
+    collection: String,
+    folder_path: String,
+    ordered_names: Vec<String>,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.reorder_items(&collection, &folder_path, &ordered_names)
+}
+
+#[tauri::command]
 pub fn get_collection_settings(
     name: String,
     svc: State<'_, CollectionService>,
