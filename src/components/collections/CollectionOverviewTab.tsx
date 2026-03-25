@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Folder as FolderIcon, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -115,8 +115,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       .finally(() => setLoading(false));
   }, [collectionName]);
 
-  // Save all settings to disk.
-  const handleSave = useCallback(async () => {
+  // Persist settings to disk.
+  const saveSettings = useCallback(async () => {
     try {
       const apiAuth = toApiAuth(auth);
       await saveCollectionSettings(collectionName, {
@@ -134,10 +134,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     }
   }, [collectionName, auth, headers, description, variables]);
 
-  // Save description on blur.
-  const handleDescriptionBlur = useCallback(async () => {
-    await handleSave();
-  }, [handleSave]);
+  // Keep a ref to the latest save function so the cleanup effect can call it.
+  const saveRef = useRef(saveSettings);
+  saveRef.current = saveSettings;
+
+  // Auto-save when the component unmounts (user navigated away).
+  useEffect(() => {
+    return () => { saveRef.current(); };
+  }, [collectionName]);
 
   if (loading) {
     return (
@@ -213,7 +217,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   placeholder="Add a description..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  onBlur={handleDescriptionBlur}
+                  onBlur={saveSettings}
                   className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
@@ -226,7 +230,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 <h3 className="text-xs font-medium text-muted-foreground">Default Headers</h3>
                 <HeadersEditor headers={headers} onChange={setHeaders} />
                 <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSave} className="gap-1.5">
+                  <Button size="sm" onClick={saveSettings} className="gap-1.5">
                     <Save className="h-3.5 w-3.5" />
                     Save
                   </Button>
@@ -254,7 +258,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               <AuthEditor auth={auth} onChange={setAuth} />
 
               <div className="flex justify-end">
-                <Button size="sm" onClick={handleSave} className="gap-1.5">
+                <Button size="sm" onClick={saveSettings} className="gap-1.5">
                   <Save className="h-3.5 w-3.5" />
                   Save
                 </Button>
@@ -271,7 +275,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               />
 
               <div className="flex justify-end">
-                <Button size="sm" onClick={handleSave} className="gap-1.5">
+                <Button size="sm" onClick={saveSettings} className="gap-1.5">
                   <Save className="h-3.5 w-3.5" />
                   Save
                 </Button>
