@@ -160,19 +160,35 @@ For future Bruno export:
 
 No data is lost because all fields have direct mappings.
 
-### 7. Files to Change
+### 7. New Tauri Command
+
+Add a lightweight `get_collection_settings` command to avoid loading the full collection tree just to read settings. Currently settings are only accessible via `get_collection` which walks the entire filesystem.
+
+```rust
+#[tauri::command]
+pub fn get_collection_settings(
+    name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<CollectionSettings, DomainError> {
+    svc.get_settings(&name)
+}
+```
+
+### 8. Files to Change
 
 **Backend (Rust)**:
 - `crates/rocket-collection/src/settings.rs` — add `CollectionVariable` struct and `variables` field
 - `crates/rocket-app/src/execution_service.rs` — load collection variables into the variable map
+- `src-tauri/src/commands/collections.rs` — add `get_collection_settings` command
 
 **Frontend (TypeScript)**:
-- `src/lib/tauri-api.ts` — add `CollectionVariable` type, update `CollectionSettings`
+- `src/lib/tauri-api.ts` — add `CollectionVariable` type, update `CollectionSettings`, add `getCollectionSettings()` API
 - `src/types/pane-types.ts` — update `CollectionSection` type
 - `src/components/collections/CollectionOverviewTab.tsx` — rewrite with new tab layout (Overview, Authorization, Variables)
 - New: `src/components/collections/CollectionVariablesEditor.tsx` — variable table component
 
-### 8. Out of Scope
+### 9. Out of Scope
 - Pre-request scripts and test scripts (Postman/Bruno feature, complex JS runtime)
 - Postman/Bruno import/export commands (future feature, this spec just ensures data compatibility)
 - Collection-level events/webhooks
+- Folder-level auth/headers cascade (Postman feature, requires Folder struct changes)
