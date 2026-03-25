@@ -3655,6 +3655,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger",
  "log",
+ "reqwest 0.12.28",
  "rocket-app",
  "rocket-collection",
  "rocket-environment",
@@ -3672,6 +3673,9 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tokio",
+ "url",
+ "uuid",
+ "webkit2gtk",
 ]
 
 [[package]]
@@ -3727,14 +3731,17 @@ name = "rocket-http"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "hex",
  "hmac",
+ "rand 0.8.5",
  "reqwest 0.12.28",
  "rocket-shared",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
