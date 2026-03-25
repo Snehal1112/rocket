@@ -4,8 +4,7 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { cn } from '@/lib/utils';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
-import { saveCollectionSettings } from '@/lib/tauri-api';
-import { toApiAuth } from '@/lib/execute-request';
+import { saveCollectionSettings, type Auth } from '@/lib/tauri-api';
 
 interface CollectionSettingsDialogProps {
   collectionName: string;
@@ -32,9 +31,14 @@ export function CollectionSettingsDialog({
 
   async function handleSave() {
     try {
-      const apiAuth = toApiAuth(auth);
+      // Convert nested AuthState to flat API Auth for Rust.
+      let apiAuth: Auth | undefined;
+      if (auth.authType === 'basic') apiAuth = { authType: 'basic', username: auth.basic?.username ?? '', password: auth.basic?.password ?? '' };
+      else if (auth.authType === 'bearer') apiAuth = { authType: 'bearer', token: auth.bearer?.token ?? '' };
+      else if (auth.authType === 'api-key') apiAuth = { authType: 'api-key', key: auth.apiKey?.key ?? '', value: auth.apiKey?.value ?? '', addTo: auth.apiKey?.addTo ?? 'header' };
+      else apiAuth = undefined;
       await saveCollectionSettings(collectionName, {
-        auth: apiAuth.authType !== 'none' ? apiAuth : undefined,
+        auth: apiAuth,
         headers: headers.filter((h) => h.key).map((h) => ({
           key: h.key,
           value: h.value,

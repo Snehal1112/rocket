@@ -16,7 +16,7 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 import { usePaneStore } from '@/stores/pane-store';
-import { toApiAuth } from '@/lib/execute-request';
+import type { Auth } from '@/lib/tauri-api';
 import type { AuthState, KeyValueEntry, CollectionTab, CollectionSection } from '@/types/pane-types';
 
 interface CollectionOverviewTabProps {
@@ -47,9 +47,107 @@ function plural(n: number, singular: string, pluralForm: string): string {
   return `${n} ${n === 1 ? singular : pluralForm}`;
 }
 
+// Convert flat Rust Auth (from API) to nested frontend AuthState.
 function toAuthState(auth: Collection['settings']['auth']): AuthState {
   if (!auth) return { authType: 'none' };
-  return auth as unknown as AuthState;
+  const a = auth as Record<string, unknown>;
+  const authType = a.authType as string;
+
+  // Rust uses kebab-case "o-auth2", frontend uses "oauth2".
+  if (authType === 'o-auth2' || authType === 'oauth2') {
+    return {
+      authType: 'oauth2',
+      oauth2: {
+        grantType: ((a.grantType as string) ?? 'client_credentials') as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
+        authorizationUrl: (a.authorizationUrl as string) ?? '',
+        tokenUrl: (a.tokenUrl as string) ?? '',
+        callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+        clientId: (a.clientId as string) ?? '',
+        clientSecret: (a.clientSecret as string) ?? '',
+        scope: (a.scope as string) ?? '',
+        state: (a.state as string) ?? '',
+        username: (a.username as string) ?? '',
+        password: (a.password as string) ?? '',
+        clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
+        headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
+        addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
+        verifySsl: (a.verifySsl as boolean) ?? true,
+        accessToken: (a.accessToken as string) ?? '',
+        refreshToken: (a.refreshToken as string) ?? '',
+        expiresIn: (a.expiresIn as number) ?? null,
+        tokenAcquiredAt: (a.tokenAcquiredAt as number) ?? null,
+      },
+    };
+  }
+
+  if (authType === 'aws-sig-v4') {
+    return {
+      authType: 'aws-sig-v4',
+      awsSigV4: {
+        accessKey: (a.accessKey as string) ?? '',
+        secretKey: (a.secretKey as string) ?? '',
+        region: (a.region as string) ?? '',
+        service: (a.service as string) ?? '',
+        sessionToken: (a.sessionToken as string) ?? '',
+      },
+    };
+  }
+
+  if (authType === 'basic') {
+    return { authType: 'basic', basic: { username: (a.username as string) ?? '', password: (a.password as string) ?? '' } };
+  }
+
+  if (authType === 'bearer') {
+    return { authType: 'bearer', bearer: { token: (a.token as string) ?? '' } };
+  }
+
+  if (authType === 'api-key') {
+    return { authType: 'api-key', apiKey: { key: (a.key as string) ?? '', value: (a.value as string) ?? '', addTo: ((a.addTo as string) ?? 'header') as 'header' | 'query' } };
+  }
+
+  return { authType: 'none' };
+}
+
+// Convert nested frontend AuthState back to flat Rust Auth for persistence.
+function authStateToApi(auth: AuthState): Auth | undefined {
+  switch (auth.authType) {
+    case 'none':
+    case 'inherit':
+      return undefined;
+    case 'basic':
+      return { authType: 'basic', username: auth.basic?.username ?? '', password: auth.basic?.password ?? '' };
+    case 'bearer':
+      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
+    case 'api-key':
+      return { authType: 'api-key', key: auth.apiKey?.key ?? '', value: auth.apiKey?.value ?? '', addTo: auth.apiKey?.addTo ?? 'header' };
+    case 'oauth2': {
+      const o = auth.oauth2;
+      return {
+        authType: 'o-auth2',
+        grantType: o?.grantType ?? 'client_credentials',
+        clientId: o?.clientId ?? '',
+        clientSecret: o?.clientSecret ?? '',
+        tokenUrl: o?.tokenUrl ?? '',
+        scope: o?.scope || undefined,
+        accessToken: o?.accessToken || undefined,
+        refreshToken: o?.refreshToken || undefined,
+        expiresAt: undefined,
+      } as unknown as Auth;
+    }
+    case 'aws-sig-v4': {
+      const a = auth.awsSigV4;
+      return {
+        authType: 'aws-sig-v4',
+        accessKey: a?.accessKey ?? '',
+        secretKey: a?.secretKey ?? '',
+        region: a?.region ?? '',
+        service: a?.service ?? '',
+        sessionToken: a?.sessionToken || undefined,
+      } as unknown as Auth;
+    }
+    default:
+      return undefined;
+  }
 }
 
 function toKeyValueEntries(
@@ -118,9 +216,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Persist settings to disk.
   const saveSettings = useCallback(async () => {
     try {
-      const apiAuth = toApiAuth(auth);
       await saveCollectionSettings(collectionName, {
-        auth: apiAuth.authType !== 'none' ? apiAuth : undefined,
+        auth: authStateToApi(auth),
         headers: headers.filter((h) => h.key).map((h) => ({
           key: h.key,
           value: h.value,
