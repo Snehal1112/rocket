@@ -16,7 +16,7 @@ function EmptyState({ groupId }: { groupId: string }) {
       <div className="flex flex-col items-center gap-6 text-center max-w-sm">
         {/* Logo and branding. */}
         <div className="flex flex-col items-center gap-3">
-          <img src="/rocket.png" alt="Rocket API" className="w-12 h-12 object-contain" />
+          <img src="/rocket.png" alt="Rocket API" className="w-16 h-16 object-contain" />
           <div>
             <h2 className="text-lg font-semibold text-foreground">Rocket API</h2>
             <p className="text-sm text-muted-foreground mt-1">
