@@ -65,6 +65,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
           clientAuthentication: 'body',
           headerPrefix: 'Bearer',
           addTokenTo: 'header',
+          verifySsl: true,
           accessToken: '',
           refreshToken: '',
           expiresIn: null,
@@ -109,6 +110,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
           oauth.clientSecret,
           oauth.scope || undefined,
           oauth.callbackUrl || undefined,
+          oauth.verifySsl,
         );
         patchOAuth2({
           accessToken: token.access_token,
@@ -475,6 +477,10 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                     </SelectContent>
                   </Select>
                 </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={o.verifySsl} onChange={(e) => patchOAuth2({ verifySsl: e.target.checked })} className="rounded" />
+                  <span className="text-[11px] text-muted-foreground">Verify SSL certificates</span>
+                </label>
               </div>
             </details>
 
