@@ -1,4 +1,5 @@
 pub mod aws_sig;
+pub mod pkce;
 pub mod cookie;
 pub mod cookie_repository;
 pub mod executor;
@@ -13,3 +14,4 @@ pub use executor::HttpExecutor;
 pub use oauth2::{acquire_token, OAuthConfig, OAuthToken};
 pub use request::{HttpRequest, RequestOptions};
 pub use response::HttpResponse;
+pub use pkce::{generate_pkce, PkcePair};
