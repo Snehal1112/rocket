@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Folder as FolderIcon, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -213,41 +213,23 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       .finally(() => setLoading(false));
   }, [collectionName]);
 
-  // Refs to hold the latest editable state for auto-save on unmount.
-  const stateRef = useRef({ auth, headers, description, variables });
-  stateRef.current = { auth, headers, description, variables };
-
-  // Save function that takes an explicit target collection name.
-  const saveSettingsFor = useCallback(async (targetCollection: string) => {
-    const { auth: a, headers: h, description: d, variables: v } = stateRef.current;
+  // Save settings to disk (explicit save only, no auto-save).
+  const saveSettings = useCallback(async () => {
     try {
-      await saveCollectionSettings(targetCollection, {
-        auth: authStateToApi(a),
-        headers: h.filter((hdr) => hdr.key).map((hdr) => ({
-          key: hdr.key,
-          value: hdr.value,
-          enabled: hdr.enabled,
+      await saveCollectionSettings(collectionName, {
+        auth: authStateToApi(auth),
+        headers: headers.filter((h) => h.key).map((h) => ({
+          key: h.key,
+          value: h.value,
+          enabled: h.enabled,
         })),
-        description: d || undefined,
-        variables: v,
+        description: description || undefined,
+        variables,
       } as any);
     } catch (err) {
       console.error('[CollectionOverviewTab] save failed', err);
     }
-  }, []);
-
-  // Convenience wrapper using the current collection name.
-  const saveSettings = useCallback(async () => {
-    await saveSettingsFor(collectionName);
-  }, [collectionName, saveSettingsFor]);
-
-  // Auto-save when the component unmounts or collection changes.
-  // Captures the collection name in the closure so the cleanup saves
-  // to the correct collection, not the next one.
-  useEffect(() => {
-    const name = collectionName;
-    return () => { saveSettingsFor(name); };
-  }, [collectionName, saveSettingsFor]);
+  }, [collectionName, auth, headers, description, variables]);
 
   if (loading) {
     return (
