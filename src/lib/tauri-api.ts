@@ -353,6 +353,7 @@ export const oauth2AuthCodeFlow = (
   clientSecret: string,
   scope?: string,
   callbackUrl?: string,
+  verifySsl?: boolean,
 ) => invoke<OAuth2TokenResponse>("oauth2_auth_code_flow", {
-  authorizationUrl, tokenUrl, clientId, clientSecret, scope, callbackUrl,
+  authorizationUrl, tokenUrl, clientId, clientSecret, scope, callbackUrl, verifySsl,
 });

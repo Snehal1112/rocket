@@ -86,6 +86,7 @@ export interface AuthState {
     clientAuthentication: 'header' | 'body';
     headerPrefix: string;
     addTokenTo: 'header' | 'queryParams';
+    verifySsl: boolean;
     accessToken: string;
     refreshToken: string;
     expiresIn: number | null;

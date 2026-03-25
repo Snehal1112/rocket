@@ -46,6 +46,7 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
         clientAuthentication: auth.oauth2?.clientAuthentication ?? 'body',
         headerPrefix: auth.oauth2?.headerPrefix ?? 'Bearer',
         addTokenTo: auth.oauth2?.addTokenTo ?? 'header',
+        verifySsl: auth.oauth2?.verifySsl ?? true,
         accessToken: auth.oauth2?.accessToken ?? '',
         refreshToken: auth.oauth2?.refreshToken ?? '',
         expiresIn: auth.oauth2?.expiresIn ?? null,
