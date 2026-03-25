@@ -25,6 +25,46 @@ export function mapApiRequestToState(req: ApiRequest): RequestState {
     case 'api-key':
       auth = { authType: 'api-key', apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.addTo } };
       break;
+    case 'oauth2': {
+      const a = req.auth as Record<string, unknown>;
+      auth = {
+        authType: 'oauth2',
+        oauth2: {
+          grantType: (a.grantType ?? 'client_credentials') as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
+          authorizationUrl: (a.authorizationUrl as string) ?? '',
+          tokenUrl: (a.tokenUrl as string) ?? '',
+          callbackUrl: (a.callbackUrl as string) ?? 'http://localhost:9876/callback',
+          clientId: (a.clientId as string) ?? '',
+          clientSecret: (a.clientSecret as string) ?? '',
+          scope: (a.scope as string) ?? '',
+          state: (a.state as string) ?? '',
+          username: (a.username as string) ?? '',
+          password: (a.password as string) ?? '',
+          clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
+          headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
+          addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
+          accessToken: (a.accessToken as string) ?? '',
+          refreshToken: (a.refreshToken as string) ?? '',
+          expiresIn: (a.expiresIn as number) ?? null,
+          tokenAcquiredAt: (a.tokenAcquiredAt as number) ?? null,
+        },
+      };
+      break;
+    }
+    case 'aws-sig-v4': {
+      const a = req.auth as Record<string, unknown>;
+      auth = {
+        authType: 'aws-sig-v4',
+        awsSigV4: {
+          accessKey: (a.accessKey as string) ?? '',
+          secretKey: (a.secretKey as string) ?? '',
+          region: (a.region as string) ?? '',
+          service: (a.service as string) ?? '',
+          sessionToken: (a.sessionToken as string) ?? '',
+        },
+      };
+      break;
+    }
     default:
       auth = { authType: 'none' };
   }
