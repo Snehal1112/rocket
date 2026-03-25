@@ -56,7 +56,7 @@ export interface PaneState {
   activeGroupId: string;
 
   // Tab actions.
-  newDraftTab: (groupId?: string, defaultCollection?: string) => void;
+  newDraftTab: (groupId?: string, defaultCollection?: string, defaultFolderPath?: string) => void;
   openTab: (tab: Tab, groupId?: string) => void;
   closeTab: (tabId: string, groupId: string) => void;
   setActiveTab: (tabId: string, groupId: string) => void;
@@ -83,12 +83,15 @@ export interface PaneState {
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
 
-  newDraftTab(groupId, defaultCollection) {
+  newDraftTab(groupId, defaultCollection, defaultFolderPath) {
     const { root, activeGroupId } = get();
     const targetGroupId = groupId ?? activeGroupId;
     const tab = createDefaultTab();
     if (defaultCollection) {
       (tab as any).defaultCollection = defaultCollection;
+    }
+    if (defaultFolderPath) {
+      (tab as any).defaultFolderPath = defaultFolderPath;
     }
     const newRoot = updateLeaf(root, targetGroupId, (leaf) => ({
       ...leaf,
