@@ -18,6 +18,7 @@ export { RocketClock } from './RocketClock';
 export { RocketPlug } from './RocketPlug';
 export { RocketCelebrate } from './RocketCelebrate';
 export { RocketTelescope } from './RocketTelescope';
+export { RocketLiftOff } from './RocketLiftoff';
 
 // Legacy alias.
 export { RocketLaunch as RocketIllustration } from './RocketLaunch';
