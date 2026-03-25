@@ -53,7 +53,7 @@ interface RequestNodeProps {
   path: string;
   itemData: Extract<CollectionItem, { type: 'request' }>;
   summaries: CollectionSummary[];
-  filter: string;
+  dragDisabled: boolean;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
   onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
@@ -61,7 +61,7 @@ interface RequestNodeProps {
 
 export function RequestNode({
   uid, name, method, collectionName, path, itemData,
-  summaries, filter, onMove, onDelete, onDuplicate,
+  summaries, dragDisabled, onMove, onDelete, onDuplicate,
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
@@ -69,7 +69,7 @@ export function RequestNode({
   const [renameValue, setRenameValue] = useState(name);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: uid, disabled: !!filter });
+    useSortable({ id: uid, disabled: dragDisabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -89,6 +89,7 @@ export function RequestNode({
   };
 
   function handleClick() {
+    if (isRenaming) return;
     const request: RequestState = mapApiRequestToState(itemData, true);
     const tab: RequestTab = {
       id: uid, title: name, tabType: 'request',
@@ -103,12 +104,11 @@ export function RequestNode({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={setNodeRef} style={style} className="group relative flex items-center">
+        <div ref={setNodeRef} style={style} className="group relative flex items-center" {...attributes}>
           {/* Drag handle — grip icon, visible on hover. */}
           <button
             type="button"
             className="absolute left-0 h-full px-0.5 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-muted-foreground"
-            {...attributes}
             {...listeners}
             tabIndex={-1}
           >
@@ -203,6 +203,7 @@ export function RequestNode({
                 {s.name}
               </ContextMenuItem>
             ))}
+            {summaries.length === 0 && <ContextMenuItem disabled>No collections</ContextMenuItem>}
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
