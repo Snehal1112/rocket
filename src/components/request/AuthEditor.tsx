@@ -152,6 +152,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         method: 'POST',
         url: oauth.tokenUrl,
         headers,
+        queryParams: [],
         body: { mode: 'text', content: params.toString() },
         auth: { authType: 'none' },
         options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
@@ -216,6 +217,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       if (oauth.scope) params.set('scope', oauth.scope);
       const result = await executeRequest({
         method: 'POST', url: oauth.tokenUrl, headers,
+        queryParams: [],
         body: { mode: 'text', content: params.toString() },
         auth: { authType: 'none' },
         options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
