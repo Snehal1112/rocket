@@ -84,10 +84,15 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const resolvedAuth = toApiAuth(request.auth, resolve);
 
   try {
+    const resolvedQueryParams = request.queryParams
+      .filter((p) => p.enabled)
+      .map((p) => ({ key: resolve(p.key), value: resolve(p.value), enabled: p.enabled }));
+
     const result = await executeRequest({
       method: request.method,
       url: resolvedUrl,
       headers: resolvedHeaders,
+      queryParams: resolvedQueryParams,
       body: resolvedBody,
       auth: resolvedAuth,
       options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
