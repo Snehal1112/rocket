@@ -8,91 +8,105 @@ import {
   listCollections,
   saveRequest as saveReq,
   type CollectionSummary,
+  type Request,
 } from '@/lib/tauri-api';
-import { toApiAuth } from '@/lib/execute-request';
 import { usePaneStore } from '@/stores/pane-store';
-import type { RequestState } from '@/types/pane-types';
+import type { RequestTab } from '@/types/pane-types';
 
 interface SaveToCollectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  tabId: string;
-  title: string;
-  request: RequestState;
+  tab: RequestTab;
+  /** Build the save payload from the tab. Provided by SaveRequestButton. */
+  buildPayload: (name: string) => Request;
+  /** Pre-select this collection when the dialog opens. */
+  defaultCollection?: string;
 }
 
 export function SaveToCollectionDialog({
   open,
   onOpenChange,
-  tabId,
-  title,
-  request,
+  tab,
+  buildPayload,
+  defaultCollection,
 }: SaveToCollectionDialogProps) {
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [selectedCollection, setSelectedCollection] = useState('');
-  const [requestName, setRequestName] = useState(title || 'New Request');
+  const [requestName, setRequestName] = useState('');
+  const [saving, setSaving] = useState(false);
 
+  // Reset state when dialog opens.
   useEffect(() => {
     if (open) {
       void listCollections().then(setCollections);
-      setRequestName(title || 'New Request');
+      setRequestName(tab.title || 'New Request');
+      setSelectedCollection(defaultCollection ?? '');
+      setSaving(false);
     }
-  }, [open, title]);
+  }, [open, tab.title, defaultCollection]);
 
   const handleSave = useCallback(async () => {
-    if (!selectedCollection || !requestName.trim()) return;
+    const name = requestName.trim();
+    if (!selectedCollection || !name) return;
+    setSaving(true);
     try {
-      const saved = await saveReq(selectedCollection, requestName.trim(), {
-        uid: '',
-        name: requestName.trim(),
-        method: request.method,
-        url: request.url,
-        headers: request.headers
-          .filter((h) => h.enabled)
-          .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-        body: request.body.mode !== 'none'
-          ? { mode: request.body.mode, content: request.body.content }
-          : undefined,
-        auth: toApiAuth(request.auth),
-      });
-      // Update the tab to be collection-owned after a successful save.
-      // Use the uid returned by the backend as the new stable tab id.
+      // Build payload with empty UID for new requests (backend generates unique name).
+      const payload = buildPayload(name);
+      payload.uid = '';
+      payload.name = name;
+
+      const saved = await saveReq(selectedCollection, name, payload);
+
+      // Transition the tab from draft to collection-owned.
       usePaneStore.setState((state) => {
-        const updateTab = (node: any): any => {
+        const updateNode = (node: any): any => {
           if (node.type === 'leaf') {
-            const idx = node.tabs.findIndex((t: any) => t.id === tabId);
+            const idx = node.tabs.findIndex((t: any) => t.id === tab.id);
             if (idx === -1) return node;
             const tabs = [...node.tabs];
             tabs[idx] = {
               ...tabs[idx],
               id: saved.uid,
               tabType: 'request',
-              title: requestName.trim(),
+              title: name,
               isDirty: false,
-              source: { collection: selectedCollection, path: saved.fileName ?? `${requestName.trim()}.json` },
+              defaultCollection: undefined,
+              source: {
+                collection: selectedCollection,
+                path: saved.fileName ?? `${name}.json`,
+              },
             };
-            return { ...node, tabs, activeTabId: node.activeTabId === tabId ? saved.uid : node.activeTabId };
+            return {
+              ...node,
+              tabs,
+              activeTabId: node.activeTabId === tab.id ? saved.uid : node.activeTabId,
+            };
           }
           return {
             ...node,
-            children: [updateTab(node.children[0]), updateTab(node.children[1])],
+            children: [updateNode(node.children[0]), updateNode(node.children[1])],
           };
         };
-        return { root: updateTab(state.root) };
+        return { root: updateNode(state.root) };
       });
+
       onOpenChange(false);
     } catch (err) {
       console.error('[SaveToCollection] Failed:', err);
+      setSaving(false);
     }
-  }, [selectedCollection, requestName, request, tabId, onOpenChange]);
+  }, [selectedCollection, requestName, tab.id, buildPayload, onOpenChange]);
+
+  const canSave = !!selectedCollection && !!requestName.trim() && !saving;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Save to Collection</DialogTitle>
+          <DialogTitle>Save Request</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          {/* Request name input. */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
               Request Name
@@ -101,10 +115,13 @@ export function SaveToCollectionDialog({
               className="text-xs h-8"
               value={requestName}
               onChange={(e) => setRequestName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSave) void handleSave(); }}
+              autoFocus
             />
           </div>
+
+          {/* Collection selector. */}
           <div>
-            {/* v1: flat collection list — folder selection deferred. */}
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
               Collection
             </label>
@@ -138,12 +155,8 @@ export function SaveToCollectionDialog({
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!selectedCollection || !requestName.trim()}
-          >
-            Save
+          <Button size="sm" onClick={handleSave} disabled={!canSave}>
+            {saving ? 'Saving...' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

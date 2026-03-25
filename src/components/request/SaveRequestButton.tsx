@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { saveRequest, type Auth } from '@/lib/tauri-api';
+import { saveRequest, type Auth, type Request as ApiRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
 import type { RequestTab } from '@/types/pane-types';
@@ -17,11 +17,11 @@ interface SaveRequestButtonProps {
   groupId: string;
 }
 
-// Maps AuthState to a persistence-safe format that preserves the full config.
-// Unlike toApiAuth (which converts oauth2 to bearer for execution), this
-// keeps the original auth type and all fields so they survive save/reload.
+// Maps AuthState to the flat Rust Auth shape for disk persistence.
+// Preserves full OAuth2/AWS config (unlike toApiAuth which collapses to bearer).
 function authForSave(auth: RequestTab['request']['auth']): Auth {
   switch (auth.authType) {
+    case 'inherit':
     case 'none':
       return { authType: 'none' };
     case 'basic':
@@ -67,128 +67,90 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
 }
 
 // Builds the request payload for saving to disk.
-function buildRequestPayload(tab: RequestTab) {
+function buildPayloadFromTab(tab: RequestTab, nameOverride?: string): ApiRequest {
+  const body = tab.request.body;
   return {
     uid: tab.id,
-    name: tab.title,
+    name: nameOverride ?? tab.title,
     method: tab.request.method,
     url: tab.request.url,
     headers: tab.request.headers
       .filter((h) => h.key)
       .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-    body:
-      tab.request.body.mode !== 'none'
-        ? { mode: tab.request.body.mode, content: tab.request.body.content }
-        : undefined,
+    body: body.mode !== 'none' ? { mode: body.mode, content: body.content } : undefined,
     auth: authForSave(tab.request.auth),
   };
 }
 
 export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
-  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const markClean = usePaneStore((s) => s.markClean);
 
-  // Saves directly to the linked collection without prompting.
+  // True if this tab is already saved to a collection (has a source).
+  const isCollectionOwned = !!tab.source;
+
+  // Build payload for the SaveToCollectionDialog.
+  const buildPayload = useCallback(
+    (name: string) => buildPayloadFromTab(tab, name),
+    [tab],
+  );
+
+  // Direct save to the existing file (only for collection-owned tabs).
   const handleDirectSave = useCallback(async () => {
     if (!tab.source) return;
     try {
-      await saveRequest(tab.source.collection, tab.source.path, buildRequestPayload(tab));
+      await saveRequest(tab.source.collection, tab.source.path, buildPayloadFromTab(tab));
       markClean(tab.id);
     } catch (err) {
       console.error('[SaveRequestButton] Direct save failed:', err);
     }
   }, [tab, markClean]);
 
-  // Saves a draft directly to its defaultCollection (no dialog).
-  const handleDraftSaveToCollection = useCallback(async () => {
-    if (!tab.defaultCollection) return;
-    const collection = tab.defaultCollection;
-    const name = tab.title || 'New Request';
-    try {
-      const saved = await saveRequest(collection, name, buildRequestPayload(tab));
-      // Convert the draft tab into a collection-owned request tab.
-      usePaneStore.setState((state) => {
-        const updateNode = (node: any): any => {
-          if (node.type === 'leaf') {
-            const idx = node.tabs.findIndex((t: any) => t.id === tab.id);
-            if (idx === -1) return node;
-            const tabs = [...node.tabs];
-            tabs[idx] = {
-              ...tabs[idx],
-              id: saved.uid,
-              tabType: 'request',
-              isDirty: false,
-              defaultCollection: undefined,
-              source: { collection, path: saved.fileName ?? `${name}.json` },
-            };
-            return { ...node, tabs, activeTabId: node.activeTabId === tab.id ? saved.uid : node.activeTabId };
-          }
-          return { ...node, children: [updateNode(node.children[0]), updateNode(node.children[1])] };
-        };
-        return { root: updateNode(state.root) };
-      });
-    } catch (err) {
-      console.error('[SaveRequestButton] Draft save to collection failed:', err);
+  // Handle Save action: direct save if collection-owned, dialog otherwise.
+  const handleSave = useCallback(() => {
+    if (isCollectionOwned) {
+      void handleDirectSave();
+    } else {
+      setSaveDialogOpen(true);
     }
-  }, [tab]);
+  }, [isCollectionOwned, handleDirectSave]);
 
-  // Listen for Cmd+S events dispatched from the global keyboard handler.
+  // Listen for Cmd+S keyboard shortcut.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ tabId: string }>).detail;
       if (detail?.tabId !== tab.id) return;
-      if (tab.source) {
-        void handleDirectSave();
-      } else if (tab.defaultCollection) {
-        void handleDraftSaveToCollection();
-      } else {
-        setSaveAsOpen(true);
-      }
+      handleSave();
     };
     window.addEventListener('rocket:save-draft', handler);
     return () => window.removeEventListener('rocket:save-draft', handler);
-  }, [tab.id, tab.source, tab.defaultCollection, handleDirectSave, handleDraftSaveToCollection]);
+  }, [tab.id, handleSave]);
 
-  // Draft tab with a default collection — save directly, no dialog needed.
-  if (!tab.source && tab.defaultCollection) {
-    return (
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 px-3"
-        onClick={() => void handleDraftSaveToCollection()}
-      >
-        <Save className="mr-1 h-3.5 w-3.5" />
-        Save
-      </Button>
-    );
-  }
-
-  // Draft tab without a default collection — opens the save-as dialog.
-  if (!tab.source) {
+  // Unsaved tab (draft) — single Save button that opens the dialog.
+  if (!isCollectionOwned) {
     return (
       <>
         <Button
           size="sm"
           variant="outline"
           className="h-8 px-3"
-          onClick={() => setSaveAsOpen(true)}
+          onClick={() => setSaveDialogOpen(true)}
         >
           <Save className="mr-1 h-3.5 w-3.5" />
           Save
         </Button>
         <SaveToCollectionDialog
-          open={saveAsOpen}
-          onOpenChange={setSaveAsOpen}
-          tabId={tab.id}
-          title={tab.title}
-          request={tab.request}
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          tab={tab}
+          buildPayload={buildPayload}
+          defaultCollection={tab.defaultCollection}
         />
       </>
     );
   }
 
-  // Collection-linked tab — split button with direct save and save-as options.
+  // Collection-owned tab — split button with Save and Save As.
   return (
     <>
       <div className="flex">
@@ -215,18 +177,17 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
             <DropdownMenuItem onClick={() => void handleDirectSave()}>
               Save
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSaveAsOpen(true)}>
+            <DropdownMenuItem onClick={() => setSaveDialogOpen(true)}>
               Save as...
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
       <SaveToCollectionDialog
-        open={saveAsOpen}
-        onOpenChange={setSaveAsOpen}
-        tabId={tab.id}
-        title={tab.title}
-        request={tab.request}
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        tab={tab}
+        buildPayload={buildPayload}
       />
     </>
   );
