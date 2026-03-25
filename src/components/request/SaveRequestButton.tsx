@@ -69,7 +69,7 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
 // Builds the request payload for saving to disk.
 function buildRequestPayload(tab: RequestTab) {
   return {
-    uid: '',
+    uid: tab.id,
     name: tab.title,
     method: tab.request.method,
     url: tab.request.url,
