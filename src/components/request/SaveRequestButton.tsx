@@ -7,8 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { saveRequest } from '@/lib/tauri-api';
-import { toApiAuth } from '@/lib/execute-request';
+import { saveRequest, type Auth } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
 import type { RequestTab } from '@/types/pane-types';
@@ -18,7 +17,55 @@ interface SaveRequestButtonProps {
   groupId: string;
 }
 
-// Builds the API-compatible request payload from the current tab state.
+// Maps AuthState to a persistence-safe format that preserves the full config.
+// Unlike toApiAuth (which converts oauth2 to bearer for execution), this
+// keeps the original auth type and all fields so they survive save/reload.
+function authForSave(auth: RequestTab['request']['auth']): Auth {
+  switch (auth.authType) {
+    case 'none':
+      return { authType: 'none' };
+    case 'basic':
+      return { authType: 'basic', username: auth.basic?.username ?? '', password: auth.basic?.password ?? '' };
+    case 'bearer':
+      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
+    case 'api-key':
+      return { authType: 'api-key', key: auth.apiKey?.key ?? '', value: auth.apiKey?.value ?? '', addTo: auth.apiKey?.addTo ?? 'header' };
+    case 'oauth2':
+      return {
+        authType: 'oauth2',
+        grantType: auth.oauth2?.grantType ?? 'client_credentials',
+        authorizationUrl: auth.oauth2?.authorizationUrl ?? '',
+        tokenUrl: auth.oauth2?.tokenUrl ?? '',
+        callbackUrl: auth.oauth2?.callbackUrl ?? '',
+        clientId: auth.oauth2?.clientId ?? '',
+        clientSecret: auth.oauth2?.clientSecret ?? '',
+        scope: auth.oauth2?.scope ?? '',
+        state: auth.oauth2?.state ?? '',
+        username: auth.oauth2?.username ?? '',
+        password: auth.oauth2?.password ?? '',
+        clientAuthentication: auth.oauth2?.clientAuthentication ?? 'body',
+        headerPrefix: auth.oauth2?.headerPrefix ?? 'Bearer',
+        addTokenTo: auth.oauth2?.addTokenTo ?? 'header',
+        accessToken: auth.oauth2?.accessToken ?? '',
+        refreshToken: auth.oauth2?.refreshToken ?? '',
+        expiresIn: auth.oauth2?.expiresIn ?? null,
+        tokenAcquiredAt: auth.oauth2?.tokenAcquiredAt ?? null,
+      };
+    case 'aws-sig-v4':
+      return {
+        authType: 'aws-sig-v4',
+        accessKey: auth.awsSigV4?.accessKey ?? '',
+        secretKey: auth.awsSigV4?.secretKey ?? '',
+        region: auth.awsSigV4?.region ?? '',
+        service: auth.awsSigV4?.service ?? '',
+        sessionToken: auth.awsSigV4?.sessionToken ?? '',
+      };
+    default:
+      return { authType: 'none' };
+  }
+}
+
+// Builds the request payload for saving to disk.
 function buildRequestPayload(tab: RequestTab) {
   return {
     uid: '',
@@ -32,7 +79,7 @@ function buildRequestPayload(tab: RequestTab) {
       tab.request.body.mode !== 'none'
         ? { mode: tab.request.body.mode, content: tab.request.body.content }
         : undefined,
-    auth: toApiAuth(tab.request.auth),
+    auth: authForSave(tab.request.auth),
   };
 }
 
