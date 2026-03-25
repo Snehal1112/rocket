@@ -29,6 +29,19 @@ const AUTH_TYPES: { label: string; value: AuthType }[] = [
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
 ];
 
+function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null): string {
+  if (!expiresIn || !acquiredAt) return 'No expiry';
+  const expiresAt = acquiredAt + expiresIn;
+  const now = Math.floor(Date.now() / 1000);
+  if (now >= expiresAt) return 'Expired';
+  const remaining = expiresAt - now;
+  const date = new Date(expiresAt * 1000);
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (remaining < 60) return `Expires in ${remaining}s (at ${time})`;
+  if (remaining < 3600) return `Expires in ${Math.floor(remaining / 60)}m (at ${time})`;
+  return `Expires in ${Math.floor(remaining / 3600)}h (at ${time})`;
+}
+
 export function AuthEditor({ auth, onChange }: AuthEditorProps) {
   const setType = useCallback(
     (authType: AuthType) => {
@@ -41,12 +54,21 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         next.oauth2 = {
           grantType: 'client_credentials',
           authorizationUrl: '',
+          tokenUrl: '',
+          callbackUrl: 'http://localhost:9876/callback',
           clientId: '',
           clientSecret: '',
-          tokenUrl: '',
           scope: '',
+          state: '',
+          username: '',
+          password: '',
+          clientAuthentication: 'body',
+          headerPrefix: 'Bearer',
+          addTokenTo: 'header',
           accessToken: '',
           refreshToken: '',
+          expiresIn: null,
+          tokenAcquiredAt: null,
         };
       if (authType === 'aws-sig-v4')
         next.awsSigV4 = {
@@ -90,6 +112,8 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         patchOAuth2({
           accessToken: token.access_token,
           refreshToken: token.refresh_token || '',
+          expiresIn: typeof token.expires_in === 'number' ? token.expires_in : null,
+          tokenAcquiredAt: Math.floor(Date.now() / 1000),
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -103,21 +127,28 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
     setTokenError('');
     const params = new URLSearchParams();
     params.set('grant_type', oauth.grantType);
-    params.set('client_id', oauth.clientId);
-    params.set('client_secret', oauth.clientSecret);
-    // Note: password grant reuses clientId/clientSecret as username/password.
-    // This is a v1 limitation; dedicated username/password fields can be added later.
     if (oauth.grantType === 'password') {
-      params.set('username', oauth.clientId);
-      params.set('password', oauth.clientSecret);
+      params.set('username', oauth.username);
+      params.set('password', oauth.password);
     }
     if (oauth.scope) params.set('scope', oauth.scope);
+
+    const headers: { key: string; value: string; enabled: boolean }[] = [
+      { key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true },
+    ];
+    if (oauth.clientAuthentication === 'header') {
+      const basic = btoa(`${oauth.clientId}:${oauth.clientSecret}`);
+      headers.push({ key: 'Authorization', value: `Basic ${basic}`, enabled: true });
+    } else {
+      params.set('client_id', oauth.clientId);
+      params.set('client_secret', oauth.clientSecret);
+    }
 
     try {
       const result = await executeRequest({
         method: 'POST',
         url: oauth.tokenUrl,
-        headers: [{ key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true }],
+        headers,
         body: { mode: 'text', content: params.toString() },
         auth: { authType: 'none' },
         options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
@@ -150,12 +181,53 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       patchOAuth2({
         accessToken: json.access_token,
         refreshToken,
+        expiresIn: typeof json.expires_in === 'number' ? json.expires_in : null,
+        tokenAcquiredAt: Math.floor(Date.now() / 1000),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setTokenError(msg);
       patchOAuth2({ accessToken: '' });
     }
+  }, [auth.oauth2, patchOAuth2]);
+
+  const handleRefreshToken = useCallback(async () => {
+    const oauth = auth.oauth2;
+    if (!oauth || !oauth.refreshToken || !oauth.tokenUrl) return;
+    setGettingToken(true);
+    setTokenError('');
+    try {
+      const params = new URLSearchParams();
+      params.set('grant_type', 'refresh_token');
+      params.set('refresh_token', oauth.refreshToken);
+      const headers: { key: string; value: string; enabled: boolean }[] = [
+        { key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true },
+      ];
+      if (oauth.clientAuthentication === 'header') {
+        const basic = btoa(`${oauth.clientId}:${oauth.clientSecret}`);
+        headers.push({ key: 'Authorization', value: `Basic ${basic}`, enabled: true });
+      } else {
+        params.set('client_id', oauth.clientId);
+        params.set('client_secret', oauth.clientSecret);
+      }
+      if (oauth.scope) params.set('scope', oauth.scope);
+      const result = await executeRequest({
+        method: 'POST', url: oauth.tokenUrl, headers,
+        body: { mode: 'text', content: params.toString() },
+        auth: { authType: 'none' },
+        options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      });
+      const json = JSON.parse(result.body);
+      if (json.error) { setTokenError(json.error_description || json.error); return; }
+      patchOAuth2({
+        accessToken: json.access_token,
+        refreshToken: json.refresh_token || oauth.refreshToken,
+        expiresIn: typeof json.expires_in === 'number' ? json.expires_in : null,
+        tokenAcquiredAt: Math.floor(Date.now() / 1000),
+      });
+    } catch (err) {
+      setTokenError(err instanceof Error ? err.message : String(err));
+    } finally { setGettingToken(false); }
   }, [auth.oauth2, patchOAuth2]);
 
   // Helper: patch awsSigV4 fields without losing other auth state.
@@ -291,137 +363,154 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       )}
 
       {/* OAuth 2.0: labeled fields with small labels. */}
-      {auth.authType === 'oauth2' && auth.oauth2 && (
-        <div className="space-y-3">
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-              Grant Type
-            </label>
-            <Select
-              value={auth.oauth2.grantType}
-              onValueChange={(val) =>
-                patchOAuth2({ grantType: val as OAuth2GrantType })
-              }
-            >
-              <SelectTrigger className="w-[200px] h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="client_credentials" className="text-xs">Client Credentials</SelectItem>
-                <SelectItem value="password" className="text-xs">Password</SelectItem>
-                <SelectItem value="authorization_code" className="text-xs">Authorization Code</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {auth.oauth2.grantType === 'authorization_code' && (
+      {auth.authType === 'oauth2' && auth.oauth2 && (() => {
+        const o = auth.oauth2;
+        return (
+          <div className="space-y-3">
+            {/* Grant Type. */}
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                Authorization URL
-              </label>
-              <Input
-                className="text-xs h-8 font-mono"
-                placeholder="https://auth.example.com/authorize"
-                value={auth.oauth2.authorizationUrl}
-                onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })}
-              />
+              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Grant Type</label>
+              <Select value={o.grantType} onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}>
+                <SelectTrigger className="w-[200px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="client_credentials" className="text-xs">Client Credentials</SelectItem>
+                  <SelectItem value="password" className="text-xs">Password</SelectItem>
+                  <SelectItem value="authorization_code" className="text-xs">Authorization Code</SelectItem>
+                  <SelectItem value="implicit" className="text-xs">Implicit</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          )}
 
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-              Token URL
-            </label>
-            <Input
-              className="text-xs h-8 font-mono"
-              placeholder="https://auth.example.com/token"
-              value={auth.oauth2.tokenUrl}
-              onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                Client ID
-              </label>
-              <Input
-                className="text-xs h-8"
-                placeholder="client-id"
-                value={auth.oauth2.clientId}
-                onChange={(e) => patchOAuth2({ clientId: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                Client Secret
-              </label>
-              <Input
-                className="text-xs h-8"
-                type="password"
-                placeholder="client-secret"
-                value={auth.oauth2.clientSecret}
-                onChange={(e) => patchOAuth2({ clientSecret: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-              Scope
-            </label>
-            <Input
-              className="text-xs h-8"
-              placeholder="read write"
-              value={auth.oauth2.scope}
-              onChange={(e) => patchOAuth2({ scope: e.target.value })}
-            />
-          </div>
-
-          {/* Access token row with action button. */}
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-              Access Token
-            </label>
-            <div className="flex items-center gap-1.5">
-              <Input
-                className="h-8 flex-1 truncate text-xs"
-                readOnly
-                placeholder="(none)"
-                value={auth.oauth2.accessToken}
-                title={auth.oauth2.accessToken || undefined}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 shrink-0 px-2 text-xs"
-                disabled={!auth.oauth2.tokenUrl || gettingToken}
-                onClick={handleGetToken}
-              >
-                {gettingToken ? 'Waiting for authorization...' : 'Get Token'}
-              </Button>
-            </div>
-            {tokenError && (
-              <p className="text-[11px] text-destructive mt-1">{tokenError}</p>
+            {/* Authorization URL — auth code and implicit only. */}
+            {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Authorization URL</label>
+                <Input className="text-xs h-8 font-mono" placeholder="https://auth.example.com/authorize" value={o.authorizationUrl} onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })} />
+              </div>
             )}
-          </div>
 
-          {auth.oauth2.refreshToken && (
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
-                Refresh Token
-              </label>
-              <Input
-                className="h-8 truncate text-xs"
-                readOnly
-                value={auth.oauth2.refreshToken}
-                title={auth.oauth2.refreshToken}
-              />
+            {/* Token URL — hidden for implicit. */}
+            {o.grantType !== 'implicit' && (
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Token URL</label>
+                <Input className="text-xs h-8 font-mono" placeholder="https://auth.example.com/token" value={o.tokenUrl} onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })} />
+              </div>
+            )}
+
+            {/* Callback URL + State — auth code and implicit only. */}
+            {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (<>
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Callback URL</label>
+                <div className="flex gap-1.5">
+                  <Input className="text-xs h-8 font-mono flex-1" value={o.callbackUrl} onChange={(e) => patchOAuth2({ callbackUrl: e.target.value })} />
+                  <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.callbackUrl)} title="Copy">Copy</Button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">State</label>
+                <Input className="text-xs h-8" placeholder="Leave empty for auto-generated" value={o.state} onChange={(e) => patchOAuth2({ state: e.target.value })} />
+              </div>
+            </>)}
+
+            {/* Client ID + Secret — Secret hidden for implicit. */}
+            <div className={o.grantType === 'implicit' ? '' : 'grid grid-cols-2 gap-2'}>
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Client ID</label>
+                <Input className="text-xs h-8" placeholder="client-id" value={o.clientId} onChange={(e) => patchOAuth2({ clientId: e.target.value })} />
+              </div>
+              {o.grantType !== 'implicit' && (
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Client Secret</label>
+                  <Input className="text-xs h-8" type="password" placeholder="client-secret" value={o.clientSecret} onChange={(e) => patchOAuth2({ clientSecret: e.target.value })} />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Scope — always visible. */}
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Scope</label>
+              <Input className="text-xs h-8" placeholder="read write" value={o.scope} onChange={(e) => patchOAuth2({ scope: e.target.value })} />
+            </div>
+
+            {/* Username + Password — password grant only. */}
+            {o.grantType === 'password' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Username</label>
+                  <Input className="text-xs h-8" placeholder="user@example.com" value={o.username} onChange={(e) => patchOAuth2({ username: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Password</label>
+                  <Input className="text-xs h-8" type="password" value={o.password} onChange={(e) => patchOAuth2({ password: e.target.value })} />
+                </div>
+              </div>
+            )}
+
+            {/* Advanced Options — collapsible. */}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground py-1">Advanced Options</summary>
+              <div className="space-y-3 mt-2 pl-1">
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Client Authentication</label>
+                  <Select value={o.clientAuthentication} onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}>
+                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="body" className="text-xs">Send in Request Body</SelectItem>
+                      <SelectItem value="header" className="text-xs">Send as Basic Auth Header</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Header Prefix</label>
+                  <Input className="text-xs h-8" value={o.headerPrefix} onChange={(e) => patchOAuth2({ headerPrefix: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Add Token To</label>
+                  <Select value={o.addTokenTo} onValueChange={(v) => patchOAuth2({ addTokenTo: v as 'header' | 'queryParams' })}>
+                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="header" className="text-xs">Header</SelectItem>
+                      <SelectItem value="queryParams" className="text-xs">Query Params</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </details>
+
+            {/* Token section. */}
+            <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Access Token</label>
+                <div className="flex gap-1.5">
+                  <Input className="h-8 flex-1 text-xs truncate" readOnly value={o.accessToken} placeholder="(none)" title={o.accessToken || undefined} />
+                  <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.accessToken)} title="Copy">Copy</Button>
+                </div>
+              </div>
+              {o.refreshToken && (
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Refresh Token</label>
+                  <div className="flex gap-1.5">
+                    <Input className="h-8 flex-1 text-xs truncate" readOnly value={o.refreshToken} />
+                    <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.refreshToken)} title="Copy">Copy</Button>
+                  </div>
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground">{tokenExpiryDisplay(o.expiresIn, o.tokenAcquiredAt)}</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs" disabled={gettingToken || (!o.tokenUrl && o.grantType !== 'implicit')} onClick={handleGetToken}>
+                  {gettingToken ? 'Waiting...' : 'Get Token'}
+                </Button>
+                {o.refreshToken && (
+                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={gettingToken || !o.tokenUrl} onClick={handleRefreshToken}>
+                    Refresh
+                  </Button>
+                )}
+              </div>
+              {tokenError && <p className="text-[10px] text-destructive">{tokenError}</p>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* AWS Signature v4 panel. */}
       {auth.authType === 'aws-sig-v4' && auth.awsSigV4 && (
