@@ -197,10 +197,10 @@ export function CollectionNode({
             <DropdownMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}>Overview</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={async () => { await onNewRequest(summary.name, ''); setOpen(true); setCollection(null); }}>
+              <DropdownMenuItem onClick={async () => { await onNewRequest(summary.name, ''); setOpen(true); }}>
                 <Plus className="h-3.5 w-3.5 mr-2" /> New Request
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={async () => { await onNewFolder(summary.name, ''); setOpen(true); setCollection(null); }}>
+              <DropdownMenuItem onClick={async () => { await onNewFolder(summary.name, ''); setOpen(true); }}>
                 <FolderPlus className="h-3.5 w-3.5 mr-2" /> New Folder
               </DropdownMenuItem>
               <DropdownMenuSeparator />
