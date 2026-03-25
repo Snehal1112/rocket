@@ -31,7 +31,7 @@ export interface RequestTab extends BaseTab {
   response: ResponseState | null;
 }
 
-export type CollectionSection = 'auth' | 'headers' | 'requests';
+export type CollectionSection = 'overview' | 'auth' | 'variables';
 
 export interface CollectionTab extends BaseTab {
   tabType: 'collection';

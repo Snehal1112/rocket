@@ -10,5 +10,5 @@ pub use collection::Collection;
 pub use folder::{CollectionItem, Folder};
 pub use repository::CollectionRepository;
 pub use request::Request;
-pub use settings::CollectionSettings;
+pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;

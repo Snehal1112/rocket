@@ -54,10 +54,19 @@ export interface RequestOptions {
   verifySsl: boolean;
 }
 
+export interface CollectionVariable {
+  key: string;
+  value: string;
+  initialValue: string;
+  enabled: boolean;
+  secret: boolean;
+}
+
 export interface CollectionSettings {
   description?: string;
   auth?: Auth;
   headers: Header[];
+  variables: CollectionVariable[];
 }
 
 export interface CollectionSummary {
@@ -232,6 +241,9 @@ export const moveItem = (
     dstCollection,
     dstPath,
   });
+
+export const getCollectionSettings = (name: string) =>
+  invoke<CollectionSettings>("get_collection_settings", { name });
 
 export const saveCollectionSettings = (
   collection: string,

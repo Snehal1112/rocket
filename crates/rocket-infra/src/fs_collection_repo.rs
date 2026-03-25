@@ -452,6 +452,7 @@ mod tests {
             description: None,
             auth: Some(Auth::Bearer { token: "tok_abc".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
+            variables: vec![],
         };
         repo.save_settings("my-api", &original).unwrap();
         let loaded = repo.get_settings("my-api").unwrap();
@@ -470,6 +471,7 @@ mod tests {
             description: None,
             auth: Some(Auth::None),
             headers: vec![],
+            variables: vec![],
         };
         repo.save_settings("my-api", &settings).unwrap();
 

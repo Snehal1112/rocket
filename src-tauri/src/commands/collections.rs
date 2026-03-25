@@ -102,6 +102,14 @@ pub fn move_item(
 }
 
 #[tauri::command]
+pub fn get_collection_settings(
+    name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<rocket_collection::CollectionSettings, DomainError> {
+    svc.get_settings(&name)
+}
+
+#[tauri::command]
 pub fn save_collection_settings(
     collection: String,
     settings: rocket_collection::CollectionSettings,
