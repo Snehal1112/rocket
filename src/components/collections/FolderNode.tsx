@@ -70,13 +70,13 @@ export function FolderNode({
   };
 
   const filteredItems = filter
-    ? localItems.filter((item) => item.type !== 'request' || item.name.toLowerCase().includes(filter))
+    ? localItems.filter((item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()))
     : localItems;
 
   if (filter && filteredItems.length === 0) return null;
 
   // IDs for SortableContext — folders use basePath/name, requests use uid.
-  const sortableIds = localItems.map((item) =>
+  const sortableIds = filteredItems.map((item) =>
     item.type === 'folder' ? `${basePath}/${item.name}` : item.uid
   );
 
@@ -169,7 +169,7 @@ export function FolderNode({
             onDragCancel={handleDragCancel}
           >
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              {filteredItems.map((item, idx) => {
+              {filteredItems.map((item) => {
                 if (item.type === 'folder') {
                   const folderPath = `${basePath}/${item.name}`;
                   return (
@@ -187,7 +187,7 @@ export function FolderNode({
                 const requestPath = `${basePath}/${fileName}`;
                 return (
                   <RequestNode
-                    key={`request-${requestPath}-${idx}`}
+                    key={item.uid}
                     uid={item.uid} name={item.name} method={item.method}
                     collectionName={collectionName} path={requestPath}
                     itemData={item} summaries={summaries} dragDisabled={!!filter}
