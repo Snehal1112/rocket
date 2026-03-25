@@ -51,6 +51,11 @@ pub trait CollectionRepository: Send + Sync {
         dst_path: &str,
     ) -> DomainResult<()>;
 
+    /// Write an explicit ordering for items in a folder within a collection.
+    /// `folder_path` is relative to the collection root; pass `""` for the root.
+    /// `ordered_names` is the full ordered list of entry names (files include `.json`).
+    fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()>;
+
     /// Read collection-level settings (auth, headers) from collection.json.
     /// Returns default settings if the file does not exist.
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings>;

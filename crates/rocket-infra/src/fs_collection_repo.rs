@@ -278,6 +278,21 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(())
     }
 
+    fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
+        let collection_dir = self.collection_path(collection);
+        let dir = if folder_path.is_empty() {
+            collection_dir.clone()
+        } else {
+            self.validate_path(&collection_dir, Path::new(folder_path))?
+        };
+        if !dir.is_dir() {
+            return Err(DomainError::NotFound(format!("{}/{}", collection, folder_path)));
+        }
+        let json = serde_json::to_string_pretty(ordered_names)?;
+        fs::write(dir.join("_order.json"), json)?;
+        Ok(())
+    }
+
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
         let path = self.settings_path(name);
         if !path.exists() {
@@ -314,8 +329,8 @@ fn count_request_files(dir: &Path) -> usize {
 }
 
 fn is_request_file(path: &Path) -> bool {
-    // Exclude the reserved collection settings file.
-    if path.file_name().is_some_and(|n| n == "collection.json") {
+    // Exclude reserved sidecar files.
+    if path.file_name().is_some_and(|n| n == "collection.json" || n == "_order.json") {
         return false;
     }
     path.extension().is_some_and(|ext| ext == "json" || ext == "bru")
@@ -334,7 +349,23 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
     }
 
     let mut entries: Vec<_> = fs::read_dir(current)?.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.file_name());
+    // Apply explicit order from _order.json if present; fall back to alphabetical.
+    let order_path = current.join("_order.json");
+    if let Ok(content) = fs::read_to_string(&order_path) {
+        if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
+            let pos: std::collections::HashMap<String, usize> = ordered
+                .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
+            entries.sort_by(|a, b| {
+                let ai = pos.get(&a.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                let bi = pos.get(&b.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
+            });
+        } else {
+            entries.sort_by_key(|e| e.file_name());
+        }
+    } else {
+        entries.sort_by_key(|e| e.file_name());
+    }
 
     for entry in entries {
         let path = entry.path();
@@ -592,6 +623,45 @@ mod tests {
             "expected traversal to be blocked, got {:?}",
             err
         );
+    }
+
+    #[test]
+    fn reorder_items_writes_order_file_and_get_respects_it() {
+        use rocket_collection::CollectionItem;
+
+        fn item_name(item: &CollectionItem) -> &str {
+            match item {
+                CollectionItem::Request(r) => r.name.as_str(),
+                CollectionItem::Folder(f) => f.name.as_str(),
+            }
+        }
+
+        let (_dir, repo) = setup();
+        repo.create("test-col").unwrap();
+
+        // Create two requests. Alphabetically "aaa" comes before "bbb".
+        let req_a = rocket_collection::Request::new("AAA", HttpMethod::Get, "/a");
+        let req_b = rocket_collection::Request::new("BBB", HttpMethod::Get, "/b");
+        repo.save_request("test-col", "aaa.json", &req_a).unwrap();
+        repo.save_request("test-col", "bbb.json", &req_b).unwrap();
+
+        // Confirm default (alphabetical) order: aaa first.
+        let col = repo.get("test-col").unwrap();
+        assert_eq!(item_name(&col.root.items[0]), "AAA");
+        assert_eq!(item_name(&col.root.items[1]), "BBB");
+
+        // Reorder so bbb comes first.
+        repo.reorder_items(
+            "test-col",
+            "",
+            &["bbb.json".to_string(), "aaa.json".to_string()],
+        )
+        .unwrap();
+
+        // After reorder, bbb should appear first.
+        let col = repo.get("test-col").unwrap();
+        assert_eq!(item_name(&col.root.items[0]), "BBB");
+        assert_eq!(item_name(&col.root.items[1]), "AAA");
     }
 
     #[test]
