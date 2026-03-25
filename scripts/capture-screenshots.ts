@@ -67,13 +67,20 @@ async function clickTab(page: Page, text: string): Promise<void> {
 
 // Feature screenshot definitions.
 async function captureAllScreens(page: Page): Promise<void> {
-  // 1. Full app overview — default state after load.
-  console.log('Capturing: app overview');
+  // 1. Full app overview — branded empty state.
+  console.log('Capturing: app overview (empty state)');
   await captureBoth(page, '01-app-overview');
 
-  // 2. Request builder — URL bar, method selector, send button.
+  // 2. Open a new request tab via the "New Request" button.
+  console.log('Opening new request tab...');
+  const newRequestBtn = page.getByRole('button', { name: /new request/i }).first();
+  if (await newRequestBtn.isVisible()) {
+    await newRequestBtn.click();
+    await page.waitForTimeout(500);
+  }
+
+  // 3. Request builder — URL bar, method selector, send button.
   console.log('Capturing: request builder');
-  // Type a sample URL to show the builder in action.
   const urlInput = page.locator('input[placeholder*="api.example.com"]').first();
   if (await urlInput.isVisible()) {
     await urlInput.fill('https://api.example.com/users');
