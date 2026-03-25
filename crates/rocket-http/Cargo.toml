@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 rocket-shared.workspace = true
 serde.workspace = true
+tokio.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
