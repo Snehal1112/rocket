@@ -21,8 +21,12 @@ export const BASE_EDITOR_OPTIONS: EditorOptions = {
 export const READONLY_OPTIONS: EditorOptions = {
   ...BASE_EDITOR_OPTIONS,
   readOnly: true,
-  minimap: { enabled: true },
-  lineNumbers: 'off',
+  domReadOnly: true,
+  minimap: { enabled: false },
+  lineNumbers: 'on',
+  renderLineHighlight: 'none',
+  folding: true,
+  matchBrackets: 'always' as const,
 };
 
 // Detect Monaco language from body mode or content-type header.

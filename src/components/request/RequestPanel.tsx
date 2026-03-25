@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -59,20 +58,6 @@ interface RequestPanelProps {
   groupId: string;
 }
 
-
-function statusColor(status: number): string {
-  if (status >= 500) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-  if (status >= 400) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-  if (status >= 300) return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800';
-  if (status >= 200) return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
-  return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { request, response } = tab;
@@ -275,23 +260,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       {/* ── Response area ── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0">
         {response ? (
-          <>
-            {/* Response status bar. */}
-            <div className="flex items-center gap-3 border-b border-border/70 px-3 py-1.5 text-xs bg-card/50 shrink-0">
-              <Badge variant="outline" className={cn('text-xs font-semibold', statusColor(response.status))}>
-                {response.status === 0 ? 'ERR' : response.status} {response.statusText}
-              </Badge>
-              {response.durationMs > 0 && (
-                <span className="text-muted-foreground">{response.durationMs} ms</span>
-              )}
-              <span className="text-muted-foreground">{formatBytes(response.sizeBytes)}</span>
-            </div>
-
-            {/* Response body viewer. */}
-            <div className="flex-1 overflow-hidden">
-              <ResponseBodyViewer response={response} />
-            </div>
-          </>
+          <ResponseBodyViewer response={response} />
         ) : (
           <div className="flex flex-1 items-center justify-center text-muted-foreground text-xs">
             Send a request to see the response
