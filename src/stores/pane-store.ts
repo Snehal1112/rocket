@@ -135,10 +135,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (remaining.length === 0) {
       // Collapse the group unless it is the only leaf (root).
       if (root.type === 'leaf') {
-        // Root leaf — keep group alive but replace with a fresh draft.
-        const fresh = createDefaultTab();
+        // Root leaf — show empty state (no tabs).
         set({
-          root: { ...root, tabs: [fresh], activeTabId: fresh.id },
+          root: { ...root, tabs: [], activeTabId: '' },
         });
       } else {
         const newRoot = removeLeaf(root, groupId);
@@ -199,12 +198,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       // Collapse the source group, then add tab to the destination.
       newRoot = removeLeaf(root, fromGroupId);
     } else if (remaining.length === 0) {
-      // Source is root leaf — keep it but swap in a fresh draft.
-      const fresh = createDefaultTab();
+      // Source is root leaf — show empty state.
       newRoot = updateLeaf(root, fromGroupId, (leaf) => ({
         ...leaf,
-        tabs: [fresh],
-        activeTabId: fresh.id,
+        tabs: [],
+        activeTabId: '',
       }));
     } else {
       // Activate previous tab in source, then add to destination below.
