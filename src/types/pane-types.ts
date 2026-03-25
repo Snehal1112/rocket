@@ -29,6 +29,8 @@ export interface RequestTab extends BaseTab {
   tabType: 'request' | 'draft' | 'history';
   request: RequestState;
   response: ResponseState | null;
+  /** Pre-set collection for drafts created from a collection's + button. */
+  defaultCollection?: string;
 }
 
 export type CollectionSection = 'overview' | 'auth' | 'variables';
