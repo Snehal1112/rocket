@@ -665,6 +665,20 @@ mod tests {
     }
 
     #[test]
+    fn path_traversal_in_reorder_items_is_rejected() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let result = repo.reorder_items("my-api", "../../evil", &["x.json".to_string()]);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, DomainError::InvalidInput(_) | DomainError::NotFound(_)),
+            "expected traversal to be blocked, got {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn path_traversal_in_move_item_dst_is_rejected() {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
