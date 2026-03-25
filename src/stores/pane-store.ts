@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import {
@@ -77,6 +77,7 @@ export interface PaneState {
 
   updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
   updateTabTitle: (tabId: string, title: string) => void;
+  updateCollectionSection: (tabId: string, section: CollectionSection) => void;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -300,5 +301,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           .catch((err) => console.error('[pane-store] rename failed:', err));
       });
     }
+  },
+
+  updateCollectionSection(tabId, section) {
+    const { root } = get();
+    set({
+      root: updateTabInTree(root, tabId, (tab) => {
+        if (tab.tabType !== 'collection') return tab;
+        return { ...tab, activeSection: section };
+      }),
+    });
   },
 }));

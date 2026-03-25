@@ -14,10 +14,11 @@ import { MethodBreakdown } from './MethodBreakdown';
 import { RequestList } from './RequestList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
-import type { AuthState, KeyValueEntry } from '@/types/pane-types';
+import { usePaneStore } from '@/stores/pane-store';
+import type { AuthState, KeyValueEntry, CollectionTab, CollectionSection } from '@/types/pane-types';
 
 interface CollectionOverviewTabProps {
-  collectionName: string;
+  tab: CollectionTab;
 }
 
 // Recursively counts requests (leaf nodes) across the entire tree.
@@ -66,7 +67,10 @@ function toKeyValueEntries(
   }));
 }
 
-export function CollectionOverviewTab({ collectionName }: CollectionOverviewTabProps) {
+export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
+  const collectionName = tab.collectionName;
+  const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
+
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,10 @@ export function CollectionOverviewTab({ collectionName }: CollectionOverviewTabP
   const [description, setDescription] = useState('');
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
+
+  const handleSectionChange = useCallback((section: string) => {
+    updateCollectionSection(tab.id, section as CollectionSection);
+  }, [tab.id, updateCollectionSection]);
 
   // Load the collection on mount.
   useEffect(() => {
@@ -178,7 +186,7 @@ export function CollectionOverviewTab({ collectionName }: CollectionOverviewTabP
         {/* Auth / Headers / Requests tabs inside a card. */}
         <Card>
           <CardContent className="pt-4">
-            <Tabs defaultValue="requests">
+            <Tabs value={tab.activeSection ?? 'requests'} onValueChange={handleSectionChange}>
               <TabsList className="w-full justify-start">
                 <TabsTrigger value="auth">Auth</TabsTrigger>
                 <TabsTrigger value="headers">Headers</TabsTrigger>

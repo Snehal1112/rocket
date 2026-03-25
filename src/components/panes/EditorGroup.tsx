@@ -70,7 +70,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : (
-            <CollectionOverviewTab collectionName={activeTab.collectionName} />
+            <CollectionOverviewTab tab={activeTab} />
           )
         ) : (
           <EmptyState groupId={node.groupId} />
