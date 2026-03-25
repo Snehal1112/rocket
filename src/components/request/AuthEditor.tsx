@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { AuthState } from '@/types/pane-types';
-import { executeRequest } from '@/lib/tauri-api';
+import { executeRequest, oauth2AuthCodeFlow } from '@/lib/tauri-api';
 
 type AuthType = AuthState['authType'];
 type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
@@ -40,6 +40,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       if (authType === 'oauth2')
         next.oauth2 = {
           grantType: 'client_credentials',
+          authorizationUrl: '',
           clientId: '',
           clientSecret: '',
           tokenUrl: '',
@@ -69,11 +70,35 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
   );
 
   const [tokenError, setTokenError] = useState('');
+  const [gettingToken, setGettingToken] = useState(false);
 
   const handleGetToken = useCallback(async () => {
     const oauth = auth.oauth2;
     if (!oauth || !oauth.tokenUrl) return;
-    if (oauth.grantType === 'authorization_code') return;
+    if (oauth.grantType === 'authorization_code') {
+      if (!oauth.authorizationUrl || !oauth.tokenUrl) return;
+      setGettingToken(true);
+      setTokenError('');
+      try {
+        const token = await oauth2AuthCodeFlow(
+          oauth.authorizationUrl,
+          oauth.tokenUrl,
+          oauth.clientId,
+          oauth.clientSecret,
+          oauth.scope || undefined,
+        );
+        patchOAuth2({
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token || '',
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setTokenError(msg);
+      } finally {
+        setGettingToken(false);
+      }
+      return;
+    }
 
     setTokenError('');
     const params = new URLSearchParams();
@@ -289,6 +314,20 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
             </Select>
           </div>
 
+          {auth.oauth2.grantType === 'authorization_code' && (
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+                Authorization URL
+              </label>
+              <Input
+                className="text-xs h-8 font-mono"
+                placeholder="https://auth.example.com/authorize"
+                value={auth.oauth2.authorizationUrl}
+                onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })}
+              />
+            </div>
+          )}
+
           <div>
             <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
               Token URL
@@ -357,15 +396,10 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 variant="outline"
                 size="sm"
                 className="h-8 shrink-0 px-2 text-xs"
-                disabled={auth.oauth2.grantType === 'authorization_code' || !auth.oauth2.tokenUrl}
+                disabled={!auth.oauth2.tokenUrl || gettingToken}
                 onClick={handleGetToken}
-                title={
-                  auth.oauth2.grantType === 'authorization_code'
-                    ? 'Authorization code flow coming soon.'
-                    : undefined
-                }
               >
-                Get Token
+                {gettingToken ? 'Waiting for authorization...' : 'Get Token'}
               </Button>
             </div>
             {tokenError && (

@@ -74,6 +74,7 @@ export interface AuthState {
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };
   oauth2?: {
     grantType: 'client_credentials' | 'password' | 'authorization_code';
+    authorizationUrl: string;
     clientId: string;
     clientSecret: string;
     tokenUrl: string;
