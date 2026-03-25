@@ -17,7 +17,7 @@ import {
   type CollectionItem,
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { createDefaultRequest, mapApiRequestToState } from '@/lib/pane-utils';
+import { mapApiRequestToState } from '@/lib/pane-utils';
 import type { RequestTab, CollectionTab, RequestState, PaneNode } from '@/types/pane-types';
 import {
   ContextMenu,
@@ -785,40 +785,12 @@ export function CollectionsSidebar() {
     }
   }, [newName]);
 
-  const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
-    // Find next available name (New Request, New Request 2, New Request 3...).
-    let name = 'New Request';
-    try {
-      const col = await getCollection(collection);
-      const items = col.root.items;
-      const existing = new Set(
-        items.filter((i: CollectionItem) => i.type === 'request').map((i: CollectionItem) => i.name),
-      );
-      let counter = 1;
-      while (existing.has(name)) {
-        counter++;
-        name = `New Request ${counter}`;
-      }
-    } catch { /* Use default name if fetch fails. */ }
-    const path = folderPath ? `${folderPath}/${name}` : name;
-    const saved = await saveRequest(collection, path, {
-      uid: '',
-      name,
-      method: 'GET',
-      url: '',
-      headers: [],
-      auth: { authType: 'none' },
-    });
-    const tab: RequestTab = {
-      id: saved.uid,
-      title: name,
-      tabType: 'request',
-      request: createDefaultRequest(),
-      response: null,
-      isDirty: false,
-      source: { collection, path: saved.fileName ?? (path.endsWith('.json') ? path : `${path}.json`) },
-    };
-    usePaneStore.getState().openTab(tab);
+  const handleNewRequest = useCallback(async (_collection: string, _folderPath: string) => {
+    // Create a draft tab — the file is only written to disk when the user
+    // explicitly saves (via the Save button or Cmd+S). This avoids creating
+    // empty placeholder files and prevents filename collisions from two
+    // request-creation paths.
+    usePaneStore.getState().newDraftTab();
   }, []);
 
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
