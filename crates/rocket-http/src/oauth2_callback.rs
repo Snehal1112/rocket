@@ -84,53 +84,70 @@ pub async fn wait_for_callback(
     let expected = expected_state.to_string();
 
     let result = timeout(Duration::from_secs(timeout_secs), async {
-        let (mut stream, _) = listener
-            .accept()
-            .await
-            .map_err(|e| DomainError::Internal(format!("Accept failed: {e}")))?;
+        // Loop to handle multiple connections. Browsers may send preflight
+        // connections, favicon requests, or other requests before/after the
+        // actual callback with the authorization code.
+        loop {
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .map_err(|e| DomainError::Internal(format!("Accept failed: {e}")))?;
 
-        let mut buf = vec![0u8; 8192];
-        let n = stream
-            .read(&mut buf)
-            .await
-            .map_err(|e| DomainError::Internal(format!("Read failed: {e}")))?;
+            let mut buf = vec![0u8; 8192];
+            let n = stream
+                .read(&mut buf)
+                .await
+                .map_err(|e| DomainError::Internal(format!("Read failed: {e}")))?;
 
-        let request = String::from_utf8_lossy(&buf[..n]);
+            if n == 0 {
+                // Empty connection (preconnect). Skip and wait for next.
+                continue;
+            }
 
-        // Extract the path from the HTTP request line (e.g., "GET /callback?code=X HTTP/1.1").
-        let path = request
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or("");
+            let request = String::from_utf8_lossy(&buf[..n]);
 
-        let params = parse_query(path);
+            // Extract the path from the HTTP request line.
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("");
 
-        // Check for error from auth server.
-        if let Some(error) = params.get("error") {
-            let desc = params.get("error_description").unwrap_or(error);
-            send_response(&mut stream, ERROR_HTML).await;
-            return Err(DomainError::Internal(format!("Authorization denied: {desc}")));
+            let params = parse_query(path);
+
+            // Skip requests that don't have a code or error (e.g., /favicon.ico).
+            if !params.contains_key("code") && !params.contains_key("error") {
+                let response = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes()).await;
+                continue;
+            }
+
+            // Check for error from auth server.
+            if let Some(error) = params.get("error") {
+                let desc = params.get("error_description").unwrap_or(error);
+                send_response(&mut stream, ERROR_HTML).await;
+                return Err(DomainError::Internal(format!("Authorization denied: {desc}")));
+            }
+
+            // Verify state to prevent CSRF.
+            let state = params.get("state").map(|s| s.as_str()).unwrap_or("");
+            if state != expected {
+                send_response(&mut stream, ERROR_HTML).await;
+                return Err(DomainError::Internal(
+                    "State mismatch — possible CSRF attack.".into(),
+                ));
+            }
+
+            // Extract authorization code.
+            let code = params
+                .get("code")
+                .ok_or_else(|| DomainError::Internal("No authorization code in callback.".into()))?
+                .clone();
+
+            send_response(&mut stream, SUCCESS_HTML).await;
+
+            return Ok(CallbackResult { code, port });
         }
-
-        // Verify state to prevent CSRF.
-        let state = params.get("state").map(|s| s.as_str()).unwrap_or("");
-        if state != expected {
-            send_response(&mut stream, ERROR_HTML).await;
-            return Err(DomainError::Internal(
-                "State mismatch — possible CSRF attack.".into(),
-            ));
-        }
-
-        // Extract authorization code.
-        let code = params
-            .get("code")
-            .ok_or_else(|| DomainError::Internal("No authorization code in callback.".into()))?
-            .clone();
-
-        send_response(&mut stream, SUCCESS_HTML).await;
-
-        Ok(CallbackResult { code, port })
     })
     .await;
 
