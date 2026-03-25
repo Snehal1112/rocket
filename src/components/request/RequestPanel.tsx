@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RocketMinimal } from '@/components/illustrations';
 import {
   Select,
   SelectContent,
@@ -262,8 +263,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         {response ? (
           <ResponseBodyViewer response={response} />
         ) : (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground text-xs">
-            Send a request to see the response
+          <div className="flex flex-1 flex-col items-center justify-center gap-3">
+            <RocketMinimal className="w-20 h-28" />
+            <p className="text-sm font-medium text-foreground">Ready for liftoff</p>
+            <p className="text-xs text-muted-foreground">
+              Send a request to see the response here
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Press{' '}
+              <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                Ctrl+Enter
+              </kbd>
+              {' '}to send
+            </p>
           </div>
         )}
       </div>
