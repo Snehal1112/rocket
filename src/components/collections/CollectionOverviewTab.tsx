@@ -16,6 +16,7 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 import { usePaneStore } from '@/stores/pane-store';
+import { toApiAuth } from '@/lib/execute-request';
 import type { AuthState, KeyValueEntry, CollectionTab, CollectionSection } from '@/types/pane-types';
 
 interface CollectionOverviewTabProps {
@@ -82,7 +83,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
 
-  const activeSection = tab.activeSection ?? 'overview';
+  // Guard against stale section values from before the tab redesign.
+  const validSections: CollectionSection[] = ['overview', 'auth', 'variables'];
+  const activeSection = validSections.includes(tab.activeSection as CollectionSection)
+    ? tab.activeSection!
+    : 'overview';
 
   const handleSectionChange = useCallback((section: CollectionSection) => {
     updateCollectionSection(tab.id, section);
@@ -113,9 +118,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Save all settings to disk.
   const handleSave = useCallback(async () => {
     try {
+      const apiAuth = toApiAuth(auth);
       await saveCollectionSettings(collectionName, {
-        auth: auth.authType !== 'none' ? (auth as unknown as any) : undefined,
-        headers: headers.filter((h) => h.key),
+        auth: apiAuth.authType !== 'none' ? apiAuth : undefined,
+        headers: headers.filter((h) => h.key).map((h) => ({
+          key: h.key,
+          value: h.value,
+          enabled: h.enabled,
+        })),
         description: description || undefined,
         variables,
       } as any);

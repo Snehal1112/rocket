@@ -5,6 +5,7 @@ import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { cn } from '@/lib/utils';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
 import { saveCollectionSettings } from '@/lib/tauri-api';
+import { toApiAuth } from '@/lib/execute-request';
 
 interface CollectionSettingsDialogProps {
   collectionName: string;
@@ -31,9 +32,15 @@ export function CollectionSettingsDialog({
 
   async function handleSave() {
     try {
+      const apiAuth = toApiAuth(auth);
       await saveCollectionSettings(collectionName, {
-        auth: auth.authType !== 'none' ? auth : undefined,
-        headers: headers.filter((h) => h.key),
+        auth: apiAuth.authType !== 'none' ? apiAuth : undefined,
+        headers: headers.filter((h) => h.key).map((h) => ({
+          key: h.key,
+          value: h.value,
+          enabled: h.enabled,
+        })),
+        variables: [],
       });
       onClose();
     } catch (err) {
