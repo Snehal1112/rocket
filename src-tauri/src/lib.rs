@@ -92,8 +92,11 @@ pub fn run() {
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
-            let _ = watcher.start(collections_dir, watcher_bus);
+            let _ = watcher.start(collections_dir, watcher_bus.clone());
             app.manage(watcher);
+
+            // Share the event bus so commands like watch_collections can reuse it.
+            app.manage(watcher_bus);
 
             log::info!("RocketAPI initialized at {:?}", data_dir);
             Ok(())

@@ -158,10 +158,17 @@ export interface HttpResponse {
   sizeBytes: number;
 }
 
+export interface QueryParam {
+  key: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface ExecuteRequestInput {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  queryParams: QueryParam[];
   body?: Body;
   auth: Auth;
   options: RequestOptions;
@@ -312,7 +319,7 @@ export const stopWatching = () => invoke<void>("stop_watching");
 export const onFileChange = (
   handler: (event: FileChangedEvent) => void,
 ): Promise<UnlistenFn> =>
-  listen<FileChangedEvent>("file-change", (e) => handler(e.payload));
+  listen<FileChangedEvent>("collection-changed", (e) => handler(e.payload));
 
 export interface CollectionChangedEvent {
   type: string;

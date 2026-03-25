@@ -1,5 +1,6 @@
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
+use rocket_shared::events::EventPublisher;
 use std::sync::Arc;
 use tauri::State;
 
@@ -12,14 +13,16 @@ pub fn get_app_data_dir() -> Result<String, DomainError> {
 }
 
 #[tauri::command]
-pub fn watch_collections(watcher: State<'_, NotifyFileWatcher>) -> Result<(), DomainError> {
+pub fn watch_collections(
+    watcher: State<'_, NotifyFileWatcher>,
+    publisher: State<'_, Arc<dyn EventPublisher>>,
+) -> Result<(), DomainError> {
     let collections_dir = dirs::home_dir()
         .ok_or_else(|| DomainError::Internal("Home directory not found".into()))?
         .join(".rocket-api")
         .join("collections");
-    let publisher = Arc::new(rocket_shared::events::NullEventPublisher);
     watcher
-        .start(collections_dir, publisher)
+        .start(collections_dir, Arc::clone(&publisher))
         .map_err(DomainError::Internal)
 }
 
