@@ -64,6 +64,7 @@ export function CollectionNode({
   // Per-collection change listener, active only when expanded.
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onCollectionChanged((event) => {
       const affected = event.collection ?? event.name;
@@ -71,8 +72,12 @@ export function CollectionNode({
         if (treeDebounce.current) clearTimeout(treeDebounce.current);
         treeDebounce.current = setTimeout(() => refreshTree(), 300);
       }
-    }).then((fn) => { unlisten = fn; });
+    }).then((fn) => {
+      if (cancelled) fn(); // Already unmounted — immediately unsubscribe.
+      else unlisten = fn;
+    });
     return () => {
+      cancelled = true;
       unlisten?.();
       if (treeDebounce.current) clearTimeout(treeDebounce.current);
     };
@@ -80,6 +85,11 @@ export function CollectionNode({
 
   // Auto-expand when filter is active.
   useEffect(() => { if (filter) setOpen(true); }, [filter]);
+
+  // Clear pending click timer on unmount.
+  useEffect(() => {
+    return () => { if (clickTimer.current) clearTimeout(clickTimer.current); };
+  }, []);
 
   const handleRename = async () => {
     const trimmed = renameValue.trim();
