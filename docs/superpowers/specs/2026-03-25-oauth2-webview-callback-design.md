@@ -21,14 +21,16 @@ Postman Desktop solves this by opening an in-app browser window and intercepting
 User clicks "Get Token"
   → Generate PKCE pair + random state
   → Build authorization URL with redirect_uri, code_challenge, state
+  → Close any existing oauth2-auth window
   → Open a Tauri WebviewWindow navigating to the auth URL
   → User logs in and consents inside the window
   → Auth provider redirects to callback URL with ?code=xxx&state=yyy
-  → on_navigation intercepts the redirect, extracts code + state
-  → Window closes, main app receives code via oneshot channel
-  → Verify state matches
+  → on_navigation checks URL prefix AND presence of code/error param
+  → Extracts code + state, sends through oneshot channel
+  → Window closes, main app receives code + state
+  → Verify state matches expected value
   → Exchange code for token via POST (existing acquire_token)
-  → Show toast in main window on success, or tokenError on failure
+  → Return token to frontend (success updates UI, error shows tokenError)
 ```
 
 ### Default Callback URL
@@ -57,25 +59,40 @@ pub async fn oauth2_auth_code_flow(
     let redirect_uri = callback_url
         .unwrap_or_else(|| "https://exchange4all.local/webapp/#oidc-callback".into());
 
-    // Build auth URL with response_type, client_id, redirect_uri,
-    // code_challenge (S256), state, and optional scope.
-    let auth_url = build_auth_url(&authorization_url, &client_id, &redirect_uri, &pkce, &state, &scope);
+    // Build auth URL inline (replaces the current format! construction).
+    // Uses urlencoding_encode for client_id, redirect_uri, and scope.
+    // Includes: response_type=code, client_id, redirect_uri,
+    // code_challenge (S256), code_challenge_method, state, scope.
+    let auth_url = build_auth_url(
+        &authorization_url, &client_id, &redirect_uri, &pkce, &state, &scope,
+    );
 
     // Channel for the navigation callback to send the result.
-    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+    // Sends AuthCodeResult on success, or error description string on failure.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<AuthCodeResult, String>>();
     let tx = std::sync::Mutex::new(Some(tx));
     let redirect_prefix = redirect_uri_prefix(&redirect_uri);
 
+    // Close any existing auth window from a previous attempt.
+    if let Some(existing) = app.get_webview_window("oauth2-auth") {
+        let _ = existing.close();
+    }
+
     // Open webview window.
+    // Note: on_navigation receives &url::Url and must be Fn (not FnOnce),
+    // hence the Mutex<Option<Sender>> pattern to move the sender out once.
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         "oauth2-auth",
-        tauri::WebviewUrl::External(auth_url.parse().unwrap()),
+        tauri::WebviewUrl::External(
+            auth_url.parse().map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?,
+        ),
     )
     .title("Sign In")
     .inner_size(500.0, 700.0)
     .on_navigation(move |url| {
-        if url.as_str().starts_with(&redirect_prefix) {
+        // Only intercept if URL matches callback prefix AND has code or error.
+        if url.as_str().starts_with(&redirect_prefix) && has_auth_params(url) {
             if let Some(tx) = tx.lock().unwrap().take() {
                 let result = extract_code_or_error(url);
                 let _ = tx.send(result);
@@ -91,9 +108,11 @@ pub async fn oauth2_auth_code_flow(
     let result = tokio::time::timeout(Duration::from_secs(120), rx).await;
     let _ = window.close();
 
-    let code = match result {
-        Ok(Ok(Ok(code))) => code,
-        Ok(Ok(Err(err))) => return Err(DomainError::Internal(format!("Authorization denied: {err}"))),
+    let auth_result = match result {
+        Ok(Ok(Ok(r))) => r,
+        Ok(Ok(Err(err))) => return Err(DomainError::Internal(
+            format!("Authorization denied: {err}"),
+        )),
         Ok(Err(_)) => return Err(DomainError::Internal(
             "Authorization window was closed before completing sign-in.".into(),
         )),
@@ -102,7 +121,13 @@ pub async fn oauth2_auth_code_flow(
         )),
     };
 
-    // Verify state (extracted alongside code in extract_code_or_error).
+    // Verify CSRF state before exchanging the code.
+    if auth_result.state != state {
+        return Err(DomainError::Internal(
+            "State mismatch — possible CSRF attack.".into(),
+        ));
+    }
+
     // Exchange code for token.
     let client = reqwest::Client::new();
     let config = OAuthConfig {
@@ -111,18 +136,27 @@ pub async fn oauth2_auth_code_flow(
         client_secret,
         token_url,
         scope,
-        code: Some(code),
+        username: None,
+        password: None,
+        code: Some(auth_result.code),
         redirect_uri: Some(redirect_uri),
         code_verifier: Some(pkce.code_verifier),
-        ..Default::default()
     };
     acquire_token(&config, &client).await
 }
 ```
 
-### Helper Functions
+### Helper Types and Functions
 
-`redirect_uri_prefix` strips the fragment from the callback URL so `starts_with` matching works correctly against the redirect URL which will have query params inserted before the fragment:
+```rust
+/// Result extracted from the OAuth2 callback URL.
+struct AuthCodeResult {
+    code: String,
+    state: String,
+}
+```
+
+`redirect_uri_prefix` strips the fragment from the callback URL so `starts_with` matching works correctly against the redirect URL (query params are inserted before the fragment per RFC 3986):
 
 ```rust
 fn redirect_uri_prefix(redirect_uri: &str) -> String {
@@ -132,20 +166,59 @@ fn redirect_uri_prefix(redirect_uri: &str) -> String {
 }
 ```
 
-`extract_code_or_error` parses query params from the intercepted URL:
+`has_auth_params` checks that the URL actually carries OAuth2 callback parameters. This prevents intercepting unrelated navigations to the same domain prefix (defense-in-depth):
 
 ```rust
-fn extract_code_or_error(url: &url::Url) -> Result<String, String> {
-    let params: HashMap<String, String> = url.query_pairs().map(|(k, v)| (k.into(), v.into())).collect();
+fn has_auth_params(url: &url::Url) -> bool {
+    url.query_pairs().any(|(k, _)| k == "code" || k == "error")
+}
+```
+
+`extract_code_or_error` parses both `code` and `state` from the intercepted URL:
+
+```rust
+fn extract_code_or_error(url: &url::Url) -> Result<AuthCodeResult, String> {
+    let params: HashMap<String, String> =
+        url.query_pairs().map(|(k, v)| (k.into(), v.into())).collect();
     if let Some(error) = params.get("error") {
         let desc = params.get("error_description").unwrap_or(error);
         return Err(desc.clone());
     }
-    params.get("code").cloned().ok_or_else(|| "No authorization code in callback.".into())
+    let code = params.get("code")
+        .cloned()
+        .ok_or_else(|| "No authorization code in callback.".to_string())?;
+    let state = params.get("state")
+        .cloned()
+        .ok_or_else(|| "Auth provider did not return a state parameter.".to_string())?;
+    Ok(AuthCodeResult { code, state })
 }
 ```
 
-State verification is handled by also extracting `state` from `query_pairs()` and comparing before exchanging the code.
+`build_auth_url` replaces the current inline `format!` construction. Uses the same `urlencoding_encode` helper that exists today:
+
+```rust
+fn build_auth_url(
+    authorization_url: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    pkce: &PkcePair,
+    state: &str,
+    scope: &Option<String>,
+) -> String {
+    let sep = if authorization_url.contains('?') { "&" } else { "?" };
+    let scope_param = scope.as_ref()
+        .map(|s| format!("&scope={}", urlencoding_encode(s)))
+        .unwrap_or_default();
+    format!(
+        "{}{sep}response_type=code&client_id={}&redirect_uri={}&code_challenge={}&code_challenge_method=S256&state={}{scope_param}",
+        authorization_url,
+        urlencoding_encode(client_id),
+        urlencoding_encode(redirect_uri),
+        urlencoding_encode(&pkce.code_challenge),
+        urlencoding_encode(state),
+    )
+}
+```
 
 ### Error Handling
 
@@ -154,7 +227,7 @@ State verification is handled by also extracting `state` from `query_pairs()` an
 | User closes window | `oneshot::Receiver` gets `RecvError` → "Authorization window was closed before completing sign-in." |
 | 120s timeout | `tokio::time::timeout` fires → "Authorization timed out. Please try again." |
 | Auth provider returns `?error=` | Extracted in `on_navigation`, sent through channel → "Authorization denied: {description}" |
-| State mismatch | Checked after receiving code → "State mismatch — possible CSRF attack." |
+| State mismatch | Checked after receiving code, before token exchange → "State mismatch — possible CSRF attack." |
 | Window already open | Close existing `oauth2-auth` window before creating a new one |
 
 ### Window Closed Detection
@@ -169,13 +242,17 @@ Two small changes:
    - Old: `http://localhost:9876/callback`
    - New: `https://exchange4all.local/webapp/#oidc-callback`
 
-2. **Success toast** — Listen for a `oauth2-token-acquired` Tauri event and show a brief toast notification. Error display continues to use the existing `tokenError` state.
+2. **Success/error feedback** — No separate Tauri event needed. The `handleGetToken` function already `await`s the Tauri command result: success patches the token into state, errors are displayed via the existing `tokenError` state and the red error text below the Get Token button.
 
 The Callback URL field remains editable. The Tauri API bridge (`tauri-api.ts`) and type definitions (`pane-types.ts`) are unchanged.
 
 ### PKCE
 
 Kept as-is, always enabled. `generate_pkce()` from `pkce.rs` produces the code_verifier and code_challenge (S256). No changes needed.
+
+### Closure Constraints
+
+The `on_navigation` callback must be `Fn` (not `FnOnce` or `FnMut`). The `Mutex<Option<Sender>>` pattern satisfies this: `Mutex::lock` requires only `&self`, and `Option::take` moves the sender out on first interception so subsequent calls are no-ops.
 
 ## Files Changed
 
@@ -184,9 +261,11 @@ Kept as-is, always enabled. `generate_pkce()` from `pkce.rs` produces the code_v
 | `src-tauri/src/commands/oauth2.rs` | Rewrite | Replace TCP listener with WebviewWindow + `on_navigation` |
 | `crates/rocket-http/src/oauth2_callback.rs` | Delete | Localhost callback server no longer needed |
 | `crates/rocket-http/src/lib.rs` | Edit | Remove `oauth2_callback` module and exports |
-| `src/components/request/AuthEditor.tsx` | Edit | Change default callback URL, add toast listener |
+| `src/components/request/AuthEditor.tsx` | Edit | Change default callback URL |
 | `src/lib/pane-utils.ts` | Edit | Change default callback URL |
-| `src-tauri/Cargo.toml` | Edit | Verify `tauri` features include webview window support |
+| `src-tauri/Cargo.toml` | Check | `WebviewWindowBuilder` is available by default in Tauri v2; no extra features expected |
+
+Note: The `tauri-plugin-opener` import in `oauth2.rs` is removed since we no longer open the system browser. The plugin may still be used elsewhere in the app.
 
 ## Files Unchanged
 
@@ -197,4 +276,4 @@ Kept as-is, always enabled. `generate_pkce()` from `pkce.rs` produces the code_v
 
 ## Net Effect
 
-Deletes more code than it adds. The entire TCP server (~170 lines), HTTP parsing, favicon handling, and IPv4/IPv6 dual-stack logic are replaced by ~50 lines of Tauri webview logic.
+Deletes more code than it adds. The entire TCP server (~170 lines), HTTP parsing, favicon handling, and IPv4/IPv6 dual-stack logic are replaced by ~60 lines of Tauri webview logic.
