@@ -73,14 +73,23 @@ export interface AuthState {
   bearer?: { token: string };
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };
   oauth2?: {
-    grantType: 'client_credentials' | 'password' | 'authorization_code';
+    grantType: 'client_credentials' | 'password' | 'authorization_code' | 'implicit';
     authorizationUrl: string;
+    tokenUrl: string;
+    callbackUrl: string;
     clientId: string;
     clientSecret: string;
-    tokenUrl: string;
     scope: string;
+    state: string;
+    username: string;
+    password: string;
+    clientAuthentication: 'header' | 'body';
+    headerPrefix: string;
+    addTokenTo: 'header' | 'queryParams';
     accessToken: string;
     refreshToken: string;
+    expiresIn: number | null;
+    tokenAcquiredAt: number | null;
   };
   awsSigV4?: {
     accessKey: string;
