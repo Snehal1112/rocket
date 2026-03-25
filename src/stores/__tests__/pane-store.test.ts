@@ -17,6 +17,12 @@ function getSplit(): SplitNode {
   return root;
 }
 
+// Helper: create a draft tab and return the leaf.
+function setupWithTab(): LeafNode {
+  usePaneStore.getState().newDraftTab();
+  return getLeaf();
+}
+
 describe('pane-store', () => {
   beforeEach(() => {
     usePaneStore.getState().reset();
@@ -24,12 +30,12 @@ describe('pane-store', () => {
 
   // ── Initial state ─────────────────────────────────────────────────────────
 
-  it('starts with one leaf and one draft tab', () => {
+  it('starts with one empty leaf and no tabs', () => {
     const { root } = usePaneStore.getState();
     expect(root.type).toBe('leaf');
     if (root.type === 'leaf') {
-      expect(root.tabs).toHaveLength(1);
-      expect(root.tabs[0].tabType).toBe('draft');
+      expect(root.tabs).toHaveLength(0);
+      expect(root.activeTabId).toBe('');
     }
   });
 
@@ -43,20 +49,28 @@ describe('pane-store', () => {
   it('newDraftTab adds tab to active group', () => {
     usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
-    expect(leaf.tabs).toHaveLength(2);
-    expect(leaf.tabs[1].tabType).toBe('draft');
+    expect(leaf.tabs).toHaveLength(1);
+    expect(leaf.tabs[0].tabType).toBe('draft');
   });
 
   it('newDraftTab sets the new tab as active', () => {
     usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
+    expect(leaf.activeTabId).toBe(leaf.tabs[0].id);
+  });
+
+  it('newDraftTab adds a second tab', () => {
+    usePaneStore.getState().newDraftTab();
+    usePaneStore.getState().newDraftTab();
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(2);
     expect(leaf.activeTabId).toBe(leaf.tabs[1].id);
   });
 
   it('newDraftTab with explicit groupId targets that group', () => {
-    // Split to get two groups, then open in the second one.
-    const initialLeaf = getLeaf();
-    usePaneStore.getState().splitGroup(initialLeaf.groupId, 'vertical');
+    setupWithTab();
+    const leaf = getLeaf();
+    usePaneStore.getState().splitGroup(leaf.groupId, 'vertical');
     const split = getSplit();
     const rightLeaf = split.children[1] as LeafNode;
 
@@ -64,7 +78,7 @@ describe('pane-store', () => {
 
     const updatedSplit = getSplit();
     const updatedRight = updatedSplit.children[1] as LeafNode;
-    expect(updatedRight.tabs).toHaveLength(2);
+    expect(updatedRight.tabs).toHaveLength(1);
   });
 
   // ── openTab ───────────────────────────────────────────────────────────────
@@ -89,16 +103,16 @@ describe('pane-store', () => {
     };
     openTab(tab);
     const leaf = getLeaf();
-    expect(leaf.tabs).toHaveLength(2);
+    expect(leaf.tabs).toHaveLength(1);
     expect(leaf.activeTabId).toBe(tab.id);
   });
 
   it('openTab on existing tab just activates it without duplicating', () => {
     usePaneStore.getState().newDraftTab();
+    usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
     const firstTabId = leaf.tabs[0].id;
 
-    // The first tab is no longer active, re-open it.
     usePaneStore.getState().openTab(leaf.tabs[0]);
 
     const updated = getLeaf();
@@ -110,6 +124,7 @@ describe('pane-store', () => {
 
   it('closeTab removes tab and keeps group if tabs remain', () => {
     usePaneStore.getState().newDraftTab();
+    usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
     usePaneStore.getState().closeTab(leaf.tabs[0].id, leaf.groupId);
     const updated = getLeaf();
@@ -119,8 +134,8 @@ describe('pane-store', () => {
   it('closeTab activates the previous tab after removal', () => {
     usePaneStore.getState().newDraftTab();
     usePaneStore.getState().newDraftTab();
+    usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
-    // Close the last tab — previous should become active.
     const lastId = leaf.tabs[2].id;
     const prevId = leaf.tabs[1].id;
     usePaneStore.getState().closeTab(lastId, leaf.groupId);
@@ -128,23 +143,26 @@ describe('pane-store', () => {
     expect(updated.activeTabId).toBe(prevId);
   });
 
-  it('closeTab on empty group replaces root leaf with a fresh draft when root is a leaf', () => {
-    const leaf = getLeaf();
-    // Root is the only leaf — closing the sole tab must keep one fresh tab.
+  it('closeTab on last tab leaves root leaf empty', () => {
+    const leaf = setupWithTab();
     usePaneStore.getState().closeTab(leaf.tabs[0].id, leaf.groupId);
     const updated = getLeaf();
-    expect(updated.tabs).toHaveLength(1);
-    expect(updated.tabs[0].tabType).toBe('draft');
+    expect(updated.tabs).toHaveLength(0);
+    expect(updated.activeTabId).toBe('');
   });
 
   it('closeTab collapses an empty non-root group', () => {
+    setupWithTab();
     const initialLeaf = getLeaf();
     usePaneStore.getState().splitGroup(initialLeaf.groupId, 'horizontal');
     const split = getSplit();
     const rightLeaf = split.children[1] as LeafNode;
 
-    // Close the sole tab in the right group — it should collapse.
-    usePaneStore.getState().closeTab(rightLeaf.tabs[0].id, rightLeaf.groupId);
+    // Right leaf is empty by default from split — add a tab then close it.
+    usePaneStore.getState().newDraftTab(rightLeaf.groupId);
+    const updatedSplit = getSplit();
+    const updatedRight = updatedSplit.children[1] as LeafNode;
+    usePaneStore.getState().closeTab(updatedRight.tabs[0].id, updatedRight.groupId);
 
     const { root } = usePaneStore.getState();
     expect(root.type).toBe('leaf');
@@ -153,6 +171,7 @@ describe('pane-store', () => {
   // ── setActiveTab ──────────────────────────────────────────────────────────
 
   it('setActiveTab updates activeTabId and activeGroupId', () => {
+    usePaneStore.getState().newDraftTab();
     usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
     const firstId = leaf.tabs[0].id;
@@ -165,7 +184,8 @@ describe('pane-store', () => {
   // ── moveTab ───────────────────────────────────────────────────────────────
 
   it('moveTab transfers a tab from one group to another', () => {
-    usePaneStore.getState().newDraftTab(); // two tabs in root leaf
+    usePaneStore.getState().newDraftTab();
+    usePaneStore.getState().newDraftTab();
     const leaf = getLeaf();
     usePaneStore.getState().splitGroup(leaf.groupId, 'vertical');
     const split = getSplit();
@@ -184,15 +204,20 @@ describe('pane-store', () => {
   });
 
   it('moveTab collapses empty source group when it is not root', () => {
+    setupWithTab();
     const initialLeaf = getLeaf();
     usePaneStore.getState().splitGroup(initialLeaf.groupId, 'vertical');
     const split = getSplit();
     const rightLeaf = split.children[1] as LeafNode;
     const leftLeaf = split.children[0] as LeafNode;
 
-    // Right leaf has one tab. Move it to the left — right collapses.
-    const tabToMove = rightLeaf.tabs[0];
-    usePaneStore.getState().moveTab(tabToMove.id, rightLeaf.groupId, leftLeaf.groupId);
+    // Add a tab to right so we can move it.
+    usePaneStore.getState().newDraftTab(rightLeaf.groupId);
+    const updatedSplit = getSplit();
+    const updatedRight = updatedSplit.children[1] as LeafNode;
+
+    const tabToMove = updatedRight.tabs[0];
+    usePaneStore.getState().moveTab(tabToMove.id, updatedRight.groupId, leftLeaf.groupId);
 
     const { root } = usePaneStore.getState();
     expect(root.type).toBe('leaf');
@@ -235,7 +260,7 @@ describe('pane-store', () => {
   // ── updateRequest ─────────────────────────────────────────────────────────
 
   it('updateRequest merges patch into tab request and marks dirty', () => {
-    const leaf = getLeaf();
+    const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().updateRequest(tabId, { url: 'https://api.test', method: 'POST' });
     const updated = getLeaf();
@@ -249,7 +274,7 @@ describe('pane-store', () => {
   // ── setResponse ───────────────────────────────────────────────────────────
 
   it('setResponse stores the response on the correct tab', () => {
-    const leaf = getLeaf();
+    const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
     const response: ResponseState = {
       status: 200,
@@ -270,7 +295,7 @@ describe('pane-store', () => {
   // ── markDirty / markClean ─────────────────────────────────────────────────
 
   it('markDirty sets isDirty to true', () => {
-    const leaf = getLeaf();
+    const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().markDirty(tabId);
     const updated = getLeaf();
@@ -278,7 +303,7 @@ describe('pane-store', () => {
   });
 
   it('markClean sets isDirty to false after markDirty', () => {
-    const leaf = getLeaf();
+    const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().markDirty(tabId);
     usePaneStore.getState().markClean(tabId);
@@ -288,12 +313,11 @@ describe('pane-store', () => {
 
   // ── reset ─────────────────────────────────────────────────────────────────
 
-  it('reset returns to single leaf with one draft tab', () => {
+  it('reset returns to single empty leaf', () => {
     usePaneStore.getState().newDraftTab();
     usePaneStore.getState().newDraftTab();
     usePaneStore.getState().reset();
     const leaf = getLeaf();
-    expect(leaf.tabs).toHaveLength(1);
-    expect(leaf.tabs[0].tabType).toBe('draft');
+    expect(leaf.tabs).toHaveLength(0);
   });
 });

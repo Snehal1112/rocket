@@ -135,15 +135,14 @@ export function createDefaultTab(): RequestTab {
   };
 }
 
-// Creates a leaf pane containing one default tab.
+// Creates a leaf pane, empty by default (shows branded empty state).
 export function createDefaultLeaf(groupId?: string): LeafNode {
-  const tab = createDefaultTab();
   return {
     type: 'leaf',
     id: crypto.randomUUID(),
     groupId: groupId ?? crypto.randomUUID(),
-    tabs: [tab],
-    activeTabId: tab.id,
+    tabs: [],
+    activeTabId: '',
   };
 }
 

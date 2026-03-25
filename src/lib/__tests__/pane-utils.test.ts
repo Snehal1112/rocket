@@ -23,6 +23,14 @@ describe('pane-utils', () => {
     sizes: [50, 50],
   };
 
+  // Create a leaf with a tab for tab-related tests.
+  const tab = createDefaultTab();
+  const leafWithTab: LeafNode = {
+    ...createDefaultLeaf('g-tab'),
+    tabs: [tab],
+    activeTabId: tab.id,
+  };
+
   // --- findLeaf ---
 
   it('findLeaf returns correct leaf by groupId', () => {
@@ -43,11 +51,17 @@ describe('pane-utils', () => {
   // --- findTabInTree ---
 
   it('findTabInTree locates a tab in the tree', () => {
-    const tabId = leaf1.activeTabId;
-    const result = findTabInTree(splitTree, tabId);
+    const tree: PaneNode = {
+      type: 'split',
+      id: 's-tab',
+      direction: 'horizontal',
+      children: [leafWithTab, leaf2],
+      sizes: [50, 50],
+    };
+    const result = findTabInTree(tree, tab.id);
     expect(result).not.toBeNull();
-    expect(result!.leaf.groupId).toBe('g1');
-    expect(result!.tab.id).toBe(tabId);
+    expect(result!.leaf.groupId).toBe('g-tab');
+    expect(result!.tab.id).toBe(tab.id);
   });
 
   it('findTabInTree returns null for unknown tabId', () => {
