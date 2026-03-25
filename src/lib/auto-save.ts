@@ -4,9 +4,9 @@ import type { RequestState } from '@/types/pane-types';
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function toApiRequest(name: string, request: RequestState): Request {
+function toApiRequest(uid: string, name: string, request: RequestState): Request {
   return {
-    uid: '',
+    uid,
     name,
     method: request.method,
     url: request.url,
@@ -31,7 +31,7 @@ export function scheduleAutoSave(
   const timer = setTimeout(async () => {
     timers.delete(tabId);
     try {
-      await saveRequest(collection, path, toApiRequest(title, request));
+      await saveRequest(collection, path, toApiRequest(tabId, title, request));
       // Mark tab clean after successful save.
       const { usePaneStore } = await import('@/stores/pane-store');
       usePaneStore.getState().markClean(tabId);
