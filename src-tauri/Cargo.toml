@@ -42,3 +42,4 @@ env_logger.workspace = true
 dirs.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
+url = "2"

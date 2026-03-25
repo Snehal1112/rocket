@@ -108,6 +108,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
           oauth.clientId,
           oauth.clientSecret,
           oauth.scope || undefined,
+          oauth.callbackUrl || undefined,
         );
         patchOAuth2({
           accessToken: token.access_token,
