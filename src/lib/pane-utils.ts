@@ -12,7 +12,7 @@ import type { Request as ApiRequest } from '@/lib/tauri-api';
 import { parseQueryParams } from '@/lib/url-params';
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
-export function mapApiRequestToState(req: ApiRequest): RequestState {
+export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
   // Map auth from the tagged-union API type to the frontend AuthState.
   let auth: AuthState;
   switch (req.auth.authType) {
@@ -67,7 +67,7 @@ export function mapApiRequestToState(req: ApiRequest): RequestState {
       break;
     }
     default:
-      auth = { authType: 'none' };
+      auth = { authType: fromCollection ? 'inherit' : 'none' };
   }
 
   // Map body from the optional API Body to the always-present frontend BodyState.

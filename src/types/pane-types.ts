@@ -71,7 +71,7 @@ export interface BodyState {
 }
 
 export interface AuthState {
-  authType: 'none' | 'basic' | 'bearer' | 'api-key' | 'oauth2' | 'aws-sig-v4';
+  authType: 'inherit' | 'none' | 'basic' | 'bearer' | 'api-key' | 'oauth2' | 'aws-sig-v4';
   basic?: { username: string; password: string };
   bearer?: { token: string };
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };

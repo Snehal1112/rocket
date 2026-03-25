@@ -78,7 +78,7 @@ export function RequestList({ items, collectionName }: RequestListProps) {
       id: item.uid,
       title: item.name,
       tabType: 'request',
-      request: mapApiRequestToState(item),
+      request: mapApiRequestToState(item, true),
       response: null,
       isDirty: false,
       source: { collection: collectionName, path: item.fileName ?? path },

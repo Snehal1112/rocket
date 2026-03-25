@@ -139,7 +139,7 @@ function RequestNode({
   };
 
   function handleClick() {
-    const request: RequestState = mapApiRequestToState(itemData);
+    const request: RequestState = mapApiRequestToState(itemData, true);
     const tab: RequestTab = {
       id: uid,
       title: name,
