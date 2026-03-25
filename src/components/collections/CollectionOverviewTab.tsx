@@ -213,32 +213,41 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       .finally(() => setLoading(false));
   }, [collectionName]);
 
-  // Persist settings to disk.
-  const saveSettings = useCallback(async () => {
+  // Refs to hold the latest editable state for auto-save on unmount.
+  const stateRef = useRef({ auth, headers, description, variables });
+  stateRef.current = { auth, headers, description, variables };
+
+  // Save function that takes an explicit target collection name.
+  const saveSettingsFor = useCallback(async (targetCollection: string) => {
+    const { auth: a, headers: h, description: d, variables: v } = stateRef.current;
     try {
-      await saveCollectionSettings(collectionName, {
-        auth: authStateToApi(auth),
-        headers: headers.filter((h) => h.key).map((h) => ({
-          key: h.key,
-          value: h.value,
-          enabled: h.enabled,
+      await saveCollectionSettings(targetCollection, {
+        auth: authStateToApi(a),
+        headers: h.filter((hdr) => hdr.key).map((hdr) => ({
+          key: hdr.key,
+          value: hdr.value,
+          enabled: hdr.enabled,
         })),
-        description: description || undefined,
-        variables,
+        description: d || undefined,
+        variables: v,
       } as any);
     } catch (err) {
       console.error('[CollectionOverviewTab] save failed', err);
     }
-  }, [collectionName, auth, headers, description, variables]);
+  }, []);
 
-  // Keep a ref to the latest save function so the cleanup effect can call it.
-  const saveRef = useRef(saveSettings);
-  saveRef.current = saveSettings;
+  // Convenience wrapper using the current collection name.
+  const saveSettings = useCallback(async () => {
+    await saveSettingsFor(collectionName);
+  }, [collectionName, saveSettingsFor]);
 
-  // Auto-save when the component unmounts (user navigated away).
+  // Auto-save when the component unmounts or collection changes.
+  // Captures the collection name in the closure so the cleanup saves
+  // to the correct collection, not the next one.
   useEffect(() => {
-    return () => { saveRef.current(); };
-  }, [collectionName]);
+    const name = collectionName;
+    return () => { saveSettingsFor(name); };
+  }, [collectionName, saveSettingsFor]);
 
   if (loading) {
     return (
