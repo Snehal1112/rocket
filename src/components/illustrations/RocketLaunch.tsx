@@ -1,11 +1,11 @@
-// Theme-adaptive rocket illustration using currentColor and CSS variables.
-// Automatically adapts to light and dark mode.
+// Rocket launching upward with full exhaust trail and stars.
+// Best for: main empty state, welcome screens.
 
-interface RocketIllustrationProps {
+interface Props {
   className?: string;
 }
 
-export function RocketIllustration({ className = '' }: RocketIllustrationProps) {
+export function RocketLaunch({ className = '' }: Props) {
   return (
     <svg
       viewBox="0 0 200 200"
@@ -33,7 +33,7 @@ export function RocketIllustration({ className = '' }: RocketIllustrationProps) 
         className="fill-primary"
       />
 
-      {/* Body highlight / window strip. */}
+      {/* Body highlight. */}
       <path
         d="M100 35 C90 55, 85 80, 86 110 L87 135 H95 L94 110 C93 80, 95 55, 100 35Z"
         className="fill-white/20"
@@ -45,34 +45,23 @@ export function RocketIllustration({ className = '' }: RocketIllustrationProps) 
         className="fill-white/10"
       />
 
-      {/* Window / porthole. */}
+      {/* Window. */}
       <circle cx="100" cy="80" r="12" className="fill-primary-foreground/90" />
-      <circle cx="100" cy="80" r="9" className="fill-primary stroke-primary-foreground/30" strokeWidth="1" />
       <circle cx="100" cy="80" r="9" className="fill-background/60" />
-      {/* Window reflection. */}
       <ellipse cx="97" cy="77" rx="3" ry="4" className="fill-white/30" />
 
       {/* Left fin. */}
-      <path
-        d="M80 118 C70 125, 62 140, 65 155 L82 145 L80 118Z"
-        className="fill-primary"
-      />
-      <path
-        d="M80 118 C74 125, 68 137, 67 148 L75 142 L80 118Z"
-        className="fill-white/15"
-      />
+      <path d="M80 118 C70 125, 62 140, 65 155 L82 145 L80 118Z" className="fill-primary" />
+      <path d="M80 118 C74 125, 68 137, 67 148 L75 142 L80 118Z" className="fill-white/15" />
 
       {/* Right fin. */}
-      <path
-        d="M120 118 C130 125, 138 140, 135 155 L118 145 L120 118Z"
-        className="fill-primary"
-      />
+      <path d="M120 118 C130 125, 138 140, 135 155 L118 145 L120 118Z" className="fill-primary" />
 
-      {/* Bottom ring / nozzle. */}
+      {/* Nozzle. */}
       <rect x="85" y="140" width="30" height="8" rx="2" className="fill-muted-foreground/40" />
       <rect x="88" y="143" width="24" height="5" rx="1.5" className="fill-muted-foreground/25" />
 
-      {/* Small stars / sparkles around the rocket. */}
+      {/* Stars. */}
       <circle cx="45" cy="55" r="2" className="fill-primary/40" />
       <circle cx="155" cy="45" r="1.5" className="fill-primary/30" />
       <circle cx="35" cy="105" r="1.5" className="fill-primary/25" />

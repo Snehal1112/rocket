@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { RocketIllustration } from '@/components/illustrations/RocketIllustration';
+import { RocketLaunch } from '@/components/illustrations';
 import { usePaneStore } from '@/stores/pane-store';
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
@@ -17,7 +17,7 @@ function EmptyState({ groupId }: { groupId: string }) {
       <div className="flex flex-col items-center gap-6 text-center max-w-sm">
         {/* Logo and branding. */}
         <div className="flex flex-col items-center gap-3">
-          <RocketIllustration className="w-32 h-32" />
+          <RocketLaunch className="w-32 h-32" />
           <div>
             <h2 className="text-lg font-semibold text-foreground">Rocket API</h2>
             <p className="text-sm text-muted-foreground mt-1">
