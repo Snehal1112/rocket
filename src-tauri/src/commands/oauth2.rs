@@ -1,15 +1,23 @@
-use rocket_http::{acquire_token, generate_pkce, wait_for_callback, OAuthConfig, OAuthToken};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use rocket_http::{acquire_token, generate_pkce, OAuthConfig, OAuthToken, PkcePair};
 use rocket_shared::error::DomainError;
-use tauri::AppHandle;
-use tauri_plugin_opener::OpenerExt;
+use tauri::{AppHandle, Manager};
+
+/// Result extracted from the OAuth2 callback URL.
+struct AuthCodeResult {
+    code: String,
+    state: String,
+}
 
 /// Runs the full OAuth2 Authorization Code flow with PKCE.
 ///
 /// 1. Generates PKCE code_verifier + code_challenge.
-/// 2. Starts localhost callback server on a random port.
-/// 3. Opens browser with authorization URL.
-/// 4. Waits for callback (120s timeout).
-/// 5. Exchanges authorization code for access token.
+/// 2. Opens an in-app webview to the authorization URL.
+/// 3. Intercepts the redirect via on_navigation.
+/// 4. Exchanges authorization code for access token.
 #[tauri::command]
 pub async fn oauth2_auth_code_flow(
     app: AppHandle,
@@ -20,53 +28,84 @@ pub async fn oauth2_auth_code_flow(
     scope: Option<String>,
     callback_url: Option<String>,
 ) -> Result<OAuthToken, DomainError> {
-    // 1. Generate PKCE pair.
     let pkce = generate_pkce();
-
-    // 2. Generate random state for CSRF protection.
     let state = uuid::Uuid::new_v4().to_string();
+    let redirect_uri = callback_url
+        .unwrap_or_else(|| "https://exchange4all.local/webapp/#oidc-callback".into());
 
-    // 3. Bind callback server. Use the user's callback URL port if provided,
-    //    otherwise bind to a random port.
-    let bind_port = callback_url
-        .as_ref()
-        .and_then(|url| url::Url::parse(url).ok())
-        .and_then(|u| u.port())
-        .unwrap_or(0);
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{bind_port}"))
-        .await
-        .map_err(|e| DomainError::Internal(format!("Failed to start callback server on port {bind_port}: {e}")))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| DomainError::Internal(format!("Failed to get port: {e}")))?
-        .port();
-    let redirect_uri = callback_url.unwrap_or_else(|| format!("http://localhost:{port}/callback"));
-
-    // 4. Build the authorization URL with all required query parameters.
-    let separator = if authorization_url.contains('?') { "&" } else { "?" };
-    let auth_url = format!(
-        "{}{}response_type=code&client_id={}&redirect_uri={}&code_challenge={}&code_challenge_method=S256&state={}{}",
-        authorization_url,
-        separator,
-        urlencoding_encode(&client_id),
-        urlencoding_encode(&redirect_uri),
-        &pkce.code_challenge,
+    let auth_url = build_auth_url(
+        &authorization_url,
+        &client_id,
+        &redirect_uri,
+        &pkce,
         &state,
-        scope
-            .as_ref()
-            .map(|s| format!("&scope={}", urlencoding_encode(s)))
-            .unwrap_or_default(),
+        &scope,
     );
 
-    // 5. Open the system browser to start the authorization flow.
-    app.opener()
-        .open_url(&auth_url, None::<&str>)
-        .map_err(|e| DomainError::Internal(format!("Failed to open browser: {e}")))?;
+    // Channel for the navigation callback to send the result.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<AuthCodeResult, String>>();
+    let tx = Mutex::new(Some(tx));
+    let redirect_prefix = redirect_uri_prefix(&redirect_uri);
 
-    // 6. Wait for the redirect callback (120s timeout).
-    let callback = wait_for_callback(listener, &state, 120).await?;
+    // Close any existing auth window from a previous attempt.
+    if let Some(existing) = app.get_webview_window("oauth2-auth") {
+        let _ = existing.close();
+    }
 
-    // 7. Exchange the authorization code for an access token.
+    // Open webview window.
+    // on_navigation must be Fn (not FnOnce), hence Mutex<Option<Sender>>.
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        "oauth2-auth",
+        tauri::WebviewUrl::External(
+            auth_url
+                .parse()
+                .map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?,
+        ),
+    )
+    .title("Sign In")
+    .inner_size(500.0, 700.0)
+    .on_navigation(move |url| {
+        if url.as_str().starts_with(&redirect_prefix) && has_auth_params(url) {
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let _ = tx.send(extract_code_or_error(url));
+            }
+            return false;
+        }
+        true
+    })
+    .build()
+    .map_err(|e| DomainError::Internal(format!("Failed to open auth window: {e}")))?;
+
+    // Wait for the callback with a 120s timeout.
+    let result = tokio::time::timeout(Duration::from_secs(120), rx).await;
+    let _ = window.close();
+
+    let auth_result = match result {
+        Ok(Ok(Ok(r))) => r,
+        Ok(Ok(Err(err))) => {
+            return Err(DomainError::Internal(format!("Authorization denied: {err}")))
+        }
+        Ok(Err(_)) => {
+            return Err(DomainError::Internal(
+                "Authorization window was closed before completing sign-in.".into(),
+            ))
+        }
+        Err(_) => {
+            return Err(DomainError::Internal(
+                "Authorization timed out. Please try again.".into(),
+            ))
+        }
+    };
+
+    // Verify CSRF state before exchanging the code.
+    if auth_result.state != state {
+        return Err(DomainError::Internal(
+            "State mismatch — possible CSRF attack.".into(),
+        ));
+    }
+
+    // Exchange the authorization code for an access token.
     let client = reqwest::Client::new();
     let config = OAuthConfig {
         grant_type: "authorization_code".into(),
@@ -76,11 +115,75 @@ pub async fn oauth2_auth_code_flow(
         scope,
         username: None,
         password: None,
-        code: Some(callback.code),
+        code: Some(auth_result.code),
         redirect_uri: Some(redirect_uri),
         code_verifier: Some(pkce.code_verifier),
     };
     acquire_token(&config, &client).await
+}
+
+/// Builds the full authorization URL with all required query parameters.
+fn build_auth_url(
+    authorization_url: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    pkce: &PkcePair,
+    state: &str,
+    scope: &Option<String>,
+) -> String {
+    let sep = if authorization_url.contains('?') {
+        "&"
+    } else {
+        "?"
+    };
+    let scope_param = scope
+        .as_ref()
+        .map(|s| format!("&scope={}", urlencoding_encode(s)))
+        .unwrap_or_default();
+    format!(
+        "{}{sep}response_type=code&client_id={}&redirect_uri={}&code_challenge={}&code_challenge_method=S256&state={}{scope_param}",
+        authorization_url,
+        urlencoding_encode(client_id),
+        urlencoding_encode(redirect_uri),
+        urlencoding_encode(&pkce.code_challenge),
+        urlencoding_encode(state),
+    )
+}
+
+/// Strips the fragment from a URL so starts_with matching works.
+fn redirect_uri_prefix(redirect_uri: &str) -> String {
+    redirect_uri
+        .split('#')
+        .next()
+        .unwrap_or(redirect_uri)
+        .to_string()
+}
+
+/// Checks that the URL has OAuth2 callback params (code or error).
+fn has_auth_params(url: &url::Url) -> bool {
+    url.query_pairs()
+        .any(|(k, _)| k == "code" || k == "error")
+}
+
+/// Extracts code+state or an error description from the callback URL.
+fn extract_code_or_error(url: &url::Url) -> Result<AuthCodeResult, String> {
+    let params: HashMap<String, String> = url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if let Some(error) = params.get("error") {
+        let desc = params.get("error_description").unwrap_or(error);
+        return Err(desc.clone());
+    }
+    let code = params
+        .get("code")
+        .cloned()
+        .ok_or_else(|| "No authorization code in callback.".to_string())?;
+    let state = params
+        .get("state")
+        .cloned()
+        .ok_or_else(|| "Auth provider did not return a state parameter.".to_string())?;
+    Ok(AuthCodeResult { code, state })
 }
 
 /// Percent-encodes a string for use as a URL query parameter value.
