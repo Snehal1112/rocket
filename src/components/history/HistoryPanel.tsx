@@ -194,12 +194,12 @@ export function HistoryPanel() {
               <li key={entry.id}>
                 <button
                   type="button"
-                  className="w-full cursor-pointer px-3 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="w-full cursor-pointer px-2 py-1 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   onClick={() => openEntry(entry)}
                   aria-label={`Open ${entry.method} ${entry.url}`}
                 >
                   {/* Top row: method badge + truncated URL. */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <span
                       className={cn(
                         'w-12 shrink-0 text-xs font-semibold',
@@ -214,7 +214,7 @@ export function HistoryPanel() {
                   </div>
 
                   {/* Bottom row: status, duration, timestamp. */}
-                  <div className="mt-0.5 flex items-center gap-2 pl-14">
+                  <div className="mt-0.5 flex items-center gap-1.5 pl-14">
                     <span
                       className={cn('text-xs font-medium', statusColor(entry.status))}
                     >
@@ -228,7 +228,7 @@ export function HistoryPanel() {
                     </span>
                   </div>
                 </button>
-                <div className="mx-3 h-px bg-border" />
+                <div className="mx-2 h-px bg-border" />
               </li>
             ))}
           </ul>
