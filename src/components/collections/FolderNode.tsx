@@ -115,8 +115,8 @@ export function FolderNode({
             </button>
 
             <TreeItem value={basePath} open={open} onOpenChange={setOpen} className="flex-1">
-              <TreeItemContent className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer">
-                {open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+              <TreeItemContent className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer">
+                {open ? <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" /> : <Folder className="h-3 w-3 shrink-0 text-muted-foreground" />}
                 {isRenaming ? (
                   <Input
                     autoFocus className="h-6 text-xs flex-1"
@@ -205,7 +205,7 @@ export function FolderNode({
               )}
               {activeItem && activeItem.type === 'folder' && (
                 <div className="flex items-center gap-1 px-2 py-1 text-xs rounded-sm bg-card border border-border shadow-lg opacity-90">
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                  <Folder className="h-3 w-3 text-muted-foreground" />
                   <span>{activeItem.name}</span>
                 </div>
               )}
