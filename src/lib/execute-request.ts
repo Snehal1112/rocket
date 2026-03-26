@@ -97,7 +97,14 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const resolve = buildResolver(envVars, collectionVars);
 
   // Resolve environment variables in all request fields.
-  const resolvedUrl = resolve(request.url);
+  let resolvedUrl = resolve(request.url);
+
+  // Substitute :pathParam placeholders with values from pathParams.
+  for (const p of request.pathParams) {
+    if (p.enabled && p.key && p.value) {
+      resolvedUrl = resolvedUrl.replace(`:${p.key}`, encodeURIComponent(p.value));
+    }
+  }
   const resolvedHeaders: Header[] = request.headers
     .filter((h) => h.enabled)
     .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: h.enabled }));
