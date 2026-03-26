@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
+import { renameRequest } from '@/lib/tauri-api';
 import {
   createDefaultLeaf,
   findTabInTree,
@@ -282,10 +283,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Persist rename to disk. The file watcher detects the write and
     // emits collection-changed, which refreshes the sidebar automatically.
     if (found?.tab.source) {
-      import('@/lib/tauri-api').then(({ renameRequest }) => {
-        renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
-          .catch((err) => console.error('[pane-store] rename failed:', err));
-      });
+      renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
+        .catch((err) => console.error('[pane-store] rename failed:', err));
     }
   },
 
