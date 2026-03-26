@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { DndContext, DragOverlay, closestCenter, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { Folder, FolderOpen, FolderPlus, Plus, Trash2, MoreHorizontal } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -12,11 +10,11 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
-import { getCollection, onCollectionChanged, renameCollection, reorderItems } from '@/lib/tauri-api';
+import { getCollection, onCollectionChanged, renameCollection } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
-import type { CollectionSummary, Collection, CollectionItem } from '@/lib/tauri-api';
+import type { CollectionSummary, Collection } from '@/lib/tauri-api';
 import type { CollectionTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 
@@ -39,15 +37,8 @@ export function CollectionNode({
   const [collection, setCollection] = useState<Collection | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(summary.name);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [localItems, setLocalItems] = useState<CollectionItem[]>([]);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Keep localItems in sync when collection data is fetched/refreshed.
-  useEffect(() => {
-    if (collection) setLocalItems(collection.root.items);
-  }, [collection]);
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
@@ -124,33 +115,10 @@ export function CollectionNode({
     usePaneStore.getState().openTab(tab);
   };
 
+  const rawItems = collection?.root.items ?? [];
   const filteredItems = filter
-    ? localItems.filter((item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()))
-    : localItems;
-
-  // sortableIds must match filteredItems exactly (Fix A).
-  const sortableIds = filteredItems.map((item) => item.type === 'request' ? item.uid : item.name);
-
-  const handleDragStart = ({ active }: DragStartEvent) => setActiveId(String(active.id));
-  const handleDragCancel = () => setActiveId(null);
-  const handleDragEnd = async ({ active, over }: DragEndEvent) => {
-    setActiveId(null);
-    if (!over || active.id === over.id) return;
-    const oldIdx = sortableIds.indexOf(String(active.id));
-    const newIdx = sortableIds.indexOf(String(over.id));
-    if (oldIdx === -1 || newIdx === -1) return;
-    const reordered = arrayMove(localItems, oldIdx, newIdx);
-    setLocalItems(reordered);
-    const orderedNames = reordered.map((i) => i.type === 'request' ? (i.fileName ?? i.name) : i.name);
-    try {
-      await reorderItems(summary.name, '', orderedNames);
-    } catch (err) {
-      console.error('Reorder failed, reverting:', err);
-      if (collection) setLocalItems(collection.root.items);
-    }
-  };
-
-  const activeItem = activeId ? localItems.find((i) => (i.type === 'request' ? i.uid : i.name) === activeId) : null;
+    ? rawItems.filter((item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()))
+    : rawItems;
 
   return (
     <ContextMenu>
@@ -240,52 +208,29 @@ export function CollectionNode({
 
       {open && collection && (
         <div className="pl-2 border-l border-border/30 ml-3">
-          <DndContext
-            collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          >
-            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              {filteredItems.map((item) => {
-                if (item.type === 'folder') {
-                  return (
-                    <FolderNode
-                      key={`folder-${item.name}`}
-                      name={item.name} items={item.items}
-                      collectionName={summary.name} basePath={item.name}
-                      depth={1} filter={filter} summaries={summaries}
-                      onNewRequest={onNewRequest} onNewFolder={onNewFolder}
-                      onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
-                    />
-                  );
-                }
-                return (
-                  <RequestNode
-                    key={item.uid}
-                    uid={item.uid} name={item.name} method={item.method}
-                    collectionName={summary.name} path={item.fileName ?? item.name}
-                    itemData={item} summaries={summaries} dragDisabled={!!filter}
-                    onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
-                  />
-                );
-              })}
-            </SortableContext>
-            <DragOverlay>
-              {activeItem && activeItem.type === 'request' && (
-                <div className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-sm bg-card border border-border shadow-lg opacity-90">
-                  <span className="text-muted-foreground">{activeItem.method}</span>
-                  <span>{activeItem.name}</span>
-                </div>
-              )}
-              {activeItem && activeItem.type === 'folder' && (
-                <div className="flex items-center gap-1 px-2 py-1 text-xs rounded-sm bg-card border border-border shadow-lg opacity-90">
-                  <Folder className="h-3 w-3 text-muted-foreground" />
-                  <span>{activeItem.name}</span>
-                </div>
-              )}
-            </DragOverlay>
-          </DndContext>
+          {filteredItems.map((item) => {
+            if (item.type === 'folder') {
+              return (
+                <FolderNode
+                  key={`folder-${item.name}`}
+                  name={item.name} items={item.items}
+                  collectionName={summary.name} basePath={item.name}
+                  depth={1} filter={filter} summaries={summaries}
+                  onNewRequest={onNewRequest} onNewFolder={onNewFolder}
+                  onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
+                />
+              );
+            }
+            return (
+              <RequestNode
+                key={item.uid}
+                uid={item.uid} name={item.name} method={item.method}
+                collectionName={summary.name} path={item.fileName ?? item.name}
+                itemData={item} summaries={summaries}
+                onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
+              />
+            );
+          })}
         </div>
       )}
     </ContextMenu>
