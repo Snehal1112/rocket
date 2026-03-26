@@ -112,25 +112,25 @@ function TreeItem({
           data-selected={isSelected || undefined}
           data-active={active || undefined}
           className={cn(
-            "flex items-center gap-1 px-2 py-1 text-sm cursor-pointer",
+            "flex items-center gap-1 px-1 py-1 text-sm cursor-pointer",
             "hover:bg-accent/50",
             "data-[selected]:bg-accent/30",
             "data-[active]:border-l-2 data-[active]:border-primary data-[active]:bg-accent/60 data-[active]:text-accent-foreground",
           )}
-          style={{ paddingLeft: `${(depth + 1) * 12}px` }}
+          style={{ paddingLeft: `${(depth + 1) * 8}px` }}
           onClick={handleSelect}
         >
           {/* Expand/collapse chevron, shown only for items with sub-trees. */}
           {hasChildren ? (
             <ChevronRight
               className={cn(
-                "size-4 shrink-0 text-muted-foreground transition-transform",
+                "size-3 shrink-0 text-muted-foreground transition-transform",
                 open && "rotate-90",
               )}
             />
           ) : (
             // Spacer to keep content aligned when there is no chevron.
-            <span className="size-4 shrink-0" />
+            <span className="size-3 shrink-0" />
           )}
           {contentChildren}
         </div>
