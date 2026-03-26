@@ -14,7 +14,7 @@
   --font-sans: "Inter", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --font-size-2xs: 0.625rem;      /* 10px — micro text for badges, counts, kbd. */
-  --line-height-2xs: 1rem;
+  --line-height-2xs: 1.125rem;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
