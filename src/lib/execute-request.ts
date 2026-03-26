@@ -1,5 +1,6 @@
 import { usePaneStore } from '@/stores/pane-store';
 import { useEnvStore } from '@/stores/env-store';
+import { useConsoleStore } from '@/stores/console-store';
 import {
   executeRequest,
   type Auth,
@@ -114,6 +115,18 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       activeView: 'pretty',
     };
     usePaneStore.getState().setResponse(tabId, responseState);
+    useConsoleStore.getState().addEntry({
+      method: request.method,
+      url: resolvedUrl,
+      status: result.status,
+      statusText: result.statusText,
+      durationMs: result.durationMs,
+      sizeBytes: result.sizeBytes,
+      requestHeaders: resolvedHeaders.map((h) => ({ key: h.key, value: h.value })),
+      requestBody: resolvedBody?.content ?? '',
+      responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
+      responseBody: result.body,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     usePaneStore.getState().setResponse(tabId, {
@@ -124,6 +137,18 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       durationMs: 0,
       sizeBytes: msg.length,
       activeView: 'raw',
+    });
+    useConsoleStore.getState().addEntry({
+      method: request.method,
+      url: resolvedUrl,
+      status: 0,
+      statusText: 'Error',
+      durationMs: 0,
+      sizeBytes: msg.length,
+      requestHeaders: resolvedHeaders.map((h) => ({ key: h.key, value: h.value })),
+      requestBody: resolvedBody?.content ?? '',
+      responseHeaders: [],
+      responseBody: msg,
     });
   }
 }
