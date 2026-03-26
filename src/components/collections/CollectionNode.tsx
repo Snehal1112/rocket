@@ -122,10 +122,11 @@ export function CollectionNode({
     if (!name) { setCreatingRequest(false); return; }
     setCreatingRequest(false);
     try {
-      const payload = { uid: '', name, method: 'GET' as const, url: '', headers: [], auth: { authType: 'none' as const } };
+      const uid = crypto.randomUUID();
+      const payload = { uid, name, method: 'GET' as const, url: '', headers: [], auth: { authType: 'none' as const } };
       const saved = await saveRequest(summary.name, name, payload);
       usePaneStore.getState().openTab({
-        id: saved.uid,
+        id: uid,
         title: saved.name,
         tabType: 'request',
         request: createDefaultRequest(),
