@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { parseUrlTokens, type UrlToken } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
@@ -15,8 +14,25 @@ interface VariableAwareUrlInputProps {
   collectionVariables?: Record<string, string>;
   pathParams?: Record<string, string>;
   queryParams?: Record<string, string>;
+  onPathParamChange?: (key: string, value: string) => void;
+  onSwitchToParams?: () => void;
   placeholder?: string;
   className?: string;
+}
+
+// Determines the type badge and label for the popover footer.
+function tokenMeta(token: UrlToken, _activeEnvId: string | null) {
+  switch (token.type) {
+    case 'pathParam':
+      return { icon: ':', iconClass: 'text-violet-500', label: 'Path Variable' };
+    case 'variable':
+      if (token.source === 'Collection') {
+        return { icon: 'C', iconClass: 'bg-muted-foreground text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold', label: 'Collection' };
+      }
+      return { icon: 'E', iconClass: 'bg-amber-500 text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold', label: 'Environments' };
+    default:
+      return { icon: '?', iconClass: 'text-muted-foreground', label: '' };
+  }
 }
 
 export function VariableAwareUrlInput({
@@ -27,6 +43,8 @@ export function VariableAwareUrlInput({
   collectionVariables,
   pathParams,
   queryParams,
+  onPathParamChange,
+  onSwitchToParams,
   placeholder,
   className,
 }: VariableAwareUrlInputProps) {
@@ -35,9 +53,6 @@ export function VariableAwareUrlInput({
   const environments = useEnvStore((s) => s.environments);
   const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
 
-  // Compute variables via useMemo to avoid creating a new object every render.
-  // Calling getActiveVariables() inside a Zustand selector returns a fresh
-  // object each time, which fails Object.is equality and causes infinite re-renders.
   const variables = useMemo(() => {
     if (!activeEnvId) return {};
     const env = environments.find((e) => e.name === activeEnvId);
@@ -54,28 +69,32 @@ export function VariableAwareUrlInput({
 
   const tokens = parseUrlTokens(value, variables, activeEnvId ?? undefined, collectionVariables, pathParams, queryParams);
 
-  const handleTokenHover = useCallback((token: UrlToken) => {
+  const handleTokenClick = useCallback((token: UrlToken) => {
     setEditingToken(token);
     setEditValue(token.resolved ?? '');
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!editingToken || !activeEnvId) return;
-    const env = environments.find((e) => e.name === activeEnvId);
-    if (!env) return;
+  // Save the edited value based on token type.
+  const handleCommit = useCallback(async () => {
+    if (!editingToken) return;
 
-    const updatedVars = env.variables.map((v) =>
-      v.key === editingToken.value ? { ...v, value: editValue } : v,
-    );
-
-    // If variable doesn't exist yet, add it.
-    if (!env.variables.some((v) => v.key === editingToken.value)) {
-      updatedVars.push({ key: editingToken.value, value: editValue, enabled: true, secret: false });
+    if (editingToken.type === 'pathParam' && onPathParamChange) {
+      onPathParamChange(editingToken.value, editValue);
+    } else if (editingToken.type === 'variable' && editingToken.source !== 'Collection' && activeEnvId) {
+      const env = environments.find((e) => e.name === activeEnvId);
+      if (env) {
+        const updatedVars = env.variables.map((v) =>
+          v.key === editingToken.value ? { ...v, value: editValue } : v,
+        );
+        if (!env.variables.some((v) => v.key === editingToken.value)) {
+          updatedVars.push({ key: editingToken.value, value: editValue, enabled: true, secret: false });
+        }
+        await updateEnvironment({ ...env, variables: updatedVars });
+      }
     }
 
-    await updateEnvironment({ ...env, variables: updatedVars });
     setEditingToken(null);
-  }, [editingToken, editValue, activeEnvId, environments, updateEnvironment]);
+  }, [editingToken, editValue, activeEnvId, environments, updateEnvironment, onPathParamChange]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
     if (!onCurlImport) return;
@@ -87,6 +106,79 @@ export function VariableAwareUrlInput({
       onCurlImport(parsed);
     }
   }, [onCurlImport]);
+
+  // Renders the unified Postman-style popover for any editable token.
+  function renderTokenPopover(token: UrlToken, i: number, displayText: string, tokenColorClass: string) {
+    const meta = tokenMeta(token, activeEnvId);
+    const isCollectionVar = token.type === 'variable' && token.source === 'Collection';
+
+    return (
+      <Popover
+        key={i}
+        open={editingToken?.start === token.start}
+        onOpenChange={(open) => { if (!open) setEditingToken(null); }}
+      >
+        <PopoverTrigger asChild>
+          <span
+            className={cn(
+              'rounded-sm px-0.5 cursor-pointer pointer-events-auto',
+              tokenColorClass,
+            )}
+            onMouseEnter={() => handleTokenClick(token)}
+          >
+            {displayText}
+          </span>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0" side="bottom" align="start">
+          {/* Value input. */}
+          <div className="p-2">
+            <Input
+              autoFocus
+              className="h-7 text-xs font-mono"
+              value={editValue}
+              onChange={(e) => {
+                setEditValue(e.target.value);
+                // Live update for path params.
+                if (token.type === 'pathParam' && onPathParamChange) {
+                  onPathParamChange(token.value, e.target.value);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleCommit();
+                if (e.key === 'Escape') setEditingToken(null);
+              }}
+              onBlur={() => void handleCommit()}
+              placeholder="Value"
+              readOnly={isCollectionVar}
+            />
+          </div>
+
+          {/* Footer: type badge (left) + "Variables in request →" link (right). */}
+          <div className="flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30">
+            <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+              {token.type === 'pathParam' ? (
+                <span className="text-violet-500 font-bold text-xs">:</span>
+              ) : meta.icon === 'E' ? (
+                <span className={meta.iconClass}>{meta.icon}</span>
+              ) : (
+                <span className={meta.iconClass}>{meta.icon}</span>
+              )}
+              <span>{meta.label}</span>
+            </div>
+            {onSwitchToParams && (
+              <button
+                type="button"
+                className="text-2xs text-primary hover:underline cursor-pointer"
+                onClick={() => { setEditingToken(null); onSwitchToParams(); }}
+              >
+                Variables in request &rarr;
+              </button>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  }
 
   return (
     <div className={cn('relative flex-1', className)}>
@@ -113,26 +205,16 @@ export function VariableAwareUrlInput({
               return <span key={i}>{token.value}</span>;
             }
 
-            // Path param tokens: :paramName — styled span with title tooltip, no popover.
+            // Path param: unified popover.
             if (token.type === 'pathParam') {
               const isResolved = token.resolved !== undefined;
-              return (
-                <span
-                  key={i}
-                  className={cn(
-                    'rounded-sm px-0.5 pointer-events-auto',
-                    isResolved
-                      ? 'bg-violet-500/15 text-violet-500'
-                      : 'bg-destructive/15 text-destructive',
-                  )}
-                  title={isResolved ? `${token.value} = ${token.resolved}` : `${token.value} (unresolved)`}
-                >
-                  :{token.value}
-                </span>
+              return renderTokenPopover(
+                token, i, `:${token.value}`,
+                isResolved ? 'bg-violet-500/15 text-violet-500' : 'bg-destructive/15 text-destructive',
               );
             }
 
-            // Query key tokens: highlighted key name.
+            // Query key: styled span (no popover — edit in Params tab).
             if (token.type === 'queryKey') {
               const isResolved = token.resolved !== undefined;
               return (
@@ -140,9 +222,7 @@ export function VariableAwareUrlInput({
                   key={i}
                   className={cn(
                     'rounded-sm px-0.5 pointer-events-auto',
-                    isResolved
-                      ? 'bg-amber-500/15 text-amber-500'
-                      : 'text-muted-foreground',
+                    isResolved ? 'bg-amber-500/15 text-amber-500' : 'text-muted-foreground',
                   )}
                   title={isResolved ? `${token.value} = ${token.resolved}` : token.value}
                 >
@@ -151,73 +231,16 @@ export function VariableAwareUrlInput({
               );
             }
 
-            // Query value tokens: plain muted text.
+            // Query value: plain muted text.
             if (token.type === 'queryValue') {
               return <span key={i} className="text-muted-foreground">{token.value}</span>;
             }
 
-            // Variable tokens: {{name}} — with popover for editing.
+            // Variable token: unified popover.
             const isResolved = token.resolved !== undefined;
-            return (
-              <Popover
-                key={i}
-                open={editingToken?.start === token.start}
-                onOpenChange={(open) => { if (!open) setEditingToken(null); }}
-              >
-                <PopoverTrigger asChild>
-                  <span
-                    className={cn(
-                      'rounded-sm px-0.5 cursor-pointer pointer-events-auto',
-                      isResolved
-                        ? 'bg-primary/15 text-primary'
-                        : 'bg-destructive/15 text-destructive',
-                    )}
-                    onMouseEnter={() => handleTokenHover(token)}
-                  >
-                    {`{{${token.value}}}`}
-                  </span>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-3 space-y-2" side="bottom" align="start">
-                  <div className="text-xs font-medium">{token.value}</div>
-                  {isResolved && token.source && (
-                    <div className="text-2xs text-muted-foreground">
-                      Source: {token.source}
-                    </div>
-                  )}
-                  {!isResolved && !activeEnvId && (
-                    <div className="text-2xs text-destructive">
-                      No active environment selected.
-                    </div>
-                  )}
-                  {!isResolved && activeEnvId && (
-                    <div className="text-2xs text-destructive">
-                      Not found in {activeEnvId}.
-                    </div>
-                  )}
-                  {activeEnvId && (
-                    <div className="space-y-1.5">
-                      <Input
-                        className="h-7 text-xs font-mono"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void handleSave();
-                          if (e.key === 'Escape') setEditingToken(null);
-                        }}
-                        placeholder="Variable value"
-                      />
-                      <div className="flex gap-1.5">
-                        <Button size="sm" className="h-6 text-2xs" onClick={() => void handleSave()}>
-                          Save
-                        </Button>
-                        <Button size="sm" variant="ghost" className="h-6 text-2xs" onClick={() => setEditingToken(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </PopoverContent>
-              </Popover>
+            return renderTokenPopover(
+              token, i, `{{${token.value}}}`,
+              isResolved ? 'bg-primary/15 text-primary' : 'bg-destructive/15 text-destructive',
             );
           })
         ) : (
