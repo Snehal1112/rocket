@@ -1,8 +1,7 @@
 import { useCallback, lazy, Suspense } from 'react';
-import { Check, X, Plus, FileUp } from 'lucide-react';
+import { FileUp } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Select,
@@ -12,6 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
+import { KeyValueEditor } from './KeyValueEditor';
 
 // Lazy-load Monaco so it stays out of the initial JS bundle.
 const MonacoWrapper = lazy(() =>
@@ -116,7 +116,13 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
       )}
 
       {body.mode === 'formdata' && (
-        <FormDataEditor formData={body.formData} onChange={setFormData} />
+        <KeyValueEditor
+          entries={body.formData}
+          onChange={setFormData}
+          keyPlaceholder="Field name"
+          valuePlaceholder="Value"
+          addLabel="Add Field"
+        />
       )}
 
       {body.mode === 'binary' && (
@@ -137,83 +143,6 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
           </Button>
         )
       )}
-    </div>
-  );
-}
-
-// Sub-component for form data entries using flex rows matching legacy pattern.
-function FormDataEditor({
-  formData,
-  onChange,
-}: {
-  formData: KeyValueEntry[];
-  onChange: (data: KeyValueEntry[]) => void;
-}) {
-  const updateEntry = useCallback(
-    (id: string, patch: Partial<KeyValueEntry>) => {
-      onChange(formData.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-    },
-    [formData, onChange],
-  );
-
-  const removeEntry = useCallback(
-    (id: string) => {
-      onChange(formData.filter((e) => e.id !== id));
-    },
-    [formData, onChange],
-  );
-
-  const addEntry = useCallback(() => {
-    onChange([
-      ...formData,
-      { id: crypto.randomUUID(), key: '', value: '', enabled: true },
-    ]);
-  }, [formData, onChange]);
-
-  return (
-    <div className="space-y-2">
-      {formData.map((entry) => (
-        <div key={entry.id} className="flex gap-2 items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => updateEntry(entry.id, { enabled: !entry.enabled })}
-            className={`w-4 h-4 rounded border p-0 ${
-              entry.enabled
-                ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                : 'border-gray-300 hover:bg-muted'
-            }`}
-            aria-label={`${entry.enabled ? 'Disable' : 'Enable'} field ${entry.key || 'unnamed'}`}
-          >
-            {entry.enabled && <Check className="h-3 w-3" />}
-          </Button>
-          <Input
-            placeholder="Key"
-            value={entry.key}
-            onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-            className="flex-1 text-xs h-8"
-          />
-          <Input
-            placeholder="Value"
-            value={entry.value}
-            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-            className="flex-1 text-xs h-8"
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => removeEntry(entry.id)}
-            className="h-7 w-7"
-            aria-label={`Remove field ${entry.key || 'unnamed'}`}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      ))}
-      <Button variant="ghost" size="sm" onClick={addEntry} className="text-xs">
-        <Plus className="h-3 w-3 mr-1" />
-        Add Field
-      </Button>
     </div>
   );
 }
