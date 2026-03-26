@@ -10,7 +10,6 @@ import {
   ContextMenu, ContextMenuContent, ContextMenuItem,
   ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { getCollection, onCollectionChanged, renameCollection, reorderItems } from '@/lib/tauri-api';
@@ -180,7 +179,6 @@ export function CollectionNode({
               ) : (
                 <span className="truncate font-medium text-foreground">{summary.name}</span>
               )}
-              <Badge variant="outline" className="ml-auto text-[10px] shrink-0">{summary.requestCount}</Badge>
             </TreeItemContent>
           </TreeItem>
 
