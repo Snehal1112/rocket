@@ -81,6 +81,17 @@
   --chart-4: hsl(283 52% 49%);
   --chart-5: hsl(343 74% 52%);
 
+  /* Monaco editor syntax theme. */
+  --monaco-bg: #f5f8fc;
+  --monaco-fg: #1a1f36;
+  --monaco-line-highlight: #eef2f9;
+  --monaco-line-number: #9ca3af;
+  --monaco-string: 16a34a;
+  --monaco-number: d97706;
+  --monaco-keyword: 7c3aed;
+  --monaco-comment: 9ca3af;
+  --monaco-type: 2563eb;
+
   /* Sidebar: dark blue sidebar. */
   --sidebar: hsl(222 47% 11%);
   --sidebar-foreground: hsl(210 40% 95%);
@@ -118,6 +129,17 @@
   --chart-3: hsl(30 94% 55%);
   --chart-4: hsl(282 60% 62%);
   --chart-5: hsl(340 78% 61%);
+
+  /* Monaco editor syntax theme. */
+  --monaco-bg: #1f1f1f;
+  --monaco-fg: #dedede;
+  --monaco-line-highlight: #242424;
+  --monaco-line-number: #666666;
+  --monaco-string: 4ade80;
+  --monaco-number: fbbf24;
+  --monaco-keyword: a78bfa;
+  --monaco-comment: 6b7280;
+  --monaco-type: 60a5fa;
 
   --sidebar: hsl(0 0% 8%);
   --sidebar-foreground: hsl(0 0% 87%);
