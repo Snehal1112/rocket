@@ -1,7 +1,19 @@
+import { useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { RocketLaunch } from '@/components/illustrations';
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 
@@ -35,9 +47,21 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const activeTab = node.tabs.find((t) => t.id === node.activeTabId);
   const hasTabs = node.tabs.length > 0;
 
+  const closeTab = usePaneStore((s) => s.closeTab);
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null);
+
+  const handleCloseTab = (tabId: string) => {
+    const tab = node.tabs.find((t) => t.id === tabId);
+    if (tab && tab.isDirty && !tab.source) {
+      setPendingCloseTabId(tabId);
+    } else {
+      closeTab(tabId, node.groupId);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
-      {hasTabs && <TabBar node={node} />}
+      {hasTabs && <TabBar node={node} onCloseTab={handleCloseTab} />}
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
           isRequestTab(activeTab) ? (
@@ -49,6 +73,25 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           <EmptyState />
         )}
       </div>
+      <AlertDialog open={!!pendingCloseTabId} onOpenChange={(open) => { if (!open) setPendingCloseTabId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              This request has never been saved to a collection. Close anyway?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingCloseTabId) closeTab(pendingCloseTabId, node.groupId);
+              setPendingCloseTabId(null);
+            }}>
+              Close
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
