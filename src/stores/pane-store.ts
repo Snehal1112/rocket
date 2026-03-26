@@ -3,7 +3,6 @@ import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, C
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import {
-  createDefaultTab,
   createDefaultLeaf,
   findTabInTree,
   findActiveLeaf,
@@ -45,7 +44,7 @@ function updateSplitSizes(
   return { ...node, children: [left, right] } satisfies SplitNode;
 }
 
-// Builds the initial store state with one leaf containing one draft tab.
+// Builds the initial store state with one empty leaf.
 function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId'> {
   const leaf = createDefaultLeaf();
   return { root: leaf, activeGroupId: leaf.groupId };
@@ -56,7 +55,6 @@ export interface PaneState {
   activeGroupId: string;
 
   // Tab actions.
-  newDraftTab: (groupId?: string, defaultCollection?: string, defaultFolderPath?: string) => void;
   openTab: (tab: Tab, groupId?: string) => void;
   closeTab: (tabId: string, groupId: string) => void;
   setActiveTab: (tabId: string, groupId: string) => void;
@@ -82,24 +80,6 @@ export interface PaneState {
 
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
-
-  newDraftTab(groupId, defaultCollection, defaultFolderPath) {
-    const { root, activeGroupId } = get();
-    const targetGroupId = groupId ?? activeGroupId;
-    const tab = createDefaultTab();
-    if (defaultCollection) {
-      (tab as any).defaultCollection = defaultCollection;
-    }
-    if (defaultFolderPath) {
-      (tab as any).defaultFolderPath = defaultFolderPath;
-    }
-    const newRoot = updateLeaf(root, targetGroupId, (leaf) => ({
-      ...leaf,
-      tabs: [...leaf.tabs, tab],
-      activeTabId: tab.id,
-    }));
-    set({ root: newRoot, activeGroupId: targetGroupId });
-  },
 
   openTab(tab, groupId) {
     const { root, activeGroupId } = get();
