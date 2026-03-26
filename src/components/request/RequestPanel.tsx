@@ -37,6 +37,7 @@ import type {
   HttpMethod,
   KeyValueEntry,
 } from '@/types/pane-types';
+import type { ParsedCurl } from '@/lib/curl-parser';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -69,6 +70,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
+  const [curlImported, setCurlImported] = useState(false);
 
   // Resizable split: request height as percentage.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -132,6 +134,42 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, request.url, updateRequest],
   );
 
+  const handleCurlImport = useCallback((parsed: ParsedCurl) => {
+    const patch: Partial<typeof request> = {
+      method: (parsed.method as HttpMethod) || 'GET',
+      url: parsed.url,
+      headers: parsed.headers.map((h) => ({
+        id: crypto.randomUUID(),
+        key: h.key,
+        value: h.value,
+        enabled: true,
+      })),
+    };
+
+    if (parsed.body) {
+      patch.body = {
+        mode: parsed.body.mode,
+        content: parsed.body.content,
+        formData: [],
+      };
+    }
+
+    if (parsed.auth?.type === 'basic') {
+      patch.auth = {
+        authType: 'basic',
+        basic: { username: parsed.auth.username, password: parsed.auth.password },
+      };
+    }
+
+    // Sync query params from the parsed URL.
+    patch.queryParams = parseQueryParams(parsed.url);
+
+    updateRequest(tab.id, patch);
+    setUrlError('');
+    setCurlImported(true);
+    setTimeout(() => setCurlImported(false), 3000);
+  }, [tab.id, updateRequest]);
+
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
 
@@ -166,6 +204,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             value={request.url}
             onChange={(val) => { setUrlError(''); handleUrlChange(val); }}
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
+            onCurlImport={handleCurlImport}
             placeholder="https://api.example.com/resource"
           />
 
@@ -184,6 +223,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </div>
         {urlError && (
           <p className="text-2xs text-destructive px-3 py-1">{urlError}</p>
+        )}
+        {curlImported && (
+          <p className="text-2xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
         )}
 
         {/* Section tabs — matching legacy TabsList styling. */}
