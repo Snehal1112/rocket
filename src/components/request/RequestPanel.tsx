@@ -96,7 +96,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       .then((s) => {
         const vars: Record<string, string> = {};
         for (const v of s.variables) {
-          if (v.enabled) vars[v.key] = v.value;
+          if (v.enabled) vars[v.key] = v.value || v.initialValue;
         }
         setCollectionVars(vars);
       })
