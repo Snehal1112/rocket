@@ -73,7 +73,7 @@ export function FolderNode({
         request: createDefaultRequest(),
         response: null,
         isDirty: false,
-        source: { collection: collectionName, path: saved.file_name ?? `${path}.json` },
+        source: { collection: collectionName, path: saved.fileName ?? `${path}.json` },
       });
     } catch (err) {
       console.error('[FolderNode] Failed to create request:', err);
