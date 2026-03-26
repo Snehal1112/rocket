@@ -98,7 +98,7 @@ export function RequestNode({
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <span className={cn('w-10 shrink-0 font-mono text-[10px] font-bold', methodColor)}>
+              <span className={cn('w-10 shrink-0 font-mono text-2xs font-bold', methodColor)}>
                 {method}
               </span>
               {isRenaming ? (

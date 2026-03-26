@@ -305,7 +305,7 @@ export function CollectionsSidebar() {
                   onBlur={() => { setIsCreating(false); setNewName(''); setCreateError(''); }}
                 />
                 {createError && (
-                  <p className="text-[10px] text-destructive mt-0.5 px-1">{createError}</p>
+                  <p className="text-2xs text-destructive mt-0.5 px-1">{createError}</p>
                 )}
               </div>
             )}

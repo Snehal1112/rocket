@@ -145,7 +145,7 @@ export function RequestList({ items, collectionName }: RequestListProps) {
                     >
                       <Badge
                         variant="outline"
-                        className={cn('text-[10px] font-semibold w-14 justify-center shrink-0', methodClass)}
+                        className={cn('text-2xs font-semibold w-14 justify-center shrink-0', methodClass)}
                       >
                         {req.method}
                       </Badge>

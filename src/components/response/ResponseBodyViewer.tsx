@@ -165,7 +165,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
             >
               {tab}
               {tab === 'headers' && headerCount > 0 && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
+                <span className="ml-1 text-2xs text-muted-foreground">
                   ({headerCount})
                 </span>
               )}

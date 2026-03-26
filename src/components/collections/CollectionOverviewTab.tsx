@@ -275,7 +275,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             >
               {t.label}
               {t.value === 'variables' && variables.length > 0 && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
+                <span className="ml-1 text-2xs text-muted-foreground">
                   ({variables.filter(v => v.enabled).length})
                 </span>
               )}

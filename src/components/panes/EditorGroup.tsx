@@ -21,7 +21,7 @@ function EmptyState() {
         </div>
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span>
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">Cmd+Enter</kbd>
+            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs">Cmd+Enter</kbd>
             {' '}Send
           </span>
         </div>

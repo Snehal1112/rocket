@@ -50,7 +50,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
       }`}
     >
       {isRequestTab(tab) ? (
-        <span className={`font-semibold text-[10px] shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
+        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
           {tab.request.method}
         </span>
       ) : (
@@ -58,7 +58,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
       )}
       <span className="truncate">{getTabTitle(tab)}</span>
       {tab.isDirty && (
-        <span className="text-primary shrink-0 text-[10px]" aria-label="Unsaved changes">
+        <span className="text-primary shrink-0 text-2xs" aria-label="Unsaved changes">
           ●
         </span>
       )}

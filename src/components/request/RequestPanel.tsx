@@ -187,7 +187,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             <TabsTrigger value="params" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Params
               {enabledParamCount > 0 && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
+                <span className="ml-1 text-2xs text-muted-foreground">
                   ({enabledParamCount})
                 </span>
               )}
@@ -195,7 +195,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             <TabsTrigger value="headers" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Headers
               {enabledHeaderCount > 0 && (
-                <span className="ml-1 text-[10px] text-muted-foreground">
+                <span className="ml-1 text-2xs text-muted-foreground">
                   ({enabledHeaderCount})
                 </span>
               )}
@@ -272,7 +272,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Press{' '}
-              <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+              <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs">
                 Ctrl+Enter
               </kbd>
               {' '}to send
