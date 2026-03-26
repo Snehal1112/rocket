@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -22,10 +22,23 @@ export function VariableAwareUrlInput({
   className,
 }: VariableAwareUrlInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const variables = useEnvStore((s) => s.getActiveVariables());
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const environments = useEnvStore((s) => s.environments);
   const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
+
+  // Compute variables via useMemo to avoid creating a new object every render.
+  // Calling getActiveVariables() inside a Zustand selector returns a fresh
+  // object each time, which fails Object.is equality and causes infinite re-renders.
+  const variables = useMemo(() => {
+    if (!activeEnvId) return {};
+    const env = environments.find((e) => e.name === activeEnvId);
+    if (!env) return {};
+    const vars: Record<string, string> = {};
+    for (const v of env.variables) {
+      if (v.enabled) vars[v.key] = v.value;
+    }
+    return vars;
+  }, [activeEnvId, environments]);
 
   const [editingToken, setEditingToken] = useState<UrlToken | null>(null);
   const [editValue, setEditValue] = useState('');
