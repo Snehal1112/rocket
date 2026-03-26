@@ -168,6 +168,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     setUrlError('');
     setCurlImported(true);
     setTimeout(() => setCurlImported(false), 3000);
+
+    // Auto-switch to the most relevant tab for the imported data.
+    if (parsed.body) {
+      setActiveSection('body');
+    } else if (parsed.auth) {
+      setActiveSection('auth');
+    } else if (parsed.headers.length > 0) {
+      setActiveSection('headers');
+    }
   }, [tab.id, updateRequest]);
 
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
