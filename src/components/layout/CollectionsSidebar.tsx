@@ -138,12 +138,6 @@ export function CollectionsSidebar() {
     }
   }, [newName]);
 
-  const handleNewRequest = useCallback(async (collection: string, folderPath: string) => {
-    // Create a draft tab pre-linked to this collection so Save works
-    // directly without prompting the "Save to Collection" dialog.
-    usePaneStore.getState().newDraftTab(undefined, collection, folderPath || undefined);
-  }, []);
-
   const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
     // Find next available name (New Folder, New Folder 2, New Folder 3...).
     let name = 'New Folder';
@@ -342,7 +336,6 @@ export function CollectionsSidebar() {
                       summary={s}
                       filter={filter}
                       summaries={summaries}
-                      onNewRequest={handleNewRequest}
                       onNewFolder={handleNewFolder}
                       onMove={handleMove}
                       onDelete={setDeleteTarget}
