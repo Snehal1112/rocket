@@ -1,6 +1,7 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Header } from '@/components/layout/Header';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
+import { ConsolePanel } from '@/components/layout/ConsolePanel';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
@@ -13,6 +14,8 @@ function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [sidebarCollapsed] = useState(false);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const [consoleHeight, setConsoleHeight] = useState(280);
   useKeyboardShortcuts();
 
   return (
@@ -53,7 +56,8 @@ function App() {
           </ErrorBoundary>
         </main>
       </div>
-      <StatusBar />
+      <ConsolePanel isOpen={isConsoleOpen} height={consoleHeight} onHeightChange={setConsoleHeight} />
+      <StatusBar isConsoleOpen={isConsoleOpen} onConsoleToggle={() => setIsConsoleOpen((o) => !o)} />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
     </div>
   );
