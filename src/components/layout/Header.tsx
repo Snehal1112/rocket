@@ -12,7 +12,7 @@ export function Header() {
         <img src="/rocket.png" alt="Rocket API" className="w-7 h-7 object-contain" />
         <div className="leading-tight">
           <p className="font-semibold tracking-tight text-foreground">Rocket</p>
-          <p className="text-label text-muted-foreground">API Workspace</p>
+          <p className="text-xs text-muted-foreground">API Workspace</p>
         </div>
       </div>
       <div className="flex-1" />
