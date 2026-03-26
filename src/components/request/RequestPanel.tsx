@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
-import { parseQueryParams, buildUrl, splitUrl } from '@/lib/url-params';
+import { parseQueryParams, buildUrl, splitUrl, extractPathParams } from '@/lib/url-params';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { PathParamsPanel } from './PathParamsPanel';
@@ -37,6 +37,8 @@ import type {
   HttpMethod,
   KeyValueEntry,
 } from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
+import { findTabInTree } from '@/lib/pane-utils';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { getCollectionSettings } from '@/lib/tauri-api';
 
@@ -135,7 +137,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
       urlSyncTimer.current = setTimeout(() => {
         const parsed = parseQueryParams(url);
-        updateRequest(tab.id, { queryParams: parsed });
+
+        // Auto-extract :pathParam names from URL and sync with pathParams state.
+        const paramNames = extractPathParams(url);
+        const existingParams = usePaneStore.getState().root;
+        const found = findTabInTree(existingParams, tab.id);
+        const currentPathParams = found && isRequestTab(found.tab) ? found.tab.request.pathParams : [];
+
+        const newPathParams = paramNames.map((name) => {
+          const existing = currentPathParams.find((p) => p.key === name);
+          if (existing) return existing;
+          return { id: crypto.randomUUID(), key: name, value: '', enabled: true };
+        });
+
+        updateRequest(tab.id, { queryParams: parsed, pathParams: newPathParams });
       }, 300);
     },
     [tab.id, updateRequest],
