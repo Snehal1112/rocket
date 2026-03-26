@@ -22,7 +22,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { cn } from '@/lib/utils';
@@ -34,15 +33,15 @@ import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import type { RequestTab, RequestState } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 
-// Badge color classes per HTTP method (matches RequestList.tsx).
-const METHOD_BADGE: Record<string, string> = {
-  GET:     'text-emerald-500 border-emerald-500/30 bg-emerald-500/10',
-  POST:    'text-amber-500   border-amber-500/30   bg-amber-500/10',
-  PUT:     'text-blue-500    border-blue-500/30    bg-blue-500/10',
-  PATCH:   'text-violet-500  border-violet-500/30  bg-violet-500/10',
-  DELETE:  'text-red-500     border-red-500/30     bg-red-500/10',
-  OPTIONS: 'text-cyan-500    border-cyan-500/30    bg-cyan-500/10',
-  HEAD:    'text-pink-500    border-pink-500/30    bg-pink-500/10',
+// Text color per HTTP method.
+const METHOD_COLOR: Record<string, string> = {
+  GET:     'text-emerald-500',
+  POST:    'text-amber-500',
+  PUT:     'text-blue-500',
+  PATCH:   'text-violet-500',
+  DELETE:  'text-red-500',
+  OPTIONS: 'text-cyan-500',
+  HEAD:    'text-pink-500',
 };
 
 interface RequestNodeProps {
@@ -99,7 +98,7 @@ export function RequestNode({
     usePaneStore.getState().openTab(tab);
   }
 
-  const badgeClass = METHOD_BADGE[method.toUpperCase()] ?? 'text-foreground border-border bg-muted';
+  const methodColor = METHOD_COLOR[method.toUpperCase()] ?? 'text-foreground';
 
   return (
     <ContextMenu>
@@ -115,18 +114,15 @@ export function RequestNode({
             <GripVertical className="h-3 w-3" />
           </button>
 
-          <TreeItem value={uid} className="flex-1">
+          <TreeItem value={uid} active={active} className="flex-1">
             <TreeItemContent
-              className={cn(
-                'flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer',
-                active && 'bg-accent/50 text-accent-foreground',
-              )}
+              className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <Badge variant="outline" className={cn('text-[10px] font-semibold w-14 justify-center shrink-0', badgeClass)}>
+              <span className={cn('w-10 shrink-0 font-mono text-[10px] font-bold', methodColor)}>
                 {method}
-              </Badge>
+              </span>
               {isRenaming ? (
                 <Input
                   autoFocus
