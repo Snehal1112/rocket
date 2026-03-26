@@ -13,6 +13,8 @@ interface VariableAwareUrlInputProps {
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
   onCurlImport?: (parsed: ParsedCurl) => void;
   collectionVariables?: Record<string, string>;
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
   placeholder?: string;
   className?: string;
 }
@@ -23,6 +25,8 @@ export function VariableAwareUrlInput({
   onKeyDown,
   onCurlImport,
   collectionVariables,
+  pathParams,
+  queryParams,
   placeholder,
   className,
 }: VariableAwareUrlInputProps) {
@@ -48,7 +52,7 @@ export function VariableAwareUrlInput({
   const [editingToken, setEditingToken] = useState<UrlToken | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  const tokens = parseUrlTokens(value, variables, activeEnvId ?? undefined, collectionVariables);
+  const tokens = parseUrlTokens(value, variables, activeEnvId ?? undefined, collectionVariables, pathParams, queryParams);
 
   const handleTokenHover = useCallback((token: UrlToken) => {
     setEditingToken(token);
@@ -108,6 +112,51 @@ export function VariableAwareUrlInput({
             if (token.type === 'text') {
               return <span key={i}>{token.value}</span>;
             }
+
+            // Path param tokens: :paramName — styled span with title tooltip, no popover.
+            if (token.type === 'pathParam') {
+              const isResolved = token.resolved !== undefined;
+              return (
+                <span
+                  key={i}
+                  className={cn(
+                    'rounded-sm px-0.5',
+                    isResolved
+                      ? 'bg-violet-500/15 text-violet-500'
+                      : 'bg-destructive/15 text-destructive',
+                  )}
+                  title={isResolved ? `${token.value} = ${token.resolved}` : `${token.value} (unresolved)`}
+                >
+                  :{token.value}
+                </span>
+              );
+            }
+
+            // Query key tokens: highlighted key name.
+            if (token.type === 'queryKey') {
+              const isResolved = token.resolved !== undefined;
+              return (
+                <span
+                  key={i}
+                  className={cn(
+                    'rounded-sm px-0.5',
+                    isResolved
+                      ? 'bg-amber-500/15 text-amber-500'
+                      : 'text-muted-foreground',
+                  )}
+                  title={isResolved ? `${token.value} = ${token.resolved}` : token.value}
+                >
+                  {token.value}
+                </span>
+              );
+            }
+
+            // Query value tokens: plain muted text.
+            if (token.type === 'queryValue') {
+              return <span key={i} className="text-muted-foreground">{token.value}</span>;
+            }
+
+            // Variable tokens: {{name}} — with popover for editing.
             const isResolved = token.resolved !== undefined;
             return (
               <Popover
