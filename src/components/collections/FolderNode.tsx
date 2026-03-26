@@ -139,7 +139,7 @@ export function FolderNode({
 
       {open && (
         // Indentation guide line.
-        <div className="pl-2 border-l border-border/30 ml-3">
+        <div className="pl-1.5 border-l border-border/30 ml-2">
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
               const folderPath = `${basePath}/${item.name}`;
