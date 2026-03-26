@@ -12,6 +12,7 @@
     "manual": "npx tsx scripts/capture-screenshots.ts"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
