@@ -264,6 +264,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             collectionVariables={collectionVars}
             pathParams={pathParamMap}
             queryParams={queryParamMap}
+            onPathParamChange={(key, val) => {
+              const updated = request.pathParams.map((p) =>
+                p.key === key ? { ...p, value: val } : p,
+              );
+              updateRequest(tab.id, { pathParams: updated });
+            }}
+            onSwitchToParams={() => setActiveSection('params')}
             placeholder="https://api.example.com/resource"
           />
 
