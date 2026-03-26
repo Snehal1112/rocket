@@ -93,7 +93,10 @@ export function FolderNode({
         <ContextMenuTrigger asChild>
           <div className="group relative flex items-center">
             <TreeItem value={basePath} open={open} onOpenChange={setOpen} className="flex-1">
-              <TreeItemContent className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer">
+              <TreeItemContent
+                className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
+                onClick={() => setOpen((prev) => !prev)}
+              >
                 {open ? <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" /> : <Folder className="h-3 w-3 shrink-0 text-muted-foreground" />}
                 {isRenaming ? (
                   <Input
