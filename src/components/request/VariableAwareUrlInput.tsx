@@ -129,7 +129,7 @@ export function VariableAwareUrlInput({
             {displayText}
           </span>
         </PopoverTrigger>
-        <PopoverContent className="w-72 p-0" side="bottom" align="start">
+        <PopoverContent className="w-80 p-0" side="bottom" align="start">
           {/* Value input. */}
           <div className="p-2">
             <Input
