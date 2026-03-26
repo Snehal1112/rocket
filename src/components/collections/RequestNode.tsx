@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { MoreHorizontal, Copy, Trash2, GripVertical } from 'lucide-react';
+import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,7 +50,6 @@ interface RequestNodeProps {
   path: string;
   itemData: Extract<CollectionItem, { type: 'request' }>;
   summaries: CollectionSummary[];
-  dragDisabled: boolean;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
   onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
@@ -60,21 +57,12 @@ interface RequestNodeProps {
 
 export function RequestNode({
   uid, name, method, collectionName, path, itemData,
-  summaries, dragDisabled, onMove, onDelete, onDuplicate,
+  summaries, onMove, onDelete, onDuplicate,
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
-
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: uid, disabled: dragDisabled });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
 
   const handleRename = async () => {
     const trimmed = renameValue.trim();
@@ -103,17 +91,7 @@ export function RequestNode({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div ref={setNodeRef} style={style} className="group relative flex items-center" {...attributes}>
-          {/* Drag handle — grip icon, visible on hover. */}
-          <button
-            type="button"
-            className="absolute left-0 h-full px-0.5 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-muted-foreground"
-            {...listeners}
-            tabIndex={-1}
-          >
-            <GripVertical className="h-3 w-3" />
-          </button>
-
+        <div className="group relative flex items-center">
           <TreeItem value={uid} active={active} className="flex-1">
             <TreeItemContent
               className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
