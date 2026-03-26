@@ -38,6 +38,7 @@ import type {
   KeyValueEntry,
 } from '@/types/pane-types';
 import type { ParsedCurl } from '@/lib/curl-parser';
+import { getCollectionSettings } from '@/lib/tauri-api';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -70,6 +71,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
+  const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [curlImported, setCurlImported] = useState(false);
 
   // Resizable split: request height as percentage.
@@ -84,6 +86,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     };
   }, []);
+
+  // Fetch collection variables for URL input overlay.
+  useEffect(() => {
+    if (!tab.source?.collection) { setCollectionVars({}); return; }
+    getCollectionSettings(tab.source.collection)
+      .then((s) => {
+        const vars: Record<string, string> = {};
+        for (const v of s.variables) {
+          if (v.enabled) vars[v.key] = v.value;
+        }
+        setCollectionVars(vars);
+      })
+      .catch(() => setCollectionVars({}));
+  }, [tab.source?.collection]);
 
   // Drag handle for request/response split.
   const handleSeparatorDown = useCallback(
@@ -214,6 +230,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onChange={(val) => { setUrlError(''); handleUrlChange(val); }}
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
             onCurlImport={handleCurlImport}
+            collectionVariables={collectionVars}
             placeholder="https://api.example.com/resource"
           />
 
