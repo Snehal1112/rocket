@@ -118,7 +118,7 @@ export function RequestNode({
           <TreeItem value={uid} className="flex-1">
             <TreeItemContent
               className={cn(
-                'flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer',
+                'flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer',
                 active && 'bg-accent/50 text-accent-foreground',
               )}
               onClick={handleClick}
