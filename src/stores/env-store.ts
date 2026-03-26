@@ -22,9 +22,11 @@ export interface EnvState {
   resolveVariables: (text: string) => string;
 }
 
+const STORAGE_KEY = 'rocket-active-env';
+
 export const useEnvStore = create<EnvState>((set, get) => ({
   environments: [],
-  activeEnvId: null,
+  activeEnvId: localStorage.getItem(STORAGE_KEY),
 
   async loadEnvironments() {
     try {
@@ -36,6 +38,11 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   },
 
   setActiveEnv(id) {
+    if (id) {
+      localStorage.setItem(STORAGE_KEY, id);
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+    }
     set({ activeEnvId: id });
   },
 
@@ -43,6 +50,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
     const env: Environment = { name, variables: [] };
     await saveEnvironment(env);
     await get().loadEnvironments();
+    localStorage.setItem(STORAGE_KEY, name);
     set({ activeEnvId: name });
   },
 
@@ -57,6 +65,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
 
   async deleteEnvironment(name) {
     await deleteEnvApi(name);
+    if (get().activeEnvId === name) localStorage.removeItem(STORAGE_KEY);
     set((state) => ({
       environments: state.environments.filter((e) => e.name !== name),
       activeEnvId: state.activeEnvId === name ? null : state.activeEnvId,
