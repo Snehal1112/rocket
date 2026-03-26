@@ -10,8 +10,9 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
-import { getCollection, onCollectionChanged, renameCollection } from '@/lib/tauri-api';
+import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { createDefaultRequest } from '@/lib/pane-utils';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
 import type { CollectionSummary, Collection } from '@/lib/tauri-api';
@@ -22,7 +23,6 @@ interface CollectionNodeProps {
   summary: CollectionSummary;
   filter: string;
   summaries: CollectionSummary[];
-  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
@@ -31,7 +31,7 @@ interface CollectionNodeProps {
 
 export function CollectionNode({
   summary, filter, summaries,
-  onNewRequest, onNewFolder, onMove, onDelete, onDuplicate,
+  onNewFolder, onMove, onDelete, onDuplicate,
 }: CollectionNodeProps) {
   const [open, setOpen] = useState(false);
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -39,6 +39,8 @@ export function CollectionNode({
   const [renameValue, setRenameValue] = useState(summary.name);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [creatingRequest, setCreatingRequest] = useState(false);
+  const [newRequestName, setNewRequestName] = useState('');
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
@@ -115,6 +117,27 @@ export function CollectionNode({
     usePaneStore.getState().openTab(tab);
   };
 
+  const handleNewRequestCreate = async () => {
+    const name = newRequestName.trim();
+    if (!name) { setCreatingRequest(false); return; }
+    setCreatingRequest(false);
+    try {
+      const payload = { uid: '', name, method: 'GET' as const, url: '', headers: [], auth: { authType: 'none' as const } };
+      const saved = await saveRequest(summary.name, name, payload);
+      usePaneStore.getState().openTab({
+        id: saved.uid,
+        title: saved.name,
+        tabType: 'request',
+        request: createDefaultRequest(),
+        response: null,
+        isDirty: false,
+        source: { collection: summary.name, path: saved.file_name ?? `${name}.json` },
+      });
+    } catch (err) {
+      console.error('[CollectionNode] Failed to create request:', err);
+    }
+  };
+
   const rawItems = collection?.root.items ?? [];
   const filteredItems = filter
     ? rawItems.filter((item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()))
@@ -163,7 +186,7 @@ export function CollectionNode({
             <DropdownMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}>Overview</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={async () => { await onNewRequest(summary.name, ''); setOpen(true); }}>
+              <DropdownMenuItem onClick={() => { setOpen(true); setCreatingRequest(true); setNewRequestName(''); }}>
                 <Plus className="h-3.5 w-3.5 mr-2" /> New Request
               </DropdownMenuItem>
               <DropdownMenuItem onClick={async () => { await onNewFolder(summary.name, ''); setOpen(true); }}>
@@ -195,7 +218,7 @@ export function CollectionNode({
           usePaneStore.getState().openTab(tab);
         }}>Overview</ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => void onNewRequest(summary.name, '')}>New Request</ContextMenuItem>
+        <ContextMenuItem onClick={() => { setOpen(true); setCreatingRequest(true); setNewRequestName(''); }}>New Request</ContextMenuItem>
         <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>New Folder</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => { setRenameValue(summary.name); setIsRenaming(true); }}>Rename</ContextMenuItem>
@@ -216,7 +239,7 @@ export function CollectionNode({
                   name={item.name} items={item.items}
                   collectionName={summary.name} basePath={item.name}
                   depth={1} filter={filter} summaries={summaries}
-                  onNewRequest={onNewRequest} onNewFolder={onNewFolder}
+                  onNewFolder={onNewFolder}
                   onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
                 />
               );
@@ -231,6 +254,23 @@ export function CollectionNode({
               />
             );
           })}
+          {creatingRequest && (
+            <div className="flex items-center gap-1 px-2 py-0.5 text-xs">
+              <Input
+                autoFocus
+                className="h-5 text-xs flex-1"
+                placeholder="Request name"
+                value={newRequestName}
+                onChange={(e) => setNewRequestName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleNewRequestCreate();
+                  if (e.key === 'Escape') setCreatingRequest(false);
+                }}
+                onBlur={() => setCreatingRequest(false)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
         </div>
       )}
     </ContextMenu>
