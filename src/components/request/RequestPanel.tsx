@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RocketLiftOff } from '@/components/illustrations';
@@ -198,6 +198,22 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
 
+  const pathParamMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of request.pathParams) {
+      if (p.enabled && p.key) map[p.key] = p.value;
+    }
+    return map;
+  }, [request.pathParams]);
+
+  const queryParamMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of request.queryParams) {
+      if (p.enabled && p.key) map[p.key] = p.value;
+    }
+    return map;
+  }, [request.queryParams]);
+
   return (
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-transparent">
       {/* ── Request area ── */}
@@ -231,6 +247,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
             onCurlImport={handleCurlImport}
             collectionVariables={collectionVars}
+            pathParams={pathParamMap}
+            queryParams={queryParamMap}
             placeholder="https://api.example.com/resource"
           />
 
