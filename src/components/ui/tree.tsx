@@ -112,12 +112,12 @@ function TreeItem({
           data-selected={isSelected || undefined}
           data-active={active || undefined}
           className={cn(
-            "flex items-center gap-1 px-1 py-1 text-sm cursor-pointer",
+            "flex items-center gap-1 px-1 py-1 text-sm cursor-pointer pl-[var(--tree-indent)]",
             "hover:bg-accent/50",
             "data-[selected]:bg-accent/30",
             "data-[active]:border-l-2 data-[active]:border-primary data-[active]:bg-accent/60 data-[active]:text-accent-foreground",
           )}
-          style={{ paddingLeft: `${(depth + 1) * 8}px` }}
+          style={{ '--tree-indent': `${(depth + 1) * 8}px` } as React.CSSProperties}
           onClick={handleSelect}
         >
           {/* Expand/collapse chevron, shown only for items with sub-trees. */}

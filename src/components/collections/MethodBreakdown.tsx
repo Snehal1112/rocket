@@ -57,8 +57,8 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
                 <span className={cn('w-16 text-xs font-semibold', color.text)}>{method}</span>
                 <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                   <div
-                    className={cn('h-full rounded-full', color.bg)}
-                    style={{ width: `${pct}%` }}
+                    className={cn('h-full rounded-full w-[var(--bar-w)]', color.bg)}
+                    style={{ '--bar-w': `${pct}%` } as React.CSSProperties}
                   />
                 </div>
                 <span className="text-xs text-muted-foreground w-16 text-right">
