@@ -13,7 +13,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 
 // Request tab bar matching legacy RequestTabs styling.
-export function TabBar({ node }: { node: LeafNode }) {
+export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tabId: string) => void }) {
   const setActiveTab = usePaneStore((s) => s.setActiveTab);
   const closeTab = usePaneStore((s) => s.closeTab);
 
@@ -57,7 +57,7 @@ export function TabBar({ node }: { node: LeafNode }) {
                   tab={tab}
                   isActive={tab.id === node.activeTabId}
                   onSelect={() => setActiveTab(tab.id, node.groupId)}
-                  onClose={() => closeTab(tab.id, node.groupId)}
+                  onClose={() => onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId)}
                   onDoubleClick={() => {
                     setRenamingTabId(tab.id);
                     setRenameValue(tab.title);
@@ -84,14 +84,14 @@ export function TabBar({ node }: { node: LeafNode }) {
               Rename
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => closeTab(tab.id, node.groupId)}>
+            <ContextMenuItem onClick={() => onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId)}>
               Close
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
                 node.tabs
                   .filter((t) => t.id !== tab.id)
-                  .forEach((t) => closeTab(t.id, node.groupId));
+                  .forEach((t) => onCloseTab ? onCloseTab(t.id) : closeTab(t.id, node.groupId));
               }}
             >
               Close Others
