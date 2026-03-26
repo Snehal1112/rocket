@@ -5,11 +5,13 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { parseUrlTokens, type UrlToken } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
+import { parseCurl, type ParsedCurl } from '@/lib/curl-parser';
 
 interface VariableAwareUrlInputProps {
   value: string;
   onChange: (value: string) => void;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  onCurlImport?: (parsed: ParsedCurl) => void;
   placeholder?: string;
   className?: string;
 }
@@ -18,6 +20,7 @@ export function VariableAwareUrlInput({
   value,
   onChange,
   onKeyDown,
+  onCurlImport,
   placeholder,
   className,
 }: VariableAwareUrlInputProps) {
@@ -68,6 +71,17 @@ export function VariableAwareUrlInput({
     setEditingToken(null);
   }, [editingToken, editValue, activeEnvId, environments, updateEnvironment]);
 
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!onCurlImport) return;
+    const text = e.clipboardData.getData('text/plain').trim();
+    if (!/^curl\s/i.test(text)) return;
+    e.preventDefault();
+    const parsed = parseCurl(text);
+    if (parsed) {
+      onCurlImport(parsed);
+    }
+  }, [onCurlImport]);
+
   return (
     <div className={cn('relative flex-1', className)}>
       {/* Real input for keyboard interaction. */}
@@ -77,6 +91,7 @@ export function VariableAwareUrlInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={handlePaste}
         placeholder={placeholder}
         className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 font-mono text-xs text-transparent caret-foreground outline-none ring-ring/50 focus-visible:ring-[3px] focus-visible:border-ring"
       />
