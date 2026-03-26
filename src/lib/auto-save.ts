@@ -1,5 +1,6 @@
 import { saveRequest, type Request } from '@/lib/tauri-api';
 import { toApiAuth } from '@/lib/execute-request';
+import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -33,7 +34,6 @@ export function scheduleAutoSave(
     try {
       await saveRequest(collection, path, toApiRequest(tabId, title, request));
       // Mark tab clean after successful save.
-      const { usePaneStore } = await import('@/stores/pane-store');
       usePaneStore.getState().markClean(tabId);
     } catch (err) {
       console.error('[AutoSave] Failed:', err);

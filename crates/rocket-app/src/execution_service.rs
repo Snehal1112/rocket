@@ -317,6 +317,7 @@ mod tests {
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.clone())
         }

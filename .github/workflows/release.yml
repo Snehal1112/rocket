@@ -69,5 +69,5 @@ jobs:
           releaseBody: 'See the changelog for details.'
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.rust_target }}
+          args: --target ${{ matrix.rust_target }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
           updaterJsonPreferNsis: true
