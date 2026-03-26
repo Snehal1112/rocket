@@ -3,10 +3,13 @@ import { useEnvStore } from '@/stores/env-store';
 import { useConsoleStore } from '@/stores/console-store';
 import {
   executeRequest,
+  getCollectionSettings,
   type Auth,
   type Body,
   type Header,
 } from '@/lib/tauri-api';
+import { findTabInTree } from '@/lib/pane-utils';
+import { buildResolver } from '@/lib/url-variables';
 import type {
   AuthState,
   BodyState,
@@ -74,7 +77,24 @@ function toApiBody(body: BodyState, resolve = (s: string) => s): Body | undefine
 // This is a plain async function so it can be called from both React
 // components and non-React contexts (e.g. keyboard shortcut handlers).
 export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
-  const resolve = useEnvStore.getState().resolveVariables;
+  // Build merged variable resolution: env vars (high priority) + collection vars (fallback).
+  const envVars = useEnvStore.getState().getActiveVariables();
+
+  let collectionVars: Record<string, string> = {};
+  const { root } = usePaneStore.getState();
+  const found = findTabInTree(root, tabId);
+  if (found?.tab.source?.collection) {
+    try {
+      const settings = await getCollectionSettings(found.tab.source.collection);
+      for (const v of settings.variables) {
+        if (v.enabled) collectionVars[v.key] = v.value;
+      }
+    } catch {
+      // Collection settings unavailable — proceed with env vars only.
+    }
+  }
+
+  const resolve = buildResolver(envVars, collectionVars);
 
   // Resolve environment variables in all request fields.
   const resolvedUrl = resolve(request.url);
