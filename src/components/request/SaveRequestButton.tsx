@@ -1,5 +1,5 @@
-import { useEffect, useCallback } from 'react';
-import { Save } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Save, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { saveRequest, type Auth, type Request as ApiRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -75,14 +75,19 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
 
 export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   const markClean = usePaneStore((s) => s.markClean);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const handleSave = useCallback(async () => {
     if (!tab.source) return;
     try {
       await saveRequest(tab.source.collection, tab.source.path, buildPayloadFromTab(tab));
       markClean(tab.id);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (err) {
       console.error('[SaveRequestButton] Save failed:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
     }
   }, [tab, markClean]);
 
@@ -100,15 +105,24 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   if (!tab.source) return null;
 
   return (
-    <Button
-      size="sm"
-      variant="outline"
-      className="h-8 px-3"
-      disabled={!tab.isDirty}
-      onClick={() => void handleSave()}
-    >
-      <Save className="mr-1 h-3.5 w-3.5" />
-      Save
-    </Button>
+    <div className="flex items-center gap-1.5">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 px-3"
+        disabled={!tab.isDirty}
+        onClick={() => void handleSave()}
+      >
+        {saveStatus === 'success' ? (
+          <Check className="mr-1 h-3.5 w-3.5 text-green-500" />
+        ) : (
+          <Save className="mr-1 h-3.5 w-3.5" />
+        )}
+        Save
+      </Button>
+      {saveStatus === 'error' && (
+        <span className="text-2xs text-destructive">Save failed</span>
+      )}
+    </div>
   );
 }
