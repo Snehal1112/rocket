@@ -53,12 +53,14 @@ function TreeItem({
   className,
   open: openProp,
   onOpenChange,
+  active,
   children,
   ...props
 }: React.ComponentProps<"li"> & {
   value: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  active?: boolean;
 }) {
   const [openState, setOpenState] = React.useState(false);
   // Use controlled open when the caller provides it, otherwise fall back to
@@ -108,10 +110,12 @@ function TreeItem({
         <div
           data-slot="tree-item-row"
           data-selected={isSelected || undefined}
+          data-active={active || undefined}
           className={cn(
-            "flex items-center gap-1 rounded-md px-2 py-1 text-sm cursor-pointer",
-            "hover:bg-accent hover:text-accent-foreground",
-            "data-[selected]:bg-accent data-[selected]:text-accent-foreground",
+            "flex items-center gap-1 px-2 py-1 text-sm cursor-pointer",
+            "hover:bg-accent/50",
+            "data-[selected]:bg-accent/30",
+            "data-[active]:border-l-2 data-[active]:border-primary data-[active]:bg-accent/60 data-[active]:text-accent-foreground",
           )}
           style={{ paddingLeft: `${(depth + 1) * 12}px` }}
           onClick={handleSelect}
