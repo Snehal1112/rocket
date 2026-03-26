@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RocketLiftOff } from '@/components/illustrations';
@@ -68,6 +68,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
+  const [urlError, setUrlError] = useState('');
 
   // Resizable split: request height as percentage.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -261,7 +262,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
       {/* ── Response area ── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0">
-        {response ? (
+        {sending ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Sending request...</p>
+          </div>
+        ) : response ? (
           <ResponseBodyViewer response={response} />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3">
