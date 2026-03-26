@@ -6,9 +6,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Plus, PanelRight, PanelBottom } from 'lucide-react';
+import { PanelRight, PanelBottom } from 'lucide-react';
 import { TabItem } from './TabItem';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
@@ -17,7 +16,7 @@ import type { LeafNode } from '@/types/pane-types';
 export function TabBar({ node }: { node: LeafNode }) {
   const setActiveTab = usePaneStore((s) => s.setActiveTab);
   const closeTab = usePaneStore((s) => s.closeTab);
-  const newDraftTab = usePaneStore((s) => s.newDraftTab);
+
   const splitGroup = usePaneStore((s) => s.splitGroup);
   const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
 
@@ -107,16 +106,6 @@ export function TabBar({ node }: { node: LeafNode }) {
           </ContextMenuContent>
         </ContextMenu>
       ))}
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 shrink-0 rounded-none hover:bg-accent/60"
-        onClick={() => newDraftTab(node.groupId)}
-        aria-label="New tab"
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </Button>
     </div>
   );
 }

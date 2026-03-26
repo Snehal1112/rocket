@@ -1,7 +1,4 @@
-import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { RocketLaunch } from '@/components/illustrations';
-import { usePaneStore } from '@/stores/pane-store';
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
@@ -9,44 +6,20 @@ import type { LeafNode } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 
 // Branded empty state shown when no tabs are open.
-function EmptyState({ groupId }: { groupId: string }) {
-  const newDraftTab = usePaneStore((s) => s.newDraftTab);
-
+function EmptyState() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-6 text-center max-w-sm">
-        {/* Logo and branding. */}
         <div className="flex flex-col items-center gap-3">
           <RocketLaunch className="w-32 h-32" />
           <div>
             <h2 className="text-lg font-semibold text-foreground">Rocket API</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Fast, native API client for testing HTTP APIs.
+              Open a request from the collections sidebar to get started.
             </p>
           </div>
         </div>
-
-        {/* Quick actions. */}
-        <div className="flex flex-col gap-2 w-full">
-          <Button
-            variant="default"
-            className="w-full gap-2"
-            onClick={() => newDraftTab(groupId)}
-          >
-            <Plus className="h-4 w-4" />
-            New Request
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            or open a request from the collections sidebar
-          </p>
-        </div>
-
-        {/* Keyboard shortcut hints. */}
         <div className="flex gap-4 text-xs text-muted-foreground">
-          <span>
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">Cmd+T</kbd>
-            {' '}New tab
-          </span>
           <span>
             <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">Cmd+Enter</kbd>
             {' '}Send
@@ -73,7 +46,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <CollectionOverviewTab tab={activeTab} />
           )
         ) : (
-          <EmptyState groupId={node.groupId} />
+          <EmptyState />
         )}
       </div>
     </div>
