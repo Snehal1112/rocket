@@ -1,15 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Save, ChevronDown } from 'lucide-react';
+import { useEffect, useCallback } from 'react';
+import { Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { saveRequest, type Auth, type Request as ApiRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { SaveToCollectionDialog } from '@/components/collections/SaveToCollectionDialog';
 import type { RequestTab } from '@/types/pane-types';
 
 interface SaveRequestButtonProps {
@@ -18,7 +11,6 @@ interface SaveRequestButtonProps {
 }
 
 // Maps AuthState to the flat Rust Auth shape for disk persistence.
-// Preserves full OAuth2/AWS config (unlike toApiAuth which collapses to bearer).
 function authForSave(auth: RequestTab['request']['auth']): Auth {
   switch (auth.authType) {
     case 'inherit':
@@ -66,12 +58,11 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
   }
 }
 
-// Builds the request payload for saving to disk.
-function buildPayloadFromTab(tab: RequestTab, nameOverride?: string): ApiRequest {
+function buildPayloadFromTab(tab: RequestTab): ApiRequest {
   const body = tab.request.body;
   return {
     uid: tab.id,
-    name: nameOverride ?? tab.title,
+    name: tab.title,
     method: tab.request.method,
     url: tab.request.url,
     headers: tab.request.headers
@@ -83,112 +74,41 @@ function buildPayloadFromTab(tab: RequestTab, nameOverride?: string): ApiRequest
 }
 
 export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const markClean = usePaneStore((s) => s.markClean);
 
-  // True if this tab is already saved to a collection (has a source).
-  const isCollectionOwned = !!tab.source;
-
-  // Build payload for the SaveToCollectionDialog.
-  const buildPayload = useCallback(
-    (name: string) => buildPayloadFromTab(tab, name),
-    [tab],
-  );
-
-  // Direct save to the existing file (only for collection-owned tabs).
-  const handleDirectSave = useCallback(async () => {
+  const handleSave = useCallback(async () => {
     if (!tab.source) return;
     try {
       await saveRequest(tab.source.collection, tab.source.path, buildPayloadFromTab(tab));
       markClean(tab.id);
     } catch (err) {
-      console.error('[SaveRequestButton] Direct save failed:', err);
+      console.error('[SaveRequestButton] Save failed:', err);
     }
   }, [tab, markClean]);
-
-  // Handle Save action: direct save if collection-owned, dialog otherwise.
-  const handleSave = useCallback(() => {
-    if (isCollectionOwned) {
-      void handleDirectSave();
-    } else {
-      setSaveDialogOpen(true);
-    }
-  }, [isCollectionOwned, handleDirectSave]);
 
   // Listen for Cmd+S keyboard shortcut.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ tabId: string }>).detail;
       if (detail?.tabId !== tab.id) return;
-      handleSave();
+      void handleSave();
     };
     window.addEventListener('rocket:save-draft', handler);
     return () => window.removeEventListener('rocket:save-draft', handler);
   }, [tab.id, handleSave]);
 
-  // Unsaved tab (draft) — single Save button that opens the dialog.
-  if (!isCollectionOwned) {
-    return (
-      <>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 px-3"
-          onClick={() => setSaveDialogOpen(true)}
-        >
-          <Save className="mr-1 h-3.5 w-3.5" />
-          Save
-        </Button>
-        <SaveToCollectionDialog
-          open={saveDialogOpen}
-          onOpenChange={setSaveDialogOpen}
-          tab={tab}
-          buildPayload={buildPayload}
-          defaultCollection={tab.defaultCollection}
-        />
-      </>
-    );
-  }
+  if (!tab.source) return null;
 
-  // Collection-owned tab — split button with Save and Save As.
   return (
-    <>
-      <div className="flex">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 px-3 rounded-r-none border-r-0"
-          onClick={() => void handleDirectSave()}
-        >
-          <Save className="mr-1 h-3.5 w-3.5" />
-          Save
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 px-1.5 rounded-l-none"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => void handleDirectSave()}>
-              Save
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSaveDialogOpen(true)}>
-              Save as...
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <SaveToCollectionDialog
-        open={saveDialogOpen}
-        onOpenChange={setSaveDialogOpen}
-        tab={tab}
-        buildPayload={buildPayload}
-      />
-    </>
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-8 px-3"
+      disabled={!tab.isDirty}
+      onClick={() => void handleSave()}
+    >
+      <Save className="mr-1 h-3.5 w-3.5" />
+      Save
+    </Button>
   );
 }
