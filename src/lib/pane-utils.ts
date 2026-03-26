@@ -3,7 +3,6 @@ import type {
   SplitNode,
   LeafNode,
   Tab,
-  RequestTab,
   RequestState,
   AuthState,
   BodyState,
@@ -119,19 +118,6 @@ export function createDefaultRequest(): RequestState {
     auth: {
       authType: 'none',
     },
-  };
-}
-
-// Creates a new unsaved draft tab with a fresh UUID.
-export function createDefaultTab(): RequestTab {
-  const id = crypto.randomUUID();
-  return {
-    id,
-    title: 'New Request',
-    tabType: 'draft',
-    request: createDefaultRequest(),
-    response: null,
-    isDirty: false,
   };
 }
 

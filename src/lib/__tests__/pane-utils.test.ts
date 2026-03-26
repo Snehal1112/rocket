@@ -6,11 +6,11 @@ import {
   removeLeaf,
   splitLeaf,
   createDefaultLeaf,
-  createDefaultTab,
+  createDefaultRequest,
   findFirstLeaf,
   findActiveLeaf,
 } from '../pane-utils';
-import type { PaneNode, LeafNode } from '@/types/pane-types';
+import type { PaneNode, LeafNode, RequestTab } from '@/types/pane-types';
 
 describe('pane-utils', () => {
   const leaf1 = createDefaultLeaf('g1');
@@ -24,7 +24,14 @@ describe('pane-utils', () => {
   };
 
   // Create a leaf with a tab for tab-related tests.
-  const tab = createDefaultTab();
+  const tab: RequestTab = {
+    id: crypto.randomUUID(),
+    title: 'Test Request',
+    tabType: 'request' as const,
+    request: createDefaultRequest(),
+    response: null,
+    isDirty: false,
+  };
   const leafWithTab: LeafNode = {
     ...createDefaultLeaf('g-tab'),
     tabs: [tab],
@@ -179,19 +186,4 @@ describe('pane-utils', () => {
     expect(active.groupId).toBe('g1');
   });
 
-  // --- createDefaultTab ---
-
-  it('createDefaultTab produces unique IDs', () => {
-    const a = createDefaultTab();
-    const b = createDefaultTab();
-    expect(a.id).not.toBe(b.id);
-  });
-
-  it('createDefaultTab has expected defaults', () => {
-    const tab = createDefaultTab();
-    expect(tab.tabType).toBe('draft');
-    expect(tab.response).toBeNull();
-    expect(tab.isDirty).toBe(false);
-    expect(tab.request.method).toBe('GET');
-  });
 });
