@@ -120,7 +120,7 @@ export function VariableAwareUrlInput({
                 <span
                   key={i}
                   className={cn(
-                    'rounded-sm px-0.5',
+                    'rounded-sm px-0.5 pointer-events-auto',
                     isResolved
                       ? 'bg-violet-500/15 text-violet-500'
                       : 'bg-destructive/15 text-destructive',
@@ -139,7 +139,7 @@ export function VariableAwareUrlInput({
                 <span
                   key={i}
                   className={cn(
-                    'rounded-sm px-0.5',
+                    'rounded-sm px-0.5 pointer-events-auto',
                     isResolved
                       ? 'bg-amber-500/15 text-amber-500'
                       : 'text-muted-foreground',
