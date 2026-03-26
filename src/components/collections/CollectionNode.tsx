@@ -156,8 +156,8 @@ export function CollectionNode({
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               {open
-                ? <LibraryBig className="h-3.5 w-3.5 shrink-0 text-primary" />
-                : <Library className="h-3.5 w-3.5 shrink-0 text-primary" />
+                ? <LibraryBig className="h-4 w-4 shrink-0 text-primary" />
+                : <Library className="h-4 w-4 shrink-0 text-primary" />
               }
               {isRenaming ? (
                 <Input
