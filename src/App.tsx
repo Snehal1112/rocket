@@ -21,7 +21,7 @@ function App() {
       <div className="flex-1 flex overflow-hidden">
         {!sidebarCollapsed && (
           <>
-            <div style={{ width: `${sidebarWidth}px` }} className="shrink-0">
+            <div style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties} className="w-[var(--sidebar-w)] shrink-0">
               <ErrorBoundary>
                 <CollectionsSidebar />
               </ErrorBoundary>

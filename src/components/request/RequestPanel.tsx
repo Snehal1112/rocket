@@ -138,8 +138,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-transparent">
       {/* ── Request area ── */}
       <div
-        className="flex flex-col overflow-hidden bg-card/80"
-        style={{ height: `${requestHeight}%`, minHeight: '20%', maxHeight: '80%' }}
+        className="flex flex-col overflow-hidden bg-card/80 h-[var(--req-h)] min-h-[20%] max-h-[80%]"
+        style={{ '--req-h': `${requestHeight}%` } as React.CSSProperties}
       >
         {/* URL bar. */}
         <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm">
