@@ -10,7 +10,9 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
-import { moveItem } from '@/lib/tauri-api';
+import { moveItem, saveRequest } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
+import { createDefaultRequest } from '@/lib/pane-utils';
 import { RequestNode } from './RequestNode';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import type { DeleteTarget } from './tree-utils';
@@ -23,7 +25,6 @@ interface FolderNodeProps {
   depth: number;
   filter: string;
   summaries: CollectionSummary[];
-  onNewRequest: (collection: string, folderPath: string) => Promise<void>;
   onNewFolder: (collection: string, folderPath: string) => Promise<void>;
   onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
@@ -32,11 +33,13 @@ interface FolderNodeProps {
 
 export function FolderNode({
   name, items, collectionName, basePath, depth, filter,
-  summaries, onNewRequest, onNewFolder, onMove, onDelete, onDuplicate,
+  summaries, onNewFolder, onMove, onDelete, onDuplicate,
 }: FolderNodeProps) {
   const [open, setOpen] = useState(depth < 2);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
+  const [creatingRequest, setCreatingRequest] = useState(false);
+  const [newRequestName, setNewRequestName] = useState('');
   // Auto-expand when filter is active.
   useEffect(() => { if (filter) setOpen(true); }, [filter]);
 
@@ -52,6 +55,28 @@ export function FolderNode({
       setIsRenaming(false);
     } catch (err) {
       console.error('Rename folder failed:', err);
+    }
+  };
+
+  const handleNewRequestCreate = async () => {
+    const reqName = newRequestName.trim();
+    if (!reqName) { setCreatingRequest(false); return; }
+    setCreatingRequest(false);
+    try {
+      const path = `${basePath}/${reqName}`;
+      const payload = { uid: '', name: reqName, method: 'GET' as const, url: '', headers: [], auth: { authType: 'none' as const } };
+      const saved = await saveRequest(collectionName, path, payload);
+      usePaneStore.getState().openTab({
+        id: saved.uid,
+        title: saved.name,
+        tabType: 'request',
+        request: createDefaultRequest(),
+        response: null,
+        isDirty: false,
+        source: { collection: collectionName, path: saved.file_name ?? `${path}.json` },
+      });
+    } catch (err) {
+      console.error('[FolderNode] Failed to create request:', err);
     }
   };
 
@@ -91,7 +116,7 @@ export function FolderNode({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuItem onClick={() => void onNewRequest(collectionName, basePath)}><Plus className="h-3.5 w-3.5 mr-2" /> New Request</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setOpen(true); setCreatingRequest(true); setNewRequestName(''); }}><Plus className="h-3.5 w-3.5 mr-2" /> New Request</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void onNewFolder(collectionName, basePath)}><FolderPlus className="h-3.5 w-3.5 mr-2" /> New Folder</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}><Pencil className="h-3.5 w-3.5 mr-2" /> Rename</DropdownMenuItem>
@@ -102,7 +127,7 @@ export function FolderNode({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
-          <ContextMenuItem onClick={() => void onNewRequest(collectionName, basePath)}>New Request</ContextMenuItem>
+          <ContextMenuItem onClick={() => { setOpen(true); setCreatingRequest(true); setNewRequestName(''); }}>New Request</ContextMenuItem>
           <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>New Folder</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>Rename</ContextMenuItem>
@@ -123,7 +148,7 @@ export function FolderNode({
                   name={item.name} items={item.items}
                   collectionName={collectionName} basePath={folderPath}
                   depth={depth + 1} filter={filter} summaries={summaries}
-                  onNewRequest={onNewRequest} onNewFolder={onNewFolder}
+                  onNewFolder={onNewFolder}
                   onMove={onMove} onDelete={onDelete} onDuplicate={onDuplicate}
                 />
               );
@@ -140,6 +165,23 @@ export function FolderNode({
               />
             );
           })}
+          {creatingRequest && (
+            <div className="flex items-center gap-1 px-2 py-0.5 text-xs">
+              <Input
+                autoFocus
+                className="h-5 text-xs flex-1"
+                placeholder="Request name"
+                value={newRequestName}
+                onChange={(e) => setNewRequestName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleNewRequestCreate();
+                  if (e.key === 'Escape') setCreatingRequest(false);
+                }}
+                onBlur={() => setCreatingRequest(false)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
