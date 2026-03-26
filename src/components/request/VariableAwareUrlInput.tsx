@@ -12,6 +12,7 @@ interface VariableAwareUrlInputProps {
   onChange: (value: string) => void;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
   onCurlImport?: (parsed: ParsedCurl) => void;
+  collectionVariables?: Record<string, string>;
   placeholder?: string;
   className?: string;
 }
@@ -21,6 +22,7 @@ export function VariableAwareUrlInput({
   onChange,
   onKeyDown,
   onCurlImport,
+  collectionVariables,
   placeholder,
   className,
 }: VariableAwareUrlInputProps) {
@@ -46,7 +48,7 @@ export function VariableAwareUrlInput({
   const [editingToken, setEditingToken] = useState<UrlToken | null>(null);
   const [editValue, setEditValue] = useState('');
 
-  const tokens = parseUrlTokens(value, variables, activeEnvId ?? undefined);
+  const tokens = parseUrlTokens(value, variables, activeEnvId ?? undefined, collectionVariables);
 
   const handleTokenHover = useCallback((token: UrlToken) => {
     setEditingToken(token);
