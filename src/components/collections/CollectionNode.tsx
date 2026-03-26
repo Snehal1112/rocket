@@ -159,14 +159,14 @@ export function CollectionNode({
         <div className="group relative flex items-center">
           <TreeItem value={summary.uid} open={open} onOpenChange={setOpen} className="flex-1">
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer"
+              className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               {open
-                ? <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-                : <Folder className="h-4 w-4 shrink-0 text-primary" />
+                ? <FolderOpen className="h-3 w-3 shrink-0 text-primary" />
+                : <Folder className="h-3 w-3 shrink-0 text-primary" />
               }
               {isRenaming ? (
                 <Input
