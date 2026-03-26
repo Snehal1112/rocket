@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { RocketLiftOff } from '@/components/illustrations';
 import {
   Select,
@@ -32,6 +31,7 @@ import { BodyEditor } from './BodyEditor';
 import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import { SaveRequestButton } from './SaveRequestButton';
+import { VariableAwareUrlInput } from './VariableAwareUrlInput';
 import type {
   RequestTab,
   HttpMethod,
@@ -162,12 +162,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </SelectContent>
           </Select>
 
-          <Input
-            className="h-8 flex-1 font-mono text-xs"
-            placeholder="https://api.example.com/resource"
+          <VariableAwareUrlInput
             value={request.url}
-            onChange={(e) => { setUrlError(''); handleUrlChange(e.target.value); }}
+            onChange={(val) => { setUrlError(''); handleUrlChange(val); }}
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
+            placeholder="https://api.example.com/resource"
           />
 
           <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => {
