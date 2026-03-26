@@ -55,7 +55,8 @@ impl RequestExecutionService {
             // Load collection variables (lower priority).
             for cv in &settings.variables {
                 if cv.enabled {
-                    vars.insert(cv.key.clone(), cv.value.clone());
+                    let val = if cv.value.is_empty() { &cv.initial_value } else { &cv.value };
+                    vars.insert(cv.key.clone(), val.clone());
                 }
             }
         }

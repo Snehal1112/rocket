@@ -87,7 +87,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     try {
       const settings = await getCollectionSettings(found.tab.source.collection);
       for (const v of settings.variables) {
-        if (v.enabled) collectionVars[v.key] = v.value;
+        if (v.enabled) collectionVars[v.key] = v.value || v.initialValue;
       }
     } catch {
       // Collection settings unavailable — proceed with env vars only.
