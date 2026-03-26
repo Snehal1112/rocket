@@ -282,7 +282,7 @@ export function CollectionNode({
               )}
               {activeItem && activeItem.type === 'folder' && (
                 <div className="flex items-center gap-1 px-2 py-1 text-xs rounded-sm bg-card border border-border shadow-lg opacity-90">
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                  <Folder className="h-3 w-3 text-muted-foreground" />
                   <span>{activeItem.name}</span>
                 </div>
               )}
