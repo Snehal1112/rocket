@@ -166,17 +166,26 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             className="h-8 flex-1 font-mono text-xs"
             placeholder="https://api.example.com/resource"
             value={request.url}
-            onChange={(e) => handleUrlChange(e.target.value)}
+            onChange={(e) => { setUrlError(''); handleUrlChange(e.target.value); }}
             onKeyDown={(e) => { if (e.key === 'Enter') send(request); }}
           />
 
-          <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => send(request)}>
+          <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => {
+            const url = request.url.trim();
+            if (!url) { setUrlError('URL is required'); return; }
+            try { new URL(url); } catch { setUrlError('Invalid URL — include http:// or https://'); return; }
+            setUrlError('');
+            send(request);
+          }}>
             <Send className="mr-1 h-3.5 w-3.5" />
             {sending ? 'Sending...' : 'Send'}
           </Button>
 
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
+        {urlError && (
+          <p className="text-2xs text-destructive px-3 py-1">{urlError}</p>
+        )}
 
         {/* Section tabs — matching legacy TabsList styling. */}
         <Tabs
