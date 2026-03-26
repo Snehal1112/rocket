@@ -61,18 +61,20 @@ export function buildUrl(baseUrl: string, params: KeyValueEntry[]): string {
 // Supports :param and {param} patterns.
 export function extractPathParams(url: string): string[] {
   const { base } = splitUrl(url);
+  // Strip {{variable}} patterns first so {param} regex doesn't match inside them.
+  const stripped = base.replace(/\{\{[\w.-]+\}\}/g, '');
   const results: string[] = [];
 
   // Match :paramName — stops at / ? & # or end of string.
   const colonPattern = /:([A-Za-z_][A-Za-z0-9_]*)/g;
   let match: RegExpExecArray | null;
-  while ((match = colonPattern.exec(base)) !== null) {
+  while ((match = colonPattern.exec(stripped)) !== null) {
     results.push(match[1]);
   }
 
-  // Match {paramName}.
+  // Match {paramName} (single-brace, not double-brace).
   const bracePattern = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
-  while ((match = bracePattern.exec(base)) !== null) {
+  while ((match = bracePattern.exec(stripped)) !== null) {
     results.push(match[1]);
   }
 
