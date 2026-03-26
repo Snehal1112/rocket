@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, FolderPlus, Plus, Trash2, MoreHorizontal } from 'lucide-react';
+import { Library, LibraryBig, FolderPlus, Plus, Trash2, MoreHorizontal } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -156,8 +156,8 @@ export function CollectionNode({
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               {open
-                ? <FolderOpen className="h-3 w-3 shrink-0 text-primary" />
-                : <Folder className="h-3 w-3 shrink-0 text-primary" />
+                ? <LibraryBig className="h-3.5 w-3.5 shrink-0 text-primary" />
+                : <Library className="h-3.5 w-3.5 shrink-0 text-primary" />
               }
               {isRenaming ? (
                 <Input

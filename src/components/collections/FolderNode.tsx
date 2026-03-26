@@ -97,7 +97,7 @@ export function FolderNode({
                 className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
                 onClick={() => setOpen((prev) => !prev)}
               >
-                {open ? <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground" /> : <Folder className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                {open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                 {isRenaming ? (
                   <Input
                     autoFocus className="h-6 text-xs flex-1"
