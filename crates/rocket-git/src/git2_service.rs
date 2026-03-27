@@ -336,12 +336,59 @@ impl GitService for Git2Service {
         Ok(())
     }
 
-    fn commit(&self, _path: &str, _message: &str) -> DomainResult<CommitInfo> {
-        todo!()
+    fn commit(&self, path: &str, message: &str) -> DomainResult<CommitInfo> {
+        let repo = open_repo(path)?;
+        let sig = repo.signature().or_else(|_|
+            git2::Signature::now("RocketAPI User", "user@rocketapi.local")
+        ).map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
+        let tree_id = index.write_tree().map_err(|e| DomainError::Internal(e.to_string()))?;
+        let tree = repo.find_tree(tree_id).map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+
+        let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(CommitInfo {
+            id: oid.to_string()[..7].to_string(),
+            full_id: oid.to_string(),
+            message: message.to_string(),
+            author: sig.name().unwrap_or("").to_string(),
+            author_email: sig.email().unwrap_or("").to_string(),
+            timestamp: chrono::Utc::now(),
+            files_changed: 0,
+        })
     }
 
-    fn log(&self, _path: &str, _limit: usize) -> DomainResult<Vec<CommitInfo>> {
-        todo!()
+    fn log(&self, path: &str, limit: usize) -> DomainResult<Vec<CommitInfo>> {
+        let repo = open_repo(path)?;
+        let mut revwalk = repo.revwalk().map_err(|e| DomainError::Internal(e.to_string()))?;
+        revwalk.push_head().map_err(|e| DomainError::Internal(e.to_string()))?;
+        revwalk.set_sorting(git2::Sort::TIME).map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut commits = Vec::new();
+        for oid_result in revwalk.take(limit) {
+            let oid = oid_result.map_err(|e| DomainError::Internal(e.to_string()))?;
+            let commit = repo.find_commit(oid).map_err(|e| DomainError::Internal(e.to_string()))?;
+            let time = commit.time();
+            let timestamp = chrono::DateTime::from_timestamp(time.seconds(), 0)
+                .unwrap_or_default()
+                .with_timezone(&chrono::Utc);
+
+            commits.push(CommitInfo {
+                id: oid.to_string()[..7].to_string(),
+                full_id: oid.to_string(),
+                message: commit.message().unwrap_or("").to_string(),
+                author: commit.author().name().unwrap_or("").to_string(),
+                author_email: commit.author().email().unwrap_or("").to_string(),
+                timestamp,
+                files_changed: 0,
+            });
+        }
+        Ok(commits)
     }
 
     fn push(&self, _path: &str, _remote: &str, _creds: &GitCredentials) -> DomainResult<()> {
@@ -513,5 +560,33 @@ mod tests {
         svc.discard(&path, &["test.bru"]).unwrap();
         let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
         assert_eq!(content, "meta { name: Test }"); // original content
+    }
+
+    #[test]
+    fn commit_and_log() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("new.bru"), "content").unwrap();
+        svc.stage(&path, &["new.bru"]).unwrap();
+        let info = svc.commit(&path, "add new request").unwrap();
+        assert!(!info.id.is_empty());
+        assert_eq!(info.message, "add new request");
+
+        let log = svc.log(&path, 10).unwrap();
+        assert!(log.len() >= 2);
+        assert_eq!(log[0].message, "add new request");
+    }
+
+    #[test]
+    fn log_respects_limit() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        for i in 0..5 {
+            fs::write(dir.path().join(format!("f{}.bru", i)), format!("content {}", i)).unwrap();
+            svc.stage(&path, &[&format!("f{}.bru", i)]).unwrap();
+            svc.commit(&path, &format!("commit {}", i)).unwrap();
+        }
+        let log = svc.log(&path, 3).unwrap();
+        assert_eq!(log.len(), 3);
     }
 }
