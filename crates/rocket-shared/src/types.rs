@@ -204,6 +204,7 @@ pub enum Auth {
         region: String,
         service: String,
         session_token: Option<String>,
+        profile_name: Option<String>,
     },
     /// Inherits auth from the parent collection or folder.
     Inherit,
@@ -330,6 +331,7 @@ mod tests {
             region: "us-east-1".into(),
             service: "s3".into(),
             session_token: Some("FwoGZXIvY...".into()),
+            profile_name: None,
         };
         let json = serde_json::to_string(&auth).unwrap();
         assert!(json.contains("\"authType\":\"aws-sig-v4\""));
@@ -337,6 +339,22 @@ mod tests {
         assert!(json.contains("\"sessionToken\":\"FwoGZXIvY...\""));
         let parsed: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, parsed);
+    }
+
+    #[test]
+    fn auth_awsv4_with_profile_name() {
+        let auth = Auth::AwsSigV4 {
+            access_key: "AK".into(),
+            secret_key: "SK".into(),
+            region: "us-east-1".into(),
+            service: "s3".into(),
+            session_token: None,
+            profile_name: Some("prod".into()),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("profileName") || json.contains("profile_name"));
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
     }
 
     #[test]

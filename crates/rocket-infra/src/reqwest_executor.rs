@@ -163,6 +163,7 @@ fn apply_auth(
             region,
             service,
             session_token,
+            profile_name: _,
         } => {
             use rocket_http::aws_sig::{sign_request, AwsCredentials};
 
