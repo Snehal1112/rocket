@@ -19,11 +19,13 @@ import {
   gitPush,
   gitPull,
   gitFetch,
+  gitLog,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
   type BranchList,
   type GitCredentials,
+  type CommitInfo,
 } from '@/lib/tauri-api';
 
 interface GitState {
@@ -32,6 +34,7 @@ interface GitState {
   status: RepoStatus | null;
   stashes: StashEntry[];
   branches: BranchList | null;
+  commitLog: CommitInfo[];
   loading: boolean;
   error: string | null;
   credentials: GitCredentials | null;
@@ -41,6 +44,7 @@ interface GitState {
   refreshStatus: () => Promise<void>;
   refreshStashes: () => Promise<void>;
   refreshBranches: () => Promise<void>;
+  refreshLog: (limit?: number) => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
@@ -69,6 +73,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   status: null,
   stashes: [],
   branches: null,
+  commitLog: [],
   loading: false,
   error: null,
   credentials: null,
@@ -124,6 +129,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const branches = await gitBranches(collectionPath);
       set({ branches });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Reload the commit log from disk, up to the given limit.
+  refreshLog: async (limit) => {
+    const { collectionPath, isRepo } = get();
+    if (!collectionPath || !isRepo) return;
+    try {
+      const log = await gitLog(collectionPath, limit ?? 50);
+      set({ commitLog: log });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -356,6 +373,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       status: null,
       stashes: [],
       branches: null,
+      commitLog: [],
       loading: false,
       error: null,
       credentials: null,
