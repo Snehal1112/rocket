@@ -143,6 +143,52 @@ pub struct OcOAuth2PKCE {
     pub method: Option<String>,
 }
 
+/// A value that can be a boolean or the string "inherit".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InheritableBoolean {
+    Value(bool),
+    Inherit(String),  // "inherit"
+}
+
+/// A value that can be a number or the string "inherit".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InheritableNumber {
+    Value(f64),
+    Inherit(String),  // "inherit"
+}
+
+/// HTTP request execution settings.
+/// Schema: { encodeUrl, timeout, followRedirects, maxRedirects }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcHttpRequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode_url: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<InheritableNumber>,
+}
+
+/// GraphQL request execution settings (same fields as HTTP settings).
+/// Schema: { encodeUrl, timeout, followRedirects, maxRedirects }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcGraphQLRequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode_url: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<InheritableNumber>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +365,64 @@ mod tests {
             }
             _ => panic!("expected OAuth2"),
         }
+    }
+
+    #[test]
+    fn inheritable_boolean_value() {
+        let yaml = "true";
+        let v: InheritableBoolean = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(v, InheritableBoolean::Value(true));
+    }
+
+    #[test]
+    fn inheritable_boolean_inherit() {
+        let yaml = "inherit";
+        let v: InheritableBoolean = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(v, InheritableBoolean::Inherit("inherit".into()));
+    }
+
+    #[test]
+    fn inheritable_number_value() {
+        let yaml = "5000";
+        let v: InheritableNumber = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(v, InheritableNumber::Value(5000.0));
+    }
+
+    #[test]
+    fn inheritable_number_inherit() {
+        let yaml = "inherit";
+        let v: InheritableNumber = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(v, InheritableNumber::Inherit("inherit".into()));
+    }
+
+    #[test]
+    fn oc_http_request_settings_yaml() {
+        let yaml = "encodeUrl: true\ntimeout: 30000\nfollowRedirects: inherit\nmaxRedirects: 5";
+        let settings: OcHttpRequestSettings = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(true)));
+        assert_eq!(settings.timeout, Some(InheritableNumber::Value(30000.0)));
+        assert_eq!(settings.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
+        assert_eq!(settings.max_redirects, Some(InheritableNumber::Value(5.0)));
+    }
+
+    #[test]
+    fn oc_http_request_settings_roundtrip() {
+        let settings = OcHttpRequestSettings {
+            encode_url: Some(InheritableBoolean::Value(false)),
+            timeout: Some(InheritableNumber::Inherit("inherit".into())),
+            follow_redirects: None,
+            max_redirects: Some(InheritableNumber::Value(10.0)),
+        };
+        let yaml = serde_yaml::to_string(&settings).unwrap();
+        let back: OcHttpRequestSettings = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(settings, back);
+    }
+
+    #[test]
+    fn oc_graphql_request_settings_yaml() {
+        let yaml = "encodeUrl: false\ntimeout: inherit";
+        let settings: OcGraphQLRequestSettings = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(false)));
+        assert_eq!(settings.timeout, Some(InheritableNumber::Inherit("inherit".into())));
     }
 }
