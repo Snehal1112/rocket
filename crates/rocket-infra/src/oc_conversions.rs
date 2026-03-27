@@ -4,6 +4,9 @@
 //! is needed for descriptions — they flow through unchanged.
 
 use crate::opencollection::*;
+use rocket_collection::collection::Collection;
+use rocket_collection::folder::{CollectionItem, Folder};
+use rocket_collection::settings::{CollectionSettings, CollectionVariable};
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
@@ -916,6 +919,199 @@ pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
     }
 }
 
+// ============================================================
+// Folder conversions
+// ============================================================
+
+/// Convert an OC folder to a domain Folder, recursively converting items.
+pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
+    let name = oc.info.name;
+    let items = oc
+        .items
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| match item {
+            OcItem::Http(req) => Some(CollectionItem::Request(oc_http_request_to_request(req))),
+            OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
+            _ => None, // Skip non-HTTP protocols for now.
+        })
+        .collect();
+
+    Folder {
+        uid: uuid::Uuid::new_v4().to_string(),
+        name,
+        items,
+    }
+}
+
+/// Convert a domain Folder back to an OC folder.
+pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
+    let items: Vec<OcItem> = folder
+        .items
+        .into_iter()
+        .map(|item| match item {
+            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
+            CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+        })
+        .collect();
+
+    OcFolder {
+        info: OcFolderInfo {
+            name: folder.name,
+            description: None,
+            folder_type: Some("folder".into()),
+            seq: None,
+            tags: Vec::new(),
+        },
+        items: if items.is_empty() { None } else { Some(items) },
+        request: None,
+        docs: None,
+    }
+}
+
+// ============================================================
+// Collection conversions
+// ============================================================
+
+/// Convert an OC collection to a domain Collection.
+pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
+    let name = oc
+        .info
+        .as_ref()
+        .map(|i| i.name.clone())
+        .unwrap_or_else(|| "Untitled".into());
+
+    // Convert items into the root folder.
+    let items = oc
+        .items
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| match item {
+            OcItem::Http(req) => Some(CollectionItem::Request(oc_http_request_to_request(req))),
+            OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
+            _ => None,
+        })
+        .collect();
+
+    let root = Folder {
+        uid: uuid::Uuid::new_v4().to_string(),
+        name: name.clone(),
+        items,
+    };
+
+    // Convert request defaults to collection settings.
+    let settings = if let Some(defaults) = oc.request {
+        CollectionSettings {
+            description: oc.docs,
+            auth: defaults.auth.map(Auth::from),
+            headers: defaults
+                .headers
+                .unwrap_or_default()
+                .into_iter()
+                .map(Header::from)
+                .collect(),
+            variables: defaults
+                .variables
+                .unwrap_or_default()
+                .into_iter()
+                .map(|v| {
+                    let var: Variable = v.into();
+                    CollectionVariable {
+                        key: var.key,
+                        value: var.value.clone(),
+                        initial_value: var.value,
+                        enabled: var.enabled,
+                        secret: var.secret,
+                    }
+                })
+                .collect(),
+        }
+    } else {
+        CollectionSettings {
+            description: oc.docs,
+            ..CollectionSettings::default()
+        }
+    };
+
+    Collection {
+        name,
+        root,
+        settings,
+    }
+}
+
+/// Convert a domain Collection back to an OC collection.
+pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
+    let items: Vec<OcItem> = col
+        .root
+        .items
+        .into_iter()
+        .map(|item| match item {
+            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
+            CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+        })
+        .collect();
+
+    let request = {
+        let has_defaults = !col.settings.headers.is_empty()
+            || col.settings.auth.is_some()
+            || !col.settings.variables.is_empty();
+        if has_defaults {
+            Some(OcRequestDefaults {
+                headers: if col.settings.headers.is_empty() {
+                    None
+                } else {
+                    Some(
+                        col.settings
+                            .headers
+                            .into_iter()
+                            .map(OcHttpRequestHeader::from)
+                            .collect(),
+                    )
+                },
+                metadata: None,
+                auth: col.settings.auth.map(OcAuth::from),
+                variables: if col.settings.variables.is_empty() {
+                    None
+                } else {
+                    Some(
+                        col.settings
+                            .variables
+                            .into_iter()
+                            .map(|cv| OcVariable {
+                                name: cv.key,
+                                value: Some(VariableValue::simple(cv.value)),
+                                description: None,
+                                disabled: if cv.enabled { None } else { Some(true) },
+                            })
+                            .collect(),
+                    )
+                },
+                scripts: None,
+                settings: None,
+            })
+        } else {
+            None
+        }
+    };
+
+    OcCollection {
+        opencollection: Some("0.1".into()),
+        info: Some(OcInfo {
+            name: col.name,
+            summary: None,
+            version: None,
+            authors: None,
+        }),
+        config: None,
+        items: if items.is_empty() { None } else { Some(items) },
+        request,
+        docs: col.settings.description,
+        bundled: None,
+        extensions: None,
+    }
+}
+
 /// Extract pre-request, post-response, and test scripts from runtime.
 fn extract_scripts(runtime: &Option<OcHttpRequestRuntime>) -> (Option<String>, Option<String>, Option<String>) {
     let Some(rt) = runtime else { return (None, None, None) };
@@ -1434,5 +1630,88 @@ docs: "Creates a user."
         assert_eq!(rt.scripts.len(), 1);
         assert_eq!(rt.assertions.len(), 1);
         assert_eq!(back.docs, Some("Creates a user.".into()));
+    }
+
+    // ---- Folder + Collection tests ----
+
+    #[test]
+    fn oc_folder_to_domain() {
+        let yaml = r#"
+info:
+  name: Users
+  type: folder
+items:
+  - info:
+      name: Get Users
+      type: http
+    http:
+      method: GET
+      url: "https://api.example.com/users"
+  - info:
+      name: Create User
+      type: http
+    http:
+      method: POST
+      url: "https://api.example.com/users"
+"#;
+        let oc: OcFolder = serde_yaml::from_str(yaml).unwrap();
+        let folder = oc_folder_to_folder(oc);
+        assert_eq!(folder.name, "Users");
+        assert_eq!(folder.items.len(), 2);
+        assert!(matches!(&folder.items[0], CollectionItem::Request(r) if r.name == "Get Users"));
+        assert!(matches!(&folder.items[1], CollectionItem::Request(r) if r.name == "Create User"));
+    }
+
+    #[test]
+    fn oc_collection_to_domain() {
+        let yaml = r#"
+opencollection: "0.1"
+info:
+  name: My API
+request:
+  headers:
+    - name: Accept
+      value: application/json
+  auth:
+    type: bearer
+    token: "{{token}}"
+items:
+  - info:
+      name: Health Check
+      type: http
+    http:
+      method: GET
+      url: /health
+"#;
+        let oc: OcCollection = serde_yaml::from_str(yaml).unwrap();
+        let col = oc_collection_to_collection(oc);
+        assert_eq!(col.name, "My API");
+        assert_eq!(col.root.items.len(), 1);
+        assert_eq!(col.settings.headers.len(), 1);
+        assert_eq!(col.settings.headers[0].key, "Accept");
+        assert!(col.settings.auth.is_some());
+    }
+
+    #[test]
+    fn collection_roundtrip() {
+        use rocket_shared::types::HttpMethod;
+
+        let mut col = Collection::new("Test API");
+        col.root
+            .add_request(Request::new("Get Users", HttpMethod::Get, "/users"));
+        col.settings
+            .headers
+            .push(Header::new("Accept", "application/json"));
+
+        let oc = collection_to_oc_collection(col);
+        assert_eq!(oc.info.as_ref().unwrap().name, "Test API");
+        assert!(oc.items.is_some());
+        assert_eq!(oc.items.as_ref().unwrap().len(), 1);
+        assert!(oc.request.is_some());
+
+        let back = oc_collection_to_collection(oc);
+        assert_eq!(back.name, "Test API");
+        assert_eq!(back.root.items.len(), 1);
+        assert_eq!(back.settings.headers.len(), 1);
     }
 }
