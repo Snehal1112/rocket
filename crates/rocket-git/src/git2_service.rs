@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use git2::{Repository, Status};
+use git2::{build::CheckoutBuilder, BranchType, Repository, Status};
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::branch::BranchList;
+use crate::branch::{Branch, BranchList};
 use crate::commit::CommitInfo;
 use crate::conflict::{ConflictFile, ConflictResolution};
 use crate::credentials::GitCredentials;
@@ -328,7 +328,7 @@ impl GitService for Git2Service {
     fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         for file in files {
-            let mut cb = git2::build::CheckoutBuilder::new();
+            let mut cb = CheckoutBuilder::new();
             cb.path(*file).force();
             repo.checkout_head(Some(&mut cb))
                 .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -403,24 +403,166 @@ impl GitService for Git2Service {
         todo!()
     }
 
-    fn branches(&self, _path: &str) -> DomainResult<BranchList> {
-        todo!()
+    fn branches(&self, path: &str) -> DomainResult<BranchList> {
+        let repo = open_repo(path)?;
+        let current = branch_name(&repo);
+        let mut local = Vec::new();
+        let mut remote = Vec::new();
+
+        let branches = repo
+            .branches(None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        for item in branches {
+            let (branch, branch_type) = item.map_err(|e| DomainError::Internal(e.to_string()))?;
+            let name = branch
+                .name()
+                .map_err(|e| DomainError::Internal(e.to_string()))?
+                .unwrap_or("")
+                .to_string();
+            let is_head = branch.is_head();
+            let upstream = branch
+                .upstream()
+                .ok()
+                .and_then(|u| u.name().ok().flatten().map(String::from));
+
+            let entry = Branch {
+                name: name.clone(),
+                is_head,
+                is_remote: branch_type == BranchType::Remote,
+                upstream,
+            };
+
+            match branch_type {
+                BranchType::Local => local.push(entry),
+                BranchType::Remote => remote.push(entry),
+            }
+        }
+
+        Ok(BranchList {
+            current,
+            local,
+            remote,
+        })
     }
 
-    fn switch_branch(&self, _path: &str, _name: &str) -> DomainResult<()> {
-        todo!()
+    fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        repo.set_head(&format!("refs/heads/{name}"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn create_branch(&self, _path: &str, _name: &str) -> DomainResult<()> {
-        todo!()
+    fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let head_commit = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.branch(name, &head_commit, false)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn delete_branch(&self, _path: &str, _name: &str) -> DomainResult<()> {
-        todo!()
+    fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let mut branch = repo
+            .find_branch(name, BranchType::Local)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        branch
+            .delete()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn merge_branch(&self, _path: &str, _name: &str) -> DomainResult<()> {
-        todo!()
+    fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+
+        // Find the branch commit and create an annotated commit for analysis.
+        let branch_ref = repo
+            .find_branch(name, BranchType::Local)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let branch_commit = branch_ref
+            .get()
+            .peel_to_commit()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let annotated = repo
+            .find_annotated_commit(branch_commit.id())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Determine merge strategy.
+        let (analysis, _preference) = repo
+            .merge_analysis(&[&annotated])
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        if analysis.is_up_to_date() {
+            // Nothing to do.
+            return Ok(());
+        }
+
+        if analysis.is_fast_forward() {
+            // Fast-forward: move the current branch ref to the target commit.
+            let ref_name = format!("refs/heads/{}", branch_name(&repo));
+            let mut reference = repo
+                .find_reference(&ref_name)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            reference
+                .set_target(branch_commit.id(), "fast-forward merge")
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            repo.set_head(&ref_name)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            return Ok(());
+        }
+
+        // Normal merge: perform a real merge with a merge commit.
+        repo.merge(&[&annotated], None, None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut index = repo
+            .index()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        if index.has_conflicts() {
+            return Err(DomainError::Internal(
+                "merge resulted in conflicts".to_string(),
+            ));
+        }
+
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let tree = repo
+            .find_tree(tree_id)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let head_commit = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let msg = format!("Merge branch '{name}'");
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            &msg,
+            &tree,
+            &[&head_commit, &branch_commit],
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        repo.cleanup_state()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 
     fn stash_list(&self, _path: &str) -> DomainResult<Vec<StashEntry>> {
@@ -588,5 +730,35 @@ mod tests {
         }
         let log = svc.log(&path, 3).unwrap();
         assert_eq!(log.len(), 3);
+    }
+
+    #[test]
+    fn branch_create_switch_delete() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "feature-x").unwrap();
+        let branches = svc.branches(&path).unwrap();
+        assert!(branches.local.iter().any(|b| b.name == "feature-x"));
+        svc.switch_branch(&path, "feature-x").unwrap();
+        assert_eq!(svc.status(&path).unwrap().branch, "feature-x");
+        svc.switch_branch(&path, "main").unwrap();
+        svc.delete_branch(&path, "feature-x").unwrap();
+        let branches2 = svc.branches(&path).unwrap();
+        assert!(!branches2.local.iter().any(|b| b.name == "feature-x"));
+    }
+
+    #[test]
+    fn merge_branch_fast_forward() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "feature").unwrap();
+        svc.switch_branch(&path, "feature").unwrap();
+        fs::write(dir.path().join("new.bru"), "content").unwrap();
+        svc.stage(&path, &["new.bru"]).unwrap();
+        svc.commit(&path, "feature commit").unwrap();
+        svc.switch_branch(&path, "main").unwrap();
+        svc.merge_branch(&path, "feature").unwrap();
+        let log = svc.log(&path, 5).unwrap();
+        assert!(log.iter().any(|c| c.message == "feature commit"));
     }
 }
