@@ -83,6 +83,9 @@ mod tests {
         };
         assert!(action.description.is_some());
         assert_eq!(action.disabled, Some(true));
+        let json = serde_json::to_string(&action).unwrap();
+        let back: ActionSetVariable = serde_json::from_str(&json).unwrap();
+        assert_eq!(action, back);
     }
 
     #[test]
