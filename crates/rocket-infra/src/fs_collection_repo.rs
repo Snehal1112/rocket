@@ -5,7 +5,7 @@ use rocket_collection::{Collection, CollectionRepository, CollectionSettings, Co
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
-use crate::opencollection::{OcCollection, OcHttpRequest, OcInfo};
+use crate::opencollection::{OcCollection, OcFolderInfo, OcHttpRequest, OcInfo};
 
 /// Reads the .uid file from a directory. If missing, generates a UUID and writes it.
 fn read_or_create_uid(dir: &Path) -> String {
@@ -296,6 +296,23 @@ impl CollectionRepository for FsCollectionRepo {
         let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         fs::create_dir_all(&dir_path)?;
         read_or_create_uid(&dir_path);
+
+        // Write folder.yml with folder metadata.
+        let folder_name = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+        let info = OcFolderInfo {
+            name: folder_name,
+            description: None,
+            folder_type: Some("folder".into()),
+            seq: None,
+            tags: Vec::new(),
+        };
+        let yaml = serde_yaml::to_string(&info)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
+        fs::write(dir_path.join("folder.yml"), yaml)?;
+
         Ok(())
     }
 
@@ -420,6 +437,16 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         .unwrap_or_default();
     let mut folder = Folder::new(name);
     folder.uid = read_or_create_uid(current);
+
+    // Read folder.yml for metadata if present.
+    let folder_yml = current.join("folder.yml");
+    if folder_yml.exists() {
+        if let Ok(content) = fs::read_to_string(&folder_yml) {
+            if let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
+                folder.name = info.name;
+            }
+        }
+    }
 
     if !current.exists() {
         return Ok(folder);
@@ -786,6 +813,23 @@ mod tests {
             "expected traversal to be blocked, got {:?}",
             err
         );
+    }
+
+    #[test]
+    fn folder_yml_exists_after_create_folder() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        assert!(dir.path().join("my-api/auth/folder.yml").exists());
+    }
+
+    #[test]
+    fn folder_yml_not_counted_as_request() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        let list = repo.list().unwrap();
+        assert_eq!(list[0].request_count, 0);
     }
 
     #[test]
