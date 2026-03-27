@@ -187,6 +187,130 @@ pub struct OcGraphQLRequestSettings {
     pub max_redirects: Option<InheritableNumber>,
 }
 
+// ============================================================
+// HTTP Request — Detail Structs
+// ============================================================
+
+/// HTTP request metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub request_type: Option<String>,  // "http"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// HTTP request parameter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestParam {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub param_type: Option<String>,  // "query" | "path"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+}
+
+/// HTTP request header.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestHeader {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+}
+
+/// HTTP response header.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcHttpResponseHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// Form field for form-urlencoded body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcFormField {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+}
+
+/// Multipart form part value — string or array of strings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcMultipartValue {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+/// Multipart form part.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcMultipartFormPart {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub part_type: String,  // "text" | "file"
+    pub value: OcMultipartValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+}
+
+/// File body variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcFileBodyVariant {
+    pub file_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub selected: bool,
+}
+
+/// HTTP request body — discriminated by `type` field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum OcHttpRequestBody {
+    #[serde(rename = "json")]
+    Json { data: String },
+    #[serde(rename = "text")]
+    Text { data: String },
+    #[serde(rename = "xml")]
+    Xml { data: String },
+    #[serde(rename = "sparql")]
+    Sparql { data: String },
+    #[serde(rename = "form-urlencoded")]
+    FormUrlEncoded { data: Vec<OcFormField> },
+    #[serde(rename = "multipart-form")]
+    MultipartForm { data: Vec<OcMultipartFormPart> },
+    #[serde(rename = "file")]
+    File { data: Vec<OcFileBodyVariant> },
+}
+
+/// HTTP request body variant (named variant with title + selected).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestBodyVariant {
+    pub title: String,
+    #[serde(default)]
+    pub selected: bool,
+    pub body: OcHttpRequestBody,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,5 +546,85 @@ mod tests {
         let settings: OcGraphQLRequestSettings = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(false)));
         assert_eq!(settings.timeout, Some(InheritableNumber::Inherit("inherit".into())));
+    }
+
+    #[test]
+    fn oc_http_request_info_yaml() {
+        let yaml = "name: Get Users\ntype: http\nseq: 1\ntags:\n  - api\n  - users";
+        let info: OcHttpRequestInfo = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(info.name, "Get Users");
+        assert_eq!(info.request_type, Some("http".into()));
+        assert_eq!(info.seq, Some(1));
+        assert_eq!(info.tags, vec!["api", "users"]);
+    }
+
+    #[test]
+    fn oc_http_request_header_yaml() {
+        let yaml = "name: Content-Type\nvalue: application/json\ndisabled: false";
+        let header: OcHttpRequestHeader = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(header.name, "Content-Type");
+        assert_eq!(header.disabled, Some(false));
+    }
+
+    #[test]
+    fn oc_http_request_param_yaml() {
+        let yaml = "name: page\nvalue: \"1\"\ntype: query";
+        let param: OcHttpRequestParam = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(param.name, "page");
+        assert_eq!(param.param_type, Some("query".into()));
+    }
+
+    #[test]
+    fn oc_body_json_yaml() {
+        let yaml = "type: json\ndata: '{\"key\": \"value\"}'";
+        let body: OcHttpRequestBody = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(body, OcHttpRequestBody::Json { .. }));
+    }
+
+    #[test]
+    fn oc_body_form_urlencoded_yaml() {
+        let yaml = "type: form-urlencoded\ndata:\n  - name: username\n    value: admin\n  - name: password\n    value: secret\n    disabled: true";
+        let body: OcHttpRequestBody = serde_yaml::from_str(yaml).unwrap();
+        match body {
+            OcHttpRequestBody::FormUrlEncoded { data } => {
+                assert_eq!(data.len(), 2);
+                assert_eq!(data[1].disabled, Some(true));
+            }
+            _ => panic!("expected FormUrlEncoded"),
+        }
+    }
+
+    #[test]
+    fn oc_body_multipart_yaml() {
+        let yaml = "type: multipart-form\ndata:\n  - name: file\n    type: file\n    value:\n      - /path/to/file.txt\n      - /path/to/file2.txt";
+        let body: OcHttpRequestBody = serde_yaml::from_str(yaml).unwrap();
+        match body {
+            OcHttpRequestBody::MultipartForm { data } => {
+                assert_eq!(data.len(), 1);
+                assert!(matches!(data[0].value, OcMultipartValue::Multiple(_)));
+            }
+            _ => panic!("expected MultipartForm"),
+        }
+    }
+
+    #[test]
+    fn oc_body_file_yaml() {
+        let yaml = "type: file\ndata:\n  - filePath: /uploads/doc.pdf\n    contentType: application/pdf\n    selected: true";
+        let body: OcHttpRequestBody = serde_yaml::from_str(yaml).unwrap();
+        match body {
+            OcHttpRequestBody::File { data } => {
+                assert_eq!(data[0].file_path, "/uploads/doc.pdf");
+                assert!(data[0].selected);
+            }
+            _ => panic!("expected File"),
+        }
+    }
+
+    #[test]
+    fn oc_body_variant_yaml() {
+        let yaml = "title: Default\nselected: true\nbody:\n  type: json\n  data: '{}'";
+        let variant: OcHttpRequestBodyVariant = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(variant.title, "Default");
+        assert!(variant.selected);
     }
 }
