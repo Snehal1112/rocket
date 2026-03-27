@@ -1,9 +1,30 @@
 import { Button } from '@/components/ui/button';
 import { useGitStore } from '@/stores/git-store';
+import { gitDiffStaged } from '@/lib/tauri-api';
+import type { FileStatus } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
 import { GitFileRow } from './GitFileRow';
 
 export function GitStagedFiles() {
-  const { status, unstageFiles, unstageAll } = useGitStore();
+  const { status, unstageFiles, unstageAll, collectionPath } = useGitStore();
+  const openDiffTab = usePaneStore((s) => s.openDiffTab);
+
+  const handleFileClick = async (file: FileStatus) => {
+    if (!collectionPath) return;
+    try {
+      const diff = await gitDiffStaged(collectionPath, file.path);
+      openDiffTab({
+        filePath: file.path,
+        collectionPath,
+        oldContent: diff.oldContent ?? '',
+        newContent: diff.newContent ?? '',
+        status: file.status,
+        isStaged: true,
+      });
+    } catch {
+      // Ignore errors silently.
+    }
+  };
 
   const staged = status?.files.filter((f) => f.staged) ?? [];
 
@@ -25,6 +46,7 @@ export function GitStagedFiles() {
             key={file.path}
             file={file}
             onUnstage={() => unstageFiles([file.path])}
+            onClick={() => handleFileClick(file)}
           />
         ))}
       </div>
