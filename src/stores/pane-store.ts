@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState, ConflictTab, ConflictState } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { renameRequest } from '@/lib/tauri-api';
@@ -73,6 +73,9 @@ export interface PaneState {
 
   // Diff tab action.
   openDiffTab: (diffState: DiffState) => void;
+
+  // Conflict tab action.
+  openConflictTab: (conflictState: ConflictState) => void;
 
   // Utility.
   reset: () => void;
@@ -263,6 +266,18 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       isDirty: false,
       tabType: 'diff',
       diffState,
+    };
+    get().openTab(tab);
+  },
+
+  openConflictTab(conflictState) {
+    const tabId = `conflict:${conflictState.collectionPath}/${conflictState.filePath}`;
+    const tab: ConflictTab = {
+      id: tabId,
+      title: `${conflictState.filePath} (Conflict)`,
+      isDirty: false,
+      tabType: 'conflict',
+      conflictState,
     };
     get().openTab(tab);
   },

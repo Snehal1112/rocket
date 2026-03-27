@@ -16,7 +16,7 @@ import { CollectionOverviewTab } from '@/components/collections/CollectionOvervi
 import { DiffViewer } from '@/components/git/DiffViewer';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isDiffTab, isRequestTab } from '@/types/pane-types';
+import { isDiffTab, isRequestTab, isConflictTab } from '@/types/pane-types';
 
 // Branded empty state shown when no tabs are open.
 function EmptyState() {
@@ -67,6 +67,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
         {activeTab ? (
           isDiffTab(activeTab) ? (
             <DiffViewer diffState={activeTab.diffState} />
+          ) : isConflictTab(activeTab) ? (
+            // ConflictResolver wired in P15-T2.
+            null
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : (
