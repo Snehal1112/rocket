@@ -6,4 +6,4 @@ pub mod types;
 
 pub use assertion::Assertion;
 pub use description::{Description, Documentation};
-pub use types::QueryParam;
+pub use types::{PathParam, QueryParam};

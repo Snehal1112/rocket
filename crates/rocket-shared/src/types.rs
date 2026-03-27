@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use crate::description::Description;
 use crate::error::DomainError;
 
 // ============================================================
@@ -64,6 +65,8 @@ pub struct QueryParam {
     pub key: String,
     pub value: String,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 // ============================================================
@@ -76,6 +79,8 @@ pub struct Header {
     pub key: String,
     pub value: String,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 impl Header {
@@ -84,6 +89,7 @@ impl Header {
             key: key.into(),
             value: value.into(),
             enabled: true,
+            description: None,
         }
     }
 
@@ -92,8 +98,21 @@ impl Header {
             key: key.into(),
             value: value.into(),
             enabled: false,
+            description: None,
         }
     }
+}
+
+// ============================================================
+// PathParam
+// ============================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathParam {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 // ============================================================
@@ -201,7 +220,7 @@ mod tests {
 
     #[test]
     fn query_param_serialization_roundtrip() {
-        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true };
+        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true, description: None };
         let json = serde_json::to_string(&param).unwrap();
         let parsed: QueryParam = serde_json::from_str(&json).unwrap();
         assert_eq!(param, parsed);
@@ -302,5 +321,33 @@ mod tests {
         assert!(json.contains("\"sessionToken\":\"FwoGZXIvY...\""));
         let parsed: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, parsed);
+    }
+
+    #[test]
+    fn header_has_description() {
+        let h = Header {
+            key: "Auth".into(),
+            value: "Bearer tk".into(),
+            enabled: true,
+            description: Some(Description::text("Auth header")),
+        };
+        assert!(h.description.is_some());
+    }
+
+    #[test]
+    fn query_param_has_description() {
+        let p = QueryParam {
+            key: "page".into(),
+            value: "1".into(),
+            enabled: true,
+            description: Some(Description::text("Page number")),
+        };
+        assert!(p.description.is_some());
+    }
+
+    #[test]
+    fn path_param_full() {
+        let p = PathParam { name: "id".into(), value: "123".into(), description: None };
+        assert_eq!(p.name, "id");
     }
 }

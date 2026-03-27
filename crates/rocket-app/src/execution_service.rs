@@ -87,6 +87,7 @@ impl RequestExecutionService {
                 key: resolve(&h.key, &vars).output,
                 value: resolve(&h.value, &vars).output,
                 enabled: h.enabled,
+                description: None,
             })
             .collect();
 
