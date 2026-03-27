@@ -16,10 +16,14 @@ import {
   gitCreateBranch,
   gitDeleteBranch,
   gitMergeBranch,
+  gitPush,
+  gitPull,
+  gitFetch,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
   type BranchList,
+  type GitCredentials,
 } from '@/lib/tauri-api';
 
 interface GitState {
@@ -30,6 +34,8 @@ interface GitState {
   branches: BranchList | null;
   loading: boolean;
   error: string | null;
+  credentials: GitCredentials | null;
+  showCredentialsDialog: boolean;
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -49,6 +55,11 @@ interface GitState {
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
+  setCredentials: (creds: GitCredentials) => void;
+  setShowCredentialsDialog: (show: boolean) => void;
+  push: (remote?: string) => Promise<void>;
+  pull: (remote?: string) => Promise<void>;
+  fetch: (remote?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -60,6 +71,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   branches: null,
   loading: false,
   error: null,
+  credentials: null,
+  showCredentialsDialog: false,
 
   // Set the active collection path and check if it is a git repo.
   setCollection: async (path: string) => {
@@ -289,6 +302,52 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  // Store credentials and close the dialog.
+  setCredentials: (creds) => set({ credentials: creds, showCredentialsDialog: false }),
+
+  // Show or hide the credentials dialog.
+  setShowCredentialsDialog: (show) => set({ showCredentialsDialog: show }),
+
+  // Push local commits to the remote, prompting for credentials if needed.
+  push: async (remote) => {
+    const { collectionPath, credentials } = get();
+    if (!collectionPath) return;
+    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    try {
+      await gitPush(collectionPath, remote ?? 'origin', credentials);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Pull remote commits into the current branch, prompting for credentials if needed.
+  pull: async (remote) => {
+    const { collectionPath, credentials } = get();
+    if (!collectionPath) return;
+    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    try {
+      await gitPull(collectionPath, remote ?? 'origin', credentials);
+      await get().refreshStatus();
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Fetch remote refs without merging, prompting for credentials if needed.
+  fetch: async (remote) => {
+    const { collectionPath, credentials } = get();
+    if (!collectionPath) return;
+    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    try {
+      await gitFetch(collectionPath, remote ?? 'origin', credentials);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   // Reset the store back to its initial state.
   reset: () => {
     set({
@@ -299,6 +358,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       branches: null,
       loading: false,
       error: null,
+      credentials: null,
+      showCredentialsDialog: false,
     });
   },
 }));
