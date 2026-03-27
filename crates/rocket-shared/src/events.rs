@@ -25,6 +25,17 @@ pub enum DomainEvent {
 
     // History events
     HistoryCleared,
+
+    // Git events
+    GitStatusChanged { collection: String },
+    GitCommit { collection: String, message: String, sha: String },
+    GitPush { collection: String, remote: String },
+    GitPull { collection: String, remote: String },
+    BranchSwitched { collection: String, branch: String },
+    BranchMerged { collection: String, branch: String },
+    GitStashChanged { collection: String },
+    GitConflictDetected { collection: String, files: Vec<String> },
+    GitCloned { url: String, dest: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
