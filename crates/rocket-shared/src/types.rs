@@ -205,6 +205,21 @@ pub enum Auth {
         service: String,
         session_token: Option<String>,
     },
+    /// Inherits auth from the parent collection or folder.
+    Inherit,
+    Wsse {
+        username: String,
+        password: String,
+    },
+    Digest {
+        username: String,
+        password: String,
+    },
+    Ntlm {
+        username: String,
+        password: String,
+        domain: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -350,5 +365,41 @@ mod tests {
     fn path_param_full() {
         let p = PathParam { name: "id".into(), value: "123".into(), description: None };
         assert_eq!(p.name, "id");
+    }
+
+    #[test]
+    fn auth_inherit_serde() {
+        let auth = Auth::Inherit;
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_wsse_serde() {
+        let auth = Auth::Wsse { username: "user".into(), password: "pass".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_digest_serde() {
+        let auth = Auth::Digest { username: "admin".into(), password: "secret".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_ntlm_serde() {
+        let auth = Auth::Ntlm {
+            username: "CORP\\user".into(),
+            password: "p".into(),
+            domain: "CORP".into(),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
     }
 }

@@ -151,6 +151,12 @@ fn apply_auth(
         Auth::OAuth2 { .. } => {
             // No access token available yet; skip auth header.
         }
+        Auth::Inherit => {
+            // Inherits from parent — resolved before execution.
+        }
+        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } => {
+            // Not yet implemented in HTTP executor.
+        }
         Auth::AwsSigV4 {
             access_key,
             secret_key,
