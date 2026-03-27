@@ -187,10 +187,8 @@ impl CollectionRepository for FsCollectionRepo {
         // Try .yml first, then .json for backward compatibility.
         let yml_path = if path.ends_with(".yml") || path.ends_with(".yaml") {
             path.to_string()
-        } else if path.ends_with(".json") {
-            path.to_string()
         } else {
-            format!("{}.yml", path)
+            format!("{}.yml", path.strip_suffix(".json").unwrap_or(path))
         };
 
         // Try .yml first.
