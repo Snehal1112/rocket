@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::opencollection::{OcCollection, OcInfo};
+
 /// Reads the .uid file from a directory. If missing, generates a UUID and writes it.
 fn read_or_create_uid(dir: &Path) -> String {
     let uid_path = dir.join(".uid");
@@ -90,6 +92,10 @@ impl CollectionRepository for FsCollectionRepo {
                 if name.starts_with('.') {
                     continue;
                 }
+                // Only recognize directories that contain opencollection.yml.
+                if !path.join("opencollection.yml").exists() {
+                    continue;
+                }
                 let count = count_request_files(&path);
                 let uid = read_or_create_uid(&path);
                 let modified_at = fs::metadata(&path)
@@ -127,6 +133,27 @@ impl CollectionRepository for FsCollectionRepo {
             return Err(DomainError::AlreadyExists(format!("Collection '{}'", name)));
         }
         fs::create_dir_all(&path)?;
+
+        // Write opencollection.yml with basic info.
+        let oc = OcCollection {
+            opencollection: Some("0.1".into()),
+            info: Some(OcInfo {
+                name: name.into(),
+                summary: None,
+                version: None,
+                authors: None,
+            }),
+            config: None,
+            items: None,
+            request: None,
+            docs: None,
+            bundled: None,
+            extensions: None,
+        };
+        let yaml = serde_yaml::to_string(&oc)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+        fs::write(path.join("opencollection.yml"), yaml)?;
+
         Ok(Collection::new(name))
     }
 
@@ -329,11 +356,13 @@ fn count_request_files(dir: &Path) -> usize {
 }
 
 fn is_request_file(path: &Path) -> bool {
-    // Exclude reserved sidecar files.
-    if path.file_name().is_some_and(|n| n == "collection.json" || n == "_order.json") {
-        return false;
+    // Exclude reserved sidecar and config files.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if matches!(name, "collection.json" | "_order.json" | "_order.yml" | "opencollection.yml" | "folder.yml") {
+            return false;
+        }
     }
-    path.extension().is_some_and(|ext| ext == "json" || ext == "bru")
+    path.extension().is_some_and(|ext| ext == "json" || ext == "yml" || ext == "yaml" || ext == "bru")
 }
 
 fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
@@ -692,5 +721,32 @@ mod tests {
             "expected traversal to be blocked, got {:?}",
             err
         );
+    }
+
+    #[test]
+    fn list_ignores_dirs_without_opencollection_yml() {
+        let (dir, repo) = setup();
+        // Create a plain directory (not via repo.create).
+        fs::create_dir(dir.path().join("plain-dir")).unwrap();
+        // Create a proper collection.
+        repo.create("proper").unwrap();
+        let list = repo.list().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "proper");
+    }
+
+    #[test]
+    fn opencollection_yml_exists_after_create() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        assert!(dir.path().join("my-api/opencollection.yml").exists());
+    }
+
+    #[test]
+    fn opencollection_yml_not_counted_as_request() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let list = repo.list().unwrap();
+        assert_eq!(list[0].request_count, 0);
     }
 }
