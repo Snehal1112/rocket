@@ -11,9 +11,15 @@ import {
   gitStashPop,
   gitStashApply,
   gitStashDrop,
+  gitBranches,
+  gitSwitchBranch,
+  gitCreateBranch,
+  gitDeleteBranch,
+  gitMergeBranch,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
+  type BranchList,
 } from '@/lib/tauri-api';
 
 interface GitState {
@@ -21,12 +27,14 @@ interface GitState {
   collectionPath: string | null;
   status: RepoStatus | null;
   stashes: StashEntry[];
+  branches: BranchList | null;
   loading: boolean;
   error: string | null;
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   refreshStashes: () => Promise<void>;
+  refreshBranches: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
@@ -37,6 +45,10 @@ interface GitState {
   popStash: (index: number) => Promise<void>;
   applyStash: (index: number) => Promise<void>;
   dropStash: (index: number) => Promise<void>;
+  switchBranch: (name: string) => Promise<void>;
+  createBranch: (name: string) => Promise<void>;
+  deleteBranch: (name: string) => Promise<void>;
+  mergeBranch: (name: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -45,6 +57,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   collectionPath: null,
   status: null,
   stashes: [],
+  branches: null,
   loading: false,
   error: null,
 
@@ -58,6 +71,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         const status = await gitStatus(path);
         set({ status, loading: false });
         await get().refreshStashes();
+        await get().refreshBranches();
       } else {
         set({ status: null, loading: false });
       }
@@ -85,6 +99,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const stashes = await gitStashList(collectionPath);
       set({ stashes });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Reload the branch list from disk.
+  refreshBranches: async () => {
+    const { collectionPath, isRepo } = get();
+    if (!collectionPath || !isRepo) return;
+    try {
+      const branches = await gitBranches(collectionPath);
+      set({ branches });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -213,6 +239,56 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  // Switch to the named branch.
+  switchBranch: async (name) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitSwitchBranch(collectionPath, name);
+      await get().refreshStatus();
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Create a new branch with the given name.
+  createBranch: async (name) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitCreateBranch(collectionPath, name);
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Delete the named branch.
+  deleteBranch: async (name) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitDeleteBranch(collectionPath, name);
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Merge the named branch into the current branch.
+  mergeBranch: async (name) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitMergeBranch(collectionPath, name);
+      await get().refreshStatus();
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   // Reset the store back to its initial state.
   reset: () => {
     set({
@@ -220,6 +296,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       collectionPath: null,
       status: null,
       stashes: [],
+      branches: null,
       loading: false,
       error: null,
     });
