@@ -1,0 +1,16 @@
+[package]
+name = "rocket-git"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+git2 = { version = "0.19", features = ["ssh"] }
+log.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
