@@ -6,25 +6,37 @@ import {
   gitUnstage,
   gitDiscard,
   gitCommit,
+  gitStashList,
+  gitStashSave,
+  gitStashPop,
+  gitStashApply,
+  gitStashDrop,
   type RepoStatus,
   type FileStatus,
+  type StashEntry,
 } from '@/lib/tauri-api';
 
 interface GitState {
   isRepo: boolean;
   collectionPath: string | null;
   status: RepoStatus | null;
+  stashes: StashEntry[];
   loading: boolean;
   error: string | null;
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
+  refreshStashes: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
   commitChanges: (message: string) => Promise<void>;
   stageAll: () => Promise<void>;
   unstageAll: () => Promise<void>;
+  saveStash: (message: string) => Promise<void>;
+  popStash: (index: number) => Promise<void>;
+  applyStash: (index: number) => Promise<void>;
+  dropStash: (index: number) => Promise<void>;
   reset: () => void;
 }
 
@@ -32,6 +44,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   isRepo: false,
   collectionPath: null,
   status: null,
+  stashes: [],
   loading: false,
   error: null,
 
@@ -44,6 +57,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       if (isRepo) {
         const status = await gitStatus(path);
         set({ status, loading: false });
+        await get().refreshStashes();
       } else {
         set({ status: null, loading: false });
       }
@@ -59,6 +73,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const status = await gitStatus(collectionPath);
       set({ status });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Reload the stash list from disk.
+  refreshStashes: async () => {
+    const { collectionPath, isRepo } = get();
+    if (!collectionPath || !isRepo) return;
+    try {
+      const stashes = await gitStashList(collectionPath);
+      set({ stashes });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -136,12 +162,64 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  // Save current working-tree changes as a new stash entry.
+  saveStash: async (message: string) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitStashSave(collectionPath, message);
+      await get().refreshStatus();
+      await get().refreshStashes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Pop the stash at the given index and restore it to the working tree.
+  popStash: async (index: number) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitStashPop(collectionPath, index);
+      await get().refreshStatus();
+      await get().refreshStashes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Apply the stash at the given index without removing it.
+  applyStash: async (index: number) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitStashApply(collectionPath, index);
+      await get().refreshStatus();
+      await get().refreshStashes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Drop (delete) the stash at the given index.
+  dropStash: async (index: number) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitStashDrop(collectionPath, index);
+      await get().refreshStashes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   // Reset the store back to its initial state.
   reset: () => {
     set({
       isRepo: false,
       collectionPath: null,
       status: null,
+      stashes: [],
       loading: false,
       error: null,
     });
