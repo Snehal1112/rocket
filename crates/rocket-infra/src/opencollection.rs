@@ -35,6 +35,114 @@ pub struct OcSecretVariable {
     pub secret_type: Option<String>,  // "string"|"number"|"boolean"|"null"|"object"
 }
 
+/// OpenCollection Auth — discriminated by `type` field. String "inherit" for inheritance.
+/// Uses custom serde since it's a oneOf with a string shorthand.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcAuth {
+    /// String shorthand: "inherit".
+    Inherit(String),
+    /// Object form: dispatched by `type` field.
+    Typed(OcAuthTyped),
+}
+
+/// Typed auth — discriminated by `type` field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum OcAuthTyped {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "basic")]
+    Basic { username: String, password: String },
+    #[serde(rename = "bearer")]
+    Bearer { token: String },
+    #[serde(rename = "apikey", rename_all = "camelCase")]
+    ApiKey {
+        key: String,
+        value: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<String>,
+    },
+    #[serde(rename = "digest")]
+    Digest { username: String, password: String },
+    #[serde(rename = "ntlm")]
+    Ntlm {
+        username: String,
+        password: String,
+        domain: String,
+    },
+    #[serde(rename = "wsse")]
+    Wsse { username: String, password: String },
+    #[serde(rename = "awsv4", rename_all = "camelCase")]
+    AwsV4 {
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        service: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile_name: Option<String>,
+    },
+    #[serde(rename = "oauth2", rename_all = "camelCase")]
+    OAuth2 {
+        flow: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refresh_token_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authorization_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        callback_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<OcOAuth2Credentials>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resource_owner: Option<OcOAuth2ResourceOwner>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pkce: Option<OcOAuth2PKCE>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        additional_parameters: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_config: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settings: Option<serde_json::Value>,
+    },
+}
+
+/// OAuth2 client credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcOAuth2Credentials {
+    pub client_id: String,
+    pub client_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+}
+
+/// OAuth2 resource owner credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcOAuth2ResourceOwner {
+    pub username: String,
+    pub password: String,
+}
+
+/// OAuth2 PKCE configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcOAuth2PKCE {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +223,101 @@ mod tests {
         let variant: OcVariableValueVariant = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(variant.title, "Production");
         assert!(variant.selected);
+    }
+
+    #[test]
+    fn oc_auth_inherit_yaml() {
+        let yaml = "inherit";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(auth, OcAuth::Inherit(s) if s == "inherit"));
+    }
+
+    #[test]
+    fn oc_auth_basic_yaml() {
+        let yaml = "type: basic\nusername: user\npassword: pass";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        match auth {
+            OcAuth::Typed(OcAuthTyped::Basic { username, password }) => {
+                assert_eq!(username, "user");
+                assert_eq!(password, "pass");
+            }
+            _ => panic!("expected Basic"),
+        }
+    }
+
+    #[test]
+    fn oc_auth_bearer_yaml() {
+        let yaml = "type: bearer\ntoken: my-token-123";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::Bearer { .. })));
+    }
+
+    #[test]
+    fn oc_auth_apikey_yaml() {
+        let yaml = "type: apikey\nkey: X-API-Key\nvalue: abc123\nplacement: header";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        match auth {
+            OcAuth::Typed(OcAuthTyped::ApiKey {
+                key,
+                value,
+                placement,
+            }) => {
+                assert_eq!(key, "X-API-Key");
+                assert_eq!(value, "abc123");
+                assert_eq!(placement, Some("header".into()));
+            }
+            _ => panic!("expected ApiKey"),
+        }
+    }
+
+    #[test]
+    fn oc_auth_awsv4_yaml() {
+        let yaml =
+            "type: awsv4\naccessKeyId: AKIA...\nsecretAccessKey: secret\nregion: us-east-1\nservice: s3";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::AwsV4 { .. })));
+    }
+
+    #[test]
+    fn oc_auth_digest_yaml() {
+        let yaml = "type: digest\nusername: admin\npassword: secret";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::Digest { .. })));
+    }
+
+    #[test]
+    fn oc_auth_oauth2_client_credentials_yaml() {
+        let yaml = "type: oauth2\nflow: client_credentials\naccessTokenUrl: https://auth.example.com/token\ncredentials:\n  clientId: my-id\n  clientSecret: my-secret";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        match auth {
+            OcAuth::Typed(OcAuthTyped::OAuth2 {
+                flow,
+                access_token_url,
+                credentials,
+                ..
+            }) => {
+                assert_eq!(flow, "client_credentials");
+                assert_eq!(
+                    access_token_url,
+                    Some("https://auth.example.com/token".into())
+                );
+                assert!(credentials.is_some());
+            }
+            _ => panic!("expected OAuth2"),
+        }
+    }
+
+    #[test]
+    fn oc_auth_oauth2_authorization_code_yaml() {
+        let yaml = "type: oauth2\nflow: authorization_code\nauthorizationUrl: https://auth.example.com/authorize\naccessTokenUrl: https://auth.example.com/token\ncredentials:\n  clientId: id\n  clientSecret: secret\npkce:\n  enabled: true\n  method: S256";
+        let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+        match auth {
+            OcAuth::Typed(OcAuthTyped::OAuth2 { flow, pkce, .. }) => {
+                assert_eq!(flow, "authorization_code");
+                assert!(pkce.is_some());
+                assert_eq!(pkce.unwrap().method, Some("S256".into()));
+            }
+            _ => panic!("expected OAuth2"),
+        }
     }
 }
