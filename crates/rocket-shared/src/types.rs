@@ -180,6 +180,7 @@ pub enum Auth {
     Bearer {
         token: String,
     },
+    #[serde(rename_all = "camelCase")]
     ApiKey {
         key: String,
         value: String,
