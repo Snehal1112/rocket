@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::opencollection::{OcCollection, OcInfo};
+use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
+use crate::opencollection::{OcCollection, OcHttpRequest, OcInfo};
 
 /// Reads the .uid file from a directory. If missing, generates a UUID and writes it.
 fn read_or_create_uid(dir: &Path) -> String {
@@ -182,9 +183,31 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<rocket_collection::Request> {
         let collection_dir = self.collection_path(collection);
-        // Try with .json extension first, then without (for legacy files).
-        let with_ext = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
-        let file_path = self.validate_path(&collection_dir, Path::new(&with_ext))
+
+        // Try .yml first, then .json for backward compatibility.
+        let yml_path = if path.ends_with(".yml") || path.ends_with(".yaml") {
+            path.to_string()
+        } else if path.ends_with(".json") {
+            path.to_string()
+        } else {
+            format!("{}.yml", path)
+        };
+
+        // Try .yml first.
+        if let Ok(file_path) = self.validate_path(&collection_dir, Path::new(&yml_path)) {
+            if file_path.exists() && file_path.extension().map_or(false, |e| e == "yml" || e == "yaml") {
+                let content = fs::read_to_string(&file_path)?;
+                let oc: OcHttpRequest = serde_yaml::from_str(&content)
+                    .map_err(|e| DomainError::Internal(format!("Failed to parse YAML request: {e}")))?;
+                let mut req = oc_http_request_to_request(oc);
+                req.file_name = file_path.file_name().map(|n| n.to_string_lossy().to_string());
+                return Ok(req);
+            }
+        }
+
+        // Fall back to .json for legacy files.
+        let json_path = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
+        let file_path = self.validate_path(&collection_dir, Path::new(&json_path))
             .or_else(|_| self.validate_path(&collection_dir, Path::new(path)))?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
@@ -195,26 +218,27 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
         let collection_dir = self.collection_path(collection);
-        // Ensure path ends with .json so it is recognized on read-back.
-        let base = if path.ends_with(".json") {
+        // Use .yml extension instead of .json.
+        let base = if path.ends_with(".yml") || path.ends_with(".yaml") {
             path.to_string()
+        } else if path.ends_with(".json") {
+            // Strip .json and add .yml for migration.
+            format!("{}.yml", &path[..path.len() - 5])
         } else {
-            format!("{}.json", path)
+            format!("{}.yml", path)
         };
         let mut file_path = self.validate_path(&collection_dir, Path::new(&base))?;
 
-        // For new requests (empty UID), avoid overwriting an existing file
-        // that belongs to a different request. Append a counter to find a
-        // unique filename.
+        // Same duplicate-avoidance logic, but with .yml.
         if request.uid.is_empty() && file_path.exists() {
             let stem = Path::new(&base).file_stem().unwrap_or_default().to_string_lossy().to_string();
             let parent_rel = Path::new(&base).parent().unwrap_or(Path::new(""));
             let mut counter = 1u32;
             loop {
                 let candidate = if parent_rel.as_os_str().is_empty() {
-                    format!("{} {}.json", stem, counter)
+                    format!("{} {}.yml", stem, counter)
                 } else {
-                    format!("{}/{} {}.json", parent_rel.display(), stem, counter)
+                    format!("{}/{} {}.yml", parent_rel.display(), stem, counter)
                 };
                 let candidate_path = self.validate_path(&collection_dir, Path::new(&candidate))?;
                 if !candidate_path.exists() {
@@ -228,8 +252,12 @@ impl CollectionRepository for FsCollectionRepo {
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(request)?;
-        fs::write(&file_path, json)?;
+
+        // Convert domain Request to OcHttpRequest, then serialize as YAML.
+        let oc = request_to_oc_http_request(request.clone());
+        let yaml = serde_yaml::to_string(&oc)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
+        fs::write(&file_path, yaml)?;
 
         // Return the actual filename relative to the collection directory.
         let actual = file_path
@@ -242,10 +270,12 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()> {
         let collection_dir = self.collection_path(collection);
-        let old_ext = if old_path.ends_with(".json") { old_path.to_string() } else { format!("{}.json", old_path) };
-        let new_ext = if new_path.ends_with(".json") { new_path.to_string() } else { format!("{}.json", new_path) };
-        let old_file = self.validate_path(&collection_dir, Path::new(&old_ext))
-            .or_else(|_| self.validate_path(&collection_dir, Path::new(old_path)))?;
+        let old_file = resolve_request_path(self, &collection_dir, old_path)?;
+        let new_ext = if new_path.ends_with(".yml") || new_path.ends_with(".yaml") || new_path.ends_with(".json") {
+            new_path.to_string()
+        } else {
+            format!("{}.yml", new_path)
+        };
         let new_file = self.validate_path(&collection_dir, Path::new(&new_ext))?;
         fs::rename(&old_file, &new_file)?;
         Ok(())
@@ -253,9 +283,7 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         let collection_dir = self.collection_path(collection);
-        let with_ext = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
-        let file_path = self.validate_path(&collection_dir, Path::new(&with_ext))
-            .or_else(|_| self.validate_path(&collection_dir, Path::new(path)))?;
+        let file_path = resolve_request_path(self, &collection_dir, path)?;
         if !file_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
@@ -315,8 +343,9 @@ impl CollectionRepository for FsCollectionRepo {
         if !dir.is_dir() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, folder_path)));
         }
-        let json = serde_json::to_string_pretty(ordered_names)?;
-        fs::write(dir.join("_order.json"), json)?;
+        let yaml = serde_yaml::to_string(ordered_names)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize order: {e}")))?;
+        fs::write(dir.join("_order.yml"), yaml)?;
         Ok(())
     }
 
@@ -365,6 +394,25 @@ fn is_request_file(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "json" || ext == "yml" || ext == "yaml" || ext == "bru")
 }
 
+/// Resolve a request file path, trying .yml first, then .json for backward compat.
+fn resolve_request_path(repo: &FsCollectionRepo, collection_dir: &Path, path: &str) -> DomainResult<PathBuf> {
+    // Try .yml first.
+    let yml = if path.ends_with(".yml") || path.ends_with(".yaml") {
+        path.to_string()
+    } else {
+        format!("{}.yml", path.strip_suffix(".json").unwrap_or(path))
+    };
+    if let Ok(p) = repo.validate_path(collection_dir, Path::new(&yml)) {
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    // Fall back to .json.
+    let json = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
+    repo.validate_path(collection_dir, Path::new(&json))
+        .or_else(|_| repo.validate_path(collection_dir, Path::new(path)))
+}
+
 fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
     let name = current
         .file_name()
@@ -378,10 +426,19 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
     }
 
     let mut entries: Vec<_> = fs::read_dir(current)?.filter_map(|e| e.ok()).collect();
-    // Apply explicit order from _order.json if present; fall back to alphabetical.
-    let order_path = current.join("_order.json");
+    // Apply explicit order from _order.yml (or _order.json for backward compat).
+    let order_path = current.join("_order.yml");
+    let order_path = if order_path.exists() { order_path } else { current.join("_order.json") };
     if let Ok(content) = fs::read_to_string(&order_path) {
-        if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
+        if let Ok(ordered) = serde_yaml::from_str::<Vec<String>>(&content) {
+            let pos: std::collections::HashMap<String, usize> = ordered
+                .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
+            entries.sort_by(|a, b| {
+                let ai = pos.get(&a.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                let bi = pos.get(&b.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
+            });
+        } else if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
             let pos: std::collections::HashMap<String, usize> = ordered
                 .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
             entries.sort_by(|a, b| {
@@ -406,12 +463,20 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             folder.add_subfolder(build_folder_tree(&path)?);
         } else if is_request_file(&path) {
             let content = fs::read_to_string(&path)?;
-            if let Ok(mut request) = serde_json::from_str::<rocket_collection::Request>(&content) {
-                request.file_name = Some(entry_name.clone());
-                // Migrate: persist uid if the file doesn't have one yet.
-                if !content.contains("\"uid\"") {
-                    let _ = fs::write(&path, serde_json::to_string_pretty(&request).unwrap_or_default());
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let request_result = match ext {
+                "yml" | "yaml" => {
+                    serde_yaml::from_str::<OcHttpRequest>(&content)
+                        .map(oc_http_request_to_request)
+                        .map_err(|e| DomainError::Internal(e.to_string()))
                 }
+                _ => {
+                    serde_json::from_str::<rocket_collection::Request>(&content)
+                        .map_err(|e| DomainError::Internal(e.to_string()))
+                }
+            };
+            if let Ok(mut request) = request_result {
+                request.file_name = Some(entry_name.clone());
                 folder.add_request(request);
             }
         }
@@ -477,8 +542,8 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
-        repo.save_request("my-api", "get-users.json", &req).unwrap();
-        let loaded = repo.get_request("my-api", "get-users.json").unwrap();
+        repo.save_request("my-api", "get-users.yml", &req).unwrap();
+        let loaded = repo.get_request("my-api", "get-users.yml").unwrap();
         assert_eq!(loaded.name, "Get Users");
     }
 
@@ -487,8 +552,8 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("Login", HttpMethod::Post, "/login");
-        repo.save_request("my-api", "auth/login.json", &req).unwrap();
-        let loaded = repo.get_request("my-api", "auth/login.json").unwrap();
+        repo.save_request("my-api", "auth/login.yml", &req).unwrap();
+        let loaded = repo.get_request("my-api", "auth/login.yml").unwrap();
         assert_eq!(loaded.name, "Login");
     }
 
@@ -497,9 +562,9 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
-        repo.save_request("my-api", "test.json", &req).unwrap();
-        repo.delete_request("my-api", "test.json").unwrap();
-        assert!(repo.get_request("my-api", "test.json").is_err());
+        repo.save_request("my-api", "test.yml", &req).unwrap();
+        repo.delete_request("my-api", "test.yml").unwrap();
+        assert!(repo.get_request("my-api", "test.yml").is_err());
     }
 
     #[test]
@@ -515,10 +580,10 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
-        repo.save_request("my-api", "old/test.json", &req).unwrap();
-        repo.move_item("my-api", "old/test.json", "my-api", "new/test.json").unwrap();
-        assert!(repo.get_request("my-api", "old/test.json").is_err());
-        assert!(repo.get_request("my-api", "new/test.json").is_ok());
+        repo.save_request("my-api", "old/test.yml", &req).unwrap();
+        repo.move_item("my-api", "old/test.yml", "my-api", "new/test.yml").unwrap();
+        assert!(repo.get_request("my-api", "old/test.yml").is_err());
+        assert!(repo.get_request("my-api", "new/test.yml").is_ok());
     }
 
     #[test]
@@ -588,7 +653,7 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("Bad", rocket_shared::types::HttpMethod::Get, "/bad");
-        let result = repo.save_request("my-api", "../../evil.json", &req);
+        let result = repo.save_request("my-api", "../../evil.yml", &req);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -644,7 +709,7 @@ mod tests {
     fn path_traversal_in_move_item_src_is_rejected() {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
-        let result = repo.move_item("my-api", "../../etc/passwd", "my-api", "dest.json");
+        let result = repo.move_item("my-api", "../../etc/passwd", "my-api", "dest.yml");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -671,8 +736,8 @@ mod tests {
         // Create two requests. Alphabetically "aaa" comes before "bbb".
         let req_a = rocket_collection::Request::new("AAA", HttpMethod::Get, "/a");
         let req_b = rocket_collection::Request::new("BBB", HttpMethod::Get, "/b");
-        repo.save_request("test-col", "aaa.json", &req_a).unwrap();
-        repo.save_request("test-col", "bbb.json", &req_b).unwrap();
+        repo.save_request("test-col", "aaa.yml", &req_a).unwrap();
+        repo.save_request("test-col", "bbb.yml", &req_b).unwrap();
 
         // Confirm default (alphabetical) order: aaa first.
         let col = repo.get("test-col").unwrap();
@@ -683,7 +748,7 @@ mod tests {
         repo.reorder_items(
             "test-col",
             "",
-            &["bbb.json".to_string(), "aaa.json".to_string()],
+            &["bbb.yml".to_string(), "aaa.yml".to_string()],
         )
         .unwrap();
 
@@ -697,7 +762,7 @@ mod tests {
     fn path_traversal_in_reorder_items_is_rejected() {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
-        let result = repo.reorder_items("my-api", "../../evil", &["x.json".to_string()]);
+        let result = repo.reorder_items("my-api", "../../evil", &["x.yml".to_string()]);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -712,8 +777,8 @@ mod tests {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
         let req = rocket_collection::Request::new("T", rocket_shared::types::HttpMethod::Get, "/t");
-        repo.save_request("my-api", "src.json", &req).unwrap();
-        let result = repo.move_item("my-api", "src.json", "my-api", "../../evil.json");
+        repo.save_request("my-api", "src.yml", &req).unwrap();
+        let result = repo.move_item("my-api", "src.yml", "my-api", "../../evil.yml");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
