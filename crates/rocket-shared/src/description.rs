@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// OpenCollection Description — polymorphic: string | {content, type} | null.
 /// Used across headers, params, variables, assertions, folders, environments.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Description {
     None,
     Text(String),
@@ -74,7 +74,7 @@ impl<'de> Deserialize<'de> for Description {
                 }
                 match (content, content_type) {
                     (Some(c), Some(t)) => Ok(Description::typed(c, t)),
-                    (Some(c), None) => Ok(Description::text(c)),
+                    (Some(_), None) => Err(de::Error::missing_field("type")),
                     _ => Err(de::Error::missing_field("content")),
                 }
             }
@@ -122,6 +122,13 @@ mod tests {
         let json = serde_json::to_string(&desc).unwrap();
         let back: Description = serde_json::from_str(&json).unwrap();
         assert_eq!(desc.content(), back.content());
+    }
+
+    #[test]
+    fn description_object_missing_type_is_rejected() {
+        let json = r#"{"content": "hello"}"#;
+        let result = serde_json::from_str::<Description>(json);
+        assert!(result.is_err());
     }
 
     #[test]
