@@ -1,4 +1,5 @@
 pub mod file_watcher;
+pub mod oc_conversions;
 pub mod opencollection;
 pub mod fs_collection_repo;
 pub mod fs_cookie_repo;
