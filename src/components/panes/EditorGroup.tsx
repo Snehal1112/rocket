@@ -13,9 +13,10 @@ import { RocketLaunch } from '@/components/illustrations';
 import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { DiffViewer } from '@/components/git/DiffViewer';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import { isDiffTab, isRequestTab } from '@/types/pane-types';
 
 // Branded empty state shown when no tabs are open.
 function EmptyState() {
@@ -64,7 +65,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       {hasTabs && <TabBar node={node} onCloseTab={handleCloseTab} />}
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
-          isRequestTab(activeTab) ? (
+          isDiffTab(activeTab) ? (
+            <DiffViewer diffState={activeTab.diffState} />
+          ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : (
             <CollectionOverviewTab tab={activeTab} />
