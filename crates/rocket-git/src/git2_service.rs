@@ -246,7 +246,7 @@ impl GitService for Git2Service {
                         | Status::CONFLICTED),
                 );
                 files.push(FileStatus {
-                    path: file_path,
+                    path: file_path.clone(),
                     status: gs,
                     staged: false,
                 });
