@@ -733,9 +733,6 @@ pub struct OcFolderInfo {
     pub tags: Vec<String>,
 }
 
-// Forward declare OcRequestDefaults as a placeholder — full definition comes in Task 3.
-// For now, use serde_yaml::Value.
-
 /// Folder — contains nested items and optional request defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcFolder {
@@ -743,7 +740,7 @@ pub struct OcFolder {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items: Option<Vec<OcItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request: Option<serde_yaml::Value>,  // OcRequestDefaults — defined in Task 3
+    pub request: Option<OcRequestDefaults>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
 }
@@ -760,6 +757,183 @@ pub enum OcItem {
     WebSocket(OcWebSocketRequest),
     Folder(OcFolder),
     ScriptFile(OcScriptFile),
+}
+
+// ============================================================
+// Collection — Top-Level + Config Types
+// ============================================================
+
+/// Collection info metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authors: Option<Vec<OcAuthor>>,
+}
+
+/// Author info.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcAuthor {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Protobuf file item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcProtoFileItem {
+    pub file_path: String,
+}
+
+/// Protobuf import path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcProtoFileImportPath {
+    pub path: String,
+}
+
+/// Protobuf configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcProtobuf {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proto_files: Vec<OcProtoFileItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_paths: Vec<OcProtoFileImportPath>,
+}
+
+/// Proxy auth for OC file format (schema uses disabled + username + password).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcProxyAuth {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+/// Proxy connection config for OC file format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcProxyConnectionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcProxyAuth>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bypass_proxy: Option<String>,
+}
+
+/// Proxy configuration for OC file format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcProxy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<OcProxyConnectionConfig>,
+}
+
+/// Client certificate for OC file format.
+/// Re-uses domain ClientCertificate which already has correct serde.
+pub use rocket_shared::certificate::ClientCertificate as OcClientCertificate;
+
+/// Environment for collection config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcEnvironment {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<OcVariable>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub client_certificates: Vec<OcClientCertificate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dot_env_file_path: Option<String>,
+}
+
+/// Generic request settings — shared by OcRequestDefaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcRequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode_url: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<InheritableBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<InheritableNumber>,
+}
+
+/// Request defaults — applied to all requests in a folder or collection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcRequestDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<Vec<OcHttpRequestHeader>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Vec<OcGrpcMetadata>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variables: Option<Vec<OcVariable>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<Vec<OcScript>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<OcRequestSettings>,
+}
+
+/// Collection config — environments, protobuf, proxy, client certificates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcCollectionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environments: Option<Vec<OcEnvironment>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protobuf: Option<OcProtobuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<OcProxy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_certificates: Option<Vec<OcClientCertificate>>,
+}
+
+/// Top-level OpenCollection document (opencollection.yml).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcCollection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencollection: Option<String>,  // spec version
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<OcInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<OcCollectionConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<OcItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<OcRequestDefaults>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_yaml::Value>,
 }
 
 #[cfg(test)]
@@ -1330,5 +1504,124 @@ info:
 "#;
         let item: OcItem = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(item, OcItem::Folder(_)));
+    }
+
+    #[test]
+    fn oc_collection_full_yaml() {
+        let yaml = r##"
+opencollection: "0.1"
+info:
+  name: My API
+  summary: API collection for testing
+  version: "1.0.0"
+  authors:
+    - name: John Doe
+      email: john@example.com
+config:
+  environments:
+    - name: production
+      color: "#FF0000"
+      variables:
+        - name: BASE_URL
+          value: https://api.example.com
+    - name: staging
+      variables:
+        - name: BASE_URL
+          value: https://staging.example.com
+  proxy:
+    disabled: false
+    config:
+      protocol: http
+      hostname: proxy.example.com
+      port: 8080
+  protobuf:
+    protoFiles:
+      - filePath: ./protos/service.proto
+    importPaths:
+      - path: ./protos
+request:
+  headers:
+    - name: Content-Type
+      value: application/json
+  auth:
+    type: bearer
+    token: "{{token}}"
+  settings:
+    timeout: 30000
+    encodeUrl: true
+items:
+  - info:
+      name: Users
+      type: folder
+    items:
+      - info:
+          name: Get Users
+          type: http
+        http:
+          method: GET
+          url: "{{BASE_URL}}/users"
+docs: "Main API collection documentation."
+"##;
+        let collection: OcCollection = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(collection.opencollection, Some("0.1".into()));
+        let info = collection.info.unwrap();
+        assert_eq!(info.name, "My API");
+        assert_eq!(info.authors.as_ref().unwrap().len(), 1);
+        let config = collection.config.unwrap();
+        assert_eq!(config.environments.as_ref().unwrap().len(), 2);
+        assert!(config.proxy.is_some());
+        assert!(config.protobuf.is_some());
+        let request = collection.request.unwrap();
+        assert!(request.headers.is_some());
+        assert!(request.auth.is_some());
+        assert!(request.settings.is_some());
+        assert_eq!(collection.items.as_ref().unwrap().len(), 1);
+        assert_eq!(collection.docs, Some("Main API collection documentation.".into()));
+    }
+
+    #[test]
+    fn oc_collection_minimal_yaml() {
+        let yaml = "opencollection: \"0.1\"\ninfo:\n  name: Simple";
+        let collection: OcCollection = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(collection.info.unwrap().name, "Simple");
+        assert!(collection.items.is_none());
+    }
+
+    #[test]
+    fn oc_request_defaults_yaml() {
+        let yaml = r#"
+headers:
+  - name: Accept
+    value: application/json
+auth:
+  type: basic
+  username: admin
+  password: secret
+settings:
+  timeout: 5000
+"#;
+        let defaults: OcRequestDefaults = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(defaults.headers.as_ref().unwrap().len(), 1);
+        assert!(defaults.auth.is_some());
+        assert!(defaults.settings.is_some());
+    }
+
+    #[test]
+    fn oc_environment_yaml() {
+        let yaml = r##"
+name: production
+color: "#FF5733"
+variables:
+  - name: HOST
+    value: api.example.com
+extends: base
+dotEnvFilePath: .env.prod
+"##;
+        let env: OcEnvironment = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(env.name, "production");
+        assert_eq!(env.color, Some("#FF5733".into()));
+        assert_eq!(env.extends, Some("base".into()));
+        assert_eq!(env.dot_env_file_path, Some(".env.prod".into()));
+        assert_eq!(env.variables.len(), 1);
     }
 }
