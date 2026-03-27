@@ -14,7 +14,7 @@ impl FsTemplateRepo {
     }
 
     fn file_path(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", name))
+        self.dir.join(format!("{}.yml", name))
     }
 }
 
@@ -27,9 +27,9 @@ impl TemplateRepository for FsTemplateRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
+            if path.extension().is_some_and(|e| e == "yml") {
                 let content = fs::read_to_string(&path)?;
-                if let Ok(t) = serde_json::from_str::<Template>(&content) {
+                if let Ok(t) = serde_yaml::from_str::<Template>(&content) {
                     result.push(t);
                 }
             }
@@ -44,13 +44,15 @@ impl TemplateRepository for FsTemplateRepo {
             return Err(DomainError::NotFound(format!("Template '{}'", name)));
         }
         let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse YAML: {e}")))
     }
 
     fn save(&self, template: &Template) -> DomainResult<()> {
         fs::create_dir_all(&self.dir)?;
-        let json = serde_json::to_string_pretty(template)?;
-        fs::write(self.file_path(&template.name), json)?;
+        let yaml = serde_yaml::to_string(template)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
+        fs::write(self.file_path(&template.name), yaml)?;
         Ok(())
     }
 
