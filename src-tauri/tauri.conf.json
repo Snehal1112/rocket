@@ -35,7 +35,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIxQzQzMDk2NDNFNzI0RkEKUldUNkpPZERsakRFSVdjKzFLU2lnbG1RUGpnOWdvOWQyZllEczVQN3lyVEgybGdDL0lqT0ZIdGEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4MkFBMDUwMTY0NDM2RDkKUldUWk5rUVdVS0FxU0M3b3pXdXJBdHZHcjdQU1F6YjRoMXVHV1liK3hlamFUdk43NkhNK3d3eTcK",
       "endpoints": [
         "https://github.com/Snehal1112/rocket/releases/latest/download/latest.json"
       ]
