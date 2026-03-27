@@ -5,6 +5,7 @@ pub mod commit;
 pub mod stash;
 pub mod conflict;
 pub mod credentials;
+pub mod service;
 
 pub use status::*;
 pub use diff::*;
@@ -13,3 +14,4 @@ pub use commit::*;
 pub use stash::*;
 pub use conflict::*;
 pub use credentials::*;
+pub use service::GitService;
