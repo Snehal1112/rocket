@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::description::Description;
 
 /// OpenCollection Assertion — full spec with disabled + description.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Assertion {
     pub expression: String,
     pub operator: String,
