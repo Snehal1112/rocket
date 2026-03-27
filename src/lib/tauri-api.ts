@@ -193,6 +193,96 @@ export interface FileChangedEvent {
 }
 
 // ============================================================
+// Git types
+// ============================================================
+
+export type GitStatusKind = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted" | "unchanged";
+
+export interface FileStatus {
+  path: string;
+  status: GitStatusKind;
+  staged: boolean;
+}
+
+export interface RepoStatus {
+  branch: string;
+  files: FileStatus[];
+  ahead: number;
+  behind: number;
+  isClean: boolean;
+}
+
+export type LineType = "context" | "add" | "remove";
+
+export interface DiffLine {
+  content: string;
+  lineType: LineType;
+}
+
+export interface DiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: DiffLine[];
+}
+
+export interface FileDiff {
+  path: string;
+  oldContent?: string;
+  newContent?: string;
+  hunks: DiffHunk[];
+}
+
+export interface CommitInfo {
+  id: string;
+  fullId: string;
+  message: string;
+  author: string;
+  authorEmail: string;
+  timestamp: string;
+  filesChanged: number;
+}
+
+export interface Branch {
+  name: string;
+  isHead: boolean;
+  isRemote: boolean;
+  upstream?: string;
+}
+
+export interface BranchList {
+  current: string;
+  local: Branch[];
+  remote: Branch[];
+}
+
+export interface StashEntry {
+  index: number;
+  message: string;
+  timestamp: string;
+  branch: string;
+}
+
+export interface ConflictFile {
+  path: string;
+  ours: string;
+  theirs: string;
+  ancestor?: string;
+}
+
+export type ConflictResolution =
+  | { resolution: "ours" }
+  | { resolution: "theirs" }
+  | { resolution: "custom"; content: string };
+
+export type GitCredentials =
+  | { type: "sshKey"; privateKeyPath: string; passphrase?: string }
+  | { type: "sshAgent" }
+  | { type: "userPass"; username: string; password: string }
+  | { type: "token"; token: string };
+
+// ============================================================
 // Collections
 // ============================================================
 
@@ -329,6 +419,88 @@ export const watchCollections = () => invoke<void>("watch_collections");
 export const stopWatching = () => invoke<void>("stop_watching");
 
 // ============================================================
+// Git
+// ============================================================
+
+export const gitIsRepo = (collectionPath: string) =>
+  invoke<boolean>("git_is_repo", { collectionPath });
+
+export const gitInit = (collectionPath: string) =>
+  invoke<void>("git_init", { collectionPath });
+
+export const gitClone = (url: string, destPath: string, creds: GitCredentials) =>
+  invoke<void>("git_clone", { url, destPath, creds });
+
+export const gitStatus = (collectionPath: string) =>
+  invoke<RepoStatus>("git_status", { collectionPath });
+
+export const gitDiff = (collectionPath: string, file: string) =>
+  invoke<FileDiff>("git_diff", { collectionPath, file });
+
+export const gitDiffStaged = (collectionPath: string, file: string) =>
+  invoke<FileDiff>("git_diff_staged", { collectionPath, file });
+
+export const gitStage = (collectionPath: string, files: string[]) =>
+  invoke<void>("git_stage", { collectionPath, files });
+
+export const gitUnstage = (collectionPath: string, files: string[]) =>
+  invoke<void>("git_unstage", { collectionPath, files });
+
+export const gitDiscard = (collectionPath: string, files: string[]) =>
+  invoke<void>("git_discard", { collectionPath, files });
+
+export const gitCommit = (collectionPath: string, message: string) =>
+  invoke<CommitInfo>("git_commit", { collectionPath, message });
+
+export const gitLog = (collectionPath: string, limit: number) =>
+  invoke<CommitInfo[]>("git_log", { collectionPath, limit });
+
+export const gitPush = (collectionPath: string, remote: string, creds: GitCredentials) =>
+  invoke<void>("git_push", { collectionPath, remote, creds });
+
+export const gitPull = (collectionPath: string, remote: string, creds: GitCredentials) =>
+  invoke<void>("git_pull", { collectionPath, remote, creds });
+
+export const gitFetch = (collectionPath: string, remote: string, creds: GitCredentials) =>
+  invoke<void>("git_fetch", { collectionPath, remote, creds });
+
+export const gitBranches = (collectionPath: string) =>
+  invoke<BranchList>("git_branches", { collectionPath });
+
+export const gitSwitchBranch = (collectionPath: string, name: string) =>
+  invoke<void>("git_switch_branch", { collectionPath, name });
+
+export const gitCreateBranch = (collectionPath: string, name: string) =>
+  invoke<void>("git_create_branch", { collectionPath, name });
+
+export const gitDeleteBranch = (collectionPath: string, name: string) =>
+  invoke<void>("git_delete_branch", { collectionPath, name });
+
+export const gitMergeBranch = (collectionPath: string, name: string) =>
+  invoke<void>("git_merge_branch", { collectionPath, name });
+
+export const gitStashList = (collectionPath: string) =>
+  invoke<StashEntry[]>("git_stash_list", { collectionPath });
+
+export const gitStashSave = (collectionPath: string, message: string) =>
+  invoke<void>("git_stash_save", { collectionPath, message });
+
+export const gitStashPop = (collectionPath: string, index: number) =>
+  invoke<void>("git_stash_pop", { collectionPath, index });
+
+export const gitStashApply = (collectionPath: string, index: number) =>
+  invoke<void>("git_stash_apply", { collectionPath, index });
+
+export const gitStashDrop = (collectionPath: string, index: number) =>
+  invoke<void>("git_stash_drop", { collectionPath, index });
+
+export const gitConflicts = (collectionPath: string) =>
+  invoke<ConflictFile[]>("git_conflicts", { collectionPath });
+
+export const gitResolveConflict = (collectionPath: string, file: string, resolution: ConflictResolution) =>
+  invoke<void>("git_resolve_conflict", { collectionPath, file, resolution });
+
+// ============================================================
 // Realtime events
 // ============================================================
 
@@ -356,6 +528,11 @@ export const onRequestExecuted = (
   handler: () => void,
 ): Promise<UnlistenFn> =>
   listen("request-executed", () => handler());
+
+export const onGitChanged = (
+  handler: () => void,
+): Promise<UnlistenFn> =>
+  listen("git-changed", () => handler());
 
 // ============================================================
 // OAuth2
