@@ -108,8 +108,6 @@ pub enum OcAuthTyped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pkce: Option<OcOAuth2PKCE>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        client_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         additional_parameters: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token_config: Option<serde_json::Value>,
