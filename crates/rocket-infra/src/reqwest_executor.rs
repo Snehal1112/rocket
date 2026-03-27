@@ -143,14 +143,9 @@ fn apply_auth(
             }
             _ => {} // Unknown placement — skip.
         },
-        Auth::OAuth2 {
-            access_token: Some(token),
-            ..
-        } => {
-            builder = builder.bearer_auth(token);
-        }
-        Auth::OAuth2 { .. } => {
-            // No access token available yet; skip auth header.
+        Auth::OAuth2(_) => {
+            // OAuth2 flow execution not yet implemented.
+            // Token retrieval requires async flow-specific logic.
         }
         Auth::Inherit => {
             // Inherits from parent — resolved before execution.

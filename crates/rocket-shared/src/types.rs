@@ -186,17 +186,7 @@ pub enum Auth {
         value: String,
         placement: String,  // "header" | "query"
     },
-    #[serde(rename_all = "camelCase")]
-    OAuth2 {
-        grant_type: String,
-        client_id: String,
-        client_secret: String,
-        token_url: String,
-        scope: Option<String>,
-        access_token: Option<String>,
-        refresh_token: Option<String>,
-        expires_at: Option<String>,
-    },
+    OAuth2(crate::oauth2::OAuth2Flow),
     #[serde(rename_all = "camelCase")]
     AwsSigV4 {
         access_key: String,
@@ -297,21 +287,23 @@ mod tests {
 
     #[test]
     fn auth_oauth2_serialization_roundtrip() {
-        let auth = Auth::OAuth2 {
-            grant_type: "client_credentials".into(),
-            client_id: "my-client".into(),
-            client_secret: "my-secret".into(),
-            token_url: "https://auth.example.com/token".into(),
+        use crate::oauth2::{OAuth2Flow, OAuth2ClientCredentials};
+        let auth = Auth::OAuth2(OAuth2Flow::ClientCredentials {
+            access_token_url: "https://auth.example.com/token".into(),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "my-client".into(),
+                client_secret: "my-secret".into(),
+                placement: None,
+            },
             scope: Some("read write".into()),
-            access_token: Some("tok_abc".into()),
-            refresh_token: None,
-            expires_at: Some("2026-12-31T23:59:59Z".into()),
-        };
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        });
         let json = serde_json::to_string(&auth).unwrap();
         assert!(json.contains("\"authType\":\"o-auth2\""));
-        assert!(json.contains("\"grantType\":\"client_credentials\""));
-        assert!(json.contains("\"clientId\":\"my-client\""));
-        assert!(json.contains("\"tokenUrl\":\"https://auth.example.com/token\""));
+        assert!(json.contains("\"flow\":\"client_credentials\""));
         let parsed: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, parsed);
     }
