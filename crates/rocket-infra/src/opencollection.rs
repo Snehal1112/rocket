@@ -311,6 +311,114 @@ pub struct OcHttpRequestBodyVariant {
     pub body: OcHttpRequestBody,
 }
 
+// ============================================================
+// HTTP Request — Runtime Structs
+// ============================================================
+
+/// Script for a specific lifecycle stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcScript {
+    #[serde(rename = "type")]
+    pub script_type: String,  // "before-request" | "after-response" | "tests" | "hooks"
+    pub code: String,
+}
+
+/// Assertion for response validation.
+/// Re-uses domain Assertion which already has the correct serde.
+pub use rocket_shared::assertion::Assertion as OcAssertion;
+
+/// Action selector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcActionSelector {
+    pub expression: String,
+    pub method: String,  // "jsonq"
+}
+
+/// Action target variable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcActionVariable {
+    pub name: String,
+    pub scope: String,  // "runtime" | "request" | "folder" | "collection" | "environment"
+}
+
+/// Action — currently only set-variable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum OcAction {
+    #[serde(rename = "set-variable", rename_all = "camelCase")]
+    SetVariable {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<OcDescription>,
+        phase: String,  // "before-request" | "after-response"
+        selector: OcActionSelector,
+        variable: OcActionVariable,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        disabled: Option<bool>,
+    },
+}
+
+/// HTTP request runtime configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestRuntime {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<OcVariable>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<OcScript>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<OcAssertion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<OcAction>,
+}
+
+/// Response body in an example.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcExampleResponseBody {
+    #[serde(rename = "type")]
+    pub body_type: String,  // "json" | "text" | "xml" | "html" | "binary"
+    pub data: String,
+}
+
+/// Example request snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcExampleRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OcHttpRequestHeader>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<OcHttpRequestParam>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<OcHttpRequestBody>,
+}
+
+/// Example response snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcExampleResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OcHttpResponseHeader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<OcExampleResponseBody>,
+}
+
+/// HTTP request/response example.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestExample {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<OcExampleRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<OcExampleResponse>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,5 +734,45 @@ mod tests {
         let variant: OcHttpRequestBodyVariant = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(variant.title, "Default");
         assert!(variant.selected);
+    }
+
+    #[test]
+    fn oc_script_yaml() {
+        let yaml = "type: before-request\ncode: \"console.log('hello')\"";
+        let script: OcScript = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(script.script_type, "before-request");
+        assert_eq!(script.code, "console.log('hello')");
+    }
+
+    #[test]
+    fn oc_action_set_variable_yaml() {
+        let yaml = "type: set-variable\nphase: after-response\nselector:\n  expression: res.body.token\n  method: jsonq\nvariable:\n  name: authToken\n  scope: collection";
+        let action: OcAction = serde_yaml::from_str(yaml).unwrap();
+        match action {
+            OcAction::SetVariable { phase, selector, variable, .. } => {
+                assert_eq!(phase, "after-response");
+                assert_eq!(selector.expression, "res.body.token");
+                assert_eq!(variable.scope, "collection");
+            }
+        }
+    }
+
+    #[test]
+    fn oc_runtime_yaml() {
+        let yaml = "scripts:\n  - type: before-request\n    code: \"let x = 1;\"\nassertions:\n  - expression: res.status\n    operator: eq\n    value: \"200\"";
+        let runtime: OcHttpRequestRuntime = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(runtime.scripts.len(), 1);
+        assert_eq!(runtime.assertions.len(), 1);
+    }
+
+    #[test]
+    fn oc_http_request_example_yaml() {
+        let yaml = "name: Success\nrequest:\n  url: https://api.example.com/users\n  method: GET\nresponse:\n  status: 200\n  statusText: OK\n  body:\n    type: json\n    data: '{\"users\": []}'";
+        let example: OcHttpRequestExample = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(example.name, "Success");
+        assert!(example.request.is_some());
+        let resp = example.response.unwrap();
+        assert_eq!(resp.status, Some(200));
+        assert_eq!(resp.body.unwrap().body_type, "json");
     }
 }
