@@ -1,16 +1,24 @@
+import { useState, useEffect } from 'react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { GitCommitForm } from './GitCommitForm';
 import { GitStagedFiles } from './GitStagedFiles';
 import { GitChangedFiles } from './GitChangedFiles';
 import { GitStashSection } from './GitStashSection';
+import { GitCommitLog } from './GitCommitLog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import { useGitStore } from '@/stores/git-store';
 import { gitInit } from '@/lib/tauri-api';
-import { Separator } from '@/components/ui/separator';
 
 // Git panel shown in the sidebar Git tab.
 export function GitSidebarPanel() {
-  const { isRepo, collectionPath, loading, setCollection } = useGitStore();
+  const { isRepo, collectionPath, loading, setCollection, refreshLog } = useGitStore();
+  const [activeSubTab, setActiveSubTab] = useState('changes');
+
+  useEffect(() => {
+    if (activeSubTab === 'log') refreshLog();
+  }, [activeSubTab, refreshLog]);
 
   if (loading) {
     return (
@@ -41,15 +49,32 @@ export function GitSidebarPanel() {
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-2 p-2">
-        <GitCommitForm />
-        <Separator />
-        <GitStagedFiles />
-        <GitChangedFiles />
-        <Separator />
-        <GitStashSection />
-      </div>
-    </ScrollArea>
+    <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="h-full flex flex-col">
+      <TabsList className="w-full shrink-0">
+        <TabsTrigger value="changes" className="flex-1 text-xs">Changes</TabsTrigger>
+        <TabsTrigger value="log" className="flex-1 text-xs">Log</TabsTrigger>
+        <TabsTrigger value="stash" className="flex-1 text-xs">Stash</TabsTrigger>
+      </TabsList>
+      <TabsContent value="changes" className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="space-y-2 p-2">
+            <GitCommitForm />
+            <Separator />
+            <GitStagedFiles />
+            <GitChangedFiles />
+          </div>
+        </ScrollArea>
+      </TabsContent>
+      <TabsContent value="log" className="flex-1 overflow-hidden">
+        <GitCommitLog />
+      </TabsContent>
+      <TabsContent value="stash" className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="p-2">
+            <GitStashSection />
+          </div>
+        </ScrollArea>
+      </TabsContent>
+    </Tabs>
   );
 }
