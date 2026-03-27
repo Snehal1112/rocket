@@ -4,12 +4,15 @@
 //! is needed for descriptions — they flow through unchanged.
 
 use crate::opencollection::*;
+use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
+use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
+use rocket_shared::description::Documentation;
 use rocket_shared::oauth2::{
     OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner,
 };
-use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, PathParam, QueryParam};
+use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam};
 use rocket_shared::variable_value::VariableValue;
 
 // ============================================================
@@ -715,6 +718,195 @@ impl From<Environment> for OcEnvironment {
     }
 }
 
+// ============================================================
+// OcHttpRequest ↔ Request conversions
+// ============================================================
+
+/// Convert an OC HTTP request to a domain Request.
+pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
+    // Info section.
+    let name = oc.info.name;
+    let description = oc.info.description;
+    let seq = oc.info.seq;
+    let tags = oc.info.tags;
+
+    // HTTP section.
+    let method = oc.http.method.parse::<HttpMethod>().unwrap_or(HttpMethod::Get);
+    let url = oc.http.url;
+    let headers: Vec<Header> = oc.http.headers.into_iter().map(Header::from).collect();
+    let body: Option<Body> = oc.http.body.map(Body::from);
+    let auth: Auth = oc.http.auth.map(Auth::from).unwrap_or(Auth::None);
+
+    // Runtime section.
+    let (pre_request_script, post_response_script, tests) = extract_scripts(&oc.runtime);
+    let assertions = oc.runtime.as_ref()
+        .map(|r| r.assertions.clone())
+        .unwrap_or_default();
+    let actions = extract_actions(&oc.runtime);
+    let variables = oc.runtime.as_ref()
+        .map(|r| r.variables.iter().map(|v| serde_json::to_value(v).unwrap_or_default()).collect())
+        .unwrap_or_default();
+
+    // Examples.
+    let examples = oc.examples.unwrap_or_default().into_iter()
+        .map(|e| HttpRequestExample {
+            name: e.name,
+            description: e.description,
+            request: e.request.and_then(|r| serde_json::to_value(r).ok()),
+            response: e.response.and_then(|r| serde_json::to_value(r).ok()),
+        })
+        .collect();
+
+    // Docs.
+    let docs: Option<Documentation> = oc.docs.map(Documentation::text);
+
+    Request {
+        uid: uuid::Uuid::new_v4().to_string(),
+        name,
+        method,
+        url,
+        headers,
+        body,
+        auth,
+        file_name: None,
+        seq,
+        tags,
+        description,
+        pre_request_script,
+        post_response_script,
+        tests,
+        assertions,
+        actions,
+        examples,
+        docs,
+        variables,
+    }
+}
+
+/// Convert a domain Request back to an OC HTTP request.
+pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
+    let info = OcHttpRequestInfo {
+        name: req.name,
+        description: req.description,
+        request_type: Some("http".into()),
+        seq: req.seq,
+        tags: req.tags,
+    };
+
+    let http = OcHttpRequestDetails {
+        method: req.method.to_string(),
+        url: req.url,
+        headers: req.headers.into_iter().map(OcHttpRequestHeader::from).collect(),
+        params: Vec::new(),
+        body: req.body.map(OcHttpRequestBody::from),
+        auth: if req.auth == Auth::None { None } else { Some(OcAuth::from(req.auth)) },
+    };
+
+    let mut scripts = Vec::new();
+    if let Some(code) = req.pre_request_script {
+        scripts.push(OcScript { script_type: "before-request".into(), code });
+    }
+    if let Some(code) = req.post_response_script {
+        scripts.push(OcScript { script_type: "after-response".into(), code });
+    }
+    if let Some(code) = req.tests {
+        scripts.push(OcScript { script_type: "tests".into(), code });
+    }
+
+    let actions: Vec<OcAction> = req.actions.into_iter().map(|a| {
+        OcAction::SetVariable {
+            description: a.description,
+            phase: a.phase,
+            selector: OcActionSelector { expression: a.selector.expression, method: a.selector.method },
+            variable: OcActionVariable { name: a.variable.name, scope: a.variable.scope },
+            disabled: a.disabled,
+        }
+    }).collect();
+
+    let has_runtime = !scripts.is_empty()
+        || !req.assertions.is_empty()
+        || !actions.is_empty()
+        || !req.variables.is_empty();
+    let runtime = if has_runtime {
+        Some(OcHttpRequestRuntime {
+            variables: req.variables.into_iter()
+                .filter_map(|v| serde_json::from_value::<OcVariable>(v).ok())
+                .collect(),
+            scripts,
+            assertions: req.assertions,
+            actions,
+            auth: None,
+        })
+    } else {
+        None
+    };
+
+    let examples = if req.examples.is_empty() {
+        None
+    } else {
+        Some(req.examples.into_iter().map(|e| {
+            OcHttpRequestExample {
+                name: e.name,
+                description: e.description,
+                request: e.request.and_then(|v| serde_json::from_value(v).ok()),
+                response: e.response.and_then(|v| serde_json::from_value(v).ok()),
+            }
+        }).collect())
+    };
+
+    let docs = req.docs.and_then(|d| d.content().map(String::from));
+
+    OcHttpRequest {
+        info,
+        http,
+        runtime,
+        settings: None,
+        examples,
+        docs,
+    }
+}
+
+/// Extract pre-request, post-response, and test scripts from runtime.
+fn extract_scripts(runtime: &Option<OcHttpRequestRuntime>) -> (Option<String>, Option<String>, Option<String>) {
+    let Some(rt) = runtime else { return (None, None, None) };
+    let mut pre = None;
+    let mut post = None;
+    let mut tests = None;
+    for script in &rt.scripts {
+        match script.script_type.as_str() {
+            "before-request" => pre = Some(script.code.clone()),
+            "after-response" => post = Some(script.code.clone()),
+            "tests" => tests = Some(script.code.clone()),
+            _ => {}
+        }
+    }
+    (pre, post, tests)
+}
+
+/// Extract action-set-variable entries from runtime.
+fn extract_actions(runtime: &Option<OcHttpRequestRuntime>) -> Vec<ActionSetVariable> {
+    let Some(rt) = runtime else { return Vec::new() };
+    rt.actions.iter().map(|a| {
+        match a {
+            OcAction::SetVariable { description, phase, selector, variable, disabled } => {
+                ActionSetVariable {
+                    phase: phase.clone(),
+                    selector: ActionSelector {
+                        expression: selector.expression.clone(),
+                        method: selector.method.clone(),
+                    },
+                    variable: ActionVariable {
+                        name: variable.name.clone(),
+                        scope: variable.scope.clone(),
+                    },
+                    disabled: *disabled,
+                    description: description.clone(),
+                }
+            }
+        }
+    }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -994,5 +1186,119 @@ mod tests {
         assert_eq!(original.color, back.color);
         assert_eq!(original.variables.len(), back.variables.len());
         assert_eq!(original.variables[0].key, back.variables[0].key);
+    }
+
+    // ---- OcHttpRequest ↔ Request tests ----
+
+    #[test]
+    fn oc_http_request_to_domain_basic() {
+        let yaml = r#"
+info:
+  name: Get Users
+  type: http
+  seq: 1
+  tags:
+    - api
+http:
+  method: GET
+  url: "https://api.example.com/users"
+  headers:
+    - name: Accept
+      value: application/json
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        assert_eq!(req.name, "Get Users");
+        assert_eq!(req.method, HttpMethod::Get);
+        assert_eq!(req.url, "https://api.example.com/users");
+        assert_eq!(req.headers.len(), 1);
+        assert_eq!(req.headers[0].key, "Accept");
+        assert_eq!(req.seq, Some(1));
+        assert_eq!(req.tags, vec!["api"]);
+    }
+
+    #[test]
+    fn oc_http_request_with_runtime() {
+        let yaml = r#"
+info:
+  name: Test
+  type: http
+http:
+  method: POST
+  url: "https://api.example.com"
+runtime:
+  scripts:
+    - type: before-request
+      code: "let x = 1;"
+    - type: after-response
+      code: "console.log(res.status);"
+    - type: tests
+      code: "expect(res.status).to.equal(200);"
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+  actions:
+    - type: set-variable
+      phase: after-response
+      selector:
+        expression: res.body.token
+        method: jsonq
+      variable:
+        name: authToken
+        scope: collection
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        assert_eq!(req.pre_request_script, Some("let x = 1;".into()));
+        assert_eq!(req.post_response_script, Some("console.log(res.status);".into()));
+        assert_eq!(req.tests, Some("expect(res.status).to.equal(200);".into()));
+        assert_eq!(req.assertions.len(), 1);
+        assert_eq!(req.actions.len(), 1);
+        assert_eq!(req.actions[0].variable.scope, "collection");
+    }
+
+    #[test]
+    fn domain_request_to_oc_roundtrip() {
+        let yaml = r#"
+info:
+  name: Create User
+  type: http
+  seq: 5
+http:
+  method: POST
+  url: "https://api.example.com/users"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: '{"name": "John"}'
+  auth:
+    type: bearer
+    token: my-token
+runtime:
+  scripts:
+    - type: before-request
+      code: "let x = 1;"
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+docs: "Creates a user."
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        let back = request_to_oc_http_request(req);
+        assert_eq!(back.info.name, "Create User");
+        assert_eq!(back.info.seq, Some(5));
+        assert_eq!(back.http.method, "POST");
+        assert!(back.http.body.is_some());
+        assert!(back.http.auth.is_some());
+        assert!(back.runtime.is_some());
+        let rt = back.runtime.unwrap();
+        assert_eq!(rt.scripts.len(), 1);
+        assert_eq!(rt.assertions.len(), 1);
+        assert_eq!(back.docs, Some("Creates a user.".into()));
     }
 }
