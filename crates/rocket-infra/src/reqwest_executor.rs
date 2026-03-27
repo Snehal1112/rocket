@@ -5,7 +5,7 @@ use reqwest::{redirect, Client, Method};
 
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::types::{ApiKeyLocation, Auth, Body, BodyMode, Header};
+use rocket_shared::types::{Auth, Body, BodyMode, Header};
 
 pub struct ReqwestExecutor;
 
@@ -134,13 +134,14 @@ fn apply_auth(
         Auth::Bearer { token } => {
             builder = builder.bearer_auth(token);
         }
-        Auth::ApiKey { key, value, add_to } => match add_to {
-            ApiKeyLocation::Header => {
+        Auth::ApiKey { key, value, placement } => match placement.as_str() {
+            "header" => {
                 builder = builder.header(key.as_str(), value.as_str());
             }
-            ApiKeyLocation::Query => {
+            "query" => {
                 builder = builder.query(&[(key.as_str(), value.as_str())]);
             }
+            _ => {} // Unknown placement — skip.
         },
         Auth::OAuth2 {
             access_token: Some(token),

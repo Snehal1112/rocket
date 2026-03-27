@@ -180,11 +180,10 @@ pub enum Auth {
     Bearer {
         token: String,
     },
-    #[serde(rename_all = "camelCase")]
     ApiKey {
         key: String,
         value: String,
-        add_to: ApiKeyLocation,
+        placement: String,  // "header" | "query"
     },
     #[serde(rename_all = "camelCase")]
     OAuth2 {
@@ -221,13 +220,6 @@ pub enum Auth {
         password: String,
         domain: String,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ApiKeyLocation {
-    Header,
-    Query,
 }
 
 
@@ -419,5 +411,18 @@ mod tests {
         let json = serde_json::to_string(&auth).unwrap();
         let back: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_apikey_placement_values() {
+        let auth = Auth::ApiKey { key: "X-Key".into(), value: "123".into(), placement: "header".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+
+        let auth2 = Auth::ApiKey { key: "token".into(), value: "abc".into(), placement: "query".into() };
+        let json2 = serde_json::to_string(&auth2).unwrap();
+        let back2: Auth = serde_json::from_str(&json2).unwrap();
+        assert_eq!(auth2, back2);
     }
 }
