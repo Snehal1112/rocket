@@ -419,6 +419,40 @@ pub struct OcHttpRequestExample {
     pub response: Option<OcExampleResponse>,
 }
 
+// ============================================================
+// HTTP Request — Top-Level
+// ============================================================
+
+/// HTTP request protocol details — method, url, headers, params, body, auth.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequestDetails {
+    pub method: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OcHttpRequestHeader>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<OcHttpRequestParam>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<OcHttpRequestBody>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+}
+
+/// Complete HTTP request — top-level YAML file struct.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcHttpRequest {
+    pub info: OcHttpRequestInfo,
+    pub http: OcHttpRequestDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<OcHttpRequestRuntime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<OcHttpRequestSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<OcHttpRequestExample>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,5 +808,92 @@ mod tests {
         let resp = example.response.unwrap();
         assert_eq!(resp.status, Some(200));
         assert_eq!(resp.body.unwrap().body_type, "json");
+    }
+
+    #[test]
+    fn oc_http_request_full_yaml() {
+        let yaml = r#"
+info:
+  name: Create User
+  type: http
+  seq: 1
+  tags:
+    - users
+    - api
+http:
+  method: POST
+  url: "https://api.example.com/users"
+  headers:
+    - name: Content-Type
+      value: application/json
+    - name: Authorization
+      value: "Bearer {{token}}"
+  params:
+    - name: version
+      value: "2"
+      type: query
+  body:
+    type: json
+    data: '{"name": "John", "email": "john@example.com"}'
+  auth:
+    type: bearer
+    token: "{{authToken}}"
+runtime:
+  scripts:
+    - type: before-request
+      code: "bru.setVar('timestamp', Date.now())"
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+  actions:
+    - type: set-variable
+      phase: after-response
+      selector:
+        expression: res.body.id
+        method: jsonq
+      variable:
+        name: userId
+        scope: collection
+settings:
+  encodeUrl: true
+  timeout: 30000
+examples:
+  - name: Success
+    response:
+      status: 201
+      body:
+        type: json
+        data: '{"id": "123", "name": "John"}'
+docs: "Creates a new user in the system."
+"#;
+        let request: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(request.info.name, "Create User");
+        assert_eq!(request.info.seq, Some(1));
+        assert_eq!(request.info.tags, vec!["users", "api"]);
+        assert_eq!(request.http.method, "POST");
+        assert_eq!(request.http.headers.len(), 2);
+        assert_eq!(request.http.params.len(), 1);
+        assert!(request.http.body.is_some());
+        assert!(request.http.auth.is_some());
+        let runtime = request.runtime.unwrap();
+        assert_eq!(runtime.scripts.len(), 1);
+        assert_eq!(runtime.assertions.len(), 1);
+        assert_eq!(runtime.actions.len(), 1);
+        let settings = request.settings.unwrap();
+        assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(true)));
+        assert_eq!(request.examples.as_ref().unwrap().len(), 1);
+        assert_eq!(request.docs, Some("Creates a new user in the system.".into()));
+    }
+
+    #[test]
+    fn oc_http_request_minimal_yaml() {
+        let yaml = "info:\n  name: Simple GET\nhttp:\n  method: GET\n  url: https://example.com";
+        let request: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(request.info.name, "Simple GET");
+        assert_eq!(request.http.method, "GET");
+        assert!(request.runtime.is_none());
+        assert!(request.settings.is_none());
+        assert!(request.examples.is_none());
     }
 }
