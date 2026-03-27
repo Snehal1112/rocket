@@ -715,6 +715,53 @@ pub struct OcWebSocketRequest {
     pub docs: Option<String>,
 }
 
+// ============================================================
+// Folder + Item
+// ============================================================
+
+/// Folder info metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcFolderInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub folder_type: Option<String>,  // "folder"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+// Forward declare OcRequestDefaults as a placeholder — full definition comes in Task 3.
+// For now, use serde_yaml::Value.
+
+/// Folder — contains nested items and optional request defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcFolder {
+    pub info: OcFolderInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<OcItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<serde_yaml::Value>,  // OcRequestDefaults — defined in Task 3
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+/// Item — dispatches to any request type, folder, or script file.
+/// Order matters: serde tries variants top-to-bottom with untagged.
+/// More specific types (with unique required fields) should come first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcItem {
+    Http(OcHttpRequest),
+    GraphQL(OcGraphQLRequest),
+    Grpc(OcGrpcRequest),
+    WebSocket(OcWebSocketRequest),
+    Folder(OcFolder),
+    ScriptFile(OcScriptFile),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1232,5 +1279,56 @@ websocket:
         let runtime: OcHttpRequestRuntime = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(runtime.scripts.len(), 1);
         assert!(runtime.auth.is_some());
+    }
+
+    #[test]
+    fn oc_folder_yaml() {
+        let yaml = r#"
+info:
+  name: Users
+  type: folder
+  seq: 1
+items:
+  - info:
+      name: Get Users
+      type: http
+    http:
+      method: GET
+      url: "https://api.example.com/users"
+  - info:
+      name: Create User
+      type: http
+    http:
+      method: POST
+      url: "https://api.example.com/users"
+"#;
+        let folder: OcFolder = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(folder.info.name, "Users");
+        assert_eq!(folder.items.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn oc_item_dispatch_http() {
+        let yaml = r#"
+info:
+  name: Test
+  type: http
+http:
+  method: GET
+  url: https://example.com
+"#;
+        let item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(item, OcItem::Http(_)));
+    }
+
+    #[test]
+    fn oc_item_dispatch_folder() {
+        let yaml = r#"
+info:
+  name: My Folder
+  type: folder
+"#;
+        let item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(item, OcItem::Folder(_)));
     }
 }
