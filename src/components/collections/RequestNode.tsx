@@ -64,8 +64,8 @@ export function RequestNode({
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
   // Look up the git status for this file by matching the tail of the git path.
-  const gitFiles = useGitStore((s) => s.status?.files ?? []);
-  const gitFile = gitFiles.find((f) => f.path === path || f.path.endsWith(`/${path}`));
+  const gitStatusData = useGitStore((s) => s.status);
+  const gitFile = gitStatusData?.files.find((f) => f.path === path || f.path.endsWith(`/${path}`));
   const gitStatus = gitFile?.status ?? 'unchanged';
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
