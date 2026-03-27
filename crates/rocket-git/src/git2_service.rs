@@ -13,6 +13,34 @@ use crate::service::GitService;
 use crate::stash::StashEntry;
 use crate::status::{FileStatus, GitStatus, RepoStatus};
 
+/// Build credential callbacks for remote operations.
+fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'_> {
+    let mut callbacks = git2::RemoteCallbacks::new();
+    let creds = creds.clone();
+    callbacks.credentials(move |_url, username, _allowed| match &creds {
+        GitCredentials::SshKey {
+            private_key_path,
+            passphrase,
+        } => git2::Cred::ssh_key(
+            username.unwrap_or("git"),
+            None,
+            Path::new(private_key_path),
+            passphrase.as_deref(),
+        ),
+        GitCredentials::SshAgent => {
+            git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
+        }
+        GitCredentials::UserPass {
+            username: u,
+            password,
+        } => git2::Cred::userpass_plaintext(u, password),
+        GitCredentials::Token { token } => {
+            git2::Cred::userpass_plaintext("oauth2", token)
+        }
+    });
+    callbacks
+}
+
 /// Git service backed by libgit2.
 pub struct Git2Service;
 
@@ -186,11 +214,19 @@ impl GitService for Git2Service {
 
     fn clone_repo(
         &self,
-        _url: &str,
-        _dest_path: &str,
-        _creds: &GitCredentials,
+        url: &str,
+        dest_path: &str,
+        creds: &GitCredentials,
     ) -> DomainResult<()> {
-        todo!()
+        let callbacks = build_callbacks(creds);
+        let mut fetch_opts = git2::FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+
+        git2::build::RepoBuilder::new()
+            .fetch_options(fetch_opts)
+            .clone(url, Path::new(dest_path))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
     fn status(&self, path: &str) -> DomainResult<RepoStatus> {
@@ -391,16 +427,128 @@ impl GitService for Git2Service {
         Ok(commits)
     }
 
-    fn push(&self, _path: &str, _remote: &str, _creds: &GitCredentials) -> DomainResult<()> {
-        todo!()
+    fn push(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let mut remote_obj = repo
+            .find_remote(remote)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let head = repo
+            .head()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let branch = head
+            .shorthand()
+            .unwrap_or("main");
+        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+
+        let callbacks = build_callbacks(creds);
+        let mut push_opts = git2::PushOptions::new();
+        push_opts.remote_callbacks(callbacks);
+
+        remote_obj
+            .push(&[&refspec], Some(&mut push_opts))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn pull(&self, _path: &str, _remote: &str, _creds: &GitCredentials) -> DomainResult<()> {
-        todo!()
+    fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+        // Fetch first, then merge FETCH_HEAD.
+        self.fetch(path, remote, creds)?;
+
+        let repo = open_repo(path)?;
+        let fetch_head = repo
+            .find_reference("FETCH_HEAD")
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let fetch_commit = repo
+            .reference_to_annotated_commit(&fetch_head)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let (analysis, _) = repo
+            .merge_analysis(&[&fetch_commit])
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        if analysis.is_up_to_date() {
+            return Ok(());
+        }
+
+        if analysis.is_fast_forward() {
+            let ref_name = format!("refs/heads/{}", branch_name(&repo));
+            let mut reference = repo
+                .find_reference(&ref_name)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            reference
+                .set_target(fetch_commit.id(), "pull fast-forward")
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            repo.set_head(&ref_name)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            return Ok(());
+        }
+
+        // Normal merge.
+        repo.merge(&[&fetch_commit], None, None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut index = repo
+            .index()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        if index.has_conflicts() {
+            return Err(DomainError::Internal(
+                "pull resulted in conflicts".to_string(),
+            ));
+        }
+
+        let tree_id = index
+            .write_tree()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let tree = repo
+            .find_tree(tree_id)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let head_commit = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let fetch_obj = repo
+            .find_commit(fetch_commit.id())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Merge remote changes",
+            &tree,
+            &[&head_commit, &fetch_obj],
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        repo.cleanup_state()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 
-    fn fetch(&self, _path: &str, _remote: &str, _creds: &GitCredentials) -> DomainResult<()> {
-        todo!()
+    fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let mut remote_obj = repo
+            .find_remote(remote)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let callbacks = build_callbacks(creds);
+        let mut fetch_opts = git2::FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+
+        remote_obj
+            .fetch::<&str>(&[], Some(&mut fetch_opts), None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
     fn branches(&self, path: &str) -> DomainResult<BranchList> {
@@ -565,37 +713,208 @@ impl GitService for Git2Service {
         Ok(())
     }
 
-    fn stash_list(&self, _path: &str) -> DomainResult<Vec<StashEntry>> {
-        todo!()
+    fn stash_list(&self, path: &str) -> DomainResult<Vec<StashEntry>> {
+        let mut repo = Repository::open(path)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut entries = Vec::new();
+
+        repo.stash_foreach(|index, message, _oid| {
+            entries.push(StashEntry {
+                index,
+                message: message.to_string(),
+                timestamp: chrono::Utc::now(),
+                branch: String::new(),
+            });
+            true
+        })
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(entries)
     }
 
-    fn stash_save(&self, _path: &str, _message: &str) -> DomainResult<()> {
-        todo!()
+    fn stash_save(&self, path: &str, message: &str) -> DomainResult<()> {
+        let mut repo = Repository::open(path)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        repo.stash_save(&sig, message, None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn stash_pop(&self, _path: &str, _index: usize) -> DomainResult<()> {
-        todo!()
+    fn stash_pop(&self, path: &str, index: usize) -> DomainResult<()> {
+        let mut repo = Repository::open(path)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.stash_pop(index, None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn stash_apply(&self, _path: &str, _index: usize) -> DomainResult<()> {
-        todo!()
+    fn stash_apply(&self, path: &str, index: usize) -> DomainResult<()> {
+        let mut repo = Repository::open(path)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.stash_apply(index, None)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn stash_drop(&self, _path: &str, _index: usize) -> DomainResult<()> {
-        todo!()
+    fn stash_drop(&self, path: &str, index: usize) -> DomainResult<()> {
+        let mut repo = Repository::open(path)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.stash_drop(index)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn conflicts(&self, _path: &str) -> DomainResult<Vec<ConflictFile>> {
-        todo!()
+    fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>> {
+        let repo = open_repo(path)?;
+        let index = repo
+            .index()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let conflicts = index
+            .conflicts()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut result = Vec::new();
+        for entry in conflicts {
+            let entry = entry.map_err(|e| DomainError::Internal(e.to_string()))?;
+
+            let file_path = entry
+                .our
+                .as_ref()
+                .or(entry.their.as_ref())
+                .and_then(|e| String::from_utf8(e.path.clone()).ok())
+                .unwrap_or_default();
+
+            let ours = entry
+                .our
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                .unwrap_or_default();
+
+            let theirs = entry
+                .their
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                .unwrap_or_default();
+
+            let ancestor = entry
+                .ancestor
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from));
+
+            result.push(ConflictFile {
+                path: file_path,
+                ours,
+                theirs,
+                ancestor,
+            });
+        }
+
+        Ok(result)
     }
 
     fn resolve_conflict(
         &self,
-        _path: &str,
-        _file: &str,
-        _resolution: &ConflictResolution,
+        path: &str,
+        file: &str,
+        resolution: &ConflictResolution,
     ) -> DomainResult<()> {
-        todo!()
+        let repo = open_repo(path)?;
+
+        // Determine the content to write based on the resolution strategy.
+        let content = match resolution {
+            ConflictResolution::Ours => {
+                let index = repo
+                    .index()
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+                let conflicts = index
+                    .conflicts()
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+                let mut ours_content = String::new();
+                for entry in conflicts {
+                    let entry =
+                        entry.map_err(|e| DomainError::Internal(e.to_string()))?;
+                    let entry_path = entry
+                        .our
+                        .as_ref()
+                        .and_then(|e| String::from_utf8(e.path.clone()).ok())
+                        .unwrap_or_default();
+                    if entry_path == file {
+                        ours_content = entry
+                            .our
+                            .as_ref()
+                            .and_then(|e| repo.find_blob(e.id).ok())
+                            .and_then(|b| {
+                                std::str::from_utf8(b.content())
+                                    .ok()
+                                    .map(String::from)
+                            })
+                            .unwrap_or_default();
+                        break;
+                    }
+                }
+                ours_content
+            }
+            ConflictResolution::Theirs => {
+                let index = repo
+                    .index()
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+                let conflicts = index
+                    .conflicts()
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+                let mut theirs_content = String::new();
+                for entry in conflicts {
+                    let entry =
+                        entry.map_err(|e| DomainError::Internal(e.to_string()))?;
+                    let entry_path = entry
+                        .our
+                        .as_ref()
+                        .or(entry.their.as_ref())
+                        .and_then(|e| String::from_utf8(e.path.clone()).ok())
+                        .unwrap_or_default();
+                    if entry_path == file {
+                        theirs_content = entry
+                            .their
+                            .as_ref()
+                            .and_then(|e| repo.find_blob(e.id).ok())
+                            .and_then(|b| {
+                                std::str::from_utf8(b.content())
+                                    .ok()
+                                    .map(String::from)
+                            })
+                            .unwrap_or_default();
+                        break;
+                    }
+                }
+                theirs_content
+            }
+            ConflictResolution::Custom { content } => content.clone(),
+        };
+
+        // Write the resolved content to the working directory.
+        let file_path = Path::new(path).join(file);
+        fs::write(&file_path, &content)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Stage the resolved file. add_path also clears the conflict marker.
+        let mut index = repo
+            .index()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .add_path(Path::new(file))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .write()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
     }
 }
 
@@ -760,5 +1079,34 @@ mod tests {
         svc.merge_branch(&path, "feature").unwrap();
         let log = svc.log(&path, 5).unwrap();
         assert!(log.iter().any(|c| c.message == "feature commit"));
+    }
+
+    #[test]
+    fn stash_save_and_pop() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "changed for stash").unwrap();
+        svc.stash_save(&path, "WIP").unwrap();
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "meta { name: Test }"); // reverted
+        let stashes = svc.stash_list(&path).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert!(stashes[0].message.contains("WIP"));
+        svc.stash_pop(&path, 0).unwrap();
+        let content2 = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content2, "changed for stash"); // restored
+    }
+
+    #[test]
+    fn stash_apply_keeps_stash() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "stash this").unwrap();
+        svc.stash_save(&path, "keep me").unwrap();
+        svc.stash_apply(&path, 0).unwrap();
+        let stashes = svc.stash_list(&path).unwrap();
+        assert_eq!(stashes.len(), 1); // still there
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "stash this"); // restored
     }
 }
