@@ -1,7 +1,9 @@
+pub mod assertion;
 pub mod description;
 pub mod error;
 pub mod events;
 pub mod types;
 
+pub use assertion::Assertion;
 pub use description::{Description, Documentation};
 pub use types::QueryParam;
