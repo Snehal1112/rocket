@@ -323,6 +323,17 @@ pub struct OcScript {
     pub code: String,
 }
 
+/// Type alias for a list of scripts.
+pub type OcScripts = Vec<OcScript>;
+
+/// External script file reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcScriptFile {
+    #[serde(rename = "type")]
+    pub script_file_type: String,  // "script"
+    pub script: String,
+}
+
 /// Assertion for response validation.
 /// Re-uses domain Assertion which already has the correct serde.
 pub use rocket_shared::assertion::Assertion as OcAssertion;
@@ -368,6 +379,8 @@ pub struct OcHttpRequestRuntime {
     pub assertions: Vec<OcAssertion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<OcAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
 }
 
 /// Response body in an example.
@@ -895,5 +908,21 @@ docs: "Creates a new user in the system."
         assert!(request.runtime.is_none());
         assert!(request.settings.is_none());
         assert!(request.examples.is_none());
+    }
+
+    #[test]
+    fn oc_script_file_yaml() {
+        let yaml = "type: script\nscript: ./scripts/auth.js";
+        let sf: OcScriptFile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(sf.script_file_type, "script");
+        assert_eq!(sf.script, "./scripts/auth.js");
+    }
+
+    #[test]
+    fn oc_runtime_with_auth_yaml() {
+        let yaml = "scripts:\n  - type: before-request\n    code: \"let x = 1;\"\nauth:\n  type: bearer\n  token: my-token";
+        let runtime: OcHttpRequestRuntime = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(runtime.scripts.len(), 1);
+        assert!(runtime.auth.is_some());
     }
 }
