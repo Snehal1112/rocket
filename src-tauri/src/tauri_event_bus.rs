@@ -29,6 +29,16 @@ impl EventPublisher for TauriEventBus {
                 "environment-changed"
             }
             DomainEvent::HistoryCleared => "history-changed",
+            // Git events
+            DomainEvent::GitStatusChanged { .. }
+            | DomainEvent::GitCommit { .. }
+            | DomainEvent::GitPush { .. }
+            | DomainEvent::GitPull { .. }
+            | DomainEvent::BranchSwitched { .. }
+            | DomainEvent::BranchMerged { .. }
+            | DomainEvent::GitStashChanged { .. }
+            | DomainEvent::GitConflictDetected { .. }
+            | DomainEvent::GitCloned { .. } => "git-changed",
         };
         let _ = self.app.emit(event_name, &event);
     }
