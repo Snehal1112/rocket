@@ -866,6 +866,56 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
     }
 }
 
+// ============================================================
+// ProtocolRequest — lossless multi-protocol wrapper
+// ============================================================
+
+/// A request that can be any protocol type.
+/// HTTP requests are fully converted to domain types.
+/// Other protocols preserve their YAML data losslessly.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProtocolRequest {
+    Http(rocket_collection::Request),
+    GraphQL(serde_yaml::Value),
+    Grpc(serde_yaml::Value),
+    WebSocket(serde_yaml::Value),
+}
+
+/// Convert an OcItem to a ProtocolRequest.
+/// HTTP items are fully converted; others are stored as opaque YAML.
+pub fn oc_item_to_protocol_request(item: OcItem) -> Option<ProtocolRequest> {
+    match item {
+        OcItem::Http(oc) => Some(ProtocolRequest::Http(oc_http_request_to_request(oc))),
+        OcItem::GraphQL(oc) => {
+            serde_yaml::to_value(oc).ok().map(ProtocolRequest::GraphQL)
+        }
+        OcItem::Grpc(oc) => {
+            serde_yaml::to_value(oc).ok().map(ProtocolRequest::Grpc)
+        }
+        OcItem::WebSocket(oc) => {
+            serde_yaml::to_value(oc).ok().map(ProtocolRequest::WebSocket)
+        }
+        // Folders and script files are not requests.
+        OcItem::Folder(_) | OcItem::ScriptFile(_) => None,
+    }
+}
+
+/// Convert a ProtocolRequest back to an OcItem for writing.
+pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
+    match pr {
+        ProtocolRequest::Http(req) => Some(OcItem::Http(request_to_oc_http_request(req))),
+        ProtocolRequest::GraphQL(val) => {
+            serde_yaml::from_value::<OcGraphQLRequest>(val).ok().map(OcItem::GraphQL)
+        }
+        ProtocolRequest::Grpc(val) => {
+            serde_yaml::from_value::<OcGrpcRequest>(val).ok().map(OcItem::Grpc)
+        }
+        ProtocolRequest::WebSocket(val) => {
+            serde_yaml::from_value::<OcWebSocketRequest>(val).ok().map(OcItem::WebSocket)
+        }
+    }
+}
+
 /// Extract pre-request, post-response, and test scripts from runtime.
 fn extract_scripts(runtime: &Option<OcHttpRequestRuntime>) -> (Option<String>, Option<String>, Option<String>) {
     let Some(rt) = runtime else { return (None, None, None) };
@@ -1256,6 +1306,90 @@ runtime:
         assert_eq!(req.assertions.len(), 1);
         assert_eq!(req.actions.len(), 1);
         assert_eq!(req.actions[0].variable.scope, "collection");
+    }
+
+    // ---- ProtocolRequest lossless roundtrip tests ----
+
+    #[test]
+    fn graphql_lossless_roundtrip() {
+        let yaml = r#"
+info:
+  name: Get Users
+  type: graphql
+graphql:
+  url: "https://api.example.com/graphql"
+  body:
+    query: "query { users { id name } }"
+"#;
+        let oc_item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        let pr = oc_item_to_protocol_request(oc_item).unwrap();
+        assert!(matches!(pr, ProtocolRequest::GraphQL(_)));
+        let back = protocol_request_to_oc_item(pr).unwrap();
+        match back {
+            OcItem::GraphQL(gql) => {
+                assert_eq!(gql.info.name, "Get Users");
+                assert_eq!(gql.graphql.url, "https://api.example.com/graphql");
+            }
+            _ => panic!("expected GraphQL"),
+        }
+    }
+
+    #[test]
+    fn grpc_lossless_roundtrip() {
+        let yaml = r#"
+info:
+  name: Get User
+  type: grpc
+grpc:
+  url: "localhost:50051"
+  method: "users.UserService/GetUser"
+  methodType: unary
+"#;
+        let oc_item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        let pr = oc_item_to_protocol_request(oc_item).unwrap();
+        assert!(matches!(pr, ProtocolRequest::Grpc(_)));
+        let back = protocol_request_to_oc_item(pr).unwrap();
+        assert!(matches!(back, OcItem::Grpc(_)));
+    }
+
+    #[test]
+    fn websocket_lossless_roundtrip() {
+        let yaml = r#"
+info:
+  name: Chat
+  type: websocket
+websocket:
+  url: "wss://chat.example.com/ws"
+  message:
+    type: json
+    data: '{"action": "subscribe"}'
+"#;
+        let oc_item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        let pr = oc_item_to_protocol_request(oc_item).unwrap();
+        assert!(matches!(pr, ProtocolRequest::WebSocket(_)));
+        let back = protocol_request_to_oc_item(pr).unwrap();
+        assert!(matches!(back, OcItem::WebSocket(_)));
+    }
+
+    #[test]
+    fn http_item_converts_to_domain() {
+        let yaml = r#"
+info:
+  name: Simple GET
+  type: http
+http:
+  method: GET
+  url: https://example.com
+"#;
+        let oc_item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        let pr = oc_item_to_protocol_request(oc_item).unwrap();
+        match pr {
+            ProtocolRequest::Http(req) => {
+                assert_eq!(req.name, "Simple GET");
+                assert_eq!(req.method, HttpMethod::Get);
+            }
+            _ => panic!("expected Http"),
+        }
     }
 
     #[test]
