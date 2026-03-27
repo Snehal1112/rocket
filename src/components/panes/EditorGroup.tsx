@@ -14,6 +14,7 @@ import { TabBar } from './TabBar';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { DiffViewer } from '@/components/git/DiffViewer';
+import { ConflictResolver } from '@/components/git/ConflictResolver';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import { isDiffTab, isRequestTab, isConflictTab } from '@/types/pane-types';
@@ -65,11 +66,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       {hasTabs && <TabBar node={node} onCloseTab={handleCloseTab} />}
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
-          isDiffTab(activeTab) ? (
+          isConflictTab(activeTab) ? (
+            <ConflictResolver conflictState={activeTab.conflictState} />
+          ) : isDiffTab(activeTab) ? (
             <DiffViewer diffState={activeTab.diffState} />
-          ) : isConflictTab(activeTab) ? (
-            // ConflictResolver wired in P15-T2.
-            null
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : (

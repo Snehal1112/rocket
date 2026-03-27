@@ -20,18 +20,23 @@ import {
   gitPull,
   gitFetch,
   gitLog,
+  gitConflicts,
+  gitResolveConflict,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
   type BranchList,
   type GitCredentials,
   type CommitInfo,
+  type ConflictFile,
+  type ConflictResolution,
 } from '@/lib/tauri-api';
 
 interface GitState {
   isRepo: boolean;
   collectionPath: string | null;
   status: RepoStatus | null;
+  conflicts: ConflictFile[];
   stashes: StashEntry[];
   branches: BranchList | null;
   commitLog: CommitInfo[];
@@ -42,9 +47,11 @@ interface GitState {
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
+  refreshConflicts: () => Promise<void>;
   refreshStashes: () => Promise<void>;
   refreshBranches: () => Promise<void>;
   refreshLog: (limit?: number) => Promise<void>;
+  resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
@@ -71,6 +78,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   isRepo: false,
   collectionPath: null,
   status: null,
+  conflicts: [],
   stashes: [],
   branches: null,
   commitLog: [],
@@ -105,6 +113,29 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const status = await gitStatus(collectionPath);
       set({ status });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Reload the conflict list from disk.
+  refreshConflicts: async () => {
+    const { collectionPath, isRepo } = get();
+    if (!collectionPath || !isRepo) return;
+    try {
+      const conflicts = await gitConflicts(collectionPath);
+      set({ conflicts });
+    } catch { set({ conflicts: [] }); }
+  },
+
+  // Resolve a single conflicted file with the given strategy.
+  resolveConflict: async (file, resolution) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitResolveConflict(collectionPath, file, resolution);
+      await get().refreshStatus();
+      await get().refreshConflicts();
     } catch (e) {
       set({ error: String(e) });
     }
@@ -371,6 +402,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       isRepo: false,
       collectionPath: null,
       status: null,
+      conflicts: [],
       stashes: [],
       branches: null,
       commitLog: [],

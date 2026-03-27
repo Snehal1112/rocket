@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { useGitStore } from '@/stores/git-store';
-import { gitDiff } from '@/lib/tauri-api';
+import { gitDiff, gitConflicts } from '@/lib/tauri-api';
 import type { FileStatus } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { GitFileRow } from './GitFileRow';
@@ -8,10 +8,25 @@ import { GitFileRow } from './GitFileRow';
 export function GitChangedFiles() {
   const { status, stageFiles, discardFiles, stageAll, collectionPath } = useGitStore();
   const openDiffTab = usePaneStore((s) => s.openDiffTab);
+  const openConflictTab = usePaneStore((s) => s.openConflictTab);
 
   const handleFileClick = async (file: FileStatus) => {
     if (!collectionPath) return;
     try {
+      if (file.status === 'conflicted') {
+        const conflicts = await gitConflicts(collectionPath);
+        const conflict = conflicts.find((c) => c.path === file.path);
+        if (conflict) {
+          openConflictTab({
+            filePath: conflict.path,
+            collectionPath,
+            ours: conflict.ours,
+            theirs: conflict.theirs,
+            ancestor: conflict.ancestor ?? null,
+          });
+        }
+        return;
+      }
       const diff = await gitDiff(collectionPath, file.path);
       openDiffTab({
         filePath: file.path,
