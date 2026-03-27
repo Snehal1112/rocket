@@ -108,6 +108,7 @@ impl Header {
 // ============================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PathParam {
     pub name: String,
     pub value: String,
