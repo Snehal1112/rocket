@@ -301,16 +301,39 @@ impl GitService for Git2Service {
         })
     }
 
-    fn stage(&self, _path: &str, _files: &[&str]) -> DomainResult<()> {
-        todo!()
+    fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
+        for file in files {
+            index
+                .add_path(Path::new(file))
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+        }
+        index.write().map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn unstage(&self, _path: &str, _files: &[&str]) -> DomainResult<()> {
-        todo!()
+    fn unstage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        let head = repo
+            .head()
+            .and_then(|r| r.peel(git2::ObjectType::Commit))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let paths: Vec<&str> = files.to_vec();
+        repo.reset_default(Some(&head), paths)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
     }
 
-    fn discard(&self, _path: &str, _files: &[&str]) -> DomainResult<()> {
-        todo!()
+    fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        for file in files {
+            let mut cb = git2::build::CheckoutBuilder::new();
+            cb.path(*file).force();
+            repo.checkout_head(Some(&mut cb))
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+        }
+        Ok(())
     }
 
     fn commit(&self, _path: &str, _message: &str) -> DomainResult<CommitInfo> {
@@ -467,5 +490,28 @@ mod tests {
         assert!(diff.old_content.is_some());
         assert!(diff.new_content.is_some());
         assert_ne!(diff.old_content, diff.new_content);
+    }
+
+    #[test]
+    fn stage_and_unstage_file() {
+        let (dir, path) = setup_repo();
+        fs::write(dir.path().join("test.bru"), "changed").unwrap();
+        let svc = Git2Service::new();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let status = svc.status(&path).unwrap();
+        assert!(status.files.iter().any(|f| f.path == "test.bru" && f.staged));
+        svc.unstage(&path, &["test.bru"]).unwrap();
+        let status2 = svc.status(&path).unwrap();
+        assert!(status2.files.iter().any(|f| f.path == "test.bru" && !f.staged));
+    }
+
+    #[test]
+    fn discard_reverts_changes() {
+        let (dir, path) = setup_repo();
+        fs::write(dir.path().join("test.bru"), "changed").unwrap();
+        let svc = Git2Service::new();
+        svc.discard(&path, &["test.bru"]).unwrap();
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "meta { name: Test }"); // original content
     }
 }
