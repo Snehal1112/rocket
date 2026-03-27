@@ -627,6 +627,8 @@ pub struct OcGrpcRequestRuntime {
     pub scripts: Vec<OcScript>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assertions: Vec<OcAssertion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
 }
 
 /// Complete gRPC request.
@@ -702,6 +704,8 @@ pub struct OcWebSocketRequestRuntime {
     pub variables: Vec<OcVariable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<OcScript>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
 }
 
 /// Complete WebSocket request.
