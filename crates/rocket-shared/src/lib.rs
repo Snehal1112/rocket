@@ -3,6 +3,7 @@ pub mod description;
 pub mod error;
 pub mod events;
 pub mod oauth2;
+pub mod proxy;
 pub mod types;
 pub mod variable_value;
 
