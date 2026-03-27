@@ -4,10 +4,13 @@
 //! is needed for descriptions — they flow through unchanged.
 
 use crate::opencollection::*;
+use rocket_environment::environment::Environment;
+use rocket_environment::variable::Variable;
 use rocket_shared::oauth2::{
     OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner,
 };
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, PathParam, QueryParam};
+use rocket_shared::variable_value::VariableValue;
 
 // ============================================================
 // Header conversions
@@ -628,6 +631,90 @@ fn domain_pkce_to_oc(p: OAuth2PKCE) -> OcOAuth2PKCE {
     }
 }
 
+// ============================================================
+// Variable conversions
+// ============================================================
+
+impl From<OcVariable> for Variable {
+    fn from(oc: OcVariable) -> Self {
+        Variable {
+            key: oc.name,
+            value: oc.value.as_ref().map(|v| v.data().to_string()).unwrap_or_default(),
+            enabled: !oc.disabled.unwrap_or(false),
+            secret: false,
+            description: oc.description,
+            disabled: oc.disabled,
+            value_variants: None,
+            secret_type: None,
+        }
+    }
+}
+
+impl From<Variable> for OcVariable {
+    fn from(v: Variable) -> Self {
+        OcVariable {
+            name: v.key,
+            value: Some(VariableValue::simple(v.value)),
+            description: v.description,
+            // Omit disabled entirely when enabled (cleaner YAML output).
+            disabled: if v.enabled { None } else { Some(true) },
+        }
+    }
+}
+
+impl From<OcSecretVariable> for Variable {
+    fn from(oc: OcSecretVariable) -> Self {
+        Variable {
+            key: oc.name,
+            // Secrets don't store values in YAML.
+            value: String::new(),
+            enabled: !oc.disabled.unwrap_or(false),
+            secret: true,
+            description: oc.description,
+            disabled: oc.disabled,
+            value_variants: None,
+            secret_type: oc.secret_type,
+        }
+    }
+}
+
+// ============================================================
+// Environment conversions
+// ============================================================
+
+impl From<OcEnvironment> for Environment {
+    fn from(oc: OcEnvironment) -> Self {
+        Environment {
+            name: oc.name,
+            variables: oc.variables.into_iter().map(Variable::from).collect(),
+            color: oc.color,
+            description: oc.description,
+            extends: oc.extends,
+            dot_env_file_path: oc.dot_env_file_path,
+            // Domain uses Vec<serde_json::Value> as a placeholder for client certs.
+            client_certificates: oc.client_certificates.into_iter()
+                .map(|c| serde_json::to_value(c).unwrap_or_default())
+                .collect(),
+        }
+    }
+}
+
+impl From<Environment> for OcEnvironment {
+    fn from(env: Environment) -> Self {
+        OcEnvironment {
+            name: env.name,
+            color: env.color,
+            description: env.description,
+            variables: env.variables.into_iter().map(OcVariable::from).collect(),
+            client_certificates: env.client_certificates.into_iter()
+                .filter_map(|v| serde_json::from_value(v).ok())
+                .collect(),
+            extends: env.extends,
+            dot_env_file_path: env.dot_env_file_path,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -824,5 +911,88 @@ mod tests {
             }
             _ => panic!("expected OAuth2"),
         }
+    }
+
+    // ---- Variable tests ----
+
+    #[test]
+    fn variable_oc_to_domain() {
+        let oc = OcVariable {
+            name: "HOST".into(),
+            value: Some(VariableValue::simple("localhost")),
+            description: Some(Description::text("Server host")),
+            disabled: Some(true),
+        };
+        let v: Variable = oc.into();
+        assert_eq!(v.key, "HOST");
+        assert_eq!(v.value, "localhost");
+        assert!(!v.enabled);
+        assert!(!v.secret);
+        assert!(v.description.is_some());
+    }
+
+    #[test]
+    fn variable_domain_to_oc() {
+        let v = Variable::new("BASE_URL", "https://api.example.com");
+        let oc: OcVariable = v.into();
+        assert_eq!(oc.name, "BASE_URL");
+        assert!(oc.value.is_some());
+        assert_eq!(oc.disabled, None);
+    }
+
+    #[test]
+    fn secret_variable_oc_to_domain() {
+        let oc = OcSecretVariable {
+            secret: true,
+            name: "API_KEY".into(),
+            description: None,
+            disabled: None,
+            secret_type: Some("string".into()),
+        };
+        let v: Variable = oc.into();
+        assert_eq!(v.key, "API_KEY");
+        assert!(v.secret);
+        assert!(v.enabled);
+        assert_eq!(v.secret_type, Some("string".into()));
+    }
+
+    #[test]
+    fn environment_oc_to_domain() {
+        let oc = OcEnvironment {
+            name: "production".into(),
+            color: Some("#FF0000".into()),
+            description: Some(Description::text("Prod env")),
+            variables: vec![
+                OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), description: None, disabled: None },
+            ],
+            client_certificates: Vec::new(),
+            extends: Some("base".into()),
+            dot_env_file_path: Some(".env.prod".into()),
+        };
+        let env: Environment = oc.into();
+        assert_eq!(env.name, "production");
+        assert_eq!(env.color, Some("#FF0000".into()));
+        assert_eq!(env.variables.len(), 1);
+        assert_eq!(env.variables[0].key, "HOST");
+        assert_eq!(env.extends, Some("base".into()));
+    }
+
+    #[test]
+    fn environment_roundtrip() {
+        let original = Environment {
+            name: "staging".into(),
+            variables: vec![Variable::new("URL", "https://staging.example.com")],
+            color: Some("#00FF00".into()),
+            description: None,
+            extends: None,
+            dot_env_file_path: None,
+            client_certificates: Vec::new(),
+        };
+        let oc: OcEnvironment = original.clone().into();
+        let back: Environment = oc.into();
+        assert_eq!(original.name, back.name);
+        assert_eq!(original.color, back.color);
+        assert_eq!(original.variables.len(), back.variables.len());
+        assert_eq!(original.variables[0].key, back.variables[0].key);
     }
 }
