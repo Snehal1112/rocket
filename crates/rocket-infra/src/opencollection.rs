@@ -466,6 +466,255 @@ pub struct OcHttpRequest {
     pub docs: Option<String>,
 }
 
+// ============================================================
+// GraphQL Request
+// ============================================================
+
+/// GraphQL request info.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGraphQLRequestInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub request_type: Option<String>,  // "graphql"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// GraphQL body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcGraphQLBody {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variables: Option<String>,
+}
+
+/// GraphQL body variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcGraphQLBodyVariant {
+    pub title: String,
+    #[serde(default)]
+    pub selected: bool,
+    pub body: OcGraphQLBody,
+}
+
+/// GraphQL body — either a single body or array of variants.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcGraphQLBodyOrVariants {
+    Single(OcGraphQLBody),
+    Variants(Vec<OcGraphQLBodyVariant>),
+}
+
+/// GraphQL request protocol details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGraphQLRequestDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OcHttpRequestHeader>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<OcHttpRequestParam>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<OcGraphQLBodyOrVariants>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+}
+
+/// GraphQL request runtime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGraphQLRequestRuntime {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<OcVariable>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<OcScript>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<OcAssertion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<OcAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+}
+
+/// Complete GraphQL request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGraphQLRequest {
+    pub info: OcGraphQLRequestInfo,
+    pub graphql: OcGraphQLRequestDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<OcGraphQLRequestRuntime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<OcGraphQLRequestSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+// ============================================================
+// gRPC Request
+// ============================================================
+
+/// gRPC request info.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGrpcRequestInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub request_type: Option<String>,  // "grpc"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// gRPC metadata entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGrpcMetadata {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+}
+
+/// gRPC message variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcGrpcMessageVariant {
+    pub title: String,
+    #[serde(default)]
+    pub selected: bool,
+    pub message: String,
+}
+
+/// gRPC message — string or array of variants.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcGrpcMessageOrVariants {
+    Single(String),
+    Variants(Vec<OcGrpcMessageVariant>),
+}
+
+/// gRPC request protocol details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcGrpcRequestDetails {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method_type: Option<String>,  // "unary" | "client-streaming" | "server-streaming" | "bidi-streaming"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proto_file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata: Vec<OcGrpcMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<OcGrpcMessageOrVariants>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+}
+
+/// gRPC request runtime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGrpcRequestRuntime {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<OcVariable>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<OcScript>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<OcAssertion>,
+}
+
+/// Complete gRPC request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcGrpcRequest {
+    pub info: OcGrpcRequestInfo,
+    pub grpc: OcGrpcRequestDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<OcGrpcRequestRuntime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+// ============================================================
+// WebSocket Request
+// ============================================================
+
+/// WebSocket request info.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWebSocketRequestInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<OcDescription>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub request_type: Option<String>,  // "websocket"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+/// WebSocket message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcWebSocketMessage {
+    #[serde(rename = "type")]
+    pub message_type: String,  // "text" | "json" | "xml" | "binary"
+    pub data: String,
+}
+
+/// WebSocket message variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcWebSocketMessageVariant {
+    pub title: String,
+    #[serde(default)]
+    pub selected: bool,
+    pub message: OcWebSocketMessage,
+}
+
+/// WebSocket message — single or array of variants.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OcWebSocketMessageOrVariants {
+    Single(OcWebSocketMessage),
+    Variants(Vec<OcWebSocketMessageVariant>),
+}
+
+/// WebSocket request protocol details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWebSocketRequestDetails {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<OcHttpRequestHeader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<OcWebSocketMessageOrVariants>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<OcAuth>,
+}
+
+/// WebSocket request runtime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWebSocketRequestRuntime {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<OcVariable>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<OcScript>,
+}
+
+/// Complete WebSocket request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWebSocketRequest {
+    pub info: OcWebSocketRequestInfo,
+    pub websocket: OcWebSocketRequestDetails,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<OcWebSocketRequestRuntime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -908,6 +1157,65 @@ docs: "Creates a new user in the system."
         assert!(request.runtime.is_none());
         assert!(request.settings.is_none());
         assert!(request.examples.is_none());
+    }
+
+    #[test]
+    fn oc_graphql_request_yaml() {
+        let yaml = r#"
+info:
+  name: Get Users
+  type: graphql
+graphql:
+  url: "https://api.example.com/graphql"
+  body:
+    query: "query { users { id name } }"
+"#;
+        let req: OcGraphQLRequest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(req.info.name, "Get Users");
+        assert_eq!(req.graphql.url, "https://api.example.com/graphql");
+    }
+
+    #[test]
+    fn oc_grpc_request_yaml() {
+        let yaml = r#"
+info:
+  name: Get User
+  type: grpc
+grpc:
+  url: "localhost:50051"
+  method: "users.UserService/GetUser"
+  methodType: unary
+  protoFilePath: "./protos/users.proto"
+  metadata:
+    - name: authorization
+      value: "Bearer token"
+  message: '{"id": "123"}'
+"#;
+        let req: OcGrpcRequest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(req.info.name, "Get User");
+        assert_eq!(req.grpc.method_type, Some("unary".into()));
+        assert_eq!(req.grpc.metadata.len(), 1);
+    }
+
+    #[test]
+    fn oc_websocket_request_yaml() {
+        let yaml = r#"
+info:
+  name: Chat
+  type: websocket
+websocket:
+  url: "wss://chat.example.com/ws"
+  headers:
+    - name: Authorization
+      value: "Bearer token"
+  message:
+    type: json
+    data: '{"action": "subscribe", "channel": "general"}'
+"#;
+        let req: OcWebSocketRequest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(req.info.name, "Chat");
+        assert_eq!(req.websocket.url, "wss://chat.example.com/ws");
+        assert!(req.websocket.message.is_some());
     }
 
     #[test]
