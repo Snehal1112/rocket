@@ -66,7 +66,7 @@ pub struct OAuth2Settings {
 }
 
 /// OAuth2 flow — discriminated by `flow` field.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "flow", rename_all = "snake_case")]
 pub enum OAuth2Flow {
     #[serde(rename = "client_credentials")]
