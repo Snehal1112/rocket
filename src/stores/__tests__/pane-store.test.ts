@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { usePaneStore } from '../pane-store';
-import type { LeafNode, SplitNode, ResponseState, RequestTab } from '@/types/pane-types';
+import type { LeafNode, SplitNode, ResponseState, RequestTab, CollectionTab } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { scheduleAutoSave } from '@/lib/auto-save';
@@ -343,5 +343,54 @@ describe('pane-store', () => {
       dirtyWithSource.title,
       dirtyWithSource.request,
     );
+  });
+
+  it('closeAll flushes dirty tabs in a split pane layout', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    // Open one tab so we can split.
+    usePaneStore.getState().openTab(makeTab());
+    const initialLeaf = getLeaf();
+    usePaneStore.getState().splitGroup(initialLeaf.groupId, 'horizontal');
+
+    // Get the right pane's groupId.
+    const { root } = usePaneStore.getState();
+    if (root.type !== 'split') throw new Error('Expected split');
+    const rightLeaf = root.children[1] as LeafNode;
+
+    // Add a dirty tab with source to the right pane.
+    const dirtyTab: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+      source: { collection: 'col', path: 'req' },
+    };
+    usePaneStore.getState().openTab(dirtyTab, rightLeaf.groupId);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).toHaveBeenCalledWith(
+      dirtyTab.id,
+      'col',
+      'req',
+      dirtyTab.title,
+      dirtyTab.request,
+    );
+  });
+
+  it('closeAll does not call scheduleAutoSave for non-request tabs', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    const collectionTab: CollectionTab = {
+      id: crypto.randomUUID(),
+      title: 'My Collection',
+      isDirty: true,
+      tabType: 'collection',
+      collectionName: 'my-col',
+    };
+    usePaneStore.getState().openTab(collectionTab);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).not.toHaveBeenCalled();
   });
 });
