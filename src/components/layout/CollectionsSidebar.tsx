@@ -36,7 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Folder, Search, Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
@@ -285,20 +284,7 @@ export function CollectionsSidebar() {
 
   return (
     <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
-      <Tabs
-        defaultValue="collections"
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <TabsList className="w-full shrink-0 rounded-none border-b border-border/50 h-9 px-2">
-          <TabsTrigger value="collections" className="flex-1 text-xs">
-            Collections
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent
-          value="collections"
-          className="flex-1 flex flex-col overflow-hidden mt-0"
-        >
+      <div className="flex-1 flex flex-col overflow-hidden">
           {/* View selector and action icons. */}
           <div className="flex items-center gap-1 px-2 pt-2 pb-1">
             <Select
@@ -428,8 +414,7 @@ export function CollectionsSidebar() {
               <HistoryPanel />
             </div>
           )}
-        </TabsContent>
-      </Tabs>
+      </div>
 
       <AlertDialog
         open={!!deleteTarget}
