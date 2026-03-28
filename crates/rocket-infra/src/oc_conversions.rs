@@ -746,6 +746,9 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let variables = oc.runtime.as_ref()
         .map(|r| r.variables.iter().map(|v| serde_json::to_value(v).unwrap_or_default()).collect())
         .unwrap_or_default();
+    let runtime_auth = oc.runtime.as_ref()
+        .and_then(|r| r.auth.clone())
+        .map(Auth::from);
 
     // Examples.
     let examples = oc.examples.unwrap_or_default().into_iter()
@@ -782,13 +785,15 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         examples,
         docs,
         variables,
+        runtime_auth,
     }
 }
 
 /// Convert a domain Request back to an OC HTTP request.
 pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
-    // Extract params before req fields are consumed by field reads below.
+    // Extract params and runtime_auth before req fields are consumed.
     let params = merge_params(&req.query_params, &req.path_params);
+    let runtime_auth = req.runtime_auth.map(OcAuth::from);
 
     let info = OcHttpRequestInfo {
         name: req.name,
@@ -831,7 +836,8 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
     let has_runtime = !scripts.is_empty()
         || !req.assertions.is_empty()
         || !actions.is_empty()
-        || !req.variables.is_empty();
+        || !req.variables.is_empty()
+        || runtime_auth.is_some();
     let runtime = if has_runtime {
         Some(OcHttpRequestRuntime {
             variables: req.variables.into_iter()
@@ -840,7 +846,7 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
             scripts,
             assertions: req.assertions,
             actions,
-            auth: None,
+            auth: runtime_auth,
         })
     } else {
         None
@@ -1764,6 +1770,33 @@ http:
         assert_eq!(back.http.params.len(), 3);
         assert_eq!(back.http.params[0].param_type, Some("query".into()));
         assert_eq!(back.http.params[2].param_type, Some("path".into()));
+    }
+
+    #[test]
+    fn runtime_auth_survives_roundtrip() {
+        let yaml = r#"
+info:
+  name: Runtime Auth
+  type: http
+http:
+  method: GET
+  url: "https://api.example.com"
+runtime:
+  auth:
+    type: bearer
+    token: runtime-token
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        assert!(req.runtime_auth.is_some());
+        match req.runtime_auth.as_ref().unwrap() {
+            Auth::Bearer { token } => assert_eq!(token, "runtime-token"),
+            _ => panic!("expected Bearer"),
+        }
+
+        let back = request_to_oc_http_request(req);
+        let rt = back.runtime.unwrap();
+        assert!(rt.auth.is_some());
     }
 
     #[test]

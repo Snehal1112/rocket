@@ -52,6 +52,9 @@ pub struct Request {
     /// Request-level variables. Typed as Value until rocket-environment is wired as a dependency.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<serde_json::Value>,
+    /// Auth override applied at runtime (e.g. runtime.auth in OC YAML).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_auth: Option<Auth>,
 }
 
 impl Request {
@@ -82,6 +85,7 @@ impl Request {
             examples: Vec::new(),
             docs: None,
             variables: Vec::new(),
+            runtime_auth: None,
         }
     }
 
