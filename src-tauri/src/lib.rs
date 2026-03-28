@@ -30,18 +30,37 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Determine data directories.
+            // Determine the application data directory.
             let data_dir = dirs::home_dir()
                 .expect("Home directory not found")
                 .join(".rocket-api");
-            let collections_dir = data_dir.join("collections");
-            let environments_dir = data_dir.join("environments");
-            let history_dir = data_dir.join("history");
-            let templates_dir = data_dir.join("templates");
-            let cookies_dir = data_dir.join("cookies");
+            std::fs::create_dir_all(&data_dir).ok();
+
+            // Workspace service — manages workspace switching.
+            let active_workspace_path: Arc<Mutex<PathBuf>> =
+                Arc::new(Mutex::new(PathBuf::new()));
+            let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
+            let workspace_svc = WorkspaceService::new(
+                workspace_repo,
+                Box::new(NullEventPublisher),
+                Arc::clone(&active_workspace_path),
+            );
+
+            // Bootstrap the active workspace path from persisted state.
+            let active_ws = workspace_svc
+                .get_active()
+                .expect("failed to load active workspace on startup");
+            *active_workspace_path.lock().unwrap() = active_ws.path.clone();
+
+            // Derive per-service directories from the active workspace.
+            let workspace_base = active_ws.path.clone();
+            let collections_dir = workspace_base.join("collections");
+            let environments_dir = workspace_base.join("environments");
+            let history_dir = workspace_base.join("history");
+            let templates_dir = workspace_base.join("templates");
+            let cookies_dir = workspace_base.join("cookies");
 
             for dir in [
-                &data_dir,
                 &collections_dir,
                 &environments_dir,
                 &history_dir,
@@ -89,22 +108,6 @@ pub fn run() {
                 Box::new(rocket_git::Git2Service::new()),
                 Box::new(NullEventPublisher),
             );
-
-            // Workspace service — manages workspace switching.
-            let active_workspace_path: Arc<Mutex<PathBuf>> =
-                Arc::new(Mutex::new(PathBuf::new()));
-            let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
-            let workspace_svc = WorkspaceService::new(
-                workspace_repo,
-                Box::new(NullEventPublisher),
-                Arc::clone(&active_workspace_path),
-            );
-
-            // Bootstrap the active workspace path from persisted state.
-            let active_ws = workspace_svc
-                .get_active()
-                .expect("failed to load active workspace on startup");
-            *active_workspace_path.lock().unwrap() = active_ws.path.clone();
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
