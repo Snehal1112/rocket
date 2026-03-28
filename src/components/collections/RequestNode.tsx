@@ -23,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { cn } from '@/lib/utils';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { renameRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
@@ -30,17 +31,6 @@ import { isActiveRequest } from './tree-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import type { RequestTab, RequestState } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
-
-// Text color per HTTP method.
-const METHOD_COLOR: Record<string, string> = {
-  GET:     'text-emerald-500',
-  POST:    'text-amber-500',
-  PUT:     'text-blue-500',
-  PATCH:   'text-violet-500',
-  DELETE:  'text-red-500',
-  OPTIONS: 'text-cyan-500',
-  HEAD:    'text-pink-500',
-};
 
 interface RequestNodeProps {
   uid: string;
@@ -86,7 +76,7 @@ export function RequestNode({
     usePaneStore.getState().openTab(tab);
   }
 
-  const methodColor = METHOD_COLOR[method.toUpperCase()] ?? 'text-foreground';
+  const methodColor = METHOD_TEXT_COLOR[method.toUpperCase()] ?? 'text-foreground';
 
   return (
     <ContextMenu>

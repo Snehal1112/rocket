@@ -1,21 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { METHOD_CHART_COLOR } from '@/lib/colors';
 import type { CollectionItem } from '@/lib/tauri-api';
 
 interface MethodBreakdownProps {
   items: CollectionItem[];
 }
-
-// Maps each HTTP method to its text and background color classes.
-const METHOD_COLORS: Record<string, { text: string; bg: string }> = {
-  GET:     { text: 'text-emerald-500', bg: 'bg-emerald-500' },
-  POST:    { text: 'text-amber-500',   bg: 'bg-amber-500' },
-  PUT:     { text: 'text-blue-500',    bg: 'bg-blue-500' },
-  PATCH:   { text: 'text-violet-500',  bg: 'bg-violet-500' },
-  DELETE:  { text: 'text-red-500',     bg: 'bg-red-500' },
-  OPTIONS: { text: 'text-cyan-500',    bg: 'bg-cyan-500' },
-  HEAD:    { text: 'text-pink-500',    bg: 'bg-pink-500' },
-};
 
 // Recursively counts HTTP methods across all requests, including nested folders.
 function countMethods(items: CollectionItem[]): Record<string, number> {
@@ -50,7 +40,7 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
           <p className="text-xs text-muted-foreground">No requests in this collection.</p>
         ) : (
           rows.map(([method, count]) => {
-            const color = METHOD_COLORS[method] ?? { text: 'text-foreground', bg: 'bg-foreground' };
+            const color = METHOD_CHART_COLOR[method] ?? { text: 'text-foreground', bg: 'bg-foreground' };
             const pct = total > 0 ? Math.round((count / total) * 100) : 0;
             return (
               <div key={method} className="flex items-center gap-3">
