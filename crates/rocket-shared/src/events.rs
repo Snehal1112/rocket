@@ -92,4 +92,54 @@ mod tests {
         let pub_ = NullEventPublisher;
         pub_.publish(DomainEvent::HistoryCleared);
     }
+
+    #[test]
+    fn workspace_created_serializes() {
+        let event = DomainEvent::WorkspaceCreated {
+            id: "abc-123".into(),
+            name: "My API".into(),
+            path: "/home/user/my-api".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("workspaceCreated") || json.contains("WorkspaceCreated"));
+        assert!(json.contains("abc-123"));
+        assert!(json.contains("My API"));
+    }
+
+    #[test]
+    fn workspace_switched_serializes() {
+        let event = DomainEvent::WorkspaceSwitched {
+            id: "def-456".into(),
+            name: "Staging".into(),
+            path: "/home/user/staging".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("def-456"));
+    }
+
+    #[test]
+    fn workspace_renamed_serializes() {
+        let event = DomainEvent::WorkspaceRenamed {
+            id: "abc-123".into(),
+            old_name: "Old".into(),
+            new_name: "New".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("Old"));
+        assert!(json.contains("New"));
+    }
+
+    #[test]
+    fn workspace_closed_serializes() {
+        let event = DomainEvent::WorkspaceClosed { id: "abc-123".into() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("abc-123"));
+    }
+
+    #[test]
+    fn workspace_deleted_serializes() {
+        let event = DomainEvent::WorkspaceDeleted { id: "abc-123".into() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("abc-123"));
+    }
 }
