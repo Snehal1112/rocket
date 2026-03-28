@@ -1,6 +1,6 @@
-import { X, Folder } from 'lucide-react';
+import { X, Folder, GitBranch } from 'lucide-react';
 import type { Tab, HttpMethod } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import { isRequestTab, isGitTab } from '@/types/pane-types';
 
 // Method text colors matching legacy constants.
 const METHOD_TEXT_COLORS: Record<HttpMethod, string> = {
@@ -53,6 +53,8 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
         <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
           {tab.request.method}
         </span>
+      ) : isGitTab(tab) ? (
+        <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
       ) : (
         <Folder className="h-3 w-3 shrink-0 text-primary" />
       )}
