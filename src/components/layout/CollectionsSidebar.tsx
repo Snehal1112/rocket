@@ -291,7 +291,7 @@ export function CollectionsSidebar() {
               value={view}
               onValueChange={(v) => setView(v as "collections" | "history")}
             >
-              <SelectTrigger className="h-8 flex-1 text-xs">
+              <SelectTrigger className="h-8 flex-1 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -330,7 +330,7 @@ export function CollectionsSidebar() {
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    className="h-7 pl-7 text-xs"
+                    className="h-8 pl-7 text-sm"
                     placeholder="Search requests..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -341,7 +341,7 @@ export function CollectionsSidebar() {
                   <div className="px-1">
                     <Input
                       autoFocus
-                      className="h-7 text-xs"
+                      className="h-8 text-sm"
                       placeholder="Collection name"
                       value={newName}
                       onChange={(e) => {
@@ -363,7 +363,7 @@ export function CollectionsSidebar() {
                       }}
                     />
                     {createError && (
-                      <p className="text-2xs text-destructive mt-0.5 px-1">
+                      <p className="text-xs text-destructive mt-0.5 px-1">
                         {createError}
                       </p>
                     )}
@@ -378,13 +378,13 @@ export function CollectionsSidebar() {
                     {summaries.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-8 px-4">
                         <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-xs text-muted-foreground mb-3">
+                        <p className="text-sm text-muted-foreground mb-3">
                           No collections yet.
                         </p>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-xs"
+                          className="text-sm"
                           onClick={() => setIsCreating(true)}
                         >
                           <Plus className="h-3.5 w-3.5 mr-1.5" />

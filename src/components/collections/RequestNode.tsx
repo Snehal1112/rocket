@@ -94,17 +94,17 @@ export function RequestNode({
         <div className="group relative flex items-center">
           <TreeItem value={uid} active={active} className="flex-1">
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
+              className="flex items-center gap-1 w-full px-2 py-0.5 text-sm rounded-sm cursor-pointer"
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <span className={cn('w-10 shrink-0 font-mono text-2xs font-bold', methodColor)}>
+              <span className={cn('w-10 shrink-0 font-mono text-2xs font-semibold', methodColor)}>
                 {method}
               </span>
               {isRenaming ? (
                 <Input
                   autoFocus
-                  className="h-6 text-xs flex-1"
+                  className="h-6 text-sm flex-1"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {

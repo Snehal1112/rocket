@@ -150,7 +150,7 @@ export function CollectionNode({
         <div className="group relative flex items-center">
           <TreeItem value={summary.uid} open={open} onOpenChange={setOpen} className="flex-1">
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
+              className="flex items-center gap-1 w-full px-2 py-0.5 text-sm rounded-sm cursor-pointer"
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
@@ -161,7 +161,7 @@ export function CollectionNode({
               }
               {isRenaming ? (
                 <Input
-                  autoFocus className="h-6 text-xs flex-1"
+                  autoFocus className="h-6 text-sm flex-1"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') void handleRename(); if (e.key === 'Escape') setIsRenaming(false); }}
@@ -256,10 +256,10 @@ export function CollectionNode({
             );
           })}
           {creatingRequest && (
-            <div className="flex items-center gap-1 px-2 py-0.5 text-xs">
+            <div className="flex items-center gap-1 px-2 py-0.5 text-sm">
               <Input
                 autoFocus
-                className="h-5 text-xs flex-1"
+                className="h-5 text-sm flex-1"
                 placeholder="Request name"
                 value={newRequestName}
                 onChange={(e) => setNewRequestName(e.target.value)}
