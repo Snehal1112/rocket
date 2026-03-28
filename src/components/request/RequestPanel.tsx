@@ -32,6 +32,7 @@ import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import { SaveRequestButton } from './SaveRequestButton';
 import { VariableAwareUrlInput } from './VariableAwareUrlInput';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type {
   RequestTab,
   HttpMethod,
@@ -45,16 +46,6 @@ import { getCollectionSettings } from '@/lib/tauri-api';
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
 ];
-
-const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: 'text-green-600 dark:text-green-400',
-  POST: 'text-blue-600 dark:text-blue-400',
-  PUT: 'text-orange-600 dark:text-orange-400',
-  PATCH: 'text-yellow-600 dark:text-yellow-400',
-  DELETE: 'text-red-600 dark:text-red-400',
-  OPTIONS: 'text-gray-500',
-  HEAD: 'text-gray-400',
-};
 
 type SectionTab = 'params' | 'headers' | 'body' | 'auth';
 
@@ -243,13 +234,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
           >
             <SelectTrigger
-              className={cn('h-8 w-[7rem] text-sm font-semibold', METHOD_COLORS[request.method])}
+              className={cn('h-8 w-[7rem] text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {METHODS.map((m) => (
-                <SelectItem key={m} value={m} className={cn('text-sm font-semibold', METHOD_COLORS[m])}>
+                <SelectItem key={m} value={m} className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}>
                   {m}
                 </SelectItem>
               ))}

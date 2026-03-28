@@ -1,17 +1,7 @@
 import { X, Folder, GitBranch } from 'lucide-react';
-import type { Tab, HttpMethod } from '@/types/pane-types';
+import type { Tab } from '@/types/pane-types';
 import { isRequestTab, isGitTab } from '@/types/pane-types';
-
-// Method text colors matching legacy constants.
-const METHOD_TEXT_COLORS: Record<HttpMethod, string> = {
-  GET: 'text-green-600',
-  POST: 'text-blue-600',
-  PUT: 'text-orange-600',
-  PATCH: 'text-yellow-600',
-  DELETE: 'text-red-600',
-  OPTIONS: 'text-gray-500',
-  HEAD: 'text-gray-500',
-};
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
@@ -50,7 +40,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
       }`}
     >
       {isRequestTab(tab) ? (
-        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
+        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLOR[tab.request.method] ?? ''}`}>
           {tab.request.method}
         </span>
       ) : isGitTab(tab) ? (
