@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { type } from '@tauri-apps/plugin-os'
+import { type as osType } from '@tauri-apps/plugin-os'
 import { Sun, Moon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/hooks/useTheme'
@@ -7,14 +6,8 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { WindowControls } from './WindowControls'
 
 export function TitleBar() {
-  const [platform, setPlatform] = useState<string>('linux')
   const { isDark, toggleTheme } = useTheme()
-
-  useEffect(() => {
-    type().then(setPlatform)
-  }, [])
-
-  const isMac = platform === 'macos'
+  const isMac = osType() === 'macos'
 
   return (
     <div

@@ -1,17 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@/components/ui/button'
 
 export function WindowControls() {
-  const win = getCurrentWindow()
+  const win = useMemo(() => getCurrentWindow(), [])
   const [isMaximized, setIsMaximized] = useState(false)
 
   useEffect(() => {
-    win.isMaximized().then(setIsMaximized)
+    let cancelled = false
+
+    win.isMaximized().then((m) => { if (!cancelled) setIsMaximized(m) })
+
     const unlisten = win.onResized(() => {
-      win.isMaximized().then(setIsMaximized)
+      win.isMaximized().then((m) => { if (!cancelled) setIsMaximized(m) })
     })
-    return () => { unlisten.then((fn) => fn()) }
+
+    return () => {
+      cancelled = true
+      unlisten.then((fn) => fn())
+    }
   }, [win])
 
   return (
@@ -22,7 +29,7 @@ export function WindowControls() {
         onClick={() => win.minimize()}
         aria-label="Minimize"
       >
-        <span className="text-xs">─</span>
+        <span className="text-xs" aria-hidden="true">─</span>
       </Button>
       <Button
         variant="ghost" size="icon"
@@ -30,7 +37,7 @@ export function WindowControls() {
         onClick={() => win.toggleMaximize()}
         aria-label={isMaximized ? 'Restore' : 'Maximize'}
       >
-        <span className="text-xs">{isMaximized ? '❐' : '▢'}</span>
+        <span className="text-xs" aria-hidden="true">{isMaximized ? '❐' : '▢'}</span>
       </Button>
       <Button
         variant="ghost" size="icon"
@@ -38,7 +45,7 @@ export function WindowControls() {
         onClick={() => win.close()}
         aria-label="Close"
       >
-        <span className="text-xs">✕</span>
+        <span className="text-xs" aria-hidden="true">✕</span>
       </Button>
     </div>
   )

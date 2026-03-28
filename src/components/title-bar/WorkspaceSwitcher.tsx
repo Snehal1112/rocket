@@ -35,8 +35,8 @@ export function WorkspaceSwitcher() {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => {/* open add workspace flow */}}>
-          + Add workspace
+        <DropdownMenuItem disabled className="text-muted-foreground">
+          + Add workspace (coming soon)
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
