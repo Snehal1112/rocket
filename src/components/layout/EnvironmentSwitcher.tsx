@@ -38,7 +38,7 @@ export function EnvironmentSwitcher() {
             <span
               className={cn(
                 'h-2 w-2 rounded-full',
-                activeEnvId ? 'bg-green-500' : 'bg-muted-foreground/50',
+                activeEnvId ? 'bg-green-500 dark:bg-green-400' : 'bg-muted-foreground/50',
               )}
             />
             <span className="max-w-[120px] truncate">{activeName}</span>

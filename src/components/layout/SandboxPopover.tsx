@@ -17,7 +17,7 @@ export function SandboxPopover() {
           className="h-7 w-7"
           title="JavaScript Sandbox"
         >
-          <ShieldCheck className={cn('h-4 w-4', mode === 'safe' ? 'text-green-500' : 'text-amber-500')} />
+          <ShieldCheck className={cn('h-4 w-4', mode === 'safe' ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400')} />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-3" align="end">
@@ -30,20 +30,20 @@ export function SandboxPopover() {
           className={cn(
             'w-full rounded-lg border p-3 text-left transition-colors mb-2',
             mode === 'safe'
-              ? 'border-green-500 bg-green-500/5'
+              ? 'border-green-500 dark:border-green-400 bg-green-500/5 dark:bg-green-500/10'
               : 'border-border hover:border-green-500/50',
           )}
         >
           <div className="flex items-center gap-2 mb-1">
             <div className={cn(
               'w-4 h-4 rounded-full border-2 flex items-center justify-center',
-              mode === 'safe' ? 'border-green-500' : 'border-muted-foreground/40',
+              mode === 'safe' ? 'border-green-500 dark:border-green-400' : 'border-muted-foreground/40',
             )}>
-              {mode === 'safe' && <div className="w-2 h-2 rounded-full bg-green-500" />}
+              {mode === 'safe' && <div className="w-2 h-2 rounded-full bg-green-500 dark:bg-green-400" />}
             </div>
-            <ShieldCheck className="h-4 w-4 text-green-500" />
+            <ShieldCheck className="h-4 w-4 text-green-500 dark:text-green-400" />
             <span className="text-sm font-medium">Safe Mode</span>
-            <span className="text-[10px] font-medium text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-medium text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-500/20 px-1.5 py-0.5 rounded">
               Recommended
             </span>
           </div>
@@ -59,21 +59,21 @@ export function SandboxPopover() {
           className={cn(
             'w-full rounded-lg border p-3 text-left transition-colors',
             mode === 'developer'
-              ? 'border-amber-500 bg-amber-500/5'
+              ? 'border-amber-500 dark:border-amber-400 bg-amber-500/5 dark:bg-amber-500/10'
               : 'border-border hover:border-amber-500/50',
           )}
         >
           <div className="flex items-center gap-2 mb-1">
             <div className={cn(
               'w-4 h-4 rounded-full border-2 flex items-center justify-center',
-              mode === 'developer' ? 'border-amber-500' : 'border-muted-foreground/40',
+              mode === 'developer' ? 'border-amber-500 dark:border-amber-400' : 'border-muted-foreground/40',
             )}>
-              {mode === 'developer' && <div className="w-2 h-2 rounded-full bg-amber-500" />}
+              {mode === 'developer' && <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400" />}
             </div>
-            <Code className="h-4 w-4 text-amber-500" />
+            <Code className="h-4 w-4 text-amber-500 dark:text-amber-400" />
             <span className="text-sm font-medium">Developer Mode</span>
           </div>
-          <p className="text-[10px] text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded inline-block mb-1 ml-6">
+          <p className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded inline-block mb-1 ml-6">
             Use only if you trust the authors of the collection
           </p>
           <p className="text-xs text-muted-foreground pl-6">
