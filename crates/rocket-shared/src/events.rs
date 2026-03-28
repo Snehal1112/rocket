@@ -17,6 +17,13 @@ pub enum DomainEvent {
     EnvironmentSaved { name: String },
     EnvironmentDeleted { name: String },
 
+    // Workspace events
+    WorkspaceCreated  { id: String, name: String, path: String },
+    WorkspaceSwitched { id: String, name: String, path: String },
+    WorkspaceRenamed  { id: String, old_name: String, new_name: String },
+    WorkspaceClosed   { id: String },
+    WorkspaceDeleted  { id: String },
+
     // HTTP execution events
     RequestExecuted { method: String, url: String, status: u16, duration_ms: u64 },
 
