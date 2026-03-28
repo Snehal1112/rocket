@@ -64,7 +64,7 @@ impl WorkspaceRegistry {
     pub fn name_exists(&self, name: &str, exclude_id: Option<&str>) -> bool {
         self.workspaces.iter().any(|w| {
             w.name.to_lowercase() == name.to_lowercase()
-                && exclude_id.map_or(true, |id| w.id != id)
+                && exclude_id.is_none_or(|id| w.id != id)
         })
     }
 }
