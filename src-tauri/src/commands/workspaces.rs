@@ -1,7 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rocket_app::WorkspaceService;
+use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
 use rocket_workspace::Workspace;
 use tauri::State;
@@ -33,8 +34,18 @@ pub fn create_workspace(
 pub fn switch_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
+    watcher: State<'_, NotifyFileWatcher>,
+    app: tauri::AppHandle,
 ) -> Result<Workspace, DomainError> {
-    svc.lock().unwrap().switch(&id)
+    let workspace = svc.lock().unwrap().switch(&id)?;
+    // Restart the file watcher on the new workspace's collections directory so
+    // filesystem changes in the new workspace trigger sidebar refreshes.
+    let new_collections_dir = workspace.path.join("collections");
+    std::fs::create_dir_all(&new_collections_dir).ok();
+    watcher.stop();
+    let publisher = Arc::new(crate::tauri_event_bus::TauriEventBus::new(app));
+    let _ = watcher.start(new_collections_dir, publisher);
+    Ok(workspace)
 }
 
 #[tauri::command]

@@ -10,7 +10,7 @@ use rocket_app::{
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor,
+    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
@@ -76,8 +76,11 @@ pub fn run() {
 
             // Application services — no event publishing.
             // The file watcher is the single source of truth for sidebar updates.
+            // SharedPathCollectionRepo resolves the base directory from
+            // active_workspace_path at call time, so switching workspaces
+            // automatically redirects all collection reads/writes.
             let collection_svc = CollectionService::new(
-                Box::new(FsCollectionRepo::new(collections_dir.clone())),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
             );
             let env_svc = EnvironmentService::new(
                 Box::new(FsEnvironmentRepo::new(environments_dir.clone())),

@@ -9,6 +9,7 @@ pub mod fs_history_repo;
 pub mod fs_template_repo;
 pub mod fs_workspace_repo;
 pub mod reqwest_executor;
+pub mod shared_path_collection_repo;
 
 pub use file_watcher::NotifyFileWatcher;
 pub use fs_collection_repo::FsCollectionRepo;
@@ -18,3 +19,4 @@ pub use fs_history_repo::FsHistoryRepo;
 pub use fs_template_repo::FsTemplateRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;
 pub use reqwest_executor::ReqwestExecutor;
+pub use shared_path_collection_repo::SharedPathCollectionRepo;

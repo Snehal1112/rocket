@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   listCollections,
   getCollection,
@@ -264,19 +265,29 @@ export function CollectionsSidebar() {
   useEffect(() => {
     void fetchCollections();
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+
     onCollectionChanged(() => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
-      if (cancelled)
-        fn(); // Already unmounted — immediately unsubscribe.
-      else unlisten = fn;
+      if (cancelled) fn();
+      else unlisteners.push(fn);
     });
+
+    // Reload when the user switches workspaces — the backend now reads from
+    // the new workspace path, so we just need to trigger a fresh fetch.
+    listen("workspace-switched", () => {
+      void fetchCollections();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    });
+
     return () => {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, [fetchCollections]);
 
