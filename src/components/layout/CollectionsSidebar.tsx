@@ -37,15 +37,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Folder, Search, Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { Tree } from "@/components/ui/tree";
 import { CollectionNode } from "@/components/collections/CollectionNode";
 import type { DeleteTarget } from "@/components/collections/tree-utils";
-import { GitSidebarPanel } from "@/components/git/GitSidebarPanel";
-import { useGitStore } from "@/stores/git-store";
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
@@ -55,11 +52,6 @@ export function CollectionsSidebar() {
   const [selectedId, setSelectedId] = useState<string>("");
 
   const [view, setView] = useState<"collections" | "history">("collections");
-
-  // Count changed files for the Git tab badge.
-  const gitStatus = useGitStore((s) => s.status);
-  const changedCount =
-    gitStatus?.files.filter((f) => f.status !== "unchanged").length ?? 0;
 
   const handleImport = useCallback(async () => {
     const file = await open({
@@ -301,14 +293,6 @@ export function CollectionsSidebar() {
           <TabsTrigger value="collections" className="flex-1 text-xs">
             Collections
           </TabsTrigger>
-          <TabsTrigger value="git" className="flex-1 text-xs">
-            Git
-            {changedCount > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[9px] px-1 h-4">
-                {changedCount}
-              </Badge>
-            )}
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent
@@ -444,10 +428,6 @@ export function CollectionsSidebar() {
               <HistoryPanel />
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="git" className="flex-1 overflow-hidden mt-0">
-          <GitSidebarPanel />
         </TabsContent>
       </Tabs>
 
