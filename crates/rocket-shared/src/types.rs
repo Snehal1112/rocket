@@ -133,6 +133,8 @@ pub enum BodyMode {
     Text,
     #[serde(rename = "sparql")]
     Sparql,
+    #[serde(rename = "formurlencoded")]
+    FormUrlEncoded,
     #[serde(rename = "formdata")]
     FormData,
     #[serde(rename = "binary")]

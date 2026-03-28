@@ -268,7 +268,7 @@ fn apply_body(
                     .body(data);
             }
         }
-        BodyMode::FormData => {
+        BodyMode::FormUrlEncoded => {
             if let Some(entries) = &body.form_data {
                 let params: Vec<(&str, &str)> = entries
                     .iter()
@@ -276,6 +276,33 @@ fn apply_body(
                     .map(|e| (e.key.as_str(), e.value.as_str()))
                     .collect();
                 builder = builder.form(&params);
+            }
+        }
+        BodyMode::FormData => {
+            // Multipart form — send each part with proper MIME types.
+            if let Some(entries) = &body.form_data {
+                use reqwest::multipart;
+                let mut form = multipart::Form::new();
+                for entry in entries.iter().filter(|e| e.enabled) {
+                    match entry.entry_type {
+                        rocket_shared::types::FormDataType::File => {
+                            let path = std::path::Path::new(&entry.value);
+                            if let Ok(file_bytes) = std::fs::read(path) {
+                                let file_name = path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let part = multipart::Part::bytes(file_bytes)
+                                    .file_name(file_name);
+                                form = form.part(entry.key.clone(), part);
+                            }
+                        }
+                        rocket_shared::types::FormDataType::Text => {
+                            form = form.text(entry.key.clone(), entry.value.clone());
+                        }
+                    }
+                }
+                builder = builder.multipart(form);
             }
         }
     }

@@ -151,7 +151,7 @@ impl From<OcHttpRequestBody> for Body {
                 file_path: None,
             },
             OcHttpRequestBody::FormUrlEncoded { data } => Body {
-                mode: BodyMode::FormData,
+                mode: BodyMode::FormUrlEncoded,
                 content: None,
                 form_data: Some(data.into_iter().map(form_field_to_entry).collect()),
                 file_path: None,
@@ -220,17 +220,16 @@ impl From<Body> for OcHttpRequestBody {
             BodyMode::Sparql => OcHttpRequestBody::Sparql {
                 data: b.content.unwrap_or_default(),
             },
+            BodyMode::FormUrlEncoded => {
+                let entries = b.form_data.unwrap_or_default();
+                OcHttpRequestBody::FormUrlEncoded {
+                    data: entries.into_iter().map(entry_to_form_field).collect(),
+                }
+            }
             BodyMode::FormData => {
                 let entries = b.form_data.unwrap_or_default();
-                // If any entry is a file type, emit multipart-form.
-                if entries.iter().any(|e| e.entry_type == FormDataType::File) {
-                    OcHttpRequestBody::MultipartForm {
-                        data: entries.into_iter().map(entry_to_multipart).collect(),
-                    }
-                } else {
-                    OcHttpRequestBody::FormUrlEncoded {
-                        data: entries.into_iter().map(entry_to_form_field).collect(),
-                    }
+                OcHttpRequestBody::MultipartForm {
+                    data: entries.into_iter().map(entry_to_multipart).collect(),
                 }
             }
             BodyMode::Binary => OcHttpRequestBody::File {
@@ -1479,7 +1478,7 @@ mod tests {
             OcFormField { name: "pass".into(), value: "secret".into(), description: None, disabled: Some(true) },
         ]};
         let body: Body = oc.into();
-        assert_eq!(body.mode, BodyMode::FormData);
+        assert_eq!(body.mode, BodyMode::FormUrlEncoded);
         let fd = body.form_data.unwrap();
         assert_eq!(fd.len(), 2);
         assert_eq!(fd[0].key, "user");
@@ -2103,5 +2102,61 @@ items:
         assert_eq!(items.len(), 2);
         assert!(matches!(&items[0], OcItem::Http(_)));
         assert!(matches!(&items[1], OcItem::GraphQL(_)));
+    }
+
+    #[test]
+    fn body_multipart_form_uses_formdata_mode() {
+        let oc = OcHttpRequestBody::MultipartForm { data: vec![
+            OcMultipartFormPart {
+                name: "file".into(),
+                part_type: "file".into(),
+                value: OcMultipartValue::Single("/tmp/test.txt".into()),
+                description: None,
+                content_type: Some("text/plain".into()),
+                disabled: None,
+            },
+        ]};
+        let body: Body = oc.into();
+        assert_eq!(body.mode, BodyMode::FormData);
+    }
+
+    #[test]
+    fn body_formurlencoded_roundtrip() {
+        use rocket_shared::types::{FormDataEntry, FormDataType};
+        let body = Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "user".into(),
+                value: "admin".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        };
+        let oc: OcHttpRequestBody = body.into();
+        assert!(matches!(oc, OcHttpRequestBody::FormUrlEncoded { .. }));
+    }
+
+    #[test]
+    fn body_formdata_roundtrip_emits_multipart() {
+        use rocket_shared::types::{FormDataEntry, FormDataType};
+        let body = Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "name".into(),
+                value: "test".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        };
+        let oc: OcHttpRequestBody = body.into();
+        assert!(matches!(oc, OcHttpRequestBody::MultipartForm { .. }));
     }
 }
