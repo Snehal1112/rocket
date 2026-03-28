@@ -1,7 +1,6 @@
 import { Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { EnvironmentSwitcher } from "@/components/layout/EnvironmentSwitcher";
 import { useConsoleStore } from "@/stores/console-store";
 
 interface StatusBarProps {
@@ -32,9 +31,6 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
           </span>
         )}
       </Button>
-      <div className="ml-auto">
-        <EnvironmentSwitcher />
-      </div>
     </div>
   );
 }
