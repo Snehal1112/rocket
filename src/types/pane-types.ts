@@ -75,7 +75,7 @@ export interface GitTab extends BaseTab {
 export type Tab = RequestTab | CollectionTab | DiffTab | ConflictTab | GitTab;
 
 export function isRequestTab(tab: Tab): tab is RequestTab {
-  return tab.tabType !== 'collection' && tab.tabType !== 'diff' && tab.tabType !== 'conflict';
+  return tab.tabType === 'request' || tab.tabType === 'history';
 }
 
 export function isDiffTab(tab: Tab): tab is DiffTab {
