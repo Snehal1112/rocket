@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::migration::{detect_format, migrate_collection, CollectionFormat};
 use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
 use crate::opencollection::{OcCollection, OcFolderInfo, OcHttpRequest, OcInfo};
 
@@ -151,9 +152,16 @@ impl CollectionRepository for FsCollectionRepo {
                 if name.starts_with('.') {
                     continue;
                 }
-                // Only recognize directories that contain opencollection.yml.
-                if !path.join("opencollection.yml").exists() {
-                    continue;
+                // Auto-migrate legacy JSON collections to OpenCollection YAML.
+                match detect_format(&path) {
+                    CollectionFormat::OpenCollection => {} // Already migrated.
+                    CollectionFormat::LegacyJson => {
+                        if let Err(e) = migrate_collection(&path) {
+                            log::warn!("Failed to migrate collection '{}': {}", name, e);
+                            continue;
+                        }
+                    }
+                    CollectionFormat::Empty => continue,
                 }
                 let count = count_request_files(&path);
                 let uid = read_uid_from_yaml(&path);
@@ -179,6 +187,10 @@ impl CollectionRepository for FsCollectionRepo {
         let path = self.collection_path(name);
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Collection '{}'", name)));
+        }
+        // Auto-migrate legacy JSON if needed.
+        if detect_format(&path) == CollectionFormat::LegacyJson {
+            migrate_collection(&path)?;
         }
         let root = build_folder_tree(&path)?;
         let settings = self.get_settings(name).unwrap_or_default();
@@ -996,5 +1008,46 @@ mod tests {
         // UID should be in folder.yml.
         let content = fs::read_to_string(dir.path().join("my-api/auth/folder.yml")).unwrap();
         assert!(content.contains("uid:"));
+    }
+
+    #[test]
+    fn legacy_json_collection_auto_migrated_on_list() {
+        let (dir, repo) = setup();
+        let col_dir = dir.path().join("legacy-api");
+        fs::create_dir(&col_dir).unwrap();
+
+        // Write a legacy JSON request (no opencollection.yml).
+        let json = r#"{"uid":"999","name":"Old Request","method":"GET","url":"/old","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col_dir.join("old-request.json"), json).unwrap();
+
+        // list() should detect and migrate.
+        let list = repo.list().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "legacy-api");
+
+        // Verify migration happened.
+        assert!(col_dir.join("opencollection.yml").exists());
+        assert!(col_dir.join("old-request.yml").exists());
+        assert!(!col_dir.join("old-request.json").exists());
+    }
+
+    #[test]
+    fn legacy_json_collection_auto_migrated_on_get() {
+        let (dir, repo) = setup();
+        let col_dir = dir.path().join("legacy-api");
+        fs::create_dir(&col_dir).unwrap();
+
+        let json = r#"{"uid":"888","name":"Legacy Req","method":"POST","url":"/legacy","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col_dir.join("test.json"), json).unwrap();
+
+        // get() should auto-migrate.
+        let col = repo.get("legacy-api").unwrap();
+        assert_eq!(col.name, "legacy-api");
+        assert_eq!(col.root.request_count(), 1);
+
+        // Verify migration happened.
+        assert!(col_dir.join("opencollection.yml").exists());
+        assert!(col_dir.join("test.yml").exists());
+        assert!(!col_dir.join("test.json").exists());
     }
 }
