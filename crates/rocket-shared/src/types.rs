@@ -215,6 +215,32 @@ pub enum Auth {
     },
 }
 
+// ============================================================
+// RequestSettings
+// ============================================================
+
+/// A setting value that can be a concrete value or "inherit".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RequestSettingValue<T> {
+    Value(T),
+    Inherit(String),
+}
+
+/// Request-level execution settings.
+/// Values are optional; None means "inherit from collection/folder".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode_url: Option<RequestSettingValue<bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<RequestSettingValue<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<RequestSettingValue<bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<RequestSettingValue<f64>>,
+}
 
 #[cfg(test)]
 mod tests {

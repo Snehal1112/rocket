@@ -1,7 +1,7 @@
 use rocket_shared::action::{ActionSetVariable, HttpRequestExample};
 use rocket_shared::assertion::Assertion;
 use rocket_shared::description::{Description, Documentation};
-use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam};
+use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam, RequestSettings};
 use serde::{Deserialize, Serialize};
 
 fn generate_uid() -> String {
@@ -55,6 +55,9 @@ pub struct Request {
     /// Auth override applied at runtime (e.g. runtime.auth in OC YAML).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_auth: Option<Auth>,
+    /// Request-level execution settings (timeout, encode URL, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<RequestSettings>,
 }
 
 impl Request {
@@ -86,6 +89,7 @@ impl Request {
             docs: None,
             variables: Vec::new(),
             runtime_auth: None,
+            settings: None,
         }
     }
 

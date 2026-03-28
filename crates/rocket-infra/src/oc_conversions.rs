@@ -16,7 +16,7 @@ use rocket_shared::oauth2::{
     OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE,
     OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
 };
-use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam};
+use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam, RequestSettings, RequestSettingValue};
 use rocket_shared::variable_value::VariableValue;
 
 // ============================================================
@@ -634,6 +634,56 @@ fn domain_pkce_to_oc(p: OAuth2PKCE) -> OcOAuth2PKCE {
 }
 
 // ============================================================
+// Settings conversions
+// ============================================================
+
+fn oc_settings_to_domain(oc: OcHttpRequestSettings) -> RequestSettings {
+    RequestSettings {
+        encode_url: oc.encode_url.map(inheritable_bool_to_domain),
+        timeout: oc.timeout.map(inheritable_number_to_domain),
+        follow_redirects: oc.follow_redirects.map(inheritable_bool_to_domain),
+        max_redirects: oc.max_redirects.map(inheritable_number_to_domain),
+    }
+}
+
+fn domain_settings_to_oc(s: RequestSettings) -> OcHttpRequestSettings {
+    OcHttpRequestSettings {
+        encode_url: s.encode_url.map(domain_bool_to_inheritable),
+        timeout: s.timeout.map(domain_number_to_inheritable),
+        follow_redirects: s.follow_redirects.map(domain_bool_to_inheritable),
+        max_redirects: s.max_redirects.map(domain_number_to_inheritable),
+    }
+}
+
+fn inheritable_bool_to_domain(ib: InheritableBoolean) -> RequestSettingValue<bool> {
+    match ib {
+        InheritableBoolean::Value(v) => RequestSettingValue::Value(v),
+        InheritableBoolean::Inherit(s) => RequestSettingValue::Inherit(s),
+    }
+}
+
+fn inheritable_number_to_domain(n: InheritableNumber) -> RequestSettingValue<f64> {
+    match n {
+        InheritableNumber::Value(v) => RequestSettingValue::Value(v),
+        InheritableNumber::Inherit(s) => RequestSettingValue::Inherit(s),
+    }
+}
+
+fn domain_bool_to_inheritable(v: RequestSettingValue<bool>) -> InheritableBoolean {
+    match v {
+        RequestSettingValue::Value(b) => InheritableBoolean::Value(b),
+        RequestSettingValue::Inherit(s) => InheritableBoolean::Inherit(s),
+    }
+}
+
+fn domain_number_to_inheritable(v: RequestSettingValue<f64>) -> InheritableNumber {
+    match v {
+        RequestSettingValue::Value(n) => InheritableNumber::Value(n),
+        RequestSettingValue::Inherit(s) => InheritableNumber::Inherit(s),
+    }
+}
+
+// ============================================================
 // Variable conversions
 // ============================================================
 
@@ -760,6 +810,9 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         })
         .collect();
 
+    // Settings.
+    let settings = oc.settings.map(oc_settings_to_domain);
+
     // Docs.
     let docs: Option<Documentation> = oc.docs.map(Documentation::text);
 
@@ -786,14 +839,16 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         docs,
         variables,
         runtime_auth,
+        settings,
     }
 }
 
 /// Convert a domain Request back to an OC HTTP request.
 pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
-    // Extract params and runtime_auth before req fields are consumed.
+    // Extract params, runtime_auth, and settings before req fields are consumed.
     let params = merge_params(&req.query_params, &req.path_params);
     let runtime_auth = req.runtime_auth.map(OcAuth::from);
+    let settings = req.settings.map(domain_settings_to_oc);
 
     let info = OcHttpRequestInfo {
         name: req.name,
@@ -871,7 +926,7 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
         info,
         http,
         runtime,
-        settings: None,
+        settings,
         examples,
         docs,
     }
@@ -1845,5 +1900,34 @@ http:
             }
             _ => panic!("expected OAuth2"),
         }
+    }
+
+    #[test]
+    fn settings_survive_roundtrip() {
+        let yaml = r#"
+info:
+  name: With Settings
+  type: http
+http:
+  method: GET
+  url: "https://api.example.com"
+settings:
+  encodeUrl: true
+  timeout: 30000
+  followRedirects: inherit
+  maxRedirects: 5
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        let s = req.settings.as_ref().unwrap();
+        assert!(matches!(s.encode_url, Some(RequestSettingValue::Value(true))));
+        assert!(matches!(s.follow_redirects, Some(RequestSettingValue::Inherit(_))));
+
+        let back = request_to_oc_http_request(req);
+        let os = back.settings.unwrap();
+        assert_eq!(os.encode_url, Some(InheritableBoolean::Value(true)));
+        assert_eq!(os.timeout, Some(InheritableNumber::Value(30000.0)));
+        assert_eq!(os.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
+        assert_eq!(os.max_redirects, Some(InheritableNumber::Value(5.0)));
     }
 }
