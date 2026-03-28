@@ -12,7 +12,7 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 export function WorkspaceSwitcher() {
   const workspaces = useWorkspaceStore((s) => s.workspaces)
   const activeId = useWorkspaceStore((s) => s.activeWorkspaceId)
-  const setActive = useWorkspaceStore((s) => s.setActiveWorkspace)
+  const setActive = useWorkspaceStore((s) => s.switchWorkspace)
 
   const activeWorkspace = workspaces.find((w) => w.id === activeId)
 
