@@ -1,5 +1,5 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { Header } from '@/components/layout/Header';
+import { TitleBar } from '@/components/title-bar';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
 import { StatusBar } from '@/components/layout/StatusBar';
@@ -20,7 +20,7 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
-      <Header />
+      <TitleBar />
       <div className="flex-1 flex overflow-hidden">
         {!sidebarCollapsed && (
           <>
