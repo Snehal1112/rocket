@@ -698,7 +698,6 @@ impl From<OcVariable> for Variable {
             enabled: !oc.disabled.unwrap_or(false),
             secret: false,
             description: oc.description,
-            disabled: oc.disabled,
             value_variants: None,
             secret_type: None,
         }
@@ -726,7 +725,6 @@ impl From<OcSecretVariable> for Variable {
             enabled: !oc.disabled.unwrap_or(false),
             secret: true,
             description: oc.description,
-            disabled: oc.disabled,
             value_variants: None,
             secret_type: oc.secret_type,
         }

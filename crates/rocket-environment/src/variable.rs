@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use rocket_shared::description::Description;
 use rocket_shared::variable_value::VariableValueVariant;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Variable {
     pub key: String,
@@ -13,12 +13,54 @@ pub struct Variable {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<Description>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_variants: Option<Vec<VariableValueVariant>>,
     /// Secret type hint: "string" | "number" | "boolean" | "null" | "object".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_type: Option<String>,
+}
+
+// Custom deserializer that handles backward-compat `disabled` field.
+impl<'de> Deserialize<'de> for Variable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct VariableHelper {
+            key: String,
+            #[serde(default)]
+            value: String,
+            #[serde(default = "default_true")]
+            enabled: bool,
+            #[serde(default)]
+            disabled: Option<bool>,
+            #[serde(default)]
+            secret: bool,
+            #[serde(default)]
+            description: Option<Description>,
+            #[serde(default)]
+            value_variants: Option<Vec<VariableValueVariant>>,
+            #[serde(default)]
+            secret_type: Option<String>,
+        }
+
+        fn default_true() -> bool { true }
+
+        let helper = VariableHelper::deserialize(deserializer)?;
+
+        // enabled = helper.enabled AND NOT disabled.
+        // This means disabled: true overrides the default enabled: true,
+        // and an explicit enabled: false is also respected.
+        let enabled = helper.enabled && !helper.disabled.unwrap_or(false);
+
+        Ok(Variable {
+            key: helper.key,
+            value: helper.value,
+            enabled,
+            secret: helper.secret,
+            description: helper.description,
+            value_variants: helper.value_variants,
+            secret_type: helper.secret_type,
+        })
+    }
 }
 
 impl Variable {
@@ -29,7 +71,6 @@ impl Variable {
             enabled: true,
             secret: false,
             description: None,
-            disabled: None,
             value_variants: None,
             secret_type: None,
         }
@@ -42,7 +83,6 @@ impl Variable {
             enabled: true,
             secret: true,
             description: None,
-            disabled: None,
             value_variants: None,
             secret_type: None,
         }
@@ -55,7 +95,6 @@ impl Variable {
             enabled: false,
             secret: false,
             description: None,
-            disabled: None,
             value_variants: None,
             secret_type: None,
         }
@@ -90,7 +129,6 @@ mod tests {
             enabled: true,
             secret: false,
             description: Some(Description::text("The API host")),
-            disabled: None,
             value_variants: None,
             secret_type: None,
         };
@@ -106,7 +144,6 @@ mod tests {
             enabled: true,
             secret: false,
             description: None,
-            disabled: Some(false),
             value_variants: Some(vec![
                 VariableValueVariant {
                     title: "Production".into(),
@@ -132,7 +169,6 @@ mod tests {
             enabled: true,
             secret: true,
             description: None,
-            disabled: None,
             value_variants: None,
             secret_type: Some("string".into()),
         };
@@ -140,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn variable_serde_roundtrip_with_new_fields() {
+    fn variable_serde_roundtrip() {
         use rocket_shared::description::Description;
         let v = Variable {
             key: "HOST".into(),
@@ -148,12 +184,45 @@ mod tests {
             enabled: true,
             secret: false,
             description: Some(Description::text("Server host")),
-            disabled: Some(true),
             value_variants: None,
             secret_type: None,
         };
         let json = serde_json::to_string(&v).unwrap();
         let back: Variable = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn deserialize_disabled_field_sets_enabled_false() {
+        let json = r#"{"key":"X","value":"1","disabled":true}"#;
+        let v: Variable = serde_json::from_str(json).unwrap();
+        assert!(!v.enabled);
+    }
+
+    #[test]
+    fn deserialize_without_disabled_defaults_to_enabled() {
+        let json = r#"{"key":"X","value":"1"}"#;
+        let v: Variable = serde_json::from_str(json).unwrap();
+        assert!(v.enabled);
+    }
+
+    #[test]
+    fn deserialize_disabled_false_keeps_enabled() {
+        let json = r#"{"key":"X","value":"1","disabled":false}"#;
+        let v: Variable = serde_json::from_str(json).unwrap();
+        assert!(v.enabled);
+    }
+
+    #[test]
+    fn deserialize_explicit_enabled_false_respected() {
+        let json = r#"{"key":"X","value":"1","enabled":false}"#;
+        let v: Variable = serde_json::from_str(json).unwrap();
+        assert!(!v.enabled);
+    }
+
+    #[test]
+    fn disabled_constructor_sets_enabled_false() {
+        let v = Variable::disabled("KEY", "val");
+        assert!(!v.enabled);
     }
 }
