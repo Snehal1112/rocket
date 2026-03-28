@@ -10,6 +10,7 @@ rocket-environment.workspace = true
 rocket-git.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
+rocket-workspace = { path = "../rocket-workspace" }
 serde.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
