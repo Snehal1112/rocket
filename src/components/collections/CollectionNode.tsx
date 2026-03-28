@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useGitStore } from '@/stores/git-store';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
@@ -99,7 +100,13 @@ export function CollectionNode({
     if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; return; }
     clickTimer.current = setTimeout(() => {
       clickTimer.current = null;
-      setOpen((prev) => !prev);
+      setOpen((prev) => {
+        if (!prev) {
+          // Tell the git store which collection is now active.
+          useGitStore.getState().setCollection(summary.path);
+        }
+        return !prev;
+      });
     }, 250);
   };
 
@@ -132,7 +139,7 @@ export function CollectionNode({
         request: createDefaultRequest(),
         response: null,
         isDirty: false,
-        source: { collection: summary.name, path: saved.fileName ?? `${name}.json` },
+        source: { collection: summary.name, path: saved.fileName ?? `${name}.yml` },
       });
     } catch (err) {
       console.error('[CollectionNode] Failed to create request:', err);

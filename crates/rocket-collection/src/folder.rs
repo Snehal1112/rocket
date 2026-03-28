@@ -5,7 +5,19 @@ fn generate_uid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// A recursive tree node: either a Request or a nested Folder.
+/// An opaque protocol item stored as raw YAML for lossless roundtrip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpaqueProtocolItem {
+    /// The protocol type: "graphql", "grpc", "websocket".
+    pub protocol: String,
+    /// The display name (from info.name).
+    pub name: String,
+    /// The raw YAML value, preserved for lossless roundtrip.
+    pub raw: serde_yaml::Value,
+}
+
+/// A recursive tree node: either a Request, a nested Folder, or an opaque protocol item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CollectionItem {
@@ -13,6 +25,9 @@ pub enum CollectionItem {
     Request(Request),
     #[serde(rename = "folder")]
     Folder(Folder),
+    /// Raw YAML for non-HTTP protocols (GraphQL, gRPC, WebSocket).
+    #[serde(rename = "opaque")]
+    OpaqueItem(OpaqueProtocolItem),
 }
 
 /// A folder containing requests and sub-folders.
@@ -64,6 +79,7 @@ impl Folder {
         self.items.iter().map(|item| match item {
             CollectionItem::Request(_) => 1,
             CollectionItem::Folder(f) => f.request_count(),
+            CollectionItem::OpaqueItem(_) => 0,
         }).sum()
     }
 

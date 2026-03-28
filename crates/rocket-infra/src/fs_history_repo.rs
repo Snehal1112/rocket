@@ -14,7 +14,7 @@ impl FsHistoryRepo {
     }
 
     fn file_path(&self, id: &str) -> PathBuf {
-        self.dir.join(format!("{}.json", id))
+        self.dir.join(format!("{}.yml", id))
     }
 }
 
@@ -27,9 +27,9 @@ impl HistoryRepository for FsHistoryRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
+            if path.extension().is_some_and(|e| e == "yml") {
                 let content = fs::read_to_string(&path)?;
-                if let Ok(h) = serde_json::from_str::<HistoryEntry>(&content) {
+                if let Ok(h) = serde_yaml::from_str::<HistoryEntry>(&content) {
                     entries.push(h);
                 }
             }
@@ -48,13 +48,15 @@ impl HistoryRepository for FsHistoryRepo {
             return Err(DomainError::NotFound(format!("HistoryEntry '{}'", id)));
         }
         let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse YAML: {e}")))
     }
 
     fn save(&self, entry: &HistoryEntry) -> DomainResult<()> {
         fs::create_dir_all(&self.dir)?;
-        let json = serde_json::to_string_pretty(entry)?;
-        fs::write(self.file_path(&entry.id), json)?;
+        let yaml = serde_yaml::to_string(entry)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
+        fs::write(self.file_path(&entry.id), yaml)?;
         Ok(())
     }
 
@@ -63,7 +65,7 @@ impl HistoryRepository for FsHistoryRepo {
             for entry in fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json") {
+                if path.extension().is_some_and(|e| e == "yml") {
                     fs::remove_file(&path)?;
                 }
             }

@@ -1,4 +1,7 @@
 pub mod file_watcher;
+pub(crate) mod migration;
+pub mod oc_conversions;
+pub mod opencollection;
 pub mod fs_collection_repo;
 pub mod fs_cookie_repo;
 pub mod fs_environment_repo;

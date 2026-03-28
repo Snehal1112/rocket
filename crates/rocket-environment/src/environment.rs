@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::variable::Variable;
+use rocket_shared::description::Description;
+
+/// OpenCollection Extensions — free-form object for custom metadata.
+pub type Extensions = serde_json::Value;
 
 /// Environment aggregate root.
 /// A named set of key-value variables used for request interpolation.
@@ -9,6 +13,16 @@ use crate::variable::Variable;
 pub struct Environment {
     pub name: String,
     pub variables: Vec<Variable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dot_env_file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub client_certificates: Vec<serde_json::Value>,
 }
 
 impl Environment {
@@ -16,6 +30,11 @@ impl Environment {
         Self {
             name: name.into(),
             variables: Vec::new(),
+            color: None,
+            description: None,
+            extends: None,
+            dot_env_file_path: None,
+            client_certificates: Vec::new(),
         }
     }
 
@@ -94,5 +113,66 @@ mod tests {
         env.set_variable(Variable::disabled("DISABLED", "no"));
         assert_eq!(env.get_value("ENABLED"), Some("yes"));
         assert_eq!(env.get_value("DISABLED"), None);
+    }
+
+    #[test]
+    fn environment_with_color_and_description() {
+        use rocket_shared::description::Description;
+        let env = Environment {
+            name: "production".into(),
+            variables: Vec::new(),
+            color: Some("#FF5733".into()),
+            description: Some(Description::text("Production environment")),
+            extends: None,
+            dot_env_file_path: None,
+            client_certificates: Vec::new(),
+        };
+        assert_eq!(env.color, Some("#FF5733".into()));
+        assert!(env.description.is_some());
+    }
+
+    #[test]
+    fn environment_with_extends() {
+        let env = Environment {
+            name: "staging".into(),
+            variables: Vec::new(),
+            color: None,
+            description: None,
+            extends: Some("production".into()),
+            dot_env_file_path: Some(".env.staging".into()),
+            client_certificates: Vec::new(),
+        };
+        assert_eq!(env.extends, Some("production".into()));
+        assert_eq!(env.dot_env_file_path, Some(".env.staging".into()));
+    }
+
+    #[test]
+    fn environment_serde_backward_compat() {
+        // Old JSON without new fields must still deserialize.
+        let json = r#"{"name":"test","variables":[]}"#;
+        let env: Environment = serde_json::from_str(json).unwrap();
+        assert_eq!(env.name, "test");
+        assert!(env.color.is_none());
+        assert!(env.description.is_none());
+        assert!(env.extends.is_none());
+        assert!(env.dot_env_file_path.is_none());
+        assert!(env.client_certificates.is_empty());
+    }
+
+    #[test]
+    fn environment_serde_roundtrip_with_new_fields() {
+        use rocket_shared::description::Description;
+        let env = Environment {
+            name: "dev".into(),
+            variables: Vec::new(),
+            color: Some("#00FF00".into()),
+            description: Some(Description::text("Dev env")),
+            extends: Some("base".into()),
+            dot_env_file_path: Some(".env.dev".into()),
+            client_certificates: Vec::new(),
+        };
+        let json = serde_json::to_string(&env).unwrap();
+        let back: Environment = serde_json::from_str(&json).unwrap();
+        assert_eq!(env, back);
     }
 }

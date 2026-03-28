@@ -4,8 +4,8 @@ mod tauri_event_bus;
 use std::sync::Arc;
 
 use rocket_app::{
-    CollectionService, CookieService, EnvironmentService, HistoryService,
-    RequestExecutionService, TemplateService,
+    CollectionService, CookieService, EnvironmentService, GitAppService,
+    HistoryService, RequestExecutionService, TemplateService,
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
@@ -84,6 +84,11 @@ pub fn run() {
                 Box::new(NullEventPublisher),
             );
 
+            let git_svc = GitAppService::new(
+                Box::new(rocket_git::Git2Service::new()),
+                Box::new(NullEventPublisher),
+            );
+
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
             app.manage(env_svc);
@@ -91,6 +96,7 @@ pub fn run() {
             app.manage(template_svc);
             app.manage(cookie_svc);
             app.manage(exec_svc);
+            app.manage(git_svc);
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
@@ -138,6 +144,32 @@ pub fn run() {
             commands::app::watch_collections,
             commands::app::stop_watching,
             commands::oauth2::oauth2_auth_code_flow,
+            commands::git::git_is_repo,
+            commands::git::git_init,
+            commands::git::git_clone,
+            commands::git::git_status,
+            commands::git::git_diff,
+            commands::git::git_diff_staged,
+            commands::git::git_stage,
+            commands::git::git_unstage,
+            commands::git::git_discard,
+            commands::git::git_commit,
+            commands::git::git_log,
+            commands::git::git_push,
+            commands::git::git_pull,
+            commands::git::git_fetch,
+            commands::git::git_branches,
+            commands::git::git_switch_branch,
+            commands::git::git_create_branch,
+            commands::git::git_delete_branch,
+            commands::git::git_merge_branch,
+            commands::git::git_stash_list,
+            commands::git::git_stash_save,
+            commands::git::git_stash_pop,
+            commands::git::git_stash_apply,
+            commands::git::git_stash_drop,
+            commands::git::git_conflicts,
+            commands::git::git_resolve_conflict,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

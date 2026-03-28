@@ -1,5 +1,6 @@
 pub mod app;
 pub mod collections;
+pub mod git;
 pub mod cookies;
 pub mod environments;
 pub mod execution;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState, ConflictTab, ConflictState } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { renameRequest } from '@/lib/tauri-api';
@@ -70,6 +70,12 @@ export interface PaneState {
   setResponse: (tabId: string, response: ResponseState) => void;
   markDirty: (tabId: string) => void;
   markClean: (tabId: string) => void;
+
+  // Diff tab action.
+  openDiffTab: (diffState: DiffState) => void;
+
+  // Conflict tab action.
+  openConflictTab: (conflictState: ConflictState) => void;
 
   // Utility.
   reset: () => void;
@@ -250,6 +256,30 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   markClean(tabId) {
     const { root } = get();
     set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: false })) });
+  },
+
+  openDiffTab(diffState) {
+    const tabId = `diff:${diffState.collectionPath}/${diffState.filePath}:${diffState.isStaged ? 'staged' : 'working'}`;
+    const tab: DiffTab = {
+      id: tabId,
+      title: `${diffState.filePath} (${diffState.isStaged ? 'Staged' : 'Working'})`,
+      isDirty: false,
+      tabType: 'diff',
+      diffState,
+    };
+    get().openTab(tab);
+  },
+
+  openConflictTab(conflictState) {
+    const tabId = `conflict:${conflictState.collectionPath}/${conflictState.filePath}`;
+    const tab: ConflictTab = {
+      id: tabId,
+      title: `${conflictState.filePath} (Conflict)`,
+      isDirty: false,
+      tabType: 'conflict',
+      conflictState,
+    };
+    get().openTab(tab);
   },
 
   reset() {

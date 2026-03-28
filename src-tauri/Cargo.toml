@@ -23,6 +23,7 @@ rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-app.workspace = true
+rocket-git.workspace = true
 rocket-infra.workspace = true
 
 # Tauri

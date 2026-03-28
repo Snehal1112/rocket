@@ -39,10 +39,45 @@ export interface CollectionTab extends BaseTab {
   activeSection?: CollectionSection;
 }
 
-export type Tab = RequestTab | CollectionTab;
+export interface DiffState {
+  filePath: string;
+  collectionPath: string;
+  oldContent: string;
+  newContent: string;
+  status: string;
+  isStaged: boolean;
+}
+
+export interface DiffTab extends BaseTab {
+  tabType: 'diff';
+  diffState: DiffState;
+}
+
+export interface ConflictState {
+  filePath: string;
+  collectionPath: string;
+  ours: string;
+  theirs: string;
+  ancestor: string | null;
+}
+
+export interface ConflictTab extends BaseTab {
+  tabType: 'conflict';
+  conflictState: ConflictState;
+}
+
+export type Tab = RequestTab | CollectionTab | DiffTab | ConflictTab;
 
 export function isRequestTab(tab: Tab): tab is RequestTab {
-  return tab.tabType !== 'collection';
+  return tab.tabType !== 'collection' && tab.tabType !== 'diff' && tab.tabType !== 'conflict';
+}
+
+export function isDiffTab(tab: Tab): tab is DiffTab {
+  return tab.tabType === 'diff';
+}
+
+export function isConflictTab(tab: Tab): tab is ConflictTab {
+  return tab.tabType === 'conflict';
 }
 
 export interface RequestState {

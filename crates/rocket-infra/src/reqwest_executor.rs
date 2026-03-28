@@ -5,7 +5,7 @@ use reqwest::{redirect, Client, Method};
 
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::types::{ApiKeyLocation, Auth, Body, BodyMode, Header};
+use rocket_shared::types::{Auth, Body, BodyMode, Header};
 
 pub struct ReqwestExecutor;
 
@@ -48,7 +48,7 @@ impl HttpExecutor for ReqwestExecutor {
         }
 
         // Apply authentication.
-        builder = apply_auth(builder, &request.auth, &request.method)?;
+        builder = apply_auth(builder, &request.auth, &request.method).await?;
 
         // Apply request body.
         builder = apply_body(builder, &request.body)?;
@@ -121,7 +121,7 @@ fn map_method(method: &rocket_shared::types::HttpMethod) -> Method {
     }
 }
 
-fn apply_auth(
+async fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &Auth,
     method: &rocket_shared::types::HttpMethod,
@@ -134,22 +134,42 @@ fn apply_auth(
         Auth::Bearer { token } => {
             builder = builder.bearer_auth(token);
         }
-        Auth::ApiKey { key, value, add_to } => match add_to {
-            ApiKeyLocation::Header => {
+        Auth::ApiKey { key, value, placement } => match placement.as_str() {
+            "header" => {
                 builder = builder.header(key.as_str(), value.as_str());
             }
-            ApiKeyLocation::Query => {
+            "query" => {
                 builder = builder.query(&[(key.as_str(), value.as_str())]);
             }
+            _ => {} // Unknown placement — skip.
         },
-        Auth::OAuth2 {
-            access_token: Some(token),
-            ..
-        } => {
-            builder = builder.bearer_auth(token);
+        Auth::OAuth2(flow) => {
+            match flow {
+                rocket_shared::oauth2::OAuth2Flow::ClientCredentials {
+                    access_token_url,
+                    credentials,
+                    scope,
+                    ..
+                } => {
+                    let token = fetch_client_credentials_token(
+                        access_token_url,
+                        credentials,
+                        scope.as_deref(),
+                    )
+                    .await?;
+                    builder = builder.bearer_auth(&token);
+                }
+                _ => {
+                    // Other OAuth2 flows (authorization_code, implicit, resource_owner_password)
+                    // require user interaction and are not yet implemented.
+                }
+            }
         }
-        Auth::OAuth2 { .. } => {
-            // No access token available yet; skip auth header.
+        Auth::Inherit => {
+            // Inherits from parent — resolved before execution.
+        }
+        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } => {
+            // Not yet implemented in HTTP executor.
         }
         Auth::AwsSigV4 {
             access_key,
@@ -157,6 +177,7 @@ fn apply_auth(
             region,
             service,
             session_token,
+            profile_name: _,
         } => {
             use rocket_http::aws_sig::{sign_request, AwsCredentials};
 
@@ -208,6 +229,58 @@ fn apply_auth(
     Ok(builder)
 }
 
+/// Fetch an access token using the OAuth2 client_credentials grant.
+async fn fetch_client_credentials_token(
+    access_token_url: &str,
+    credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
+    scope: Option<&str>,
+) -> DomainResult<String> {
+    let client = Client::new();
+    let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
+    if let Some(s) = scope {
+        params.push(("scope".to_string(), s.to_string()));
+    }
+
+    let placement = credentials.placement.as_deref().unwrap_or("basic_auth_header");
+    let req = match placement {
+        "body" => {
+            params.push(("client_id".to_string(), credentials.client_id.clone()));
+            params.push(("client_secret".to_string(), credentials.client_secret.clone()));
+            client.post(access_token_url).form(&params)
+        }
+        _ => {
+            // Default: Basic Auth header.
+            client
+                .post(access_token_url)
+                .form(&params)
+                .basic_auth(&credentials.client_id, Some(&credentials.client_secret))
+        }
+    };
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| DomainError::Http(format!("OAuth2 token request failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(DomainError::Http(format!(
+            "OAuth2 token endpoint returned {status}: {body}"
+        )));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| DomainError::Http(format!("OAuth2 token response parse error: {e}")))?;
+
+    json["access_token"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| DomainError::Http("OAuth2 response missing access_token".into()))
+}
+
 fn apply_body(
     mut builder: reqwest::RequestBuilder,
     body: &Option<Body>,
@@ -236,6 +309,12 @@ fn apply_body(
                 .header("Content-Type", "text/plain")
                 .body(content.to_string());
         }
+        BodyMode::Sparql => {
+            let content = body.content.as_deref().unwrap_or("");
+            builder = builder
+                .header("Content-Type", "application/sparql-query")
+                .body(content.to_string());
+        }
         BodyMode::Binary => {
             if let Some(file_path) = &body.file_path {
                 let path = std::path::Path::new(file_path);
@@ -259,7 +338,7 @@ fn apply_body(
                     .body(data);
             }
         }
-        BodyMode::FormData => {
+        BodyMode::FormUrlEncoded => {
             if let Some(entries) = &body.form_data {
                 let params: Vec<(&str, &str)> = entries
                     .iter()
@@ -267,6 +346,33 @@ fn apply_body(
                     .map(|e| (e.key.as_str(), e.value.as_str()))
                     .collect();
                 builder = builder.form(&params);
+            }
+        }
+        BodyMode::FormData => {
+            // Multipart form — send each part with proper MIME types.
+            if let Some(entries) = &body.form_data {
+                use reqwest::multipart;
+                let mut form = multipart::Form::new();
+                for entry in entries.iter().filter(|e| e.enabled) {
+                    match entry.entry_type {
+                        rocket_shared::types::FormDataType::File => {
+                            let path = std::path::Path::new(&entry.value);
+                            if let Ok(file_bytes) = std::fs::read(path) {
+                                let file_name = path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let part = multipart::Part::bytes(file_bytes)
+                                    .file_name(file_name);
+                                form = form.part(entry.key.clone(), part);
+                            }
+                        }
+                        rocket_shared::types::FormDataType::Text => {
+                            form = form.text(entry.key.clone(), entry.value.clone());
+                        }
+                    }
+                }
+                builder = builder.multipart(form);
             }
         }
     }
@@ -373,5 +479,108 @@ mod tests {
         let response = executor.execute(&req).await.unwrap();
         assert!(response.is_success());
         assert_eq!(response.status, 200);
+    }
+}
+
+#[cfg(test)]
+mod oauth2_tests {
+    use super::*;
+    use rocket_shared::oauth2::OAuth2ClientCredentials;
+    use wiremock::matchers::{header_exists, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn client_credentials_fetches_token_via_basic_auth() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(header_exists("Authorization"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "access_token": "test-token-abc",
+                    "token_type": "bearer",
+                    "expires_in": 3600
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let token_url = format!("{}/token", mock_server.uri());
+        let token = fetch_client_credentials_token(
+            &token_url,
+            &OAuth2ClientCredentials {
+                client_id: "my-client".into(),
+                client_secret: "my-secret".into(),
+                placement: None,
+            },
+            Some("read write"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(token, "test-token-abc");
+    }
+
+    #[tokio::test]
+    async fn client_credentials_body_placement() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "access_token": "body-token-xyz",
+                    "token_type": "bearer"
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let token_url = format!("{}/token", mock_server.uri());
+        let token = fetch_client_credentials_token(
+            &token_url,
+            &OAuth2ClientCredentials {
+                client_id: "cid".into(),
+                client_secret: "csecret".into(),
+                placement: Some("body".into()),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(token, "body-token-xyz");
+    }
+
+    #[tokio::test]
+    async fn client_credentials_error_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                    "error": "invalid_client"
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let token_url = format!("{}/token", mock_server.uri());
+        let result = fetch_client_credentials_token(
+            &token_url,
+            &OAuth2ClientCredentials {
+                client_id: "bad".into(),
+                client_secret: "bad".into(),
+                placement: None,
+            },
+            None,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("401"), "Error should mention status: {}", err);
     }
 }

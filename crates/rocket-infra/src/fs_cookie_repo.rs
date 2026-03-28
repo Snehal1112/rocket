@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use rocket_http::{CookieJar, CookieRepository};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 
 pub struct FsCookieRepo {
     dir: PathBuf,
@@ -16,7 +16,7 @@ impl FsCookieRepo {
     /// Sanitize domain for use as a filename (replace dots and colons).
     fn file_path(&self, domain: &str) -> PathBuf {
         let sanitized = domain.replace(['.', ':'], "_");
-        self.dir.join(format!("{}.json", sanitized))
+        self.dir.join(format!("{}.yml", sanitized))
     }
 }
 
@@ -29,9 +29,9 @@ impl CookieRepository for FsCookieRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
+            if path.extension().is_some_and(|e| e == "yml") {
                 let content = fs::read_to_string(&path)?;
-                if let Ok(jar) = serde_json::from_str::<CookieJar>(&content) {
+                if let Ok(jar) = serde_yaml::from_str::<CookieJar>(&content) {
                     result.push(jar);
                 }
             }
@@ -45,13 +45,16 @@ impl CookieRepository for FsCookieRepo {
             return Ok(None);
         }
         let content = fs::read_to_string(&path)?;
-        Ok(Some(serde_json::from_str(&content)?))
+        let jar = serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse YAML: {e}")))?;
+        Ok(Some(jar))
     }
 
     fn save(&self, jar: &CookieJar) -> DomainResult<()> {
         fs::create_dir_all(&self.dir)?;
-        let json = serde_json::to_string_pretty(jar)?;
-        fs::write(self.file_path(&jar.domain), json)?;
+        let yaml = serde_yaml::to_string(jar)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
+        fs::write(self.file_path(&jar.domain), yaml)?;
         Ok(())
     }
 
@@ -60,7 +63,7 @@ impl CookieRepository for FsCookieRepo {
             for entry in fs::read_dir(&self.dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json") {
+                if path.extension().is_some_and(|e| e == "yml") {
                     fs::remove_file(&path)?;
                 }
             }

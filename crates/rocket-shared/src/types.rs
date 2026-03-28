@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use crate::description::Description;
 use crate::error::DomainError;
 
 // ============================================================
@@ -64,6 +65,8 @@ pub struct QueryParam {
     pub key: String,
     pub value: String,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 // ============================================================
@@ -76,6 +79,8 @@ pub struct Header {
     pub key: String,
     pub value: String,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 impl Header {
@@ -84,6 +89,7 @@ impl Header {
             key: key.into(),
             value: value.into(),
             enabled: true,
+            description: None,
         }
     }
 
@@ -92,8 +98,22 @@ impl Header {
             key: key.into(),
             value: value.into(),
             enabled: false,
+            description: None,
         }
     }
+}
+
+// ============================================================
+// PathParam
+// ============================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathParam {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 // ============================================================
@@ -111,6 +131,10 @@ pub enum BodyMode {
     Xml,
     #[serde(rename = "text")]
     Text,
+    #[serde(rename = "sparql")]
+    Sparql,
+    #[serde(rename = "formurlencoded")]
+    FormUrlEncoded,
     #[serde(rename = "formdata")]
     FormData,
     #[serde(rename = "binary")]
@@ -135,6 +159,10 @@ pub struct FormDataEntry {
     pub value: String,
     pub entry_type: FormDataType,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -164,19 +192,9 @@ pub enum Auth {
     ApiKey {
         key: String,
         value: String,
-        add_to: ApiKeyLocation,
+        placement: String,  // "header" | "query"
     },
-    #[serde(rename_all = "camelCase")]
-    OAuth2 {
-        grant_type: String,
-        client_id: String,
-        client_secret: String,
-        token_url: String,
-        scope: Option<String>,
-        access_token: Option<String>,
-        refresh_token: Option<String>,
-        expires_at: Option<String>,
-    },
+    OAuth2(crate::oauth2::OAuth2Flow),
     #[serde(rename_all = "camelCase")]
     AwsSigV4 {
         access_key: String,
@@ -184,16 +202,51 @@ pub enum Auth {
         region: String,
         service: String,
         session_token: Option<String>,
+        profile_name: Option<String>,
+    },
+    /// Inherits auth from the parent collection or folder.
+    Inherit,
+    Wsse {
+        username: String,
+        password: String,
+    },
+    Digest {
+        username: String,
+        password: String,
+    },
+    Ntlm {
+        username: String,
+        password: String,
+        domain: String,
     },
 }
 
+// ============================================================
+// RequestSettings
+// ============================================================
+
+/// A setting value that can be a concrete value or "inherit".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ApiKeyLocation {
-    Header,
-    Query,
+#[serde(untagged)]
+pub enum RequestSettingValue<T> {
+    Value(T),
+    Inherit(String),
 }
 
+/// Request-level execution settings.
+/// Values are optional; None means "inherit from collection/folder".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encode_url: Option<RequestSettingValue<bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<RequestSettingValue<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_redirects: Option<RequestSettingValue<bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<RequestSettingValue<f64>>,
+}
 
 #[cfg(test)]
 mod tests {
@@ -201,7 +254,7 @@ mod tests {
 
     #[test]
     fn query_param_serialization_roundtrip() {
-        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true };
+        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true, description: None };
         let json = serde_json::to_string(&param).unwrap();
         let parsed: QueryParam = serde_json::from_str(&json).unwrap();
         assert_eq!(param, parsed);
@@ -239,6 +292,20 @@ mod tests {
     }
 
     #[test]
+    fn body_mode_sparql_serialization() {
+        let body = Body {
+            mode: BodyMode::Sparql,
+            content: Some("SELECT ?s WHERE { ?s ?p ?o }".into()),
+            form_data: None,
+            file_path: None,
+        };
+        let json = serde_json::to_string(&body).unwrap();
+        assert!(json.contains("\"mode\":\"sparql\""));
+        let back: Body = serde_json::from_str(&json).unwrap();
+        assert_eq!(body, back);
+    }
+
+    #[test]
     fn auth_none_is_default() {
         assert_eq!(Auth::default(), Auth::None);
     }
@@ -268,21 +335,23 @@ mod tests {
 
     #[test]
     fn auth_oauth2_serialization_roundtrip() {
-        let auth = Auth::OAuth2 {
-            grant_type: "client_credentials".into(),
-            client_id: "my-client".into(),
-            client_secret: "my-secret".into(),
-            token_url: "https://auth.example.com/token".into(),
+        use crate::oauth2::{OAuth2Flow, OAuth2ClientCredentials};
+        let auth = Auth::OAuth2(OAuth2Flow::ClientCredentials {
+            access_token_url: "https://auth.example.com/token".into(),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "my-client".into(),
+                client_secret: "my-secret".into(),
+                placement: None,
+            },
             scope: Some("read write".into()),
-            access_token: Some("tok_abc".into()),
-            refresh_token: None,
-            expires_at: Some("2026-12-31T23:59:59Z".into()),
-        };
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        });
         let json = serde_json::to_string(&auth).unwrap();
         assert!(json.contains("\"authType\":\"o-auth2\""));
-        assert!(json.contains("\"grantType\":\"client_credentials\""));
-        assert!(json.contains("\"clientId\":\"my-client\""));
-        assert!(json.contains("\"tokenUrl\":\"https://auth.example.com/token\""));
+        assert!(json.contains("\"flow\":\"client_credentials\""));
         let parsed: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, parsed);
     }
@@ -295,6 +364,7 @@ mod tests {
             region: "us-east-1".into(),
             service: "s3".into(),
             session_token: Some("FwoGZXIvY...".into()),
+            profile_name: None,
         };
         let json = serde_json::to_string(&auth).unwrap();
         assert!(json.contains("\"authType\":\"aws-sig-v4\""));
@@ -302,5 +372,98 @@ mod tests {
         assert!(json.contains("\"sessionToken\":\"FwoGZXIvY...\""));
         let parsed: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, parsed);
+    }
+
+    #[test]
+    fn auth_awsv4_with_profile_name() {
+        let auth = Auth::AwsSigV4 {
+            access_key: "AK".into(),
+            secret_key: "SK".into(),
+            region: "us-east-1".into(),
+            service: "s3".into(),
+            session_token: None,
+            profile_name: Some("prod".into()),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        assert!(json.contains("profileName") || json.contains("profile_name"));
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn header_has_description() {
+        let h = Header {
+            key: "Auth".into(),
+            value: "Bearer tk".into(),
+            enabled: true,
+            description: Some(Description::text("Auth header")),
+        };
+        assert!(h.description.is_some());
+    }
+
+    #[test]
+    fn query_param_has_description() {
+        let p = QueryParam {
+            key: "page".into(),
+            value: "1".into(),
+            enabled: true,
+            description: Some(Description::text("Page number")),
+        };
+        assert!(p.description.is_some());
+    }
+
+    #[test]
+    fn path_param_full() {
+        let p = PathParam { name: "id".into(), value: "123".into(), description: None };
+        assert_eq!(p.name, "id");
+    }
+
+    #[test]
+    fn auth_inherit_serde() {
+        let auth = Auth::Inherit;
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_wsse_serde() {
+        let auth = Auth::Wsse { username: "user".into(), password: "pass".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_digest_serde() {
+        let auth = Auth::Digest { username: "admin".into(), password: "secret".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_ntlm_serde() {
+        let auth = Auth::Ntlm {
+            username: "CORP\\user".into(),
+            password: "p".into(),
+            domain: "CORP".into(),
+        };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+    }
+
+    #[test]
+    fn auth_apikey_placement_values() {
+        let auth = Auth::ApiKey { key: "X-Key".into(), value: "123".into(), placement: "header".into() };
+        let json = serde_json::to_string(&auth).unwrap();
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert_eq!(auth, back);
+
+        let auth2 = Auth::ApiKey { key: "token".into(), value: "abc".into(), placement: "query".into() };
+        let json2 = serde_json::to_string(&auth2).unwrap();
+        let back2: Auth = serde_json::from_str(&json2).unwrap();
+        assert_eq!(auth2, back2);
     }
 }

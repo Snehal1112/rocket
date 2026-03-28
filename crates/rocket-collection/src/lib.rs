@@ -7,7 +7,7 @@ pub mod summary;
 
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
-pub use folder::{CollectionItem, Folder};
+pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use repository::CollectionRepository;
 pub use request::Request;
 pub use settings::{CollectionSettings, CollectionVariable};
