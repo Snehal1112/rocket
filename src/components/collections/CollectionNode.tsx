@@ -139,7 +139,7 @@ export function CollectionNode({
         request: createDefaultRequest(),
         response: null,
         isDirty: false,
-        source: { collection: summary.name, path: saved.fileName ?? `${name}.json` },
+        source: { collection: summary.name, path: saved.fileName ?? `${name}.yml` },
       });
     } catch (err) {
       console.error('[CollectionNode] Failed to create request:', err);
