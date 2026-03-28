@@ -143,9 +143,8 @@ impl From<OcHttpRequestBody> for Body {
                 form_data: None,
                 file_path: None,
             },
-            // No Sparql mode in domain — map to Text.
             OcHttpRequestBody::Sparql { data } => Body {
-                mode: BodyMode::Text,
+                mode: BodyMode::Sparql,
                 content: Some(data),
                 form_data: None,
                 file_path: None,
@@ -211,6 +210,9 @@ impl From<Body> for OcHttpRequestBody {
                 data: b.content.unwrap_or_default(),
             },
             BodyMode::Xml => OcHttpRequestBody::Xml {
+                data: b.content.unwrap_or_default(),
+            },
+            BodyMode::Sparql => OcHttpRequestBody::Sparql {
                 data: b.content.unwrap_or_default(),
             },
             BodyMode::FormData => {
@@ -1275,6 +1277,16 @@ mod tests {
         let body: Body = oc.into();
         assert_eq!(body.mode, BodyMode::Json);
         assert_eq!(body.content.unwrap(), r#"{"key":"val"}"#);
+    }
+
+    #[test]
+    fn body_sparql_roundtrip() {
+        let oc = OcHttpRequestBody::Sparql { data: "SELECT ?s WHERE { ?s ?p ?o }".into() };
+        let body: Body = oc.into();
+        assert_eq!(body.mode, BodyMode::Sparql);
+        assert_eq!(body.content.as_deref(), Some("SELECT ?s WHERE { ?s ?p ?o }"));
+        let back: OcHttpRequestBody = body.into();
+        assert!(matches!(back, OcHttpRequestBody::Sparql { ref data } if data == "SELECT ?s WHERE { ?s ?p ?o }"));
     }
 
     #[test]

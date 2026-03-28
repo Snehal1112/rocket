@@ -131,6 +131,8 @@ pub enum BodyMode {
     Xml,
     #[serde(rename = "text")]
     Text,
+    #[serde(rename = "sparql")]
+    Sparql,
     #[serde(rename = "formdata")]
     FormData,
     #[serde(rename = "binary")]
@@ -255,6 +257,20 @@ mod tests {
         };
         let json = serde_json::to_string(&body).unwrap();
         assert!(json.contains("\"mode\":\"json\""));
+    }
+
+    #[test]
+    fn body_mode_sparql_serialization() {
+        let body = Body {
+            mode: BodyMode::Sparql,
+            content: Some("SELECT ?s WHERE { ?s ?p ?o }".into()),
+            form_data: None,
+            file_path: None,
+        };
+        let json = serde_json::to_string(&body).unwrap();
+        assert!(json.contains("\"mode\":\"sparql\""));
+        let back: Body = serde_json::from_str(&json).unwrap();
+        assert_eq!(body, back);
     }
 
     #[test]

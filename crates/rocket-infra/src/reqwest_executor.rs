@@ -239,6 +239,12 @@ fn apply_body(
                 .header("Content-Type", "text/plain")
                 .body(content.to_string());
         }
+        BodyMode::Sparql => {
+            let content = body.content.as_deref().unwrap_or("");
+            builder = builder
+                .header("Content-Type", "application/sparql-query")
+                .body(content.to_string());
+        }
         BodyMode::Binary => {
             if let Some(file_path) = &body.file_path {
                 let path = std::path::Path::new(file_path);
