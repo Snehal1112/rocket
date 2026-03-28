@@ -140,3 +140,137 @@ impl WorkspaceService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket_shared::error::DomainResult;
+    use rocket_shared::events::NullEventPublisher;
+    use rocket_workspace::{WorkspaceRegistry};
+    use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
+
+    struct MockWorkspaceRepo {
+        registry: Mutex<WorkspaceRegistry>,
+    }
+
+    impl MockWorkspaceRepo {
+        fn new(default_path: PathBuf) -> Self {
+            Self {
+                registry: Mutex::new(WorkspaceRegistry::new_with_default(default_path)),
+            }
+        }
+    }
+
+    impl WorkspaceRepository for MockWorkspaceRepo {
+        fn load(&self) -> DomainResult<WorkspaceRegistry> {
+            Ok(self.registry.lock().unwrap().clone())
+        }
+        fn save(&self, registry: &WorkspaceRegistry) -> DomainResult<()> {
+            *self.registry.lock().unwrap() = registry.clone();
+            Ok(())
+        }
+    }
+
+    fn make_service(tmp: &TempDir) -> WorkspaceService {
+        let default_path = tmp.path().join("default");
+        std::fs::create_dir_all(&default_path).unwrap();
+        let repo = Box::new(MockWorkspaceRepo::new(default_path.clone()));
+        let active_path = Arc::new(Mutex::new(default_path));
+        WorkspaceService::new(repo, Box::new(NullEventPublisher), active_path)
+    }
+
+    #[test]
+    fn list_returns_default() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert_eq!(svc.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn create_adds_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("New WS", tmp.path().join("new-ws")).unwrap();
+        assert_eq!(ws.name, "New WS");
+        assert_eq!(svc.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn create_rejects_duplicate_name() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.create("My WS", tmp.path().join("ws1")).unwrap();
+        assert!(svc.create("My WS", tmp.path().join("ws2")).is_err());
+    }
+
+    #[test]
+    fn create_rejects_empty_name() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.create("", tmp.path().join("ws")).is_err());
+    }
+
+    #[test]
+    fn switch_updates_active_path() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Other", tmp.path().join("other")).unwrap();
+        svc.switch(&ws.id).unwrap();
+        let active = svc.get_active().unwrap();
+        assert_eq!(active.id, ws.id);
+    }
+
+    #[test]
+    fn rename_updates_name() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Old", tmp.path().join("ws")).unwrap();
+        svc.rename(&ws.id, "New").unwrap();
+        assert!(svc.list().unwrap().iter().any(|w| w.name == "New"));
+    }
+
+    #[test]
+    fn rename_rejects_duplicate() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Alpha", tmp.path().join("ws")).unwrap();
+        assert!(svc.rename(&ws.id, "Default Workspace").is_err());
+    }
+
+    #[test]
+    fn cannot_close_last_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.close("default").is_err());
+    }
+
+    #[test]
+    fn close_switches_active_if_needed() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Other", tmp.path().join("other")).unwrap();
+        svc.switch(&ws.id).unwrap();
+        svc.close(&ws.id).unwrap();
+        assert_eq!(svc.get_active().unwrap().id, "default");
+    }
+
+    #[test]
+    fn cannot_delete_default() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.create("Other", tmp.path().join("other")).unwrap();
+        assert!(svc.delete("default").is_err());
+    }
+
+    #[test]
+    fn delete_removes_directory() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let path = tmp.path().join("to-delete");
+        std::fs::create_dir_all(&path).unwrap();
+        let ws = svc.create("ToDelete", path.clone()).unwrap();
+        svc.delete(&ws.id).unwrap();
+        assert!(!path.exists());
+    }
+}
