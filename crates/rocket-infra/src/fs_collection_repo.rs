@@ -24,9 +24,10 @@ fn read_uid_from_yaml(dir: &Path) -> String {
                 let uid = read_legacy_uid(dir);
                 oc.uid = Some(uid.clone());
                 if let Ok(yaml) = serde_yaml::to_string(&oc) {
-                    let _ = fs::write(&oc_path, yaml);
+                    if fs::write(&oc_path, yaml).is_ok() {
+                        cleanup_legacy_uid(dir);
+                    }
                 }
-                cleanup_legacy_uid(dir);
                 return uid;
             }
         }
@@ -45,9 +46,10 @@ fn read_uid_from_yaml(dir: &Path) -> String {
                 let uid = read_legacy_uid(dir);
                 info.uid = Some(uid.clone());
                 if let Ok(yaml) = serde_yaml::to_string(&info) {
-                    let _ = fs::write(&folder_path, yaml);
+                    if fs::write(&folder_path, yaml).is_ok() {
+                        cleanup_legacy_uid(dir);
+                    }
                 }
-                cleanup_legacy_uid(dir);
                 return uid;
             }
         }
