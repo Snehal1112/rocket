@@ -7,6 +7,7 @@ pub mod execution_service;
 pub mod git_service;
 pub mod history_service;
 pub mod template_service;
+pub mod workspace_service;
 
 pub use collection_service::CollectionService;
 pub use cookie_service::CookieService;
@@ -15,3 +16,4 @@ pub use execution_service::{ExecuteRequestInput, RequestExecutionService};
 pub use git_service::GitAppService;
 pub use history_service::HistoryService;
 pub use template_service::TemplateService;
+pub use workspace_service::WorkspaceService;
