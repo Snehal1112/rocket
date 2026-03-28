@@ -48,7 +48,7 @@ export function CollectionDropdown() {
         <Button
           variant="outline"
           size="sm"
-          className="h-7 gap-1.5 px-2.5 text-xs font-medium"
+          className="h-7 gap-1.5 px-2.5 text-sm font-medium"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />

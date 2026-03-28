@@ -17,7 +17,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         variant="ghost"
         size="sm"
         className={cn(
-          "h-5 px-1.5 text-2xs gap-1",
+          "h-5 px-1.5 text-xs gap-1",
           isConsoleOpen && "bg-accent",
         )}
         onClick={onConsoleToggle}

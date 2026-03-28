@@ -267,7 +267,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             <button
               key={t.value}
               onClick={() => handleSectionChange(t.value)}
-              className={`h-8 px-4 text-xs font-medium transition-colors ${
+              className={`h-8 px-4 text-sm font-medium transition-colors ${
                 activeSection === t.value
                   ? 'border-b-2 border-primary text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -293,7 +293,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             <>
               {/* Description. */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="col-description">
+                <label className="text-sm font-medium text-muted-foreground" htmlFor="col-description">
                   Description
                 </label>
                 <textarea
@@ -312,7 +312,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
               {/* Default headers. */}
               <div className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">Default Headers</h3>
+                <h3 className="text-sm font-medium text-muted-foreground">Default Headers</h3>
                 <HeadersEditor headers={headers} onChange={setHeaders} />
                 <div className="flex justify-end">
                   <Button size="sm" onClick={saveSettings} className="gap-1.5">
@@ -324,7 +324,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
               {/* Requests list. */}
               <div className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">Requests</h3>
+                <h3 className="text-sm font-medium text-muted-foreground">Requests</h3>
                 <RequestList items={items} collectionName={collectionName} />
               </div>
             </>

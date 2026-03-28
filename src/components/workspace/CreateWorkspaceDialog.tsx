@@ -96,7 +96,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
                 value={path}
                 readOnly
                 placeholder="Choose a folder..."
-                className="flex-1 text-xs text-muted-foreground cursor-default"
+                className="flex-1 text-sm text-muted-foreground cursor-default"
                 onClick={() => void handlePickFolder()}
               />
               <Button

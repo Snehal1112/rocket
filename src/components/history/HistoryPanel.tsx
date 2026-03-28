@@ -143,7 +143,7 @@ export function HistoryPanel() {
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="h-7 pl-7 text-xs"
+            className="h-7 pl-7 text-sm"
             placeholder="Search URL..."
             value={urlQuery}
             onChange={(e) => handleUrlChange(e.target.value)}
@@ -154,7 +154,7 @@ export function HistoryPanel() {
         <div className="flex gap-2">
           {/* Method filter. */}
           <select
-            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={method}
             onChange={(e) => setMethod(e.target.value as MethodOption)}
             aria-label="Filter by HTTP method"
@@ -168,7 +168,7 @@ export function HistoryPanel() {
 
           {/* Status filter. */}
           <select
-            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={statusLabel}
             onChange={(e) => setStatusLabel(e.target.value as StatusLabel)}
             aria-label="Filter by status code"
@@ -185,7 +185,7 @@ export function HistoryPanel() {
       {/* Entry list. */}
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 ? (
-          <p className="p-4 text-center text-xs text-muted-foreground">
+          <p className="p-4 text-center text-sm text-muted-foreground">
             No history yet. Execute a request to see it here.
           </p>
         ) : (
@@ -208,7 +208,7 @@ export function HistoryPanel() {
                     >
                       {entry.method}
                     </span>
-                    <span className="truncate text-xs text-foreground">
+                    <span className="truncate text-sm text-foreground">
                       {displayUrl(entry.url)}
                     </span>
                   </div>

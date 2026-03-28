@@ -92,7 +92,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
 
       {/* Toolbar. */}
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border/70 shrink-0">
-        <span className="text-xs font-medium">Console</span>
+        <span className="text-sm font-medium">Console</span>
         {entries.length > 0 && (
           <span className="text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
             {entries.length}
@@ -103,12 +103,12 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
           placeholder="Filter by URL"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-6 text-xs w-48"
+          className="h-6 text-sm w-48"
         />
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-xs"
+          className="h-6 px-2 text-sm"
           onClick={clearEntries}
           aria-label="Clear console"
         >
@@ -120,7 +120,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       {/* Entry list. */}
       <div className="flex-1 overflow-y-auto font-mono text-2xs">
         {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No requests sent yet
           </div>
         ) : (

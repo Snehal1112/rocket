@@ -33,7 +33,7 @@ export function EnvironmentSwitcher() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 px-2 text-xs font-normal"
+            className="h-7 gap-1.5 px-2 text-sm font-normal"
           >
             <span
               className={cn(
