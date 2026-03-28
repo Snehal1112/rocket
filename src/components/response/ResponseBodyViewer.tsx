@@ -130,7 +130,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
       <div className="flex items-center gap-2 border-b border-border/70 px-3 py-1.5 shrink-0">
         {/* Status badge. */}
         <span
-          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${statusClasses(response.status)}`}
+          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-sm font-semibold ${statusClasses(response.status)}`}
         >
           {response.status === 0 ? 'ERR' : response.status} {response.statusText}
         </span>
@@ -157,7 +157,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
             <button
               key={tab}
               onClick={() => setActiveView(tab)}
-              className={`h-7 px-3 text-xs capitalize transition-colors ${
+              className={`h-7 px-3 text-sm capitalize transition-colors ${
                 activeView === tab
                   ? 'border-b-2 border-primary text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
