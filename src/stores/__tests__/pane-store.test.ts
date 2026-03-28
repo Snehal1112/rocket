@@ -429,6 +429,16 @@ describe('pane-store', () => {
     expect(leaf.activeTabId).toBe('');
   });
 
+  it('switchCollection from null activeCollection does not throw and sets active collection', () => {
+    // Fresh store has activeCollection === null
+    expect(usePaneStore.getState().activeCollection).toBeNull();
+
+    usePaneStore.getState().switchCollection('firstCol');
+    expect(usePaneStore.getState().activeCollection).toBe('firstCol');
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+  });
+
   it('getOpenTabCount returns correct count per collection', () => {
     usePaneStore.getState().setActiveCollection('colA');
     usePaneStore.getState().openTab(makeTab());

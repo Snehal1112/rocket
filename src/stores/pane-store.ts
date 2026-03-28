@@ -296,6 +296,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   switchCollection(name) {
     const { root, activeGroupId, activeCollection, collectionTabState } = get();
+    // No-op if already on this collection.
+    if (name === activeCollection) return;
+    // Only the active leaf is snapshotted. In split-pane layouts, tabs in
+    // non-active panes are not included. This is an accepted design limitation
+    // for the current feature scope.
     const activeLeaf = findActiveLeaf(root, activeGroupId);
 
     // Snapshot current collection's tabs into the keyed state map.
