@@ -1,7 +1,5 @@
 import { useState } from 'react';
 import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
-import { useGitStore } from '@/stores/git-store';
-import { GitStatusBadge } from '@/components/git/GitStatusBadge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,10 +61,6 @@ export function RequestNode({
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
-  // Look up the git status for this file by matching the tail of the git path.
-  const gitStatusData = useGitStore((s) => s.status);
-  const gitFile = gitStatusData?.files.find((f) => f.path === path || f.path.endsWith(`/${path}`));
-  const gitStatus = gitFile?.status ?? 'unchanged';
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
 
@@ -121,10 +115,7 @@ export function RequestNode({
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <>
-                  <span className="truncate text-foreground">{name}</span>
-                  <GitStatusBadge status={gitStatus} />
-                </>
+                <span className="truncate text-foreground">{name}</span>
               )}
             </TreeItemContent>
           </TreeItem>

@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { useGitStore } from '@/stores/git-store';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
@@ -100,13 +99,7 @@ export function CollectionNode({
     if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; return; }
     clickTimer.current = setTimeout(() => {
       clickTimer.current = null;
-      setOpen((prev) => {
-        if (!prev) {
-          // Tell the git store which collection is now active.
-          useGitStore.getState().setCollection(summary.path);
-        }
-        return !prev;
-      });
+      setOpen((prev) => !prev);
     }, 250);
   };
 
