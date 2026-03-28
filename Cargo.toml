@@ -9,6 +9,7 @@ members = [
     "crates/rocket-app",
     "crates/rocket-infra",
     "crates/rocket-git",
+    "crates/rocket-workspace",
     "src-tauri",
 ]
 

@@ -1,0 +1,10 @@
+[package]
+name = "rocket-workspace"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared = { path = "../rocket-shared" }
+serde.workspace = true
+serde_yaml.workspace = true
+uuid.workspace = true
