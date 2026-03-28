@@ -283,6 +283,16 @@ export type GitCredentials =
   | { type: "token"; token: string };
 
 // ============================================================
+// Workspace types
+// ============================================================
+
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+}
+
+// ============================================================
 // Collections
 // ============================================================
 
@@ -557,3 +567,31 @@ export const oauth2AuthCodeFlow = (
 ) => invoke<OAuth2TokenResponse>("oauth2_auth_code_flow", {
   authorizationUrl, tokenUrl, clientId, clientSecret, scope, callbackUrl, verifySsl,
 });
+
+// ============================================================
+// Workspace commands
+// ============================================================
+
+export const listWorkspaces = () =>
+  invoke<Workspace[]>('list_workspaces');
+
+export const getActiveWorkspace = () =>
+  invoke<Workspace>('get_active_workspace');
+
+export const createWorkspace = (name: string, path: string) =>
+  invoke<Workspace>('create_workspace', { name, path });
+
+export const switchWorkspace = (id: string) =>
+  invoke<Workspace>('switch_workspace', { id });
+
+export const renameWorkspace = (id: string, newName: string) =>
+  invoke<void>('rename_workspace', { id, newName });
+
+export const closeWorkspace = (id: string) =>
+  invoke<void>('close_workspace', { id });
+
+export const deleteWorkspace = (id: string) =>
+  invoke<void>('delete_workspace', { id });
+
+export const openFolderPicker = () =>
+  invoke<string | null>('open_folder_picker');
