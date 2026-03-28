@@ -74,7 +74,7 @@ impl<'de> Deserialize<'de> for Description {
                 }
                 match (content, content_type) {
                     (Some(c), Some(t)) => Ok(Description::typed(c, t)),
-                    (Some(_), None) => Err(de::Error::missing_field("type")),
+                    (Some(c), None) => Ok(Description::text(c)),
                     _ => Err(de::Error::missing_field("content")),
                 }
             }
@@ -125,8 +125,17 @@ mod tests {
     }
 
     #[test]
-    fn description_object_missing_type_is_rejected() {
+    fn description_object_missing_type_falls_back_to_text() {
         let json = r#"{"content": "hello"}"#;
+        let desc: Description = serde_json::from_str(json).unwrap();
+        assert_eq!(desc, Description::Text("hello".into()));
+        assert_eq!(desc.content(), Some("hello"));
+        assert_eq!(desc.content_type(), None);
+    }
+
+    #[test]
+    fn description_object_missing_content_is_rejected() {
+        let json = r#"{"type": "text/markdown"}"#;
         let result = serde_json::from_str::<Description>(json);
         assert!(result.is_err());
     }
