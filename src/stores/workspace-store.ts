@@ -62,6 +62,7 @@ function subscribeToEvents() {
   })
 
   listen<Workspace>('workspace-switched', ({ payload }) => {
+    // Clear all tabs from the previous workspace before activating the new one.
     usePaneStore.getState().closeAll()
     useWorkspaceStore.setState({ activeWorkspaceId: payload.id })
   })
