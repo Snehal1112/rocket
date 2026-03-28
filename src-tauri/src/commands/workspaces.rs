@@ -63,8 +63,16 @@ pub fn delete_workspace(
 }
 
 #[tauri::command]
-pub fn open_folder_picker(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn open_folder_picker(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let folder = app.dialog().file().blocking_pick_folder();
-    Ok(folder.map(|p| p.to_string()))
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // blocking_pick_folder panics inside an async context (Tauri v2 always
+    // dispatches commands within the tokio runtime). Use the callback form and
+    // bridge it into the async world via a oneshot channel instead.
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+    rx.await
+        .map_err(|_| "Dialog closed unexpectedly".to_string())
+        .map(|f| f.map(|p| p.to_string()))
 }
