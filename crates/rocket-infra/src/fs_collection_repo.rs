@@ -913,4 +913,86 @@ mod tests {
         let list = repo.list().unwrap();
         assert_eq!(list[0].request_count, 0);
     }
+
+    #[test]
+    fn legacy_uid_migrated_into_opencollection_yml() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let col_dir = dir.path().join("my-api");
+
+        // Simulate a legacy collection: write .uid file and remove uid from opencollection.yml.
+        let legacy_uid = "legacy-uid-12345";
+        fs::write(col_dir.join(".uid"), legacy_uid).unwrap();
+
+        // Re-read opencollection.yml, strip uid, rewrite.
+        let content = fs::read_to_string(col_dir.join("opencollection.yml")).unwrap();
+        let mut oc: OcCollection = serde_yaml::from_str(&content).unwrap();
+        oc.uid = None;
+        let yaml = serde_yaml::to_string(&oc).unwrap();
+        fs::write(col_dir.join("opencollection.yml"), yaml).unwrap();
+
+        // List should trigger migration.
+        let list = repo.list().unwrap();
+        assert_eq!(list[0].uid, legacy_uid);
+
+        // .uid file should be deleted.
+        assert!(!col_dir.join(".uid").exists());
+
+        // opencollection.yml should now contain the uid.
+        let content = fs::read_to_string(col_dir.join("opencollection.yml")).unwrap();
+        assert!(content.contains(legacy_uid));
+    }
+
+    #[test]
+    fn legacy_uid_migrated_into_folder_yml() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        let folder_dir = dir.path().join("my-api/auth");
+
+        // Simulate legacy: write .uid, strip uid from folder.yml.
+        let legacy_uid = "folder-uid-67890";
+        fs::write(folder_dir.join(".uid"), legacy_uid).unwrap();
+
+        let content = fs::read_to_string(folder_dir.join("folder.yml")).unwrap();
+        let mut info: OcFolderInfo = serde_yaml::from_str(&content).unwrap();
+        info.uid = None;
+        let yaml = serde_yaml::to_string(&info).unwrap();
+        fs::write(folder_dir.join("folder.yml"), yaml).unwrap();
+
+        // Load the collection — build_folder_tree should trigger migration.
+        let col = repo.get("my-api").unwrap();
+        let auth_folder = col.root.find_folder("auth").unwrap();
+        assert_eq!(auth_folder.uid, legacy_uid);
+
+        // .uid file should be deleted.
+        assert!(!folder_dir.join(".uid").exists());
+
+        // folder.yml should now contain the uid.
+        let content = fs::read_to_string(folder_dir.join("folder.yml")).unwrap();
+        assert!(content.contains(legacy_uid));
+    }
+
+    #[test]
+    fn no_uid_file_created_on_new_collection() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        // No .uid file should exist.
+        assert!(!dir.path().join("my-api/.uid").exists());
+        // UID should be in opencollection.yml.
+        let content = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
+        assert!(content.contains("uid:"));
+    }
+
+    #[test]
+    fn no_uid_file_created_on_new_folder() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        // No .uid file should exist.
+        assert!(!dir.path().join("my-api/auth/.uid").exists());
+        // UID should be in folder.yml.
+        let content = fs::read_to_string(dir.path().join("my-api/auth/folder.yml")).unwrap();
+        assert!(content.contains("uid:"));
+    }
 }
