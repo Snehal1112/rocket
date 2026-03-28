@@ -823,6 +823,7 @@ mod tests {
             match item {
                 CollectionItem::Request(r) => r.name.as_str(),
                 CollectionItem::Folder(f) => f.name.as_str(),
+                CollectionItem::OpaqueItem(o) => o.name.as_str(),
             }
         }
 

@@ -5,7 +5,7 @@
 
 use crate::opencollection::*;
 use rocket_collection::collection::Collection;
-use rocket_collection::folder::{CollectionItem, Folder};
+use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable};
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
@@ -993,10 +993,52 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
         .items
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|item| match item {
-            OcItem::Http(req) => Some(CollectionItem::Request(oc_http_request_to_request(req))),
-            OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
-            _ => None, // Skip non-HTTP protocols for now.
+        .filter_map(|item| match &item {
+            OcItem::Http(_) => {
+                if let OcItem::Http(req) = item {
+                    Some(CollectionItem::Request(oc_http_request_to_request(req)))
+                } else {
+                    None
+                }
+            }
+            OcItem::Folder(_) => {
+                if let OcItem::Folder(f) = item {
+                    Some(CollectionItem::Folder(oc_folder_to_folder(f)))
+                } else {
+                    None
+                }
+            }
+            OcItem::GraphQL(ref gql) => {
+                let name = gql.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "graphql".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::Grpc(ref grpc) => {
+                let name = grpc.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "grpc".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::WebSocket(ref ws) => {
+                let name = ws.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "websocket".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::ScriptFile(_) => None,
         })
         .collect();
 
@@ -1015,6 +1057,23 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
         .map(|item| match item {
             CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+            CollectionItem::OpaqueItem(opaque) => {
+                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+                    OcItem::Folder(OcFolder {
+                        info: OcFolderInfo {
+                            name: opaque.name,
+                            uid: None,
+                            description: None,
+                            folder_type: Some("folder".into()),
+                            seq: None,
+                            tags: Vec::new(),
+                        },
+                        items: None,
+                        request: None,
+                        docs: None,
+                    })
+                })
+            }
         })
         .collect();
 
@@ -1050,10 +1109,52 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         .items
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|item| match item {
-            OcItem::Http(req) => Some(CollectionItem::Request(oc_http_request_to_request(req))),
-            OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
-            _ => None,
+        .filter_map(|item| match &item {
+            OcItem::Http(_) => {
+                if let OcItem::Http(req) = item {
+                    Some(CollectionItem::Request(oc_http_request_to_request(req)))
+                } else {
+                    None
+                }
+            }
+            OcItem::Folder(_) => {
+                if let OcItem::Folder(f) = item {
+                    Some(CollectionItem::Folder(oc_folder_to_folder(f)))
+                } else {
+                    None
+                }
+            }
+            OcItem::GraphQL(ref gql) => {
+                let name = gql.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "graphql".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::Grpc(ref grpc) => {
+                let name = grpc.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "grpc".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::WebSocket(ref ws) => {
+                let name = ws.info.name.clone();
+                serde_yaml::to_value(&item).ok().map(|raw| {
+                    CollectionItem::OpaqueItem(OpaqueProtocolItem {
+                        protocol: "websocket".into(),
+                        name,
+                        raw,
+                    })
+                })
+            }
+            OcItem::ScriptFile(_) => None,
         })
         .collect();
 
@@ -1113,6 +1214,23 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         .map(|item| match item {
             CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+            CollectionItem::OpaqueItem(opaque) => {
+                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+                    OcItem::Folder(OcFolder {
+                        info: OcFolderInfo {
+                            name: opaque.name,
+                            uid: None,
+                            description: None,
+                            folder_type: Some("folder".into()),
+                            seq: None,
+                            tags: Vec::new(),
+                        },
+                        items: None,
+                        request: None,
+                        docs: None,
+                    })
+                })
+            }
         })
         .collect();
 
@@ -1929,5 +2047,39 @@ settings:
         assert_eq!(os.timeout, Some(InheritableNumber::Value(30000.0)));
         assert_eq!(os.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
         assert_eq!(os.max_redirects, Some(InheritableNumber::Value(5.0)));
+    }
+
+    #[test]
+    fn non_http_items_preserved_in_folder_roundtrip() {
+        let yaml = r#"
+info:
+  name: Mixed
+  type: folder
+items:
+  - info:
+      name: Get Users
+      type: http
+    http:
+      method: GET
+      url: "https://api.example.com/users"
+  - info:
+      name: GQL Query
+      type: graphql
+    graphql:
+      url: "https://api.example.com/graphql"
+      body:
+        query: "query { users { id } }"
+"#;
+        let oc: OcFolder = serde_yaml::from_str(yaml).unwrap();
+        let folder = oc_folder_to_folder(oc);
+        assert_eq!(folder.items.len(), 2);
+        assert!(matches!(&folder.items[0], CollectionItem::Request(_)));
+        assert!(matches!(&folder.items[1], CollectionItem::OpaqueItem(o) if o.protocol == "graphql"));
+
+        let back = folder_to_oc_folder(folder);
+        let items = back.items.unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[0], OcItem::Http(_)));
+        assert!(matches!(&items[1], OcItem::GraphQL(_)));
     }
 }
