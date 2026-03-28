@@ -1,12 +1,17 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Folder};
+use rocket_collection::{
+    Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable, Folder,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::migration::{detect_format, migrate_collection, CollectionFormat};
 use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
-use crate::opencollection::{OcCollection, OcFolderInfo, OcHttpRequest, OcInfo};
+use crate::opencollection::{
+    OcAuth, OcCollection, OcFolderInfo, OcHttpRequest, OcHttpRequestHeader, OcInfo,
+    OcRequestDefaults, OcVariable,
+};
 
 /// Read UID from YAML metadata (opencollection.yml or folder.yml).
 /// Falls back to legacy .uid file, migrating the value into YAML.
@@ -94,7 +99,7 @@ impl FsCollectionRepo {
     }
 
     fn settings_path(&self, name: &str) -> PathBuf {
-        self.collection_path(name).join("collection.json")
+        self.collection_path(name).join("opencollection.yml")
     }
 
     /// Resolves `path` under `base` and verifies it stays inside `base`.
@@ -441,16 +446,129 @@ impl CollectionRepository for FsCollectionRepo {
             return Ok(CollectionSettings::default());
         }
         let content = fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
+        let oc: OcCollection = serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse opencollection.yml: {e}")))?;
+
+        if let Some(defaults) = oc.request {
+            Ok(CollectionSettings {
+                description: oc.docs,
+                auth: defaults.auth.map(rocket_shared::types::Auth::from),
+                headers: defaults
+                    .headers
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(rocket_shared::types::Header::from)
+                    .collect(),
+                variables: defaults
+                    .variables
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|v| {
+                        let value = v
+                            .value
+                            .as_ref()
+                            .map(|vv| vv.data().to_string())
+                            .unwrap_or_default();
+                        CollectionVariable {
+                            key: v.name,
+                            value: value.clone(),
+                            initial_value: value,
+                            enabled: !v.disabled.unwrap_or(false),
+                            secret: false,
+                        }
+                    })
+                    .collect(),
+            })
+        } else {
+            Ok(CollectionSettings {
+                description: oc.docs,
+                ..CollectionSettings::default()
+            })
+        }
     }
 
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
         let path = self.settings_path(name);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+
+        let mut oc: OcCollection = if path.exists() {
+            let content = fs::read_to_string(&path)?;
+            serde_yaml::from_str(&content)
+                .map_err(|e| DomainError::Internal(format!("Failed to parse opencollection.yml: {e}")))?
+        } else {
+            OcCollection {
+                opencollection: Some("0.1".into()),
+                uid: Some(uuid::Uuid::new_v4().to_string()),
+                info: Some(OcInfo {
+                    name: name.into(),
+                    summary: None,
+                    version: None,
+                    authors: None,
+                }),
+                config: None,
+                items: None,
+                request: None,
+                docs: None,
+                bundled: None,
+                extensions: None,
+            }
+        };
+
+        // Build OcRequestDefaults from settings.
+        let has_defaults =
+            !settings.headers.is_empty() || settings.auth.is_some() || !settings.variables.is_empty();
+
+        oc.request = if has_defaults {
+            Some(OcRequestDefaults {
+                headers: if settings.headers.is_empty() {
+                    None
+                } else {
+                    Some(
+                        settings
+                            .headers
+                            .iter()
+                            .cloned()
+                            .map(OcHttpRequestHeader::from)
+                            .collect(),
+                    )
+                },
+                metadata: None,
+                auth: settings.auth.clone().map(OcAuth::from),
+                variables: if settings.variables.is_empty() {
+                    None
+                } else {
+                    Some(
+                        settings
+                            .variables
+                            .iter()
+                            .map(|cv| OcVariable {
+                                name: cv.key.clone(),
+                                value: Some(rocket_shared::variable_value::VariableValue::simple(
+                                    &cv.value,
+                                )),
+                                description: None,
+                                disabled: if cv.enabled { None } else { Some(true) },
+                            })
+                            .collect(),
+                    )
+                },
+                scripts: None,
+                settings: None,
+            })
+        } else {
+            None
+        };
+        oc.docs = settings.description.clone();
+
+        let yaml = serde_yaml::to_string(&oc)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+        fs::write(&path, yaml)?;
+
+        // Clean up legacy collection.json.
+        let legacy = self.collection_path(name).join("collection.json");
+        if legacy.exists() {
+            let _ = fs::remove_file(&legacy);
         }
-        let json = serde_json::to_string_pretty(settings)?;
-        fs::write(&path, json)?;
+
         Ok(())
     }
 }
@@ -728,6 +846,35 @@ mod tests {
 
         let list = repo.list().unwrap();
         assert_eq!(list[0].request_count, 0);
+    }
+
+    #[test]
+    fn settings_stored_in_opencollection_yml() {
+        use rocket_shared::types::{Auth, Header};
+
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+
+        let settings = CollectionSettings {
+            description: Some("My API docs".into()),
+            auth: Some(Auth::Bearer { token: "tok".into() }),
+            headers: vec![Header::new("X-Tenant", "acme")],
+            variables: vec![],
+        };
+        repo.save_settings("my-api", &settings).unwrap();
+
+        // Should NOT have collection.json.
+        assert!(!dir.path().join("my-api/collection.json").exists());
+
+        // opencollection.yml should contain the settings.
+        let content = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
+        assert!(content.contains("X-Tenant"));
+
+        // Round-trip.
+        let loaded = repo.get_settings("my-api").unwrap();
+        assert_eq!(loaded.auth, settings.auth);
+        assert_eq!(loaded.headers.len(), 1);
+        assert_eq!(loaded.description, Some("My API docs".into()));
     }
 
     #[test]
