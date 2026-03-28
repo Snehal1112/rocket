@@ -46,14 +46,16 @@ function updateSplitSizes(
 }
 
 // Builds the initial store state with one empty leaf.
-function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId'> {
+function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId' | 'activeCollection' | 'collectionTabState'> {
   const leaf = createDefaultLeaf();
-  return { root: leaf, activeGroupId: leaf.groupId };
+  return { root: leaf, activeGroupId: leaf.groupId, activeCollection: null, collectionTabState: {} };
 }
 
 export interface PaneState {
   root: PaneNode;
   activeGroupId: string;
+  activeCollection: string | null;
+  collectionTabState: Record<string, { tabs: Tab[]; activeTabId: string }>;
 
   // Tab actions.
   openTab: (tab: Tab, groupId?: string) => void;
@@ -76,6 +78,11 @@ export interface PaneState {
 
   // Conflict tab action.
   openConflictTab: (conflictState: ConflictState) => void;
+
+  // Collection-keyed tab state actions.
+  setActiveCollection: (name: string) => void;
+  switchCollection: (name: string) => void;
+  getOpenTabCount: (collection: string) => number;
 
   // Utility.
   reset: () => void;
@@ -281,6 +288,50 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       conflictState,
     };
     get().openTab(tab);
+  },
+
+  setActiveCollection(name) {
+    set({ activeCollection: name });
+  },
+
+  switchCollection(name) {
+    const { root, activeGroupId, activeCollection, collectionTabState } = get();
+    const activeLeaf = findActiveLeaf(root, activeGroupId);
+
+    // Snapshot current collection's tabs into the keyed state map.
+    const updatedState = { ...collectionTabState };
+    if (activeCollection) {
+      updatedState[activeCollection] = {
+        tabs: activeLeaf.tabs,
+        activeTabId: activeLeaf.activeTabId,
+      };
+    }
+
+    // Restore target collection's tabs (or empty if never visited).
+    const targetState = updatedState[name];
+    const restoredTabs = targetState?.tabs ?? [];
+    const restoredActiveTabId = targetState?.activeTabId ?? '';
+
+    const newRoot = updateLeaf(root, activeGroupId, (leaf) => ({
+      ...leaf,
+      tabs: restoredTabs,
+      activeTabId: restoredActiveTabId,
+    }));
+
+    set({
+      root: newRoot,
+      activeCollection: name,
+      collectionTabState: updatedState,
+    });
+  },
+
+  getOpenTabCount(collection) {
+    const { activeCollection, collectionTabState, root, activeGroupId } = get();
+    if (collection === activeCollection) {
+      const leaf = findActiveLeaf(root, activeGroupId);
+      return leaf.tabs.length;
+    }
+    return collectionTabState[collection]?.tabs.length ?? 0;
   },
 
   reset() {

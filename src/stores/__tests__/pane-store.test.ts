@@ -394,6 +394,54 @@ describe('pane-store', () => {
     expect(mockSave).not.toHaveBeenCalled();
   });
 
+  // ── switchCollection ────────────────────────────────────────────────
+
+  it('switchCollection snapshots current tabs and restores target', () => {
+    const tab1 = makeTab();
+    const tab2 = makeTab();
+    usePaneStore.getState().openTab(tab1);
+    usePaneStore.getState().setActiveCollection('collectionA');
+
+    // Switch to collectionB (no tabs yet)
+    usePaneStore.getState().switchCollection('collectionB');
+    const leafAfterSwitch = getLeaf();
+    expect(leafAfterSwitch.tabs).toHaveLength(0);
+    expect(usePaneStore.getState().activeCollection).toBe('collectionB');
+
+    // Open a tab in collectionB
+    usePaneStore.getState().openTab(tab2);
+
+    // Switch back to collectionA — should restore tab1
+    usePaneStore.getState().switchCollection('collectionA');
+    const leafBack = getLeaf();
+    expect(leafBack.tabs).toHaveLength(1);
+    expect(leafBack.tabs[0].id).toBe(tab1.id);
+    expect(leafBack.activeTabId).toBe(tab1.id);
+  });
+
+  it('switchCollection to never-opened collection shows empty tabs', () => {
+    usePaneStore.getState().setActiveCollection('existingCol');
+    usePaneStore.getState().openTab(makeTab());
+
+    usePaneStore.getState().switchCollection('brandNewCol');
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+    expect(leaf.activeTabId).toBe('');
+  });
+
+  it('getOpenTabCount returns correct count per collection', () => {
+    usePaneStore.getState().setActiveCollection('colA');
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().openTab(makeTab());
+
+    usePaneStore.getState().switchCollection('colB');
+    usePaneStore.getState().openTab(makeTab());
+
+    expect(usePaneStore.getState().getOpenTabCount('colA')).toBe(2);
+    expect(usePaneStore.getState().getOpenTabCount('colB')).toBe(1);
+    expect(usePaneStore.getState().getOpenTabCount('colC')).toBe(0);
+  });
+
   // ── isGitTab ──────────────────────────────────────────────────────────────
 
   it('isGitTab returns true for git tabs and false for others', () => {
