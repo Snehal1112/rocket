@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export domain types that map directly to schema types.
 pub use rocket_shared::description::{Description as OcDescription, Documentation as OcDocumentation};
+pub use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
 pub use rocket_shared::variable_value::{VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant};
 
 /// OpenCollection Variable — schema field names: name, value, description, disabled.
@@ -108,11 +109,11 @@ pub enum OcAuthTyped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pkce: Option<OcOAuth2PKCE>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        additional_parameters: Option<serde_json::Value>,
+        additional_parameters: Option<OAuth2AdditionalParameters>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        token_config: Option<serde_json::Value>,
+        token_config: Option<OAuth2TokenConfig>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        settings: Option<serde_json::Value>,
+        settings: Option<OAuth2Settings>,
     },
 }
 

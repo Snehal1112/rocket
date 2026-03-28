@@ -13,7 +13,8 @@ use rocket_environment::variable::Variable;
 use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
 use rocket_shared::description::Documentation;
 use rocket_shared::oauth2::{
-    OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner,
+    OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE,
+    OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
 };
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam};
 use rocket_shared::variable_value::VariableValue;
@@ -337,22 +338,15 @@ impl From<OcAuthTyped> for Auth {
                         placement: None,
                     }
                 });
-                let add_params = additional_parameters
-                    .and_then(|v| serde_json::from_value(v).ok());
-                let tok_cfg = token_config
-                    .and_then(|v| serde_json::from_value(v).ok());
-                let setts = settings
-                    .and_then(|v| serde_json::from_value(v).ok());
-
                 let oauth_flow = match flow.as_str() {
                     "client_credentials" => OAuth2Flow::ClientCredentials {
                         access_token_url: access_token_url.unwrap_or_default(),
                         refresh_token_url,
                         credentials: creds,
                         scope,
-                        additional_parameters: add_params,
-                        token_config: tok_cfg,
-                        settings: setts,
+                        additional_parameters,
+                        token_config,
+                        settings,
                     },
                     "resource_owner_password_credentials" => {
                         OAuth2Flow::ResourceOwnerPassword {
@@ -361,9 +355,9 @@ impl From<OcAuthTyped> for Auth {
                             credentials: creds,
                             resource_owner: resource_owner.map(oc_ro_to_domain),
                             scope,
-                            additional_parameters: add_params,
-                            token_config: tok_cfg,
-                            settings: setts,
+                            additional_parameters,
+                            token_config,
+                            settings,
                         }
                     }
                     "authorization_code" => OAuth2Flow::AuthorizationCode {
@@ -375,9 +369,9 @@ impl From<OcAuthTyped> for Auth {
                         scope,
                         state,
                         pkce: pkce.map(oc_pkce_to_domain),
-                        additional_parameters: add_params,
-                        token_config: tok_cfg,
-                        settings: setts,
+                        additional_parameters,
+                        token_config,
+                        settings,
                     },
                     "implicit" | _ => OAuth2Flow::Implicit {
                         authorization_url: authorization_url.unwrap_or_default(),
@@ -385,9 +379,9 @@ impl From<OcAuthTyped> for Auth {
                         client_id: creds.client_id,
                         scope,
                         state,
-                        additional_parameters: add_params,
-                        token_config: tok_cfg,
-                        settings: setts,
+                        additional_parameters,
+                        token_config,
+                        settings,
                     },
                 };
                 Auth::OAuth2(oauth_flow)
@@ -507,9 +501,9 @@ fn domain_oauth2_to_oc_fields(
     Option<String>,
     Option<String>,
     Option<OcOAuth2PKCE>,
-    Option<serde_json::Value>,
-    Option<serde_json::Value>,
-    Option<serde_json::Value>,
+    Option<OAuth2AdditionalParameters>,
+    Option<OAuth2TokenConfig>,
+    Option<OAuth2Settings>,
 ) {
     match flow {
         OAuth2Flow::ClientCredentials {
@@ -531,9 +525,9 @@ fn domain_oauth2_to_oc_fields(
             scope,
             None,
             None,
-            additional_parameters.and_then(|v| serde_json::to_value(v).ok()),
-            token_config.and_then(|v| serde_json::to_value(v).ok()),
-            settings.and_then(|v| serde_json::to_value(v).ok()),
+            additional_parameters,
+            token_config,
+            settings,
         ),
         OAuth2Flow::ResourceOwnerPassword {
             access_token_url,
@@ -555,9 +549,9 @@ fn domain_oauth2_to_oc_fields(
             scope,
             None,
             None,
-            additional_parameters.and_then(|v| serde_json::to_value(v).ok()),
-            token_config.and_then(|v| serde_json::to_value(v).ok()),
-            settings.and_then(|v| serde_json::to_value(v).ok()),
+            additional_parameters,
+            token_config,
+            settings,
         ),
         OAuth2Flow::AuthorizationCode {
             authorization_url,
@@ -582,9 +576,9 @@ fn domain_oauth2_to_oc_fields(
             scope,
             state,
             pkce.map(domain_pkce_to_oc),
-            additional_parameters.and_then(|v| serde_json::to_value(v).ok()),
-            token_config.and_then(|v| serde_json::to_value(v).ok()),
-            settings.and_then(|v| serde_json::to_value(v).ok()),
+            additional_parameters,
+            token_config,
+            settings,
         ),
         OAuth2Flow::Implicit {
             authorization_url,
@@ -610,9 +604,9 @@ fn domain_oauth2_to_oc_fields(
             scope,
             state,
             None,
-            additional_parameters.and_then(|v| serde_json::to_value(v).ok()),
-            token_config.and_then(|v| serde_json::to_value(v).ok()),
-            settings.and_then(|v| serde_json::to_value(v).ok()),
+            additional_parameters,
+            token_config,
+            settings,
         ),
     }
 }
@@ -1727,5 +1721,53 @@ items:
         assert_eq!(back.name, "Test API");
         assert_eq!(back.root.items.len(), 1);
         assert_eq!(back.settings.headers.len(), 1);
+    }
+
+    #[test]
+    fn oauth2_typed_subfields_roundtrip() {
+        let yaml = r#"
+info:
+  name: OAuth2 Test
+  type: http
+http:
+  method: GET
+  url: "https://api.example.com"
+  auth:
+    type: oauth2
+    flow: client_credentials
+    accessTokenUrl: "https://auth.example.com/token"
+    credentials:
+      clientId: my-id
+      clientSecret: my-secret
+    additionalParameters:
+      accessTokenRequest:
+        - name: audience
+          value: "https://api.example.com"
+    tokenConfig:
+      id: my-token
+      placement:
+        header: Authorization
+    settings:
+      autoFetchToken: true
+      autoRefreshToken: false
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        match &req.auth {
+            Auth::OAuth2(flow) => {
+                assert!(matches!(flow, rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }));
+            }
+            _ => panic!("expected OAuth2"),
+        }
+        let back = request_to_oc_http_request(req);
+        let auth = back.http.auth.unwrap();
+        match auth {
+            OcAuth::Typed(OcAuthTyped::OAuth2 { additional_parameters, token_config, settings, .. }) => {
+                assert!(additional_parameters.is_some());
+                assert!(token_config.is_some());
+                assert!(settings.is_some());
+            }
+            _ => panic!("expected OAuth2"),
+        }
     }
 }
