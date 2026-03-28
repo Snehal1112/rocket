@@ -7,8 +7,58 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
 use crate::opencollection::{OcCollection, OcFolderInfo, OcHttpRequest, OcInfo};
 
-/// Reads the .uid file from a directory. If missing, generates a UUID and writes it.
-fn read_or_create_uid(dir: &Path) -> String {
+/// Read UID from YAML metadata (opencollection.yml or folder.yml).
+/// Falls back to legacy .uid file, migrating the value into YAML.
+fn read_uid_from_yaml(dir: &Path) -> String {
+    // Try opencollection.yml first (collection root).
+    let oc_path = dir.join("opencollection.yml");
+    if oc_path.exists() {
+        if let Ok(content) = fs::read_to_string(&oc_path) {
+            if let Ok(mut oc) = serde_yaml::from_str::<OcCollection>(&content) {
+                if let Some(ref uid) = oc.uid {
+                    if !uid.is_empty() {
+                        return uid.clone();
+                    }
+                }
+                // No UID in YAML — check legacy .uid file.
+                let uid = read_legacy_uid(dir);
+                oc.uid = Some(uid.clone());
+                if let Ok(yaml) = serde_yaml::to_string(&oc) {
+                    let _ = fs::write(&oc_path, yaml);
+                }
+                cleanup_legacy_uid(dir);
+                return uid;
+            }
+        }
+    }
+
+    // Try folder.yml (subfolder).
+    let folder_path = dir.join("folder.yml");
+    if folder_path.exists() {
+        if let Ok(content) = fs::read_to_string(&folder_path) {
+            if let Ok(mut info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
+                if let Some(ref uid) = info.uid {
+                    if !uid.is_empty() {
+                        return uid.clone();
+                    }
+                }
+                let uid = read_legacy_uid(dir);
+                info.uid = Some(uid.clone());
+                if let Ok(yaml) = serde_yaml::to_string(&info) {
+                    let _ = fs::write(&folder_path, yaml);
+                }
+                cleanup_legacy_uid(dir);
+                return uid;
+            }
+        }
+    }
+
+    // No YAML metadata at all — use legacy .uid.
+    read_legacy_uid(dir)
+}
+
+/// Read UID from legacy .uid file, or generate a new one.
+fn read_legacy_uid(dir: &Path) -> String {
     let uid_path = dir.join(".uid");
     if let Ok(uid) = fs::read_to_string(&uid_path) {
         let trimmed = uid.trim().to_string();
@@ -16,9 +66,15 @@ fn read_or_create_uid(dir: &Path) -> String {
             return trimmed;
         }
     }
-    let uid = uuid::Uuid::new_v4().to_string();
-    let _ = fs::write(&uid_path, &uid);
-    uid
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// Delete the legacy .uid file if it exists.
+fn cleanup_legacy_uid(dir: &Path) {
+    let uid_path = dir.join(".uid");
+    if uid_path.exists() {
+        let _ = fs::remove_file(&uid_path);
+    }
 }
 
 pub struct FsCollectionRepo {
@@ -98,7 +154,7 @@ impl CollectionRepository for FsCollectionRepo {
                     continue;
                 }
                 let count = count_request_files(&path);
-                let uid = read_or_create_uid(&path);
+                let uid = read_uid_from_yaml(&path);
                 let modified_at = fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .ok()
@@ -294,7 +350,6 @@ impl CollectionRepository for FsCollectionRepo {
         let collection_dir = self.collection_path(collection);
         let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         fs::create_dir_all(&dir_path)?;
-        read_or_create_uid(&dir_path);
 
         // Write folder.yml with folder metadata.
         let folder_name = Path::new(path)
@@ -436,7 +491,7 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let mut folder = Folder::new(name);
-    folder.uid = read_or_create_uid(current);
+    folder.uid = read_uid_from_yaml(current);
 
     // Read folder.yml for metadata if present.
     let folder_yml = current.join("folder.yml");
