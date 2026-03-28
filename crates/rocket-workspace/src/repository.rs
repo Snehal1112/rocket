@@ -5,3 +5,13 @@ pub trait WorkspaceRepository: Send + Sync {
     fn load(&self) -> DomainResult<WorkspaceRegistry>;
     fn save(&self, registry: &WorkspaceRegistry) -> DomainResult<()>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trait_is_object_safe() {
+        fn _assert_object_safe(_: Box<dyn WorkspaceRepository>) {}
+    }
+}
