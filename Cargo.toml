@@ -21,6 +21,7 @@ license = "MIT"
 # Shared across crates — declare versions once here
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = { version = "0.9.34-deprecated" }
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }

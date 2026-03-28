@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   listCollections,
   getCollection,
@@ -12,9 +12,9 @@ import {
   moveItem,
   type CollectionSummary,
   type CollectionItem,
-} from '@/lib/tauri-api';
-import { usePaneStore } from '@/stores/pane-store';
-import type { PaneNode } from '@/types/pane-types';
+} from "@/lib/tauri-api";
+import { usePaneStore } from "@/stores/pane-store";
+import type { PaneNode } from "@/types/pane-types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,59 +24,55 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import {
-  Folder,
-  Search,
-  Plus,
-  Upload,
-} from 'lucide-react';
-import { open } from '@tauri-apps/plugin-dialog';
-import { HistoryPanel } from '@/components/history/HistoryPanel';
-import { Tree } from '@/components/ui/tree';
-import { CollectionNode } from '@/components/collections/CollectionNode';
-import type { DeleteTarget } from '@/components/collections/tree-utils';
-import { GitSidebarPanel } from '@/components/git/GitSidebarPanel';
-import { useGitStore } from '@/stores/git-store';
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Folder, Search, Plus, Upload } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { HistoryPanel } from "@/components/history/HistoryPanel";
+import { Tree } from "@/components/ui/tree";
+import { CollectionNode } from "@/components/collections/CollectionNode";
+import type { DeleteTarget } from "@/components/collections/tree-utils";
+import { GitSidebarPanel } from "@/components/git/GitSidebarPanel";
+import { useGitStore } from "@/stores/git-store";
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const filter = searchQuery.toLowerCase().trim();
-  const [selectedId, setSelectedId] = useState<string>('');
+  const [selectedId, setSelectedId] = useState<string>("");
 
-  const [view, setView] = useState<'collections' | 'history'>('collections');
+  const [view, setView] = useState<"collections" | "history">("collections");
 
   // Count changed files for the Git tab badge.
   const gitStatus = useGitStore((s) => s.status);
-  const changedCount = gitStatus?.files.filter((f) => f.status !== 'unchanged').length ?? 0;
+  const changedCount =
+    gitStatus?.files.filter((f) => f.status !== "unchanged").length ?? 0;
 
   const handleImport = useCallback(async () => {
     const file = await open({
       multiple: false,
-      filters: [{ name: 'Collection', extensions: ['json'] }],
+      filters: [{ name: "Collection", extensions: ["json"] }],
     });
     if (file) {
-      console.log('Import file selected:', file);
+      console.log("Import file selected:", file);
     }
   }, []);
 
   const [isCreating, setIsCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [createError, setCreateError] = useState('');
+  const [newName, setNewName] = useState("");
+  const [createError, setCreateError] = useState("");
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
@@ -85,16 +81,16 @@ export function CollectionsSidebar() {
       const results = await listCollections();
       setSummaries(results);
     } catch (err) {
-      console.error('[CollectionsSidebar] list error', err);
+      console.error("[CollectionsSidebar] list error", err);
     }
   }, []);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     try {
-      if (deleteTarget.type === 'collection') {
+      if (deleteTarget.type === "collection") {
         await deleteCollection(deleteTarget.collection);
-      } else if (deleteTarget.type === 'folder') {
+      } else if (deleteTarget.type === "folder") {
         await deleteFolder(deleteTarget.collection, deleteTarget.path!);
       } else {
         await deleteRequest(deleteTarget.collection, deleteTarget.path!);
@@ -102,13 +98,18 @@ export function CollectionsSidebar() {
       // Close open tabs for deleted items.
       const store = usePaneStore.getState();
       const closeTabs = (node: PaneNode): void => {
-        if (node.type === 'leaf') {
+        if (node.type === "leaf") {
           for (const tab of node.tabs) {
             if (!tab.source) continue;
             const matches =
-              (deleteTarget.type === 'collection' && tab.source.collection === deleteTarget.collection) ||
-              (deleteTarget.type === 'request' && tab.source.collection === deleteTarget.collection && tab.source.path === deleteTarget.path) ||
-              (deleteTarget.type === 'folder' && tab.source.collection === deleteTarget.collection && tab.source.path.startsWith(deleteTarget.path!));
+              (deleteTarget.type === "collection" &&
+                tab.source.collection === deleteTarget.collection) ||
+              (deleteTarget.type === "request" &&
+                tab.source.collection === deleteTarget.collection &&
+                tab.source.path === deleteTarget.path) ||
+              (deleteTarget.type === "folder" &&
+                tab.source.collection === deleteTarget.collection &&
+                tab.source.path.startsWith(deleteTarget.path!));
             if (matches) store.closeTab(tab.id, node.groupId);
           }
         } else {
@@ -118,7 +119,7 @@ export function CollectionsSidebar() {
       };
       closeTabs(store.root);
     } catch (err) {
-      console.error('Delete failed:', err);
+      console.error("Delete failed:", err);
     }
     setDeleteTarget(null);
   }, [deleteTarget]);
@@ -129,102 +130,133 @@ export function CollectionsSidebar() {
     const trimmed = newName.trim();
     if (!trimmed) {
       setIsCreating(false);
-      setNewName('');
+      setNewName("");
       return;
     }
     if (INVALID_CHARS.test(trimmed)) {
-      setCreateError('Name contains invalid characters.');
+      setCreateError("Name contains invalid characters.");
       return;
     }
     try {
       await createCollection(trimmed);
       setIsCreating(false);
-      setNewName('');
-      setCreateError('');
+      setNewName("");
+      setCreateError("");
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'Failed to create collection.');
+      setCreateError(
+        err instanceof Error ? err.message : "Failed to create collection.",
+      );
     }
   }, [newName]);
 
-  const handleNewFolder = useCallback(async (collection: string, folderPath: string) => {
-    // Find next available name (New Folder, New Folder 2, New Folder 3...).
-    let name = 'New Folder';
-    try {
-      const col = await getCollection(collection);
-      const items = col.root.items;
-      const existing = new Set(
-        items.filter((i: CollectionItem) => i.type === 'folder').map((i: CollectionItem) => i.name),
-      );
-      let counter = 1;
-      while (existing.has(name)) {
-        counter++;
-        name = `New Folder ${counter}`;
-      }
-    } catch { /* Use default name if fetch fails. */ }
-    const path = folderPath ? `${folderPath}/${name}` : name;
-    try {
-      await createFolder(collection, path);
-    } catch (err) {
-      console.error('[CollectionsSidebar] create folder failed:', err);
-    }
-  }, []);
-
-  const handleMove = useCallback(async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
-    await moveItem(srcCollection, srcPath, dstCollection, dstPath);
-  }, []);
-
-  const handleDuplicate = useCallback(async (collection: string, path: string, name: string) => {
-    try {
-      // Read the existing collection to locate the source request.
-      const col = await getCollection(collection);
-      const items = col.root.items;
-
-      // Recursively find the request by fileName or name.
-      const findRequest = (nodes: CollectionItem[], targetPath: string): CollectionItem | undefined => {
-        for (const item of nodes) {
-          if (item.type === 'request') {
-            const fn = item.fileName ?? item.name;
-            if (fn === targetPath || item.name === name) return item;
-          }
-          if (item.type === 'folder') {
-            const found = findRequest(item.items, targetPath);
-            if (found) return found;
-          }
+  const handleNewFolder = useCallback(
+    async (collection: string, folderPath: string) => {
+      // Find next available name (New Folder, New Folder 2, New Folder 3...).
+      let name = "New Folder";
+      try {
+        const col = await getCollection(collection);
+        const items = col.root.items;
+        const existing = new Set(
+          items
+            .filter((i: CollectionItem) => i.type === "folder")
+            .map((i: CollectionItem) => i.name),
+        );
+        let counter = 1;
+        while (existing.has(name)) {
+          counter++;
+          name = `New Folder ${counter}`;
         }
-        return undefined;
-      };
-
-      const source = findRequest(items, path.split('/').pop() ?? path);
-      if (!source || source.type !== 'request') return;
-
-      // Collect existing names at the top level to find a unique copy name.
-      const existing = new Set(
-        items.filter((i: CollectionItem) => i.type === 'request').map((i: CollectionItem) => i.name),
-      );
-      let copyName = `${name} copy`;
-      let counter = 1;
-      while (existing.has(copyName)) {
-        counter++;
-        copyName = `${name} copy ${counter}`;
+      } catch {
+        /* Use default name if fetch fails. */
       }
+      const path = folderPath ? `${folderPath}/${name}` : name;
+      try {
+        await createFolder(collection, path);
+      } catch (err) {
+        console.error("[CollectionsSidebar] create folder failed:", err);
+      }
+    },
+    [],
+  );
 
-      // Preserve the folder prefix from the original path.
-      const pathParts = path.split('/');
-      pathParts.pop();
-      const folderPath = pathParts.join('/');
-      const newPath = folderPath ? `${folderPath}/${copyName}` : copyName;
+  const handleMove = useCallback(
+    async (
+      srcCollection: string,
+      srcPath: string,
+      dstCollection: string,
+      dstPath: string,
+    ) => {
+      await moveItem(srcCollection, srcPath, dstCollection, dstPath);
+    },
+    [],
+  );
 
-      // Save the duplicate with all source data. New uid and name, rest copied.
-      const { type: _t, uid: _u, name: _n, fileName: _f, ...requestData } = source;
-      await saveRequest(collection, newPath, {
-        ...requestData,
-        uid: '',
-        name: copyName,
-      });
-    } catch (err) {
-      console.error('[CollectionsSidebar] duplicate failed:', err);
-    }
-  }, []);
+  const handleDuplicate = useCallback(
+    async (collection: string, path: string, name: string) => {
+      try {
+        // Read the existing collection to locate the source request.
+        const col = await getCollection(collection);
+        const items = col.root.items;
+
+        // Recursively find the request by fileName or name.
+        const findRequest = (
+          nodes: CollectionItem[],
+          targetPath: string,
+        ): CollectionItem | undefined => {
+          for (const item of nodes) {
+            if (item.type === "request") {
+              const fn = item.fileName ?? item.name;
+              if (fn === targetPath || item.name === name) return item;
+            }
+            if (item.type === "folder") {
+              const found = findRequest(item.items, targetPath);
+              if (found) return found;
+            }
+          }
+          return undefined;
+        };
+
+        const source = findRequest(items, path.split("/").pop() ?? path);
+        if (!source || source.type !== "request") return;
+
+        // Collect existing names at the top level to find a unique copy name.
+        const existing = new Set(
+          items
+            .filter((i: CollectionItem) => i.type === "request")
+            .map((i: CollectionItem) => i.name),
+        );
+        let copyName = `${name} copy`;
+        let counter = 1;
+        while (existing.has(copyName)) {
+          counter++;
+          copyName = `${name} copy ${counter}`;
+        }
+
+        // Preserve the folder prefix from the original path.
+        const pathParts = path.split("/");
+        pathParts.pop();
+        const folderPath = pathParts.join("/");
+        const newPath = folderPath ? `${folderPath}/${copyName}` : copyName;
+
+        // Save the duplicate with all source data. New uid and name, rest copied.
+        const {
+          type: _t,
+          uid: _u,
+          name: _n,
+          fileName: _f,
+          ...requestData
+        } = source;
+        await saveRequest(collection, newPath, {
+          ...requestData,
+          uid: "",
+          name: copyName,
+        });
+      } catch (err) {
+        console.error("[CollectionsSidebar] duplicate failed:", err);
+      }
+    },
+    [],
+  );
 
   // Load collections on mount. Debounce file watcher events so rapid
   // filesystem changes collapse into one refresh.
@@ -237,7 +269,8 @@ export function CollectionsSidebar() {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
-      if (cancelled) fn(); // Already unmounted — immediately unsubscribe.
+      if (cancelled)
+        fn(); // Already unmounted — immediately unsubscribe.
       else unlisten = fn;
     });
     return () => {
@@ -249,21 +282,34 @@ export function CollectionsSidebar() {
 
   return (
     <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
-      <Tabs defaultValue="collections" className="flex-1 flex flex-col overflow-hidden">
+      <Tabs
+        defaultValue="collections"
+        className="flex-1 flex flex-col overflow-hidden"
+      >
         <TabsList className="w-full shrink-0 rounded-none border-b border-border/50 h-9 px-2">
-          <TabsTrigger value="collections" className="flex-1 text-xs">Collections</TabsTrigger>
+          <TabsTrigger value="collections" className="flex-1 text-xs">
+            Collections
+          </TabsTrigger>
           <TabsTrigger value="git" className="flex-1 text-xs">
             Git
             {changedCount > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[9px] px-1 h-4">{changedCount}</Badge>
+              <Badge variant="secondary" className="ml-1 text-[9px] px-1 h-4">
+                {changedCount}
+              </Badge>
             )}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="collections" className="flex-1 flex flex-col overflow-hidden mt-0">
+        <TabsContent
+          value="collections"
+          className="flex-1 flex flex-col overflow-hidden mt-0"
+        >
           {/* View selector and action icons. */}
           <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-            <Select value={view} onValueChange={(v) => setView(v as 'collections' | 'history')}>
+            <Select
+              value={view}
+              onValueChange={(v) => setView(v as "collections" | "history")}
+            >
               <SelectTrigger className="h-8 flex-1 text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -272,7 +318,7 @@ export function CollectionsSidebar() {
                 <SelectItem value="history">History</SelectItem>
               </SelectContent>
             </Select>
-            {view === 'collections' && (
+            {view === "collections" && (
               <>
                 <Button
                   variant="ghost"
@@ -296,7 +342,7 @@ export function CollectionsSidebar() {
             )}
           </div>
 
-          {view === 'collections' ? (
+          {view === "collections" ? (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Search and inline create. */}
               <div className="px-2 pb-2 space-y-1.5">
@@ -317,15 +363,28 @@ export function CollectionsSidebar() {
                       className="h-7 text-xs"
                       placeholder="Collection name"
                       value={newName}
-                      onChange={(e) => { setNewName(e.target.value); setCreateError(''); }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleCreateCollection();
-                        if (e.key === 'Escape') { setIsCreating(false); setNewName(''); setCreateError(''); }
+                      onChange={(e) => {
+                        setNewName(e.target.value);
+                        setCreateError("");
                       }}
-                      onBlur={() => { setIsCreating(false); setNewName(''); setCreateError(''); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleCreateCollection();
+                        if (e.key === "Escape") {
+                          setIsCreating(false);
+                          setNewName("");
+                          setCreateError("");
+                        }
+                      }}
+                      onBlur={() => {
+                        setIsCreating(false);
+                        setNewName("");
+                        setCreateError("");
+                      }}
                     />
                     {createError && (
-                      <p className="text-2xs text-destructive mt-0.5 px-1">{createError}</p>
+                      <p className="text-2xs text-destructive mt-0.5 px-1">
+                        {createError}
+                      </p>
                     )}
                   </div>
                 )}
@@ -338,7 +397,9 @@ export function CollectionsSidebar() {
                     {summaries.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-8 px-4">
                         <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-xs text-muted-foreground mb-3">No collections yet.</p>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          No collections yet.
+                        </p>
                         <Button
                           variant="outline"
                           size="sm"
@@ -379,21 +440,28 @@ export function CollectionsSidebar() {
         </TabsContent>
       </Tabs>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.type === 'collection'
+              {deleteTarget?.type === "collection"
                 ? `Delete collection '${deleteTarget.name}'? This removes all requests inside it.`
-                : deleteTarget?.type === 'folder'
-                ? `Delete folder '${deleteTarget.name}' and all requests inside it?`
-                : `Delete request '${deleteTarget?.name}'?`}
+                : deleteTarget?.type === "folder"
+                  ? `Delete folder '${deleteTarget.name}' and all requests inside it?`
+                  : `Delete request '${deleteTarget?.name}'?`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmDelete()}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={() => void confirmDelete()}>
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

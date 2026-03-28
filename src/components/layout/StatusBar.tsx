@@ -1,9 +1,9 @@
-import { Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { EnvironmentSwitcher } from '@/components/layout/EnvironmentSwitcher';
-import { GitBottomBar } from '@/components/git/GitBottomBar';
-import { useConsoleStore } from '@/stores/console-store';
+import { Terminal } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { EnvironmentSwitcher } from "@/components/layout/EnvironmentSwitcher";
+import { GitBottomBar } from "@/components/git/GitBottomBar";
+import { useConsoleStore } from "@/stores/console-store";
 
 interface StatusBarProps {
   isConsoleOpen?: boolean;
@@ -15,11 +15,13 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
 
   return (
     <div className="h-7 border-t border-border/70 bg-card/85 backdrop-blur-sm px-2 flex items-center gap-1.5 shrink-0">
-      <GitBottomBar />
       <Button
         variant="ghost"
         size="sm"
-        className={cn('h-5 px-1.5 text-2xs gap-1', isConsoleOpen && 'bg-accent')}
+        className={cn(
+          "h-5 px-1.5 text-2xs gap-1",
+          isConsoleOpen && "bg-accent",
+        )}
         onClick={onConsoleToggle}
         aria-label="Toggle Console"
       >
