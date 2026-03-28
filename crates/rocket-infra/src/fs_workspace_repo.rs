@@ -55,3 +55,51 @@ impl WorkspaceRepository for FsWorkspaceRepo {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_repo(tmp: &TempDir) -> FsWorkspaceRepo {
+        FsWorkspaceRepo::new(tmp.path().to_path_buf())
+    }
+
+    #[test]
+    fn first_load_creates_default_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let repo = make_repo(&tmp);
+        let registry = repo.load().unwrap();
+        assert_eq!(registry.workspaces.len(), 1);
+        assert_eq!(registry.workspaces[0].id, "default");
+        assert_eq!(registry.workspaces[0].name, "Default Workspace");
+        assert!(tmp.path().join("workspaces.yml").exists());
+        assert!(tmp.path().join("Default Workspace").exists());
+    }
+
+    #[test]
+    fn save_and_reload_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let repo = make_repo(&tmp);
+        let mut registry = repo.load().unwrap();
+        registry.workspaces.push(rocket_workspace::Workspace::new(
+            "My API",
+            tmp.path().join("my-api"),
+        ));
+        repo.save(&registry).unwrap();
+
+        let reloaded = repo.load().unwrap();
+        assert_eq!(reloaded.workspaces.len(), 2);
+        assert_eq!(reloaded.workspaces[1].name, "My API");
+    }
+
+    #[test]
+    fn subsequent_loads_read_existing_file() {
+        let tmp = TempDir::new().unwrap();
+        let repo = make_repo(&tmp);
+        repo.load().unwrap(); // creates the file
+        // Second load must read the file, not recreate it.
+        let registry = repo.load().unwrap();
+        assert_eq!(registry.workspaces.len(), 1);
+    }
+}
