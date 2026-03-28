@@ -243,13 +243,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
           >
             <SelectTrigger
-              className={cn('h-8 w-[7rem] text-xs font-bold', METHOD_COLORS[request.method])}
+              className={cn('h-8 w-[7rem] text-sm font-semibold', METHOD_COLORS[request.method])}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {METHODS.map((m) => (
-                <SelectItem key={m} value={m} className={cn('text-xs font-bold', METHOD_COLORS[m])}>
+                <SelectItem key={m} value={m} className={cn('text-sm font-semibold', METHOD_COLORS[m])}>
                   {m}
                 </SelectItem>
               ))}
@@ -288,10 +288,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
         {urlError && (
-          <p className="text-2xs text-destructive px-3 py-1">{urlError}</p>
+          <p className="text-xs text-destructive px-3 py-1">{urlError}</p>
         )}
         {curlImported && (
-          <p className="text-2xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
+          <p className="text-xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
         )}
 
         {/* Section tabs — matching legacy TabsList styling. */}
@@ -301,7 +301,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           className="flex-1 flex flex-col min-h-0"
         >
           <TabsList className="w-full justify-start rounded-none border-b border-border/70 bg-card/60 h-9 px-3">
-            <TabsTrigger value="params" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="params" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Params
               {enabledParamCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -309,7 +309,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="headers" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="headers" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Headers
               {enabledHeaderCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -317,10 +317,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="body" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="body" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Body
             </TabsTrigger>
-            <TabsTrigger value="auth" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="auth" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Auth
             </TabsTrigger>
           </TabsList>
