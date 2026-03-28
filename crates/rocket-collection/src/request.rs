@@ -1,7 +1,7 @@
 use rocket_shared::action::{ActionSetVariable, HttpRequestExample};
 use rocket_shared::assertion::Assertion;
 use rocket_shared::description::{Description, Documentation};
-use rocket_shared::types::{Auth, Body, Header, HttpMethod};
+use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam};
 use serde::{Deserialize, Serialize};
 
 fn generate_uid() -> String {
@@ -19,6 +19,10 @@ pub struct Request {
     pub method: HttpMethod,
     pub url: String,
     pub headers: Vec<Header>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_params: Vec<QueryParam>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_params: Vec<PathParam>,
     pub body: Option<Body>,
     #[serde(default)]
     pub auth: Auth,
@@ -62,6 +66,8 @@ impl Request {
             method,
             url: url.into(),
             headers: Vec::new(),
+            query_params: Vec::new(),
+            path_params: Vec::new(),
             body: None,
             auth: Auth::None,
             file_name: None,

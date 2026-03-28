@@ -733,6 +733,7 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let method = oc.http.method.parse::<HttpMethod>().unwrap_or(HttpMethod::Get);
     let url = oc.http.url;
     let headers: Vec<Header> = oc.http.headers.into_iter().map(Header::from).collect();
+    let (query_params, path_params) = split_params(oc.http.params);
     let body: Option<Body> = oc.http.body.map(Body::from);
     let auth: Auth = oc.http.auth.map(Auth::from).unwrap_or(Auth::None);
 
@@ -765,6 +766,8 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         method,
         url,
         headers,
+        query_params,
+        path_params,
         body,
         auth,
         file_name: None,
@@ -784,6 +787,9 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
 
 /// Convert a domain Request back to an OC HTTP request.
 pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
+    // Extract params before req fields are consumed by field reads below.
+    let params = merge_params(&req.query_params, &req.path_params);
+
     let info = OcHttpRequestInfo {
         name: req.name,
         description: req.description,
@@ -796,7 +802,7 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
         method: req.method.to_string(),
         url: req.url,
         headers: req.headers.into_iter().map(OcHttpRequestHeader::from).collect(),
-        params: Vec::new(),
+        params,
         body: req.body.map(OcHttpRequestBody::from),
         auth: if req.auth == Auth::None { None } else { Some(OcAuth::from(req.auth)) },
     };
@@ -1721,6 +1727,43 @@ items:
         assert_eq!(back.name, "Test API");
         assert_eq!(back.root.items.len(), 1);
         assert_eq!(back.settings.headers.len(), 1);
+    }
+
+    #[test]
+    fn params_survive_roundtrip() {
+        let yaml = r#"
+info:
+  name: Parameterised
+  type: http
+http:
+  method: GET
+  url: "https://api.example.com/users/:id"
+  params:
+    - name: page
+      value: "1"
+      type: query
+      description: Page number
+    - name: id
+      value: "42"
+      type: path
+    - name: limit
+      value: "10"
+      type: query
+      disabled: true
+"#;
+        let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
+        let req = oc_http_request_to_request(oc);
+        assert_eq!(req.query_params.len(), 2);
+        assert_eq!(req.path_params.len(), 1);
+        assert_eq!(req.query_params[0].key, "page");
+        assert!(req.query_params[0].description.is_some());
+        assert!(!req.query_params[1].enabled);
+        assert_eq!(req.path_params[0].name, "id");
+
+        let back = request_to_oc_http_request(req);
+        assert_eq!(back.http.params.len(), 3);
+        assert_eq!(back.http.params[0].param_type, Some("query".into()));
+        assert_eq!(back.http.params[2].param_type, Some("path".into()));
     }
 
     #[test]
