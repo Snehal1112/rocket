@@ -1,8 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { usePaneStore } from '../pane-store';
 import type { LeafNode, SplitNode, ResponseState, RequestTab } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { scheduleAutoSave } from '@/lib/auto-save';
+
+vi.mock('@/lib/auto-save', () => ({
+  scheduleAutoSave: vi.fn(),
+}))
 
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
@@ -294,5 +299,49 @@ describe('pane-store', () => {
     usePaneStore.getState().reset();
     const leaf = getLeaf();
     expect(leaf.tabs).toHaveLength(0);
+  });
+
+  // ── closeAll ──────────────────────────────────────────────────────────────
+
+  it('closeAll resets the pane tree to a single empty leaf', () => {
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().closeAll();
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+  });
+
+  it('closeAll auto-saves only dirty request tabs that have a source', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    const dirtyWithSource: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+      source: { collection: 'my-col', path: 'req1' },
+    };
+    const dirtyNoSource: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+    };
+    const cleanWithSource: RequestTab = {
+      ...makeTab(),
+      isDirty: false,
+      source: { collection: 'my-col', path: 'req2' },
+    };
+
+    usePaneStore.getState().openTab(dirtyWithSource);
+    usePaneStore.getState().openTab(dirtyNoSource);
+    usePaneStore.getState().openTab(cleanWithSource);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledWith(
+      dirtyWithSource.id,
+      'my-col',
+      'req1',
+      dirtyWithSource.title,
+      dirtyWithSource.request,
+    );
   });
 });

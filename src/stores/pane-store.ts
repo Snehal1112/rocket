@@ -79,6 +79,7 @@ export interface PaneState {
 
   // Utility.
   reset: () => void;
+  closeAll: () => void;
 
   updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
   updateTabTitle: (tabId: string, title: string) => void;
@@ -284,6 +285,30 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   reset() {
     set(buildInitialState());
+  },
+
+  closeAll() {
+    const { root } = get();
+    const flush = (node: PaneNode): void => {
+      if (node.type === 'leaf') {
+        for (const tab of node.tabs) {
+          if (tab.isDirty && tab.source && isRequestTab(tab)) {
+            scheduleAutoSave(
+              tab.id,
+              tab.source.collection,
+              tab.source.path,
+              tab.title,
+              tab.request,
+            );
+          }
+        }
+      } else {
+        flush(node.children[0]);
+        flush(node.children[1]);
+      }
+    };
+    flush(root);
+    get().reset();
   },
 
   updateTabSource(tabId, source) {
