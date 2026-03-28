@@ -728,6 +728,8 @@ pub struct OcWebSocketRequest {
 pub struct OcFolderInfo {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
     pub folder_type: Option<String>,  // "folder"
@@ -924,6 +926,8 @@ pub struct OcCollectionConfig {
 pub struct OcCollection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencollection: Option<String>,  // spec version
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<OcInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1627,5 +1631,19 @@ dotEnvFilePath: .env.prod
         assert_eq!(env.extends, Some("base".into()));
         assert_eq!(env.dot_env_file_path, Some(".env.prod".into()));
         assert_eq!(env.variables.len(), 1);
+    }
+
+    #[test]
+    fn oc_collection_with_uid_yaml() {
+        let yaml = "opencollection: \"0.1\"\nuid: \"550e8400-e29b-41d4-a716-446655440000\"\ninfo:\n  name: My API";
+        let col: OcCollection = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(col.uid, Some("550e8400-e29b-41d4-a716-446655440000".into()));
+    }
+
+    #[test]
+    fn oc_folder_info_with_uid_yaml() {
+        let yaml = "name: auth\nuid: abcd-1234\ntype: folder";
+        let info: OcFolderInfo = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(info.uid, Some("abcd-1234".into()));
     }
 }

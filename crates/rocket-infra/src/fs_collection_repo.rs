@@ -138,6 +138,7 @@ impl CollectionRepository for FsCollectionRepo {
         // Write opencollection.yml with basic info.
         let oc = OcCollection {
             opencollection: Some("0.1".into()),
+            uid: Some(uuid::Uuid::new_v4().to_string()),
             info: Some(OcInfo {
                 name: name.into(),
                 summary: None,
@@ -302,6 +303,7 @@ impl CollectionRepository for FsCollectionRepo {
             .unwrap_or_else(|| path.to_string());
         let info = OcFolderInfo {
             name: folder_name,
+            uid: Some(uuid::Uuid::new_v4().to_string()),
             description: None,
             folder_type: Some("folder".into()),
             seq: None,

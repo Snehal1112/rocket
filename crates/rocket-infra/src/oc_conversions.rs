@@ -958,6 +958,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
     OcFolder {
         info: OcFolderInfo {
             name: folder.name,
+            uid: None,
             description: None,
             folder_type: Some("folder".into()),
             seq: None,
@@ -1097,6 +1098,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
 
     OcCollection {
         opencollection: Some("0.1".into()),
+        uid: None,
         info: Some(OcInfo {
             name: col.name,
             summary: None,
