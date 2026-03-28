@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { usePaneStore } from '../pane-store';
 import type { LeafNode, SplitNode, ResponseState, RequestTab, CollectionTab } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import { isRequestTab, isGitTab } from '@/types/pane-types';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { scheduleAutoSave } from '@/lib/auto-save';
 
@@ -392,5 +392,21 @@ describe('pane-store', () => {
     usePaneStore.getState().closeAll();
 
     expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  // ── isGitTab ──────────────────────────────────────────────────────────────
+
+  it('isGitTab returns true for git tabs and false for others', () => {
+    const gitTab = {
+      id: 'git:test',
+      title: 'Git',
+      tabType: 'git' as const,
+      collectionName: 'test',
+      collectionPath: '/path/to/test',
+      isDirty: false,
+    };
+    const requestTab = makeTab();
+    expect(isGitTab(gitTab)).toBe(true);
+    expect(isGitTab(requestTab)).toBe(false);
   });
 });
