@@ -29,6 +29,12 @@ impl EventPublisher for TauriEventBus {
                 "environment-changed"
             }
             DomainEvent::HistoryCleared => "history-changed",
+            // Workspace events
+            DomainEvent::WorkspaceCreated { .. }
+            | DomainEvent::WorkspaceSwitched { .. }
+            | DomainEvent::WorkspaceRenamed { .. }
+            | DomainEvent::WorkspaceClosed { .. }
+            | DomainEvent::WorkspaceDeleted { .. } => "workspace-changed",
             // Git events
             DomainEvent::GitStatusChanged { .. }
             | DomainEvent::GitCommit { .. }
