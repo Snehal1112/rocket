@@ -1,5 +1,5 @@
 pub mod file_watcher;
-pub mod migration;
+pub(crate) mod migration;
 pub mod oc_conversions;
 pub mod opencollection;
 pub mod fs_collection_repo;

@@ -150,6 +150,10 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
 }
 
 /// Convert a single .json request file to .yml.
+/// Convert a single .json request file to .yml.
+/// Note: legacy request UIDs are not preserved in the YAML output.
+/// The OC format does not have a per-request uid field — UIDs are
+/// generated fresh when loading requests via build_folder_tree().
 fn migrate_request_file(json_path: &Path) -> DomainResult<()> {
     let content = fs::read_to_string(json_path)?;
     let request: rocket_collection::Request = serde_json::from_str(&content)
