@@ -179,6 +179,8 @@ fn form_field_to_entry(f: OcFormField) -> FormDataEntry {
         value: f.value,
         entry_type: FormDataType::Text,
         enabled: !f.disabled.unwrap_or(false),
+        content_type: None,
+        description: f.description,
     }
 }
 
@@ -198,6 +200,8 @@ fn multipart_to_entry(p: OcMultipartFormPart) -> FormDataEntry {
         value,
         entry_type,
         enabled: !p.disabled.unwrap_or(false),
+        content_type: p.content_type,
+        description: p.description,
     }
 }
 
@@ -251,7 +255,7 @@ fn entry_to_form_field(e: FormDataEntry) -> OcFormField {
     OcFormField {
         name: e.key,
         value: e.value,
-        description: None,
+        description: e.description,
         disabled: if e.enabled { None } else { Some(true) },
     }
 }
@@ -265,8 +269,8 @@ fn entry_to_multipart(e: FormDataEntry) -> OcMultipartFormPart {
             FormDataType::Text => "text".into(),
         },
         value: OcMultipartValue::Single(e.value),
-        description: None,
-        content_type: None,
+        description: e.description,
+        content_type: e.content_type,
         disabled: if e.enabled { None } else { Some(true) },
     }
 }
@@ -2047,6 +2051,24 @@ settings:
         assert_eq!(os.timeout, Some(InheritableNumber::Value(30000.0)));
         assert_eq!(os.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
         assert_eq!(os.max_redirects, Some(InheritableNumber::Value(5.0)));
+    }
+
+    #[test]
+    fn multipart_metadata_preserved_in_roundtrip() {
+        let part = OcMultipartFormPart {
+            name: "avatar".into(),
+            part_type: "file".into(),
+            value: OcMultipartValue::Single("/tmp/avatar.png".into()),
+            description: Some(Description::text("User avatar")),
+            content_type: Some("image/png".into()),
+            disabled: None,
+        };
+        let entry = multipart_to_entry(part);
+        assert_eq!(entry.content_type, Some("image/png".into()));
+        assert_eq!(entry.description, Some(Description::text("User avatar")));
+        let back = entry_to_multipart(entry);
+        assert_eq!(back.content_type, Some("image/png".into()));
+        assert_eq!(back.description, Some(Description::text("User avatar")));
     }
 
     #[test]

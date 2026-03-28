@@ -157,6 +157,10 @@ pub struct FormDataEntry {
     pub value: String,
     pub entry_type: FormDataType,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Description>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
