@@ -61,7 +61,7 @@ export function GitCommitLog() {
                 </Tooltip>
               </TooltipProvider>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">{commit.message}</p>
+                <p className="truncate text-sm font-medium">{commit.message}</p>
                 <p className="text-[10px] text-muted-foreground">
                   {commit.author} · {relativeTime(commit.timestamp)}
                 </p>
@@ -72,7 +72,7 @@ export function GitCommitLog() {
         ))}
         {commitLog.length >= limit && (
           <div className="p-2">
-            <Button variant="outline" size="sm" className="w-full text-xs" onClick={handleLoadMore}>
+            <Button variant="outline" size="sm" className="w-full text-sm" onClick={handleLoadMore}>
               Load more
             </Button>
           </div>

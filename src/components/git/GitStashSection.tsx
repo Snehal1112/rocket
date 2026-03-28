@@ -24,7 +24,7 @@ export function GitStashSection() {
     <div>
       <div className="flex items-center gap-1 px-2 py-1">
         <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-sm font-medium text-muted-foreground">
           Stash ({stashes.length})
         </span>
       </div>
@@ -33,13 +33,13 @@ export function GitStashSection() {
           placeholder="Stash message..."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          className="h-7 text-xs"
+          className="h-7 text-sm"
           onKeyDown={(e) => e.key === 'Enter' && handleSave()}
         />
         <Button
           variant="outline"
           size="sm"
-          className="h-7 text-xs shrink-0"
+          className="h-7 text-sm shrink-0"
           onClick={handleSave}
           disabled={!message.trim()}
         >
@@ -51,7 +51,7 @@ export function GitStashSection() {
           key={stash.index}
           className="group flex items-center gap-1.5 rounded px-2 py-0.5 hover:bg-muted/50 text-sm"
         >
-          <span className="truncate text-xs">{stash.message}</span>
+          <span className="truncate text-sm">{stash.message}</span>
           {stash.branch && (
             <span className="text-xs text-muted-foreground">({stash.branch})</span>
           )}

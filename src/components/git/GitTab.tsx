@@ -99,7 +99,7 @@ export function GitTab({ tab }: GitTabProps) {
         <TabsList className="w-full shrink-0 rounded-none border-b border-border/70 bg-card/60 h-9 px-3 justify-start">
           <TabsTrigger
             value="changes"
-            className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
           >
             Changes
             {changedCount > 0 && (
@@ -108,13 +108,13 @@ export function GitTab({ tab }: GitTabProps) {
           </TabsTrigger>
           <TabsTrigger
             value="log"
-            className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
           >
             Log
           </TabsTrigger>
           <TabsTrigger
             value="stash"
-            className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
           >
             Stash
           </TabsTrigger>

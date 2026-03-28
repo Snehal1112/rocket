@@ -45,9 +45,9 @@ export function GitCredentialsDialog() {
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label className="text-xs">Authentication Type</Label>
+            <Label className="text-sm">Authentication Type</Label>
             <Select value={authType} onValueChange={(v) => setAuthType(v as AuthType)}>
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-8 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -62,12 +62,12 @@ export function GitCredentialsDialog() {
           {authType === 'sshKey' && (
             <>
               <div>
-                <Label className="text-xs">Private Key Path</Label>
-                <Input value={privateKeyPath} onChange={(e) => setPrivateKeyPath(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Private Key Path</Label>
+                <Input value={privateKeyPath} onChange={(e) => setPrivateKeyPath(e.target.value)} className="h-8 text-sm" />
               </div>
               <div>
-                <Label className="text-xs">Passphrase (optional)</Label>
-                <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Passphrase (optional)</Label>
+                <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className="h-8 text-sm" />
               </div>
             </>
           )}
@@ -75,20 +75,20 @@ export function GitCredentialsDialog() {
           {authType === 'userPass' && (
             <>
               <div>
-                <Label className="text-xs">Username</Label>
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Username</Label>
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="h-8 text-sm" />
               </div>
               <div>
-                <Label className="text-xs">Password</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Password</Label>
+                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-sm" />
               </div>
             </>
           )}
 
           {authType === 'token' && (
             <div>
-              <Label className="text-xs">Token</Label>
-              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} className="h-8 text-xs" />
+              <Label className="text-sm">Token</Label>
+              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} className="h-8 text-sm" />
             </div>
           )}
 

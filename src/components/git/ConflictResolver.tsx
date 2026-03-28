@@ -34,12 +34,12 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 border-b px-3 py-1.5">
           <Badge variant="destructive" className="text-[9px]">Conflict</Badge>
-          <span className="font-mono text-xs truncate">{conflictState.filePath}</span>
+          <span className="font-mono text-sm truncate">{conflictState.filePath}</span>
           <div className="ml-auto flex gap-1">
-            <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setManualMode(false)}>
+            <Button variant="outline" size="sm" className="h-6 text-sm" onClick={() => setManualMode(false)}>
               Back
             </Button>
-            <Button size="sm" className="h-6 text-xs" onClick={() => handleResolve('custom', manualContent)}>
+            <Button size="sm" className="h-6 text-sm" onClick={() => handleResolve('custom', manualContent)}>
               Save Resolution
             </Button>
           </div>
@@ -60,11 +60,11 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 border-b px-3 py-1.5">
         <Badge variant="destructive" className="text-[9px]">Conflict</Badge>
-        <span className="font-mono text-xs truncate">{conflictState.filePath}</span>
+        <span className="font-mono text-sm truncate">{conflictState.filePath}</span>
       </div>
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col border-r">
-          <div className="px-2 py-1 text-xs font-medium text-muted-foreground border-b">Ours</div>
+          <div className="px-2 py-1 text-sm font-medium text-muted-foreground border-b">Ours</div>
           <div className="flex-1">
             <Editor
               value={conflictState.ours}
@@ -74,7 +74,7 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           </div>
         </div>
         <div className="flex-1 flex flex-col">
-          <div className="px-2 py-1 text-xs font-medium text-muted-foreground border-b">Theirs</div>
+          <div className="px-2 py-1 text-sm font-medium text-muted-foreground border-b">Theirs</div>
           <div className="flex-1">
             <Editor
               value={conflictState.theirs}
