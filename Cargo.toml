@@ -47,3 +47,4 @@ rocket-history = { path = "crates/rocket-history" }
 rocket-app = { path = "crates/rocket-app" }
 rocket-infra = { path = "crates/rocket-infra" }
 rocket-git = { path = "crates/rocket-git" }
+rocket-workspace = { path = "crates/rocket-workspace" }

@@ -1,15 +1,16 @@
 mod commands;
 mod tauri_event_bus;
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use rocket_app::{
     CollectionService, CookieService, EnvironmentService, GitAppService,
-    HistoryService, RequestExecutionService, TemplateService,
+    HistoryService, RequestExecutionService, TemplateService, WorkspaceService,
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    NotifyFileWatcher, ReqwestExecutor,
+    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor,
 };
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
@@ -89,6 +90,22 @@ pub fn run() {
                 Box::new(NullEventPublisher),
             );
 
+            // Workspace service — manages workspace switching.
+            let active_workspace_path: Arc<Mutex<PathBuf>> =
+                Arc::new(Mutex::new(PathBuf::new()));
+            let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
+            let workspace_svc = WorkspaceService::new(
+                workspace_repo,
+                Box::new(NullEventPublisher),
+                Arc::clone(&active_workspace_path),
+            );
+
+            // Bootstrap the active workspace path from persisted state.
+            let active_ws = workspace_svc
+                .get_active()
+                .expect("failed to load active workspace on startup");
+            *active_workspace_path.lock().unwrap() = active_ws.path.clone();
+
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
             app.manage(env_svc);
@@ -97,6 +114,8 @@ pub fn run() {
             app.manage(cookie_svc);
             app.manage(exec_svc);
             app.manage(git_svc);
+            app.manage(Mutex::new(workspace_svc));
+            app.manage(active_workspace_path);
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
