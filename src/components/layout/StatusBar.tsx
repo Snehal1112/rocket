@@ -2,7 +2,6 @@ import { Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EnvironmentSwitcher } from "@/components/layout/EnvironmentSwitcher";
-import { GitBottomBar } from "@/components/git/GitBottomBar";
 import { useConsoleStore } from "@/stores/console-store";
 
 interface StatusBarProps {
