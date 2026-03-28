@@ -42,7 +42,7 @@ pub fn run() {
             let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
             let workspace_svc = WorkspaceService::new(
                 workspace_repo,
-                Box::new(NullEventPublisher),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 Arc::clone(&active_workspace_path),
             );
 
