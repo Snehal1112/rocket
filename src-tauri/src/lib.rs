@@ -192,6 +192,14 @@ pub fn run() {
             commands::git::git_stash_drop,
             commands::git::git_conflicts,
             commands::git::git_resolve_conflict,
+            commands::workspaces::list_workspaces,
+            commands::workspaces::get_active_workspace,
+            commands::workspaces::create_workspace,
+            commands::workspaces::switch_workspace,
+            commands::workspaces::rename_workspace,
+            commands::workspaces::close_workspace,
+            commands::workspaces::delete_workspace,
+            commands::workspaces::open_folder_picker,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
