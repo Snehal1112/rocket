@@ -25,6 +25,9 @@ interface WorkspaceState {
   deleteWorkspace: (id: string) => Promise<void>
 }
 
+// Module-level guard so concurrent loadWorkspaces() calls await one promise.
+let initPromise: Promise<void> | null = null
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeWorkspaceId: '',
@@ -32,12 +35,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   loadWorkspaces: async () => {
     if (get().initialized) return
-    const [workspaces, active] = await Promise.all([
-      listWorkspaces(),
-      getActiveWorkspace(),
-    ])
-    set({ workspaces, activeWorkspaceId: active.id, initialized: true })
-    subscribeToEvents()
+    if (initPromise) return initPromise
+    initPromise = (async () => {
+      const [workspaces, active] = await Promise.all([
+        listWorkspaces(),
+        getActiveWorkspace(),
+      ])
+      set({ workspaces, activeWorkspaceId: active.id, initialized: true })
+      subscribeToEvents()
+    })()
+    return initPromise
   },
 
   createWorkspace: async (name, path) => { await apiCreate(name, path) },
@@ -55,6 +62,7 @@ function subscribeToEvents() {
   })
 
   listen<Workspace>('workspace-switched', ({ payload }) => {
+    usePaneStore.getState().closeAll()
     useWorkspaceStore.setState({ activeWorkspaceId: payload.id })
   })
 
