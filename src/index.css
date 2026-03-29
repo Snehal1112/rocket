@@ -87,13 +87,13 @@
   --chart-4: hsl(283 52% 49%);
   --chart-5: hsl(343 74% 52%);
 
-  --sidebar: oklch(0.97 0 0);
-  --sidebar-foreground: hsl(222 47% 11%);
+  --sidebar: hsl(0 0% 97%);
+  --sidebar-foreground: hsl(0 0% 23%);
   --sidebar-primary: hsl(213 88% 42%);
   --sidebar-primary-foreground: hsl(0 0% 100%);
   --sidebar-accent: hsl(212 86% 94%);
   --sidebar-accent-foreground: hsl(213 88% 30%);
-  --sidebar-border: oklch(0.88 0 0);
+  --sidebar-border: hsl(0 0% 89%);
   --sidebar-ring: hsl(213 88% 42%);
 
   /* Monaco editor — VS Code Default Light Modern syntax theme. */
@@ -159,7 +159,7 @@
 /* Thin scrollbars matching the legacy design. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-color: var(--border) transparent;
 }
 
 @layer base {
