@@ -35,8 +35,8 @@ cargo check
 cargo build
 cargo build --release
 
-# Run a single test in a crate
-cargo test -p rocket-app <test_name>
+# Run a single test in any crate
+cargo test -p <crate-name> <test_name>
 
 # Full Tauri release build
 yarn tauri build
@@ -101,3 +101,9 @@ Services publish `DomainEvent` via an `EventPublisher` trait. `NullEventPublishe
 - Repository traits are defined in domain crates; implementations live only in `rocket-infra`.
 - `cargo check` is sufficient for most Rust validation; full compilation is slow.
 - Tests use `tempfile` for ephemeral filesystem fixtures and `wiremock` for HTTP mocking.
+
+## Crate Documentation
+
+Detailed design rules and domain model notes for individual crates:
+
+- [`crates/rocket-collection/CLAUDE.md`](crates/rocket-collection/CLAUDE.md) — Collection aggregate, `Request` field semantics, `CollectionRepository` trait, serde rules.
