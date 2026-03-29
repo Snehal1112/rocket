@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState, ConflictTab, ConflictState } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { renameRequest } from '@/lib/tauri-api';
@@ -83,6 +83,10 @@ export interface PaneState {
   setActiveCollection: (name: string) => void;
   switchCollection: (name: string) => void;
   getOpenTabCount: (collection: string) => number;
+
+  // Workspace tabs.
+  openWorkspaceTabs: (workspaceId: string, isDefault: boolean) => void;
+  isWorkspaceMode: () => boolean;
 
   // Utility.
   reset: () => void;
@@ -337,6 +341,42 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       return leaf.tabs.length;
     }
     return collectionTabState[collection]?.tabs.length ?? 0;
+  },
+
+  openWorkspaceTabs(workspaceId, isDefault) {
+    get().closeAll();
+    const sections: WorkspaceTabSection[] = ['overview', 'environments'];
+    if (!isDefault) sections.push('git');
+
+    const tabs: WorkspaceTab[] = sections.map((section) => ({
+      id: `workspace:${workspaceId}:${section}`,
+      title: section.charAt(0).toUpperCase() + section.slice(1),
+      isDirty: false,
+      tabType: 'workspace',
+      workspaceId,
+      activeSection: section,
+    }));
+
+    const overviewId = tabs[0].id;
+    const { root } = get();
+    // Get the root leaf after closeAll() which resets to a single leaf.
+    const rootLeaf = root as LeafNode;
+    const newRoot = updateLeaf(root, rootLeaf.groupId, (leaf) => ({
+      ...leaf,
+      tabs,
+      activeTabId: overviewId,
+    }));
+    set({ root: newRoot, activeGroupId: rootLeaf.groupId });
+  },
+
+  isWorkspaceMode() {
+    const hasWorkspaceTab = (node: PaneNode): boolean => {
+      if (node.type === 'leaf') {
+        return node.tabs.some((t) => t.tabType === 'workspace');
+      }
+      return hasWorkspaceTab(node.children[0]) || hasWorkspaceTab(node.children[1]);
+    };
+    return hasWorkspaceTab(get().root);
   },
 
   reset() {
