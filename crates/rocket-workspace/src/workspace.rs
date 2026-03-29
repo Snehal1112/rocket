@@ -19,6 +19,8 @@ pub struct Workspace {
 pub struct WorkspaceRegistry {
     pub workspaces: Vec<Workspace>,
     pub active_workspace_id: String,
+    #[serde(default)]
+    pub multi_workspace_mode: bool,
 }
 
 impl Workspace {
@@ -54,6 +56,7 @@ impl WorkspaceRegistry {
         Self {
             active_workspace_id: default.id.clone(),
             workspaces: vec![default],
+            multi_workspace_mode: false,
         }
     }
 
@@ -167,5 +170,27 @@ mod tests {
         let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
         let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
         assert!(!ws.pinned);
+    }
+
+    #[test]
+    fn new_registry_has_multi_workspace_mode_false() {
+        let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        assert!(!reg.multi_workspace_mode);
+    }
+
+    #[test]
+    fn registry_multi_workspace_mode_serde_roundtrip() {
+        let mut reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        reg.multi_workspace_mode = true;
+        let yaml = serde_yaml::to_string(&reg).unwrap();
+        let back: WorkspaceRegistry = serde_yaml::from_str(&yaml).unwrap();
+        assert!(back.multi_workspace_mode);
+    }
+
+    #[test]
+    fn registry_deserializes_without_multi_workspace_mode_backward_compat() {
+        let yaml = "activeWorkspaceId: default\nworkspaces:\n  - id: default\n    name: Default\n    path: /tmp/d\n    pinned: true\n";
+        let reg: WorkspaceRegistry = serde_yaml::from_str(yaml).unwrap();
+        assert!(!reg.multi_workspace_mode);
     }
 }
