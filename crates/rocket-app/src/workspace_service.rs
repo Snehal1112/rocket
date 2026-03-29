@@ -133,6 +133,20 @@ impl WorkspaceService {
         Ok(())
     }
 
+    pub fn update_description(&self, id: &str, description: Option<&str>) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.description = description.map(|s| s.to_string());
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceDescriptionUpdated {
+            id: id.to_string(),
+            description: description.map(|s| s.to_string()),
+        });
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         if id == "default" {
             return Err(DomainError::InvalidInput(
@@ -353,5 +367,31 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
         assert!(svc.pin("nonexistent").is_err());
+    }
+
+    #[test]
+    fn update_description_sets_value() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.update_description("default", Some("My desc")).unwrap();
+        let ws = svc.get_active().unwrap();
+        assert_eq!(ws.description, Some("My desc".to_string()));
+    }
+
+    #[test]
+    fn update_description_to_none_clears_it() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.update_description("default", Some("Initial")).unwrap();
+        svc.update_description("default", None).unwrap();
+        let ws = svc.get_active().unwrap();
+        assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn update_description_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.update_description("nope", Some("x")).is_err());
     }
 }
