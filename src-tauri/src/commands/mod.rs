@@ -1,10 +1,11 @@
 pub mod app;
 pub mod collections;
-pub mod git;
 pub mod cookies;
 pub mod environments;
 pub mod execution;
+pub mod git;
 pub mod history;
 pub mod oauth2;
 pub mod templates;
+pub mod ui_state;
 pub mod workspaces;

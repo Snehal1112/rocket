@@ -640,3 +640,22 @@ export const setMultiWorkspaceMode = (enabled: boolean) =>
 
 export const linkExternalCollection = (workspaceId: string, collectionPath: string) =>
   invoke<void>('link_external_collection', { workspaceId, collectionPath })
+
+// ============================================================
+// UI state persistence
+// ============================================================
+
+export interface UiStateWorkspaceTabs {
+  workspaceId: string;
+}
+
+export interface UiState {
+  activeMode: 'workspace' | 'collection';
+  workspaceTabs?: UiStateWorkspaceTabs;
+}
+
+export const loadUiState = () =>
+  invoke<UiState | null>('load_ui_state')
+
+export const saveUiState = (state: UiState) =>
+  invoke<void>('save_ui_state', { state })

@@ -213,6 +213,8 @@ pub fn run() {
             commands::workspaces::set_multi_workspace_mode,
             commands::workspaces::open_folder_picker,
             commands::workspaces::link_external_collection,
+            commands::ui_state::load_ui_state,
+            commands::ui_state::save_ui_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
