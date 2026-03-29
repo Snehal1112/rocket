@@ -294,6 +294,7 @@ export function CollectionsSidebar() {
                 type="button"
                 role="tab"
                 aria-selected={view === "collections"}
+                tabIndex={view === "collections" ? 0 : -1}
                 onClick={() => setView("collections")}
                 className={cn(
                   "px-2 py-1 text-xs font-medium rounded-md transition-colors",
@@ -308,6 +309,7 @@ export function CollectionsSidebar() {
                 type="button"
                 role="tab"
                 aria-selected={view === "history"}
+                tabIndex={view === "history" ? 0 : -1}
                 onClick={() => setView("history")}
                 className={cn(
                   "px-2 py-1 text-xs font-medium rounded-md transition-colors",
