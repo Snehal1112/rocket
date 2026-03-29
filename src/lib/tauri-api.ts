@@ -75,6 +75,8 @@ export interface CollectionSummary {
   path: string;
   requestCount: number;
   modifiedAt?: string;
+  /** "embedded" (default) or "external" — set by the workspace layer. */
+  refType?: string;
 }
 
 export interface Request {
