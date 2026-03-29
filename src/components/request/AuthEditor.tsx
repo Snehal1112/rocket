@@ -14,28 +14,12 @@ import {
 import type { AuthState } from '@/types/pane-types';
 import { executeRequest, oauth2AuthCodeFlow } from '@/lib/tauri-api';
 
-type AuthType = AuthState['authType'];
 type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
 
 interface AuthEditorProps {
   auth: AuthState;
   onChange: (auth: AuthState) => void;
-  /** Show "Inherit from parent" option. Use for request-level auth only. */
-  showInherit?: boolean;
 }
-
-const BASE_AUTH_TYPES: { label: string; value: AuthType }[] = [
-  { label: 'None', value: 'none' },
-  { label: 'Basic', value: 'basic' },
-  { label: 'Bearer', value: 'bearer' },
-  { label: 'API Key', value: 'api-key' },
-  { label: 'OAuth 2.0', value: 'oauth2' },
-  { label: 'AWS Sig v4', value: 'aws-sig-v4' },
-];
-
-const INHERIT_OPTION: { label: string; value: AuthType } = {
-  label: 'Inherit from parent', value: 'inherit',
-};
 
 function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null): string {
   if (!expiresIn || !acquiredAt) return 'No expiry';
@@ -50,49 +34,7 @@ function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null)
   return `Expires in ${Math.floor(remaining / 3600)}h (at ${time})`;
 }
 
-export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorProps) {
-  const authTypes = showInherit ? [INHERIT_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES;
-  const setType = useCallback(
-    (authType: AuthType) => {
-      const next: AuthState = { authType };
-      if (authType === 'basic') next.basic = { username: '', password: '' };
-      if (authType === 'bearer') next.bearer = { token: '' };
-      if (authType === 'api-key')
-        next.apiKey = { key: '', value: '', addTo: 'header' };
-      if (authType === 'oauth2')
-        next.oauth2 = {
-          grantType: 'client_credentials',
-          authorizationUrl: '',
-          tokenUrl: '',
-          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
-          clientId: '',
-          clientSecret: '',
-          scope: '',
-          state: '',
-          username: '',
-          password: '',
-          clientAuthentication: 'body',
-          headerPrefix: 'Bearer',
-          addTokenTo: 'header',
-          verifySsl: true,
-          accessToken: '',
-          refreshToken: '',
-          expiresIn: null,
-          tokenAcquiredAt: null,
-        };
-      if (authType === 'aws-sig-v4')
-        next.awsSigV4 = {
-          accessKey: '',
-          secretKey: '',
-          region: '',
-          service: '',
-          sessionToken: '',
-        };
-      onChange(next);
-    },
-    [onChange],
-  );
-
+export function AuthEditor({ auth, onChange }: AuthEditorProps) {
   // Helper: patch oauth2 fields without losing other auth state.
   const patchOAuth2 = useCallback(
     (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
@@ -255,20 +197,6 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
 
   return (
     <div className="space-y-4">
-      {/* Auth type selector. */}
-      <Select value={auth.authType} onValueChange={(val) => setType(val as AuthType)}>
-        <SelectTrigger className="w-[200px] text-sm">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {authTypes.map((t) => (
-            <SelectItem key={t.value} value={t.value} className="text-sm">
-              {t.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
       {/* Inherit: shows message about collection auth. */}
       {auth.authType === 'inherit' && (
         <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
@@ -394,7 +322,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           <div className="space-y-3">
             {/* Grant Type. */}
             <div>
-              <Label className="mb-1">Grant Type</Label>
+              <Label className="mb-1 block">Grant Type</Label>
               <Select value={o.grantType} onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}>
                 <SelectTrigger className="w-[200px] text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -409,7 +337,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Authorization URL — auth code and implicit only. */}
             {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (
               <div>
-                <Label className="mb-1">Authorization URL</Label>
+                <Label className="mb-1 block">Authorization URL</Label>
                 <Input className="text-sm font-mono" placeholder="https://auth.example.com/authorize" value={o.authorizationUrl} onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })} />
               </div>
             )}
@@ -417,7 +345,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Token URL — hidden for implicit. */}
             {o.grantType !== 'implicit' && (
               <div>
-                <Label className="mb-1">Token URL</Label>
+                <Label className="mb-1 block">Token URL</Label>
                 <Input className="text-sm font-mono" placeholder="https://auth.example.com/token" value={o.tokenUrl} onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })} />
               </div>
             )}
@@ -425,14 +353,14 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Callback URL + State — auth code and implicit only. */}
             {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (<>
               <div>
-                <Label className="mb-1">Callback URL</Label>
+                <Label className="mb-1 block">Callback URL</Label>
                 <div className="flex gap-1.5">
                   <Input className="text-sm font-mono flex-1" value={o.callbackUrl} onChange={(e) => patchOAuth2({ callbackUrl: e.target.value })} />
                   <Button variant="outline" size="sm" className="px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.callbackUrl)} title="Copy">Copy</Button>
                 </div>
               </div>
               <div>
-                <Label className="mb-1">State</Label>
+                <Label className="mb-1 block">State</Label>
                 <Input className="text-sm" placeholder="Leave empty for auto-generated" value={o.state} onChange={(e) => patchOAuth2({ state: e.target.value })} />
               </div>
             </>)}
@@ -440,12 +368,12 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Client ID + Secret — Secret hidden for implicit. */}
             <div className={o.grantType === 'implicit' ? '' : 'grid grid-cols-2 gap-2'}>
               <div>
-                <Label className="mb-1">Client ID</Label>
+                <Label className="mb-1 block">Client ID</Label>
                 <Input className="text-sm" placeholder="client-id" value={o.clientId} onChange={(e) => patchOAuth2({ clientId: e.target.value })} />
               </div>
               {o.grantType !== 'implicit' && (
                 <div>
-                  <Label className="mb-1">Client Secret</Label>
+                  <Label className="mb-1 block">Client Secret</Label>
                   <Input className="text-sm" type="password" placeholder="client-secret" value={o.clientSecret} onChange={(e) => patchOAuth2({ clientSecret: e.target.value })} />
                 </div>
               )}
@@ -453,7 +381,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
 
             {/* Scope — always visible. */}
             <div>
-              <Label className="mb-1">Scope</Label>
+              <Label className="mb-1 block">Scope</Label>
               <Input className="text-sm" placeholder="read write" value={o.scope} onChange={(e) => patchOAuth2({ scope: e.target.value })} />
             </div>
 
@@ -461,11 +389,11 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {o.grantType === 'password' && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="mb-1">Username</Label>
+                  <Label className="mb-1 block">Username</Label>
                   <Input className="text-sm" placeholder="user@example.com" value={o.username} onChange={(e) => patchOAuth2({ username: e.target.value })} />
                 </div>
                 <div>
-                  <Label className="mb-1">Password</Label>
+                  <Label className="mb-1 block">Password</Label>
                   <Input className="text-sm" type="password" value={o.password} onChange={(e) => patchOAuth2({ password: e.target.value })} />
                 </div>
               </div>
@@ -488,7 +416,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
               {advancedOpen && (
                 <div className="space-y-3 mt-2 pl-1">
                   <div>
-                    <Label className="mb-1">Client Authentication</Label>
+                    <Label className="mb-1 block">Client Authentication</Label>
                     <Select value={o.clientAuthentication} onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}>
                       <SelectTrigger className="w-full text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -498,11 +426,11 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
                     </Select>
                   </div>
                   <div>
-                    <Label className="mb-1">Header Prefix</Label>
+                    <Label className="mb-1 block">Header Prefix</Label>
                     <Input className="text-sm" value={o.headerPrefix} onChange={(e) => patchOAuth2({ headerPrefix: e.target.value })} />
                   </div>
                   <div>
-                    <Label className="mb-1">Add Token To</Label>
+                    <Label className="mb-1 block">Add Token To</Label>
                     <Select value={o.addTokenTo} onValueChange={(v) => patchOAuth2({ addTokenTo: v as 'header' | 'queryParams' })}>
                       <SelectTrigger className="w-full text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -528,7 +456,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Token section. */}
             <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
               <div>
-                <Label className="mb-1">Access Token</Label>
+                <Label className="mb-1 block">Access Token</Label>
                 <div className="flex gap-1.5">
                   <Input className="flex-1 text-sm truncate" readOnly value={o.accessToken} placeholder="(none)" title={o.accessToken || undefined} />
                   <Button variant="outline" size="sm" className="px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.accessToken)} title="Copy">Copy</Button>
@@ -536,7 +464,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
               </div>
               {o.refreshToken && (
                 <div>
-                  <Label className="mb-1">Refresh Token</Label>
+                  <Label className="mb-1 block">Refresh Token</Label>
                   <div className="flex gap-1.5">
                     <Input className="flex-1 text-sm truncate" readOnly value={o.refreshToken} />
                     <Button variant="outline" size="sm" className="px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.refreshToken)} title="Copy">Copy</Button>
@@ -564,7 +492,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
       {auth.authType === 'aws-sig-v4' && auth.awsSigV4 && (
         <div className="space-y-3">
           <div>
-            <Label className="mb-1">Access Key</Label>
+            <Label className="mb-1 block">Access Key</Label>
             <Input
               className="text-sm"
               placeholder="AKIAIOSFODNN7EXAMPLE"
@@ -574,7 +502,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           </div>
 
           <div>
-            <Label className="mb-1">Secret Key</Label>
+            <Label className="mb-1 block">Secret Key</Label>
             <Input
               className="text-sm"
               type="password"
@@ -586,7 +514,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="mb-1">Region</Label>
+              <Label className="mb-1 block">Region</Label>
               <Input
                 className="text-sm"
                 placeholder="us-east-1"
@@ -595,7 +523,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
               />
             </div>
             <div>
-              <Label className="mb-1">Service</Label>
+              <Label className="mb-1 block">Service</Label>
               <Input
                 className="text-sm"
                 placeholder="execute-api"
@@ -606,7 +534,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           </div>
 
           <div>
-            <Label className="mb-1">Session Token</Label>
+            <Label className="mb-1 block">Session Token</Label>
             <Input
               className="text-sm"
               type="password"
