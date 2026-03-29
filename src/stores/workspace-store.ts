@@ -105,6 +105,13 @@ function subscribeToEvents() {
     useWorkspaceStore.setState((s) => ({
       workspaces: s.workspaces.filter((w) => w.id !== payload.id),
     }))
+    if (usePaneStore.getState().isWorkspaceMode()) {
+      const store = useWorkspaceStore.getState()
+      const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
+      if (activeWs) {
+        usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+      }
+    }
   })
 
   listen<{ id: string }>('workspace-deleted', ({ payload }) => {
@@ -113,6 +120,13 @@ function subscribeToEvents() {
       if (deleted) closeTabsForWorkspacePath(deleted.path)
       return { workspaces: s.workspaces.filter((w) => w.id !== payload.id) }
     })
+    if (usePaneStore.getState().isWorkspaceMode()) {
+      const store = useWorkspaceStore.getState()
+      const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
+      if (activeWs) {
+        usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+      }
+    }
   })
 
   listen<{ id: string }>('workspace-pinned', ({ payload }) => {
