@@ -208,6 +208,47 @@ impl WorkspaceService {
         Ok(())
     }
 
+    /// Link an external collection directory to a workspace.
+    /// The directory must contain `opencollection.yml`.
+    pub fn link_external_collection(&self, workspace_id: &str, collection_path: PathBuf) -> DomainResult<()> {
+        let oc_path = collection_path.join("opencollection.yml");
+        if !oc_path.exists() {
+            return Err(DomainError::NotFound(
+                "opencollection.yml not found in the selected directory".into(),
+            ));
+        }
+
+        let oc_content = fs::read_to_string(&oc_path).map_err(|e| {
+            DomainError::Io(format!("Failed to read opencollection.yml: {e}"))
+        })?;
+        let oc_value: serde_yaml::Value = serde_yaml::from_str(&oc_content).map_err(|e| {
+            DomainError::InvalidInput(format!("Failed to parse opencollection.yml: {e}"))
+        })?;
+        let collection_name = oc_value.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| {
+                collection_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Untitled")
+            })
+            .to_string();
+
+        let registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id(workspace_id)
+            .ok_or_else(|| DomainError::NotFound(workspace_id.into()))?;
+
+        let mut config = self.config_repo.load(&workspace.path)?;
+
+        if config.has_collection(&collection_name) {
+            return Err(DomainError::AlreadyExists(collection_name));
+        }
+
+        config.add_external_collection(&collection_name, collection_path);
+        self.config_repo.save(&workspace.path, &config)?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         if id == "default" {
             return Err(DomainError::InvalidInput(
@@ -520,5 +561,27 @@ mod tests {
         assert!(!svc.get_multi_workspace_mode().unwrap());
         svc.set_multi_workspace_mode(true).unwrap();
         assert!(svc.get_multi_workspace_mode().unwrap());
+    }
+
+    #[test]
+    fn link_external_collection_success() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ext = tmp.path().join("ext-col");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("opencollection.yml"), "name: External API\nitems: []\n").unwrap();
+        svc.link_external_collection("default", ext).unwrap();
+        let cfg = svc.get_workspace_config("default").unwrap();
+        assert_eq!(cfg.collections.len(), 1);
+        assert_eq!(cfg.collections[0].name, "External API");
+    }
+
+    #[test]
+    fn link_external_without_opencollection_yml_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ext = tmp.path().join("no-oc");
+        std::fs::create_dir_all(&ext).unwrap();
+        assert!(svc.link_external_collection("default", ext).is_err());
     }
 }
