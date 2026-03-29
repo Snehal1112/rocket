@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Monaco } from '@monaco-editor/react';
 
-// Reads a CSS variable from the document root.
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 export function useMonacoTheme() {
   const [isDark, setIsDark] = useState(() =>
     document.documentElement.classList.contains('dark'),
@@ -33,31 +28,26 @@ export function useMonacoTheme() {
   const themeName = isDark ? 'rocket-dark' : 'rocket-light';
 
   function defineThemes(monaco: Monaco) {
-    const bg = cssVar('--monaco-bg');
-    const fg = cssVar('--monaco-fg');
-    const lineHighlight = cssVar('--monaco-line-highlight');
-    const lineNumber = cssVar('--monaco-line-number');
-    const str = cssVar('--monaco-string');
-    const num = cssVar('--monaco-number');
-    const kw = cssVar('--monaco-keyword');
-    const comment = cssVar('--monaco-comment');
-    const type = cssVar('--monaco-type');
-
     monaco.editor.defineTheme('rocket-light', {
       base: 'vs',
       inherit: true,
       rules: [
-        { token: 'string', foreground: str },
-        { token: 'number', foreground: num },
-        { token: 'keyword', foreground: kw },
-        { token: 'comment', foreground: comment },
-        { token: 'type', foreground: type },
+        // VS Code Default Light Modern token colors.
+        { token: 'string', foreground: 'a31515' },
+        { token: 'string.key.json', foreground: '0451a5' },
+        { token: 'number', foreground: '098658' },
+        { token: 'keyword', foreground: '0000ff' },
+        { token: 'comment', foreground: '008000' },
+        { token: 'type', foreground: '267f99' },
+        { token: 'variable', foreground: '001080' },
+        { token: 'constant', foreground: '0070c1' },
       ],
       colors: {
-        'editor.background': bg,
-        'editor.foreground': fg,
-        'editor.lineHighlightBackground': lineHighlight,
-        'editorLineNumber.foreground': lineNumber,
+        'editor.background': '#ffffff',
+        'editor.foreground': '#000000',
+        'editor.lineHighlightBackground': '#add6ff26',
+        'editorLineNumber.foreground': '#237893',
+        'editorLineNumber.activeForeground': '#0b216f',
       },
     });
 
@@ -65,17 +55,22 @@ export function useMonacoTheme() {
       base: 'vs-dark',
       inherit: true,
       rules: [
-        { token: 'string', foreground: str },
-        { token: 'number', foreground: num },
-        { token: 'keyword', foreground: kw },
-        { token: 'comment', foreground: comment },
-        { token: 'type', foreground: type },
+        // VS Code Default Dark Modern token colors.
+        { token: 'string', foreground: 'ce9178' },
+        { token: 'string.key.json', foreground: '9cdcfe' },
+        { token: 'number', foreground: 'b5cea8' },
+        { token: 'keyword', foreground: '569cd6' },
+        { token: 'comment', foreground: '6a9955' },
+        { token: 'type', foreground: '4ec9b0' },
+        { token: 'variable', foreground: '9cdcfe' },
+        { token: 'constant', foreground: '4fc1ff' },
       ],
       colors: {
-        'editor.background': bg,
-        'editor.foreground': fg,
-        'editor.lineHighlightBackground': lineHighlight,
-        'editorLineNumber.foreground': lineNumber,
+        'editor.background': '#1f1f1f',
+        'editor.foreground': '#d4d4d4',
+        'editor.lineHighlightBackground': '#2a2d2e',
+        'editorLineNumber.foreground': '#858585',
+        'editorLineNumber.activeForeground': '#c6c6c6',
       },
     });
   }
