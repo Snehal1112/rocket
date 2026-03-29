@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
-import { Plus, X, Eye, EyeOff, Check } from 'lucide-react';
+import { Plus, X, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -71,19 +72,11 @@ export function CollectionVariablesEditor({
               <TableRow key={i}>
                 {/* Enabled toggle. */}
                 <TableCell className="px-2 py-1.5">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`w-4 h-4 rounded border p-0 ${
-                      v.enabled
-                        ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                        : 'border-gray-300 hover:bg-muted'
-                    }`}
-                    onClick={() => updateVar(i, { enabled: !v.enabled })}
+                  <Checkbox
+                    checked={v.enabled}
+                    onCheckedChange={(checked) => updateVar(i, { enabled: !!checked })}
                     aria-label={v.enabled ? 'Disable variable' : 'Enable variable'}
-                  >
-                    {v.enabled && <Check className="h-3 w-3" />}
-                  </Button>
+                  />
                 </TableCell>
 
                 {/* Key. */}
@@ -92,7 +85,7 @@ export function CollectionVariablesEditor({
                     placeholder="VARIABLE_NAME"
                     value={v.key}
                     onChange={(e) => updateVar(i, { key: e.target.value })}
-                    className="h-7 text-sm font-mono"
+                    className="text-sm font-mono"
                   />
                 </TableCell>
 
@@ -102,7 +95,7 @@ export function CollectionVariablesEditor({
                     placeholder="Default value"
                     value={v.initialValue}
                     onChange={(e) => updateVar(i, { initialValue: e.target.value })}
-                    className="h-7 text-sm"
+                    className="text-sm"
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>
@@ -113,7 +106,7 @@ export function CollectionVariablesEditor({
                     placeholder="Current value"
                     value={v.value}
                     onChange={(e) => updateVar(i, { value: e.target.value })}
-                    className="h-7 text-sm"
+                    className="text-sm"
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>
