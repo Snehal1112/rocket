@@ -42,6 +42,16 @@ impl WorkspaceService {
                 DomainError::Io(format!("Failed to create workspace directory: {e}"))
             })?;
         }
+        // Create subdirectories.
+        fs::create_dir_all(path.join("collections")).map_err(|e| {
+            DomainError::Io(format!("Failed to create collections dir: {e}"))
+        })?;
+        fs::create_dir_all(path.join("environments")).map_err(|e| {
+            DomainError::Io(format!("Failed to create environments dir: {e}"))
+        })?;
+        // Write workspace.yml inside the workspace directory.
+        let config = WorkspaceConfig::new(name);
+        self.config_repo.save(&path, &config)?;
         let mut registry = self.repo.load()?;
         if registry.name_exists(name, None) {
             return Err(DomainError::AlreadyExists(name.into()));
@@ -393,5 +403,16 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
         assert!(svc.update_description("nope", Some("x")).is_err());
+    }
+
+    #[test]
+    fn create_writes_workspace_yml_and_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("structured-ws");
+        svc.create("Structured", ws_path.clone()).unwrap();
+        assert!(ws_path.join("workspace.yml").exists());
+        assert!(ws_path.join("collections").is_dir());
+        assert!(ws_path.join("environments").is_dir());
     }
 }
