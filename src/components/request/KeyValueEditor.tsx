@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
-import { Check, X, Plus } from 'lucide-react';
+import { X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface KeyValueEditorProps {
@@ -47,30 +48,22 @@ export function KeyValueEditor({
       {label && <div className="text-sm font-medium text-muted-foreground">{label}</div>}
       {entries.map((entry) => (
         <div key={entry.id} className="flex gap-2 items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => updateEntry(entry.id, { enabled: !entry.enabled })}
-            className={`w-4 h-4 rounded border p-0 ${
-              entry.enabled
-                ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                : 'border-gray-300 hover:bg-muted'
-            }`}
+          <Checkbox
+            checked={entry.enabled}
+            onCheckedChange={(checked) => updateEntry(entry.id, { enabled: !!checked })}
             aria-label={`${entry.enabled ? 'Disable' : 'Enable'} ${entry.key || 'unnamed'}`}
-          >
-            {entry.enabled && <Check className="h-3 w-3" />}
-          </Button>
+          />
           <Input
             placeholder={keyPlaceholder}
             value={entry.key}
             onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-            className="flex-1 text-xs h-8"
+            className="flex-1 text-xs"
           />
           <Input
             placeholder={valuePlaceholder}
             value={entry.value}
             onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-            className="flex-1 text-xs h-8"
+            className="flex-1 text-xs"
           />
           <Button
             variant="ghost"
