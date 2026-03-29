@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   FolderPlus,
+  Layers,
   Plus,
   Trash2,
   MoreHorizontal,
@@ -235,6 +236,7 @@ export function CollectionNode({
                   strokeWidth={1.5}
                 />
               )}
+              <Layers className="h-3.5 w-3.5 shrink-0 text-primary" />
               {isRenaming ? (
                 <Input
                   autoFocus
