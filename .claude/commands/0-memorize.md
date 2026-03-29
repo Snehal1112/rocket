@@ -1,0 +1,1 @@
+Memorize what you have learned. Create or update the CLAUDE.md in the project root for overview and add or update sub CLAUDE.md files as needed for the individual analyzed parts and reference those from the root file.
