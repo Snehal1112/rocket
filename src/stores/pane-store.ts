@@ -101,6 +101,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
 
   openTab(tab, groupId) {
+    // Exit workspace mode when a non-workspace tab is opened.
+    if (tab.tabType !== 'workspace' && get().isWorkspaceMode()) {
+      get().closeAll();
+    }
     const { root, activeGroupId } = get();
     // Match by uid — if the tab is already open anywhere, activate it.
     const existing = findTabInTree(root, tab.id);
