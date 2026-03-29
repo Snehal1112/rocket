@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, Plus, LayoutDashboard, Pencil, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useState, useRef } from 'react'
+import { ChevronDown, ChevronRight, LayoutDashboard, Pencil, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -20,16 +20,33 @@ interface WorkspaceSectionProps {
 
 export function WorkspaceSection({ workspace, children, collectionCount }: WorkspaceSectionProps) {
   const [expanded, setExpanded] = useState(true)
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleOpenWorkspace = () => {
     usePaneStore.getState().openWorkspaceTabs(workspace.id, workspace.id === 'default')
   }
 
-  const handleRename = () => {
-    const newName = window.prompt('Rename workspace', workspace.name)
-    if (newName && newName.trim() && newName.trim() !== workspace.name) {
-      void useWorkspaceStore.getState().renameWorkspace(workspace.id, newName.trim())
+  const handleRename = (newName: string) => {
+    if (newName !== workspace.name) {
+      void useWorkspaceStore.getState().renameWorkspace(workspace.id, newName)
     }
+  }
+
+  const startRenaming = () => {
+    setRenameValue(workspace.name)
+    setIsRenaming(true)
+    // Focus after state flushes.
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim()
+    if (trimmed) {
+      handleRename(trimmed)
+    }
+    setIsRenaming(false)
   }
 
   const handleClose = () => {
@@ -62,26 +79,36 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
             {/* Workspace icon. */}
             <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground" />
 
-            {/* Workspace name — clicking opens workspace tabs. */}
-            <span
-              className="flex-1 truncate text-sm font-medium"
-              onClick={handleOpenWorkspace}
-            >
-              {workspace.name}
-            </span>
+            {/* Workspace name or inline rename input. */}
+            {isRenaming ? (
+              <Input
+                ref={inputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitRename()
+                  }
+                  if (e.key === 'Escape') {
+                    setIsRenaming(false)
+                  }
+                }}
+                onBlur={commitRename}
+                className="h-5 text-xs px-1 py-0 flex-1"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                className="flex-1 truncate text-sm font-medium"
+                onClick={handleOpenWorkspace}
+              >
+                {workspace.name}
+              </span>
+            )}
 
             {/* Collection count. */}
             <span className="text-xs text-muted-foreground">{collectionCount}</span>
-
-            {/* New collection button — visible on hover. */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 opacity-0 group-hover:opacity-100"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
           </div>
         </ContextMenuTrigger>
 
@@ -89,7 +116,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
           <ContextMenuItem onSelect={handleOpenWorkspace}>
             <LayoutDashboard className="mr-2 h-4 w-4" /> Open workspace home
           </ContextMenuItem>
-          <ContextMenuItem onSelect={handleRename}>
+          <ContextMenuItem onSelect={startRenaming}>
             <Pencil className="mr-2 h-4 w-4" /> Rename workspace
           </ContextMenuItem>
           <ContextMenuSeparator />
