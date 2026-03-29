@@ -285,13 +285,15 @@ export function CollectionsSidebar() {
   }, [fetchCollections]);
 
   return (
-    <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
+    <div className="h-full flex flex-col bg-sidebar border-r border-sidebar-border">
       <div className="flex-1 flex flex-col overflow-hidden">
           {/* View tabs and action icons (Bruno-style). */}
           <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-            <div className="flex items-center gap-0.5">
+            <div role="tablist" aria-label="Sidebar views" className="flex items-center gap-0.5">
               <button
                 type="button"
+                role="tab"
+                aria-selected={view === "collections"}
                 onClick={() => setView("collections")}
                 className={cn(
                   "px-2 py-1 text-xs font-medium rounded-md transition-colors",
@@ -304,6 +306,8 @@ export function CollectionsSidebar() {
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={view === "history"}
                 onClick={() => setView("history")}
                 className={cn(
                   "px-2 py-1 text-xs font-medium rounded-md transition-colors",
@@ -322,6 +326,7 @@ export function CollectionsSidebar() {
                   size="icon"
                   className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCreating(true)}
+                  aria-label="New Collection"
                   title="New Collection"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -331,6 +336,7 @@ export function CollectionsSidebar() {
                   size="icon"
                   className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => void handleImport()}
+                  aria-label="Import Collection"
                   title="Import Collection"
                 >
                   <Upload className="h-3.5 w-3.5" />
@@ -339,6 +345,7 @@ export function CollectionsSidebar() {
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label={multiWorkspaceMode ? "Switch to single workspace mode" : "Switch to multi-workspace mode"}
                   title={multiWorkspaceMode ? "Switch to single workspace mode" : "Switch to multi-workspace mode"}
                   onClick={() => {
                     const store = useWorkspaceStore.getState()
