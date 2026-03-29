@@ -55,6 +55,9 @@ export function CollectionsSidebar() {
 
   const [view, setView] = useState<"collections" | "history">("collections");
 
+  const collectionsTabRef = useRef<HTMLButtonElement>(null);
+  const historyTabRef = useRef<HTMLButtonElement>(null);
+
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const multiWorkspaceMode = useWorkspaceStore((s) => s.multiWorkspaceMode);
@@ -299,16 +302,35 @@ export function CollectionsSidebar() {
           <div
             role="tablist"
             aria-label="Sidebar views"
+            aria-orientation="horizontal"
             className="flex items-center gap-0.5"
             onKeyDown={(e) => {
-              if (e.key === "ArrowRight") setView("history");
-              if (e.key === "ArrowLeft") setView("collections");
+              if (e.key === "ArrowRight") {
+                e.preventDefault();
+                setView("history");
+                historyTabRef.current?.focus();
+              } else if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                setView("collections");
+                collectionsTabRef.current?.focus();
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                setView("collections");
+                collectionsTabRef.current?.focus();
+              } else if (e.key === "End") {
+                e.preventDefault();
+                setView("history");
+                historyTabRef.current?.focus();
+              }
             }}
           >
             <button
+              ref={collectionsTabRef}
               type="button"
               role="tab"
+              id="tab-collections"
               aria-selected={view === "collections"}
+              aria-controls="panel-collections"
               tabIndex={view === "collections" ? 0 : -1}
               onClick={() => setView("collections")}
               className={cn(
@@ -321,9 +343,12 @@ export function CollectionsSidebar() {
               {multiWorkspaceMode ? "Workspaces" : "Collections"}
             </button>
             <button
+              ref={historyTabRef}
               type="button"
               role="tab"
+              id="tab-history"
               aria-selected={view === "history"}
+              aria-controls="panel-history"
               tabIndex={view === "history" ? 0 : -1}
               onClick={() => setView("history")}
               className={cn(
@@ -384,7 +409,12 @@ export function CollectionsSidebar() {
         </div>
 
         {view === "collections" ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div
+            id="panel-collections"
+            role="tabpanel"
+            aria-labelledby="tab-collections"
+            className="flex-1 flex flex-col overflow-hidden"
+          >
             {/* Workspace home button. */}
             {activeWorkspace && (
               <div className="px-2 pt-1">
@@ -523,7 +553,12 @@ export function CollectionsSidebar() {
             )}
           </div>
         ) : (
-          <div className="flex-1 overflow-hidden">
+          <div
+            id="panel-history"
+            role="tabpanel"
+            aria-labelledby="tab-history"
+            className="flex-1 overflow-hidden"
+          >
             <HistoryPanel />
           </div>
         )}
