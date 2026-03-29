@@ -115,7 +115,12 @@ export function FolderNode({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className="absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  aria-label={`Actions for ${name}`}
+                  className="absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <MoreHorizontal className="h-3 w-3" />
                 </button>
               </DropdownMenuTrigger>
