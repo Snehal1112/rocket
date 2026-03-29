@@ -31,7 +31,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Folder, LayoutDashboard, Search, Plus, Upload, Layers } from "lucide-react";
+import {
+  Folder,
+  LayoutDashboard,
+  Search,
+  Plus,
+  Upload,
+  Layers,
+} from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { Tree } from "@/components/ui/tree";
@@ -285,195 +292,176 @@ export function CollectionsSidebar() {
   }, [fetchCollections]);
 
   return (
-    <div className="h-full flex flex-col bg-sidebar border-r border-sidebar-border">
+    <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
       <div className="flex-1 flex flex-col overflow-hidden">
-          {/* View tabs and action icons (Bruno-style). */}
-          <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-            <div role="tablist" aria-label="Sidebar views" className="flex items-center gap-0.5">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === "collections"}
-                tabIndex={view === "collections" ? 0 : -1}
-                onClick={() => setView("collections")}
-                className={cn(
-                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
-                  view === "collections"
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-                )}
+        {/* View tabs and action icons (Bruno-style). */}
+        <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+          <div
+            role="tablist"
+            aria-label="Sidebar views"
+            className="flex items-center gap-0.5"
+            onKeyDown={(e) => {
+              if (e.key === "ArrowRight") setView("history");
+              if (e.key === "ArrowLeft") setView("collections");
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "collections"}
+              tabIndex={view === "collections" ? 0 : -1}
+              onClick={() => setView("collections")}
+              className={cn(
+                "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                view === "collections"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+              )}
+            >
+              {multiWorkspaceMode ? "Workspaces" : "Collections"}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "history"}
+              tabIndex={view === "history" ? 0 : -1}
+              onClick={() => setView("history")}
+              className={cn(
+                "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                view === "history"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+              )}
+            >
+              History
+            </button>
+          </div>
+          {view === "collections" && (
+            <div className="flex items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsCreating(true)}
+                aria-label="New Collection"
+                title="New Collection"
               >
-                {multiWorkspaceMode ? "Workspaces" : "Collections"}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={view === "history"}
-                tabIndex={view === "history" ? 0 : -1}
-                onClick={() => setView("history")}
-                className={cn(
-                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
-                  view === "history"
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-                )}
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => void handleImport()}
+                aria-label="Import Collection"
+                title="Import Collection"
               >
-                History
-              </button>
+                <Upload className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label={
+                  multiWorkspaceMode
+                    ? "Switch to single workspace mode"
+                    : "Switch to multi-workspace mode"
+                }
+                title={
+                  multiWorkspaceMode
+                    ? "Switch to single workspace mode"
+                    : "Switch to multi-workspace mode"
+                }
+                onClick={() => {
+                  const store = useWorkspaceStore.getState();
+                  void store.setMultiWorkspaceMode(!store.multiWorkspaceMode);
+                }}
+              >
+                <Layers className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            {view === "collections" && (
-              <div className="flex items-center gap-0.5">
+          )}
+        </div>
+
+        {view === "collections" ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Workspace home button. */}
+            {activeWorkspace && (
+              <div className="px-2 pt-1">
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsCreating(true)}
-                  aria-label="New Collection"
-                  title="New Collection"
+                  className="w-full justify-start h-8 px-2 text-sm font-medium"
+                  onClick={() =>
+                    openWorkspaceTabs(
+                      activeWorkspace.id,
+                      activeWorkspace.id === "default",
+                    )
+                  }
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                  onClick={() => void handleImport()}
-                  aria-label="Import Collection"
-                  title="Import Collection"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label={multiWorkspaceMode ? "Switch to single workspace mode" : "Switch to multi-workspace mode"}
-                  title={multiWorkspaceMode ? "Switch to single workspace mode" : "Switch to multi-workspace mode"}
-                  onClick={() => {
-                    const store = useWorkspaceStore.getState()
-                    void store.setMultiWorkspaceMode(!store.multiWorkspaceMode)
-                  }}
-                >
-                  <Layers className="h-3.5 w-3.5" />
+                  <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground mr-2" />
+                  <span className="truncate">{activeWorkspace.name}</span>
                 </Button>
               </div>
             )}
-          </div>
-
-          {view === "collections" ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Workspace home button. */}
-              {activeWorkspace && (
-                <div className="px-2 pt-1">
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start h-8 px-2 text-sm font-medium"
-                    onClick={() => openWorkspaceTabs(activeWorkspace.id, activeWorkspace.id === 'default')}
-                  >
-                    <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground mr-2" />
-                    <span className="truncate">{activeWorkspace.name}</span>
-                  </Button>
-                </div>
-              )}
-              {/* Search and inline create. */}
-              <div className="px-2 pb-2 space-y-1.5">
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            {/* Search and inline create. */}
+            <div className="px-2 pb-2 space-y-1.5">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-8 pl-7 text-sm"
+                  placeholder="Search requests..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  aria-label="Search collections"
+                />
+              </div>
+              {isCreating && (
+                <div className="px-1">
                   <Input
-                    className="h-8 pl-7 text-sm"
-                    placeholder="Search requests..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    aria-label="Search collections"
-                  />
-                </div>
-                {isCreating && (
-                  <div className="px-1">
-                    <Input
-                      autoFocus
-                      className="h-8 text-sm"
-                      placeholder="Collection name"
-                      value={newName}
-                      onChange={(e) => {
-                        setNewName(e.target.value);
-                        setCreateError("");
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCreateCollection();
-                        if (e.key === "Escape") {
-                          setIsCreating(false);
-                          setNewName("");
-                          setCreateError("");
-                        }
-                      }}
-                      onBlur={() => {
+                    autoFocus
+                    className="h-8 text-sm"
+                    placeholder="Collection name"
+                    value={newName}
+                    onChange={(e) => {
+                      setNewName(e.target.value);
+                      setCreateError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCreateCollection();
+                      if (e.key === "Escape") {
                         setIsCreating(false);
                         setNewName("");
                         setCreateError("");
-                      }}
-                    />
-                    {createError && (
-                      <p className="text-xs text-destructive mt-0.5 px-1">
-                        {createError}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                      }
+                    }}
+                    onBlur={() => {
+                      setIsCreating(false);
+                      setNewName("");
+                      setCreateError("");
+                    }}
+                  />
+                  {createError && (
+                    <p className="text-xs text-destructive mt-0.5 px-1">
+                      {createError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
 
-              {/* Collection tree. */}
-              {multiWorkspaceMode ? (
-                <ScrollArea className="flex-1">
-                  <div className="px-1 pb-2 space-y-1">
-                    {workspaces.map((ws) => (
-                      <WorkspaceSection
-                        key={ws.id}
-                        workspace={ws}
-                        collectionCount={ws.id === activeWorkspaceId ? summaries.length : 0}
-                      >
-                        {ws.id === activeWorkspaceId ? (
-                          summaries.map((s) => (
-                            <CollectionNode
-                              key={s.name}
-                              summary={s}
-                              filter={filter}
-                              summaries={summaries}
-                              onNewFolder={handleNewFolder}
-                              onMove={handleMove}
-                              onDelete={setDeleteTarget}
-                              onDuplicate={handleDuplicate}
-                            />
-                          ))
-                        ) : (
-                          <div className="px-4 py-2 text-xs text-muted-foreground">
-                            Switch to this workspace to see collections
-                          </div>
-                        )}
-                      </WorkspaceSection>
-                    ))}
-                  </div>
-                </ScrollArea>
-              ) : (
-                <ScrollArea className="flex-1">
-                  <Tree value={selectedId} onValueChange={setSelectedId}>
-                    <div className="px-1 pb-2">
-                      {summaries.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-8 px-4">
-                          <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                          <p className="text-sm text-muted-foreground mb-3">
-                            No collections yet.
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-sm"
-                            onClick={() => setIsCreating(true)}
-                          >
-                            <Plus className="h-3.5 w-3.5 mr-1.5" />
-                            Create Collection
-                          </Button>
-                        </div>
-                      ) : (
+            {/* Collection tree. */}
+            {multiWorkspaceMode ? (
+              <ScrollArea className="flex-1">
+                <div className="px-1 pb-2 space-y-1">
+                  {workspaces.map((ws) => (
+                    <WorkspaceSection
+                      key={ws.id}
+                      workspace={ws}
+                      collectionCount={
+                        ws.id === activeWorkspaceId ? summaries.length : 0
+                      }
+                    >
+                      {ws.id === activeWorkspaceId ? (
                         summaries.map((s) => (
                           <CollectionNode
                             key={s.name}
@@ -486,17 +474,59 @@ export function CollectionsSidebar() {
                             onDuplicate={handleDuplicate}
                           />
                         ))
+                      ) : (
+                        <div className="px-4 py-2 text-xs text-muted-foreground">
+                          Switch to this workspace to see collections
+                        </div>
                       )}
-                    </div>
-                  </Tree>
-                </ScrollArea>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 overflow-hidden">
-              <HistoryPanel />
-            </div>
-          )}
+                    </WorkspaceSection>
+                  ))}
+                </div>
+              </ScrollArea>
+            ) : (
+              <ScrollArea className="flex-1">
+                <Tree value={selectedId} onValueChange={setSelectedId}>
+                  <div className="px-1 pb-2">
+                    {summaries.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 px-4">
+                        <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                        <p className="text-sm text-muted-foreground mb-3">
+                          No collections yet.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm"
+                          onClick={() => setIsCreating(true)}
+                        >
+                          <Plus className="h-3.5 w-3.5 mr-1.5" />
+                          Create Collection
+                        </Button>
+                      </div>
+                    ) : (
+                      summaries.map((s) => (
+                        <CollectionNode
+                          key={s.name}
+                          summary={s}
+                          filter={filter}
+                          summaries={summaries}
+                          onNewFolder={handleNewFolder}
+                          onMove={handleMove}
+                          onDelete={setDeleteTarget}
+                          onDuplicate={handleDuplicate}
+                        />
+                      ))
+                    )}
+                  </div>
+                </Tree>
+              </ScrollArea>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-hidden">
+            <HistoryPanel />
+          </div>
+        )}
       </div>
 
       <AlertDialog
