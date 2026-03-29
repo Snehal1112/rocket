@@ -188,9 +188,9 @@ html.linux body {
 
 html.linux #root {
   background: var(--background);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xl);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 0 4px 20px rgba(0,0,0,0.08);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 1px 2px 10px rgba(0,0,0,0.08);
   overflow: hidden;
   height: 100%;
 }

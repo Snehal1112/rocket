@@ -14,7 +14,8 @@
       {
         "title": "Rocket",
         "width": 1440,
-        "height": 900
+        "height": 900,
+        "shadow": true
       }
     ],
     "security": {

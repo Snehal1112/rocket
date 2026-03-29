@@ -1,17 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Library,
-  LibraryBig,
   FolderPlus,
   Plus,
   Trash2,
   MoreHorizontal,
-  Package,
-  PackageOpenIcon,
-  ArrowBigDown,
-  ArrowDown,
-  ArrowRight,
-  ChevronDownCircle,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";

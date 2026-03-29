@@ -65,7 +65,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           type="button"
           aria-label="Close tab"
           onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
+          className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
         >
           <X className="h-3 w-3" />
         </button>

@@ -17,6 +17,7 @@ Provides all filesystem and network implementations for the repository and servi
 | `FsTemplateRepo` | `TemplateRepository` | Template storage under `templates/`. |
 | `FsCookieRepo` | `CookieRepository` | Cookie jar storage under `cookies/`. |
 | `FsWorkspaceRepo` | `WorkspaceRepository` | Persists the workspace registry to `workspaces.yml`. Creates a "Default Workspace" on first load. |
+| `FsWorkspaceConfigRepo` | `WorkspaceConfigRepository` | Reads/writes per-workspace `workspace.yml` (collections list, description, environment settings). |
 | `ReqwestExecutor` | `HttpExecutor` | Executes HTTP requests via `reqwest`. Handles all auth schemes, body types, and AWS SigV4 signing. |
 | `NotifyFileWatcher` | — | Wraps the `notify` crate; publishes `DomainEvent::FileChanged` via `EventPublisher` when collection files change. |
 
