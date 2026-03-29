@@ -178,8 +178,18 @@
     stroke-width: 1;
   }
 }
+            
+/* Linux: transparent window with border and rounded corners.
+   Body padding creates a visible gap for the border to render against the desktop. */
+html.linux body {
+  background: transparent;
+  padding: 8px;
+}
 
-/* Linux: subtle window border for edge definition without native decorations. */
 html.linux #root {
-  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: var(--background);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+  height: 100%;
 }
