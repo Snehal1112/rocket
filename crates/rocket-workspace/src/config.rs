@@ -23,6 +23,14 @@ pub struct CollectionReference {
     pub path: Option<PathBuf>,
 }
 
+/// Configuration for workspace-level environments.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEnvironmentsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_environment: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +69,21 @@ mod tests {
         let yaml = serde_yaml::to_string(&r).unwrap();
         let back: CollectionReference = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(r, back);
+    }
+
+    #[test]
+    fn environments_config_defaults_to_none() {
+        let cfg = WorkspaceEnvironmentsConfig::default();
+        assert_eq!(cfg.active_environment, None);
+    }
+
+    #[test]
+    fn environments_config_serde_roundtrip() {
+        let cfg = WorkspaceEnvironmentsConfig {
+            active_environment: Some("staging".to_string()),
+        };
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        let back: WorkspaceEnvironmentsConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(cfg, back);
     }
 }
