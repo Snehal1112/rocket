@@ -31,12 +31,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Folder, LayoutDashboard, Search, Plus, Upload } from "lucide-react";
+import { Folder, LayoutDashboard, Search, Plus, Upload, Layers } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { Tree } from "@/components/ui/tree";
 import { CollectionNode } from "@/components/collections/CollectionNode";
 import type { DeleteTarget } from "@/components/collections/tree-utils";
+import { WorkspaceSection } from "./WorkspaceSection";
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
@@ -49,6 +50,7 @@ export function CollectionsSidebar() {
 
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const multiWorkspaceMode = useWorkspaceStore((s) => s.multiWorkspaceMode);
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
@@ -298,7 +300,7 @@ export function CollectionsSidebar() {
                     : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
                 )}
               >
-                Collections
+                {multiWorkspaceMode ? "Workspaces" : "Collections"}
               </button>
               <button
                 type="button"
@@ -332,6 +334,18 @@ export function CollectionsSidebar() {
                   title="Import Collection"
                 >
                   <Upload className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                  title={multiWorkspaceMode ? "Switch to single workspace mode" : "Switch to multi-workspace mode"}
+                  onClick={() => {
+                    const store = useWorkspaceStore.getState()
+                    void store.setMultiWorkspaceMode(!store.multiWorkspaceMode)
+                  }}
+                >
+                  <Layers className="h-3.5 w-3.5" />
                 </Button>
               </div>
             )}
@@ -399,42 +413,75 @@ export function CollectionsSidebar() {
               </div>
 
               {/* Collection tree. */}
-              <ScrollArea className="flex-1">
-                <Tree value={selectedId} onValueChange={setSelectedId}>
-                  <div className="px-1 pb-2">
-                    {summaries.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 px-4">
-                        <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-sm text-muted-foreground mb-3">
-                          No collections yet.
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-sm"
-                          onClick={() => setIsCreating(true)}
-                        >
-                          <Plus className="h-3.5 w-3.5 mr-1.5" />
-                          Create Collection
-                        </Button>
-                      </div>
-                    ) : (
-                      summaries.map((s) => (
-                        <CollectionNode
-                          key={s.name}
-                          summary={s}
-                          filter={filter}
-                          summaries={summaries}
-                          onNewFolder={handleNewFolder}
-                          onMove={handleMove}
-                          onDelete={setDeleteTarget}
-                          onDuplicate={handleDuplicate}
-                        />
-                      ))
-                    )}
+              {multiWorkspaceMode ? (
+                <ScrollArea className="flex-1">
+                  <div className="px-1 pb-2 space-y-1">
+                    {workspaces.map((ws) => (
+                      <WorkspaceSection
+                        key={ws.id}
+                        workspace={ws}
+                        collectionCount={ws.id === activeWorkspaceId ? summaries.length : 0}
+                      >
+                        {ws.id === activeWorkspaceId ? (
+                          summaries.map((s) => (
+                            <CollectionNode
+                              key={s.name}
+                              summary={s}
+                              filter={filter}
+                              summaries={summaries}
+                              onNewFolder={handleNewFolder}
+                              onMove={handleMove}
+                              onDelete={setDeleteTarget}
+                              onDuplicate={handleDuplicate}
+                            />
+                          ))
+                        ) : (
+                          <div className="px-4 py-2 text-xs text-muted-foreground">
+                            Switch to this workspace to see collections
+                          </div>
+                        )}
+                      </WorkspaceSection>
+                    ))}
                   </div>
-                </Tree>
-              </ScrollArea>
+                </ScrollArea>
+              ) : (
+                <ScrollArea className="flex-1">
+                  <Tree value={selectedId} onValueChange={setSelectedId}>
+                    <div className="px-1 pb-2">
+                      {summaries.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-8 px-4">
+                          <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                          <p className="text-sm text-muted-foreground mb-3">
+                            No collections yet.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-sm"
+                            onClick={() => setIsCreating(true)}
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1.5" />
+                            Create Collection
+                          </Button>
+                        </div>
+                      ) : (
+                        summaries.map((s) => (
+                          <CollectionNode
+                            key={s.name}
+                            summary={s}
+                            filter={filter}
+                            summaries={summaries}
+                            onNewFolder={handleNewFolder}
+                            onMove={handleMove}
+                            onDelete={setDeleteTarget}
+                            onDuplicate={handleDuplicate}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </Tree>
+                </ScrollArea>
+              )}
             </div>
           ) : (
             <div className="flex-1 overflow-hidden">
