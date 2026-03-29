@@ -29,13 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { Folder, Search, Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
@@ -285,41 +279,55 @@ export function CollectionsSidebar() {
   return (
     <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
       <div className="flex-1 flex flex-col overflow-hidden">
-          {/* View selector and action icons. */}
-          <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-            <Select
-              value={view}
-              onValueChange={(v) => setView(v as "collections" | "history")}
-            >
-              <SelectTrigger className="h-8 flex-1 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="collections">Collections</SelectItem>
-                <SelectItem value="history">History</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* View tabs and action icons (Bruno-style). */}
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setView("collections")}
+                className={cn(
+                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                  view === "collections"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+              >
+                Collections
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("history")}
+                className={cn(
+                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                  view === "history"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+              >
+                History
+              </button>
+            </div>
             {view === "collections" && (
-              <>
+              <div className="flex items-center gap-0.5">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCreating(true)}
                   title="New Collection"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => void handleImport()}
                   title="Import Collection"
                 >
-                  <Upload className="h-4 w-4" />
+                  <Upload className="h-3.5 w-3.5" />
                 </Button>
-              </>
+              </div>
             )}
           </div>
 

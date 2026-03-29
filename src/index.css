@@ -173,4 +173,8 @@
     @apply bg-background text-foreground;
     font-family: "Inter", "Segoe UI", sans-serif;
   }
+  /* Standardize all Lucide icons to 1px stroke weight. */
+  .lucide {
+    stroke-width: 1;
+  }
 }

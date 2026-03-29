@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Clock, Briefcase } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -50,10 +50,7 @@ export function CollectionDropdown() {
           size="sm"
           className="h-7 gap-1.5 px-2.5 text-sm font-medium"
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0">
-            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M8 4v4l3 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
+          <Clock size={14} className="shrink-0" />
           <span className="max-w-[120px] truncate">{activeCollection ?? 'Select collection'}</span>
           {activeCollection && (
             <span className="text-muted-foreground">{activeTabCount}</span>
@@ -69,10 +66,7 @@ export function CollectionDropdown() {
           </p>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-muted-foreground">
-                <rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M4 3V2a1 1 0 011-1h6a1 1 0 011 1v1" stroke="currentColor" strokeWidth="1.2" />
-              </svg>
+              <Briefcase size={14} className="text-muted-foreground" />
               <span className="text-sm font-medium">{activeWorkspace}</span>
             </div>
             <span className="text-xs text-muted-foreground">{summaries.length}</span>
