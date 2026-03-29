@@ -291,8 +291,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           onValueChange={(val) => setActiveSection(val as SectionTab)}
           className="flex-1 flex flex-col min-h-0"
         >
-          <TabsList className="w-full justify-start rounded-none border-b border-border/70 bg-card/60 h-9 px-3">
-            <TabsTrigger value="params" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsList>
+            <TabsTrigger value="params">
               Params
               {enabledParamCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -300,7 +300,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="headers" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="headers">
               Headers
               {enabledHeaderCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -308,12 +308,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="body" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
-              Body
-            </TabsTrigger>
-            <TabsTrigger value="auth" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
-              Auth
-            </TabsTrigger>
+            <TabsTrigger value="body">Body</TabsTrigger>
+            <TabsTrigger value="auth">Auth</TabsTrigger>
           </TabsList>
 
           <div className="flex-1 overflow-auto p-3">
