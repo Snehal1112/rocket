@@ -18,7 +18,7 @@ import { ConflictResolver } from '@/components/git/ConflictResolver';
 import { GitTab } from '@/components/git/GitTab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isDiffTab, isRequestTab, isConflictTab, isGitTab } from '@/types/pane-types';
+import { isDiffTab, isRequestTab, isConflictTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
 
 // Branded empty state shown when no tabs are open.
 function EmptyState() {
@@ -75,6 +75,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (
             <GitTab tab={activeTab} />
+          ) : isWorkspaceTab(activeTab) ? (
+            // Workspace tab rendering handled by later tasks.
+            null
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )

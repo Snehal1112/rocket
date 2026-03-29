@@ -39,6 +39,14 @@ export interface CollectionTab extends BaseTab {
   activeSection?: CollectionSection;
 }
 
+export type WorkspaceTabSection = 'overview' | 'environments' | 'git';
+
+export interface WorkspaceTab extends BaseTab {
+  tabType: 'workspace';
+  workspaceId: string;
+  activeSection: WorkspaceTabSection;
+}
+
 export interface DiffState {
   filePath: string;
   collectionPath: string;
@@ -72,7 +80,11 @@ export interface GitTab extends BaseTab {
   collectionPath: string;
 }
 
-export type Tab = RequestTab | CollectionTab | DiffTab | ConflictTab | GitTab;
+export type Tab = RequestTab | CollectionTab | WorkspaceTab | DiffTab | ConflictTab | GitTab;
+
+export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
+  return tab.tabType === 'workspace';
+}
 
 export function isRequestTab(tab: Tab): tab is RequestTab {
   return tab.tabType === 'request' || tab.tabType === 'history';
