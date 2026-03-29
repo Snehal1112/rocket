@@ -16,6 +16,9 @@ import { CollectionOverviewTab } from '@/components/collections/CollectionOvervi
 import { DiffViewer } from '@/components/git/DiffViewer';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
 import { GitTab } from '@/components/git/GitTab';
+import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
+import { WorkspaceEnvironmentsTab } from '@/components/workspace/WorkspaceEnvironmentsTab';
+import { WorkspaceGitTab } from '@/components/workspace/WorkspaceGitTab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import { isDiffTab, isRequestTab, isConflictTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
@@ -76,8 +79,13 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           ) : isGitTab(activeTab) ? (
             <GitTab tab={activeTab} />
           ) : isWorkspaceTab(activeTab) ? (
-            // Workspace tab rendering handled by later tasks.
-            null
+            activeTab.activeSection === 'overview' ? (
+              <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
+            ) : activeTab.activeSection === 'environments' ? (
+              <WorkspaceEnvironmentsTab workspaceId={activeTab.workspaceId} />
+            ) : activeTab.activeSection === 'git' ? (
+              <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
+            ) : null
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )
