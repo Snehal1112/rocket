@@ -10,6 +10,8 @@ pub struct Workspace {
     pub path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +28,7 @@ impl Workspace {
             name: name.to_string(),
             path,
             description: None,
+            pinned: false,
         }
     }
 
@@ -46,6 +49,7 @@ impl WorkspaceRegistry {
             name: "Default Workspace".to_string(),
             path: default_path,
             description: None,
+            pinned: true,
         };
         Self {
             active_workspace_id: default.id.clone(),
@@ -123,6 +127,7 @@ mod tests {
             name: "Test".to_string(),
             path: PathBuf::from("/tmp/test"),
             description: Some("My description".to_string()),
+            pinned: false,
         };
         let yaml = serde_yaml::to_string(&ws).unwrap();
         let back: Workspace = serde_yaml::from_str(&yaml).unwrap();
@@ -134,5 +139,33 @@ mod tests {
         let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
         let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn new_workspace_is_not_pinned() {
+        let ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        assert!(!ws.pinned);
+    }
+
+    #[test]
+    fn default_workspace_is_pinned() {
+        let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        assert!(reg.workspaces[0].pinned);
+    }
+
+    #[test]
+    fn workspace_pinned_serde_roundtrip() {
+        let mut ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        ws.pinned = true;
+        let yaml = serde_yaml::to_string(&ws).unwrap();
+        let back: Workspace = serde_yaml::from_str(&yaml).unwrap();
+        assert!(back.pinned);
+    }
+
+    #[test]
+    fn workspace_deserializes_without_pinned_defaults_false() {
+        let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
+        let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
+        assert!(!ws.pinned);
     }
 }
