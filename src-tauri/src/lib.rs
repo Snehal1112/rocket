@@ -12,6 +12,7 @@ use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
     FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
+use rocket_workspace::WorkspaceConfigRepository;
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
 
@@ -53,6 +54,14 @@ pub fn run() {
                 .get_active()
                 .expect("failed to load active workspace on startup");
             *active_workspace_path.lock().unwrap() = active_ws.path.clone();
+
+            // Ensure the default workspace has a workspace.yml on first launch.
+            let ws_yml = active_ws.path.join("workspace.yml");
+            if !ws_yml.exists() {
+                let config_repo = FsWorkspaceConfigRepo::new();
+                let config = rocket_workspace::WorkspaceConfig::new(&active_ws.name);
+                let _ = config_repo.save(&active_ws.path, &config);
+            }
 
             // Derive per-service directories from the active workspace.
             let workspace_base = active_ws.path.clone();
