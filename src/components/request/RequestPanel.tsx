@@ -9,7 +9,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,11 +31,14 @@ import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import { SaveRequestButton } from './SaveRequestButton';
 import { VariableAwareUrlInput } from './VariableAwareUrlInput';
+import { BrunoTabBar } from './BrunoTabBar';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type {
   RequestTab,
   HttpMethod,
   KeyValueEntry,
+  BodyState,
+  AuthState,
 } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { findTabInTree } from '@/lib/pane-utils';
@@ -46,6 +48,26 @@ import { getCollectionSettings } from '@/lib/tauri-api';
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
 ];
+
+const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
+  { label: 'None', value: 'none' },
+  { label: 'JSON', value: 'json' },
+  { label: 'XML', value: 'xml' },
+  { label: 'Text', value: 'text' },
+  { label: 'Form Data', value: 'formdata' },
+  { label: 'Binary', value: 'binary' },
+];
+
+const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
+  { label: 'None', value: 'none' },
+  { label: 'Basic', value: 'basic' },
+  { label: 'Bearer', value: 'bearer' },
+  { label: 'API Key', value: 'api-key' },
+  { label: 'OAuth 2.0', value: 'oauth2' },
+  { label: 'AWS Sig v4', value: 'aws-sig-v4' },
+];
+
+const INHERIT_AUTH_OPTION = { label: 'Inherit from parent', value: 'inherit' as AuthState['authType'] };
 
 type SectionTab = 'params' | 'headers' | 'body' | 'auth';
 
@@ -220,6 +242,151 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return map;
   }, [request.queryParams]);
 
+  const authTypeOptions = useMemo(
+    () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),
+    [tab.source],
+  );
+
+  const handleAuthTypeChange = useCallback(
+    (authType: AuthState['authType']) => {
+      const next: AuthState = { authType };
+      if (authType === 'basic') next.basic = { username: '', password: '' };
+      if (authType === 'bearer') next.bearer = { token: '' };
+      if (authType === 'api-key') next.apiKey = { key: '', value: '', addTo: 'header' };
+      if (authType === 'oauth2')
+        next.oauth2 = {
+          grantType: 'client_credentials',
+          authorizationUrl: '',
+          tokenUrl: '',
+          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
+          clientId: '',
+          clientSecret: '',
+          scope: '',
+          state: '',
+          username: '',
+          password: '',
+          clientAuthentication: 'body',
+          headerPrefix: 'Bearer',
+          addTokenTo: 'header',
+          verifySsl: true,
+          accessToken: '',
+          refreshToken: '',
+          expiresIn: null,
+          tokenAcquiredAt: null,
+        };
+      if (authType === 'aws-sig-v4')
+        next.awsSigV4 = { accessKey: '', secretKey: '', region: '', service: '', sessionToken: '' };
+      updateRequest(tab.id, { auth: next });
+    },
+    [tab.id, updateRequest],
+  );
+
+  const tabDefs = useMemo(
+    () => [
+      {
+        value: 'params',
+        label: (
+          <>
+            Params
+            {enabledParamCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+                {enabledParamCount}
+              </span>
+            )}
+          </>
+        ),
+        isActive: activeSection === 'params',
+        onClick: () => setActiveSection('params'),
+      },
+      {
+        value: 'headers',
+        label: (
+          <>
+            Headers
+            {enabledHeaderCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+                {enabledHeaderCount}
+              </span>
+            )}
+          </>
+        ),
+        isActive: activeSection === 'headers',
+        onClick: () => setActiveSection('headers'),
+      },
+      {
+        value: 'body',
+        label: (
+          <>
+            Body
+            {request.body.mode !== 'none' && (
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'body',
+        onClick: () => setActiveSection('body'),
+      },
+      {
+        value: 'auth',
+        label: (
+          <>
+            Auth
+            {request.auth.authType !== 'none' && (
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'auth',
+        onClick: () => setActiveSection('auth'),
+      },
+    ],
+    [activeSection, enabledParamCount, enabledHeaderCount, request.body.mode, request.auth.authType],
+  );
+
+  const tabRightContent = useMemo(() => {
+    if (activeSection === 'body') {
+      return (
+        <Select
+          value={request.body.mode}
+          onValueChange={(val) =>
+            updateRequest(tab.id, { body: { ...request.body, mode: val as BodyState['mode'] } })
+          }
+        >
+          <SelectTrigger className="h-7 w-[120px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {BODY_MODES.map((m) => (
+              <SelectItem key={m.value} value={m.value} className="text-xs">
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+    if (activeSection === 'auth') {
+      return (
+        <Select
+          value={request.auth.authType}
+          onValueChange={(val) => handleAuthTypeChange(val as AuthState['authType'])}
+        >
+          <SelectTrigger className="h-7 w-[160px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {authTypeOptions.map((t) => (
+              <SelectItem key={t.value} value={t.value} className="text-xs">
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+    return undefined;
+  }, [activeSection, request.body, request.auth.authType, tab.id, updateRequest, handleAuthTypeChange, authTypeOptions]);
+
   return (
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-transparent">
       {/* ── Request area ── */}
@@ -286,34 +453,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         )}
 
         {/* Section tabs. */}
-        <Tabs
-          value={activeSection}
-          onValueChange={(val) => setActiveSection(val as SectionTab)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <TabsList>
-            <TabsTrigger value="params">
-              Params
-              {enabledParamCount > 0 && (
-                <span className="ml-1 text-2xs text-muted-foreground">
-                  ({enabledParamCount})
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="headers">
-              Headers
-              {enabledHeaderCount > 0 && (
-                <span className="ml-1 text-2xs text-muted-foreground">
-                  ({enabledHeaderCount})
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="body">Body</TabsTrigger>
-            <TabsTrigger value="auth">Auth</TabsTrigger>
-          </TabsList>
-
+        <div className="flex-1 flex flex-col min-h-0">
+          <BrunoTabBar tabs={tabDefs} rightContent={tabRightContent} />
           <div className="flex-1 overflow-auto p-3">
-            <TabsContent value="params" className="mt-0 h-full">
+            {activeSection === 'params' && (
               <div className="space-y-2">
                 <PathParamsPanel
                   params={request.pathParams}
@@ -321,27 +464,27 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 />
                 <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
-            </TabsContent>
-            <TabsContent value="headers" className="mt-0 h-full">
+            )}
+            {activeSection === 'headers' && (
               <HeadersEditor
                 headers={request.headers}
                 onChange={(headers) => updateRequest(tab.id, { headers })}
               />
-            </TabsContent>
-            <TabsContent value="body" className="mt-0 h-full">
+            )}
+            {activeSection === 'body' && (
               <BodyEditor
                 body={request.body}
                 onChange={(body) => updateRequest(tab.id, { body })}
               />
-            </TabsContent>
-            <TabsContent value="auth" className="mt-0 h-full">
+            )}
+            {activeSection === 'auth' && (
               <AuthEditor
                 auth={request.auth}
                 onChange={(auth) => updateRequest(tab.id, { auth })}
               />
-            </TabsContent>
+            )}
           </div>
-        </Tabs>
+        </div>
       </div>
 
       {/* ── Drag separator ── */}
