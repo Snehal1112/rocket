@@ -3,13 +3,6 @@ import { FileUp } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { KeyValueEditor } from './KeyValueEditor';
 
@@ -20,28 +13,12 @@ const MonacoWrapper = lazy(() =>
   })),
 );
 
-type BodyMode = BodyState['mode'];
-
 interface BodyEditorProps {
   body: BodyState;
   onChange: (body: BodyState) => void;
 }
 
-const MODES: { label: string; value: BodyMode }[] = [
-  { label: 'None', value: 'none' },
-  { label: 'JSON', value: 'json' },
-  { label: 'XML', value: 'xml' },
-  { label: 'Text', value: 'text' },
-  { label: 'Form Data', value: 'formdata' },
-  { label: 'Binary', value: 'binary' },
-];
-
 export function BodyEditor({ body, onChange }: BodyEditorProps) {
-  const setMode = useCallback(
-    (mode: BodyMode) => onChange({ ...body, mode }),
-    [body, onChange],
-  );
-
   const setContent = useCallback(
     (content: string) => onChange({ ...body, content }),
     [body, onChange],
@@ -73,22 +50,6 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
   return (
     <div className="flex h-full flex-col space-y-2">
-      {/* Mode selector dropdown. */}
-      <div className="flex items-center gap-2 shrink-0">
-        <Select value={body.mode} onValueChange={(val) => setMode(val as BodyMode)}>
-          <SelectTrigger className="w-[140px] h-7 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MODES.map((m) => (
-              <SelectItem key={m.value} value={m.value} className="text-xs">
-                {m.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       {/* Content area — fills remaining height. */}
       {body.mode === 'none' && (
         <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
