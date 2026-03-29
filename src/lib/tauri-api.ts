@@ -635,3 +635,6 @@ export const getMultiWorkspaceMode = () =>
 
 export const setMultiWorkspaceMode = (enabled: boolean) =>
   invoke<void>('set_multi_workspace_mode', { enabled })
+
+export const linkExternalCollection = (workspaceId: string, collectionPath: string) =>
+  invoke<void>('link_external_collection', { workspaceId, collectionPath })
