@@ -9,6 +9,7 @@ import { SplashScreen } from '@/components/SplashScreen';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
 import { useState, useEffect } from 'react';
 
 function App() {
@@ -22,8 +23,32 @@ function App() {
 
   const loadWorkspaces = useWorkspaceStore((s) => s.loadWorkspaces);
   useEffect(() => {
-    void loadWorkspaces();
+    const init = async () => {
+      await loadWorkspaces()
+      const uiState = await restoreUiState()
+      if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
+        const { workspaceId } = uiState.workspaceTabs
+        const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId)
+        if (ws) {
+          usePaneStore.getState().openWorkspaceTabs(ws.id, ws.id === 'default')
+        }
+      }
+      // Task 9: First-launch fallback
+      if (!uiState) {
+        const store = useWorkspaceStore.getState()
+        const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
+        if (activeWs) {
+          usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+        }
+      }
+    }
+    void init()
   }, [loadWorkspaces]);
+
+  useEffect(() => {
+    const unsub = usePaneStore.subscribe(scheduleSaveUiState)
+    return unsub
+  }, []);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
