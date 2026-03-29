@@ -23,7 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { cn } from '@/lib/utils';
-import { METHOD_TEXT_COLOR } from '@/lib/colors';
+import { METHOD_BADGE_COLOR } from '@/lib/colors';
 import { renameRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
@@ -76,8 +76,6 @@ export function RequestNode({
     usePaneStore.getState().openTab(tab);
   }
 
-  const methodColor = METHOD_TEXT_COLOR[method.toUpperCase()] ?? 'text-foreground';
-
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -88,7 +86,10 @@ export function RequestNode({
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <span className={cn('w-10 shrink-0 font-mono text-2xs font-semibold', methodColor)}>
+              <span className={cn(
+                "shrink-0 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border",
+                METHOD_BADGE_COLOR[method.toUpperCase()] ?? METHOD_BADGE_COLOR["GET"]
+              )}>
                 {method}
               </span>
               {isRenaming ? (
