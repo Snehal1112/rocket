@@ -285,7 +285,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <p className="text-xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
         )}
 
-        {/* Section tabs — matching legacy TabsList styling. */}
+        {/* Section tabs. */}
         <Tabs
           value={activeSection}
           onValueChange={(val) => setActiveSection(val as SectionTab)}
