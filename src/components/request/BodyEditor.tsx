@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { KeyValueEditor } from './KeyValueEditor';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 
 // Lazy-load Monaco so it stays out of the initial JS bundle.
 const MonacoWrapper = lazy(() =>
@@ -59,13 +60,7 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
 
       {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
         <div className="flex-1 border rounded min-h-[200px]">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                Loading editor...
-              </div>
-            }
-          >
+          <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper
               value={body.content}
               onChange={(val) => setContent(val)}

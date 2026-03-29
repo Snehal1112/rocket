@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
 import type { ResponseState } from '@/types/pane-types';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 
 type ViewTab = ResponseState['activeView'];
 
@@ -180,13 +181,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeView === 'pretty' && (
           response.body ? (
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  Loading editor...
-                </div>
-              }
-            >
+            <Suspense fallback={<EditorSkeleton />}>
               <MonacoWrapper
                 value={prettyBody}
                 language={language}
@@ -203,13 +198,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
         {activeView === 'raw' && (
           response.body ? (
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  Loading editor...
-                </div>
-              }
-            >
+            <Suspense fallback={<EditorSkeleton />}>
               <MonacoWrapper
                 value={response.body}
                 language="plaintext"

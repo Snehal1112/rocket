@@ -1,6 +1,7 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { BASE_EDITOR_OPTIONS, READONLY_OPTIONS, detectLanguage } from './monaco-config';
 import { useMonacoTheme } from './useMonacoTheme';
+import { EditorSkeleton } from './EditorSkeleton';
 
 interface MonacoWrapperProps {
   value: string;
@@ -38,11 +39,7 @@ export function MonacoWrapper({
       onMount={handleMount}
       theme={themeName}
       options={options}
-      loading={
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-          Loading editor...
-        </div>
-      }
+      loading={<EditorSkeleton />}
     />
   );
 }
