@@ -8,6 +8,10 @@ pub struct Workspace {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -15,6 +19,8 @@ pub struct Workspace {
 pub struct WorkspaceRegistry {
     pub workspaces: Vec<Workspace>,
     pub active_workspace_id: String,
+    #[serde(default)]
+    pub multi_workspace_mode: bool,
 }
 
 impl Workspace {
@@ -23,6 +29,8 @@ impl Workspace {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.to_string(),
             path,
+            description: None,
+            pinned: false,
         }
     }
 
@@ -42,10 +50,13 @@ impl WorkspaceRegistry {
             id: "default".to_string(),
             name: "Default Workspace".to_string(),
             path: default_path,
+            description: None,
+            pinned: true,
         };
         Self {
             active_workspace_id: default.id.clone(),
             workspaces: vec![default],
+            multi_workspace_mode: false,
         }
     }
 
@@ -104,5 +115,82 @@ mod tests {
     fn find_by_id_returns_none_for_missing() {
         let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
         assert!(reg.find_by_id("nonexistent").is_none());
+    }
+
+    #[test]
+    fn new_workspace_has_no_description() {
+        let ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn workspace_description_serde_roundtrip() {
+        let ws = Workspace {
+            id: "test-id".to_string(),
+            name: "Test".to_string(),
+            path: PathBuf::from("/tmp/test"),
+            description: Some("My description".to_string()),
+            pinned: false,
+        };
+        let yaml = serde_yaml::to_string(&ws).unwrap();
+        let back: Workspace = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.description, Some("My description".to_string()));
+    }
+
+    #[test]
+    fn workspace_deserializes_without_description_backward_compat() {
+        let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
+        let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn new_workspace_is_not_pinned() {
+        let ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        assert!(!ws.pinned);
+    }
+
+    #[test]
+    fn default_workspace_is_pinned() {
+        let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        assert!(reg.workspaces[0].pinned);
+    }
+
+    #[test]
+    fn workspace_pinned_serde_roundtrip() {
+        let mut ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        ws.pinned = true;
+        let yaml = serde_yaml::to_string(&ws).unwrap();
+        let back: Workspace = serde_yaml::from_str(&yaml).unwrap();
+        assert!(back.pinned);
+    }
+
+    #[test]
+    fn workspace_deserializes_without_pinned_defaults_false() {
+        let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
+        let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
+        assert!(!ws.pinned);
+    }
+
+    #[test]
+    fn new_registry_has_multi_workspace_mode_false() {
+        let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        assert!(!reg.multi_workspace_mode);
+    }
+
+    #[test]
+    fn registry_multi_workspace_mode_serde_roundtrip() {
+        let mut reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
+        reg.multi_workspace_mode = true;
+        let yaml = serde_yaml::to_string(&reg).unwrap();
+        let back: WorkspaceRegistry = serde_yaml::from_str(&yaml).unwrap();
+        assert!(back.multi_workspace_mode);
+    }
+
+    #[test]
+    fn registry_deserializes_without_multi_workspace_mode_backward_compat() {
+        let yaml = "activeWorkspaceId: default\nworkspaces:\n  - id: default\n    name: Default\n    path: /tmp/d\n    pinned: true\n";
+        let reg: WorkspaceRegistry = serde_yaml::from_str(yaml).unwrap();
+        assert!(!reg.multi_workspace_mode);
     }
 }

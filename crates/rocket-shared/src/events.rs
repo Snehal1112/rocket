@@ -23,6 +23,9 @@ pub enum DomainEvent {
     WorkspaceRenamed  { id: String, old_name: String, new_name: String },
     WorkspaceClosed   { id: String },
     WorkspaceDeleted  { id: String },
+    WorkspacePinned   { id: String },
+    WorkspaceUnpinned { id: String },
+    WorkspaceDescriptionUpdated { id: String, description: Option<String> },
 
     // HTTP execution events
     RequestExecuted { method: String, url: String, status: u16, duration_ms: u64 },
@@ -141,5 +144,30 @@ mod tests {
         let event = DomainEvent::WorkspaceDeleted { id: "abc-123".into() };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("abc-123"));
+    }
+
+    #[test]
+    fn workspace_pinned_serializes() {
+        let event = DomainEvent::WorkspacePinned { id: "ws-123".into() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ws-123"));
+    }
+
+    #[test]
+    fn workspace_unpinned_serializes() {
+        let event = DomainEvent::WorkspaceUnpinned { id: "ws-123".into() };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ws-123"));
+    }
+
+    #[test]
+    fn workspace_description_updated_serializes() {
+        let event = DomainEvent::WorkspaceDescriptionUpdated {
+            id: "ws-123".into(),
+            description: Some("New desc".into()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ws-123"));
+        assert!(json.contains("New desc"));
     }
 }
