@@ -60,24 +60,25 @@
 :root {
   --radius: 0.7rem;
 
-  --background: hsl(214 44% 98%);
-  --foreground: hsl(222 47% 11%);
+  --background: hsl(0 0% 100%);      /* #ffffff */
+  --foreground: hsl(0 0% 23%);       /* #3b3b3b — VS Code Default Light Modern neutral */
+  --border: hsl(0 0% 89%);           /* #e4e4e4 */
+
   --card: hsl(0 0% 100%);
-  --card-foreground: hsl(222 47% 11%);
+  --card-foreground: hsl(0 0% 23%);
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(222 47% 11%);
+  --popover-foreground: hsl(0 0% 23%);
   --primary: hsl(213 88% 42%);
   --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(210 40% 95%);
-  --secondary-foreground: hsl(222 47% 11%);
-  --muted: hsl(213 35% 94%);
-  --muted-foreground: hsl(215 20% 35%);
+  --secondary: hsl(0 0% 96%);
+  --secondary-foreground: hsl(0 0% 23%);
+  --muted: hsl(0 0% 95%);
+  --muted-foreground: hsl(0 0% 45%);
   --accent: hsl(212 86% 94%);
   --accent-foreground: hsl(213 88% 30%);
   --destructive: hsl(0 84.2% 60.2%);
   --destructive-foreground: hsl(0 0% 98%);
-  --border: hsl(214 31% 88%);
-  --input: hsl(214 31% 88%);
+  --input: hsl(0 0% 89%);
   --ring: hsl(213 88% 42%);
 
   --chart-1: hsl(213 88% 42%);
@@ -96,36 +97,36 @@
   --sidebar-ring: hsl(213 88% 42%);
 
   /* Monaco editor syntax theme. */
-  --monaco-bg: #f5f8fc;
-  --monaco-fg: #1a1f36;
-  --monaco-line-highlight: #eef2f9;
-  --monaco-line-number: #9ca3af;
-  --monaco-string: #16a34a;
-  --monaco-number: #d97706;
-  --monaco-keyword: #7c3aed;
-  --monaco-comment: #9ca3af;
-  --monaco-type: #2563eb;
+  --monaco-bg: #ffffff;
+  --monaco-fg: #000000;
+  --monaco-line-highlight: #add6ff26;
+  --monaco-line-number: #237893;
+  --monaco-string: #a31515;
+  --monaco-number: #098658;
+  --monaco-keyword: #0000ff;
+  --monaco-comment: #008000;
+  --monaco-type: #267f99;
 }
 
 .dark {
   --background: hsl(0 0% 12%);
-  --foreground: hsl(0 0% 90%);
+  --foreground: hsl(0 0% 80%);   /* #cccccc — VS Code Default Dark Modern */
+  --border: hsl(0 0% 27%);       /* #454545 — VS Code border */
   --card: hsl(0 0% 10%);
-  --card-foreground: hsl(0 0% 87%);
+  --card-foreground: hsl(0 0% 80%);
   --popover: hsl(0 0% 10%);
-  --popover-foreground: hsl(0 0% 87%);
+  --popover-foreground: hsl(0 0% 80%);
   --primary: hsl(207 100% 42%);
   --primary-foreground: hsl(0 0% 98%);
   --secondary: hsl(0 0% 15%);
-  --secondary-foreground: hsl(0 0% 87%);
+  --secondary-foreground: hsl(0 0% 80%);
   --muted: hsl(0 0% 14%);
-  --muted-foreground: hsl(0 0% 65%);
+  --muted-foreground: hsl(0 0% 53%);
   --accent: hsl(204 100% 18%);
   --accent-foreground: hsl(0 0% 90%);
   --destructive: hsl(0 72% 45%);
   --destructive-foreground: hsl(0 0% 98%);
-  --border: hsl(0 0% 19%);
-  --input: hsl(0 0% 19%);
+  --input: hsl(0 0% 27%);
   --ring: hsl(207 100% 42%);
 
   --chart-1: hsl(207 100% 42%);
@@ -134,25 +135,25 @@
   --chart-4: hsl(282 60% 62%);
   --chart-5: hsl(340 78% 61%);
 
-  --sidebar: oklch(0.17 0 0);
+  --sidebar: hsl(0 0% 9%);
   --sidebar-foreground: hsl(0 0% 87%);
   --sidebar-primary: hsl(207 100% 42%);
   --sidebar-primary-foreground: hsl(0 0% 98%);
   --sidebar-accent: hsl(204 100% 18%);
   --sidebar-accent-foreground: hsl(0 0% 90%);
-  --sidebar-border: oklch(0.28 0 0);
+  --sidebar-border: hsl(0 0% 27%);
   --sidebar-ring: hsl(207 100% 42%);
 
   /* Monaco editor syntax theme. */
   --monaco-bg: #1f1f1f;
-  --monaco-fg: #dedede;
-  --monaco-line-highlight: #242424;
-  --monaco-line-number: #666666;
-  --monaco-string: #4ade80;
-  --monaco-number: #fbbf24;
-  --monaco-keyword: #a78bfa;
-  --monaco-comment: #6b7280;
-  --monaco-type: #60a5fa;
+  --monaco-fg: #d4d4d4;
+  --monaco-line-highlight: #2a2d2e;
+  --monaco-line-number: #858585;
+  --monaco-string: #ce9178;
+  --monaco-number: #b5cea8;
+  --monaco-keyword: #569cd6;
+  --monaco-comment: #6a9955;
+  --monaco-type: #4ec9b0;
 }
 
 /* Thin scrollbars matching the legacy design. */

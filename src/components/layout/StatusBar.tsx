@@ -12,14 +12,11 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   const entryCount = useConsoleStore((s) => s.entries.length);
 
   return (
-    <div className="h-7 border-t border-border/70 bg-card/85 backdrop-blur-sm px-2 flex items-center gap-1.5 shrink-0">
+    <div className="h-7 border-t border-border/70 bg-card backdrop-blur-sm px-2 flex items-center gap-1.5 shrink-0">
       <Button
         variant="ghost"
         size="sm"
-        className={cn(
-          "h-5 px-1.5 text-xs gap-1",
-          isConsoleOpen && "bg-accent",
-        )}
+        className={cn("h-5 px-1.5 text-xs gap-1", isConsoleOpen && "bg-accent")}
         onClick={onConsoleToggle}
         aria-label="Toggle Console"
       >
