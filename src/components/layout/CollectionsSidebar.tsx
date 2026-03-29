@@ -15,6 +15,7 @@ import {
   type CollectionItem,
 } from "@/lib/tauri-api";
 import { usePaneStore } from "@/stores/pane-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { PaneNode } from "@/types/pane-types";
 import {
   AlertDialog,
@@ -30,7 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Folder, Search, Plus, Upload } from "lucide-react";
+import { Folder, LayoutDashboard, Search, Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { Tree } from "@/components/ui/tree";
@@ -45,6 +46,11 @@ export function CollectionsSidebar() {
   const [selectedId, setSelectedId] = useState<string>("");
 
   const [view, setView] = useState<"collections" | "history">("collections");
+
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
   const handleImport = useCallback(async () => {
     const file = await open({
@@ -333,6 +339,19 @@ export function CollectionsSidebar() {
 
           {view === "collections" ? (
             <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Workspace home button. */}
+              {activeWorkspace && (
+                <div className="px-2 pt-1">
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start h-8 px-2 text-sm font-medium"
+                    onClick={() => openWorkspaceTabs(activeWorkspace.id, activeWorkspace.id === 'default')}
+                  >
+                    <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground mr-2" />
+                    <span className="truncate">{activeWorkspace.name}</span>
+                  </Button>
+                </div>
+              )}
               {/* Search and inline create. */}
               <div className="px-2 pb-2 space-y-1.5">
                 <div className="relative">
