@@ -3978,6 +3978,7 @@ dependencies = [
  "rocket-http",
  "rocket-infra",
  "rocket-shared",
+ "rocket-workspace",
  "serde",
  "serde_json",
  "tauri",
@@ -4007,7 +4008,9 @@ dependencies = [
  "rocket-history",
  "rocket-http",
  "rocket-shared",
+ "rocket-workspace",
  "serde",
+ "tempfile",
  "tokio",
 ]
 
@@ -4093,6 +4096,7 @@ dependencies = [
  "rocket-history",
  "rocket-http",
  "rocket-shared",
+ "rocket-workspace",
  "serde",
  "serde_json",
  "serde_yaml",
