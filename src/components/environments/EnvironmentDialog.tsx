@@ -1,9 +1,10 @@
 // src/components/environments/EnvironmentDialog.tsx
 import { useState, useCallback, useRef } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Check, X } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
@@ -171,31 +172,23 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                   <div className="space-y-1.5">
                     {selectedEnv.variables.map((variable, idx) => (
                       <div key={idx} className="flex gap-1.5 items-center">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => updateVariable(idx, { enabled: !variable.enabled })}
-                          className={cn(
-                            'w-4 h-4 rounded border p-0 shrink-0',
-                            variable.enabled
-                              ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                              : 'border-gray-300 hover:bg-muted',
-                          )}
-                        >
-                          {variable.enabled && <Check className="h-3 w-3" />}
-                        </Button>
+                        <Checkbox
+                          checked={variable.enabled}
+                          onCheckedChange={(checked) => updateVariable(idx, { enabled: !!checked })}
+                          aria-label={`${variable.enabled ? 'Disable' : 'Enable'} variable`}
+                        />
                         <Input
                           placeholder="Key"
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
-                          className="flex-1 text-sm h-7"
+                          className="flex-1 text-sm"
                         />
                         <Input
                           placeholder="Value"
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
-                          className="flex-1 text-sm h-7"
+                          className="flex-1 text-sm"
                         />
                         <Button
                           variant="ghost"
