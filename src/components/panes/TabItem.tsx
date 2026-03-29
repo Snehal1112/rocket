@@ -57,7 +57,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
       <span className="truncate">{getTabTitle(tab)}</span>
       {tab.isDirty && (
         <span
-          className="shrink-0 h-1.5 w-1.5 rounded-full bg-amber-400 dark:bg-amber-400"
+          className="shrink-0 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400"
           aria-label="Unsaved changes"
         />
       )}
