@@ -58,7 +58,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
+    <div className="h-full flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
       <TitleBar />
       <div className="flex-1 flex overflow-hidden">
         {!sidebarCollapsed && (
