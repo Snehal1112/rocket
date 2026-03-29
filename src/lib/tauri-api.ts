@@ -75,6 +75,8 @@ export interface CollectionSummary {
   path: string;
   requestCount: number;
   modifiedAt?: string;
+  /** "embedded" (default) or "external" — set by the workspace layer. */
+  refType?: string;
 }
 
 export interface Request {
@@ -635,3 +637,6 @@ export const getMultiWorkspaceMode = () =>
 
 export const setMultiWorkspaceMode = (enabled: boolean) =>
   invoke<void>('set_multi_workspace_mode', { enabled })
+
+export const linkExternalCollection = (workspaceId: string, collectionPath: string) =>
+  invoke<void>('link_external_collection', { workspaceId, collectionPath })

@@ -130,6 +130,15 @@ pub fn set_multi_workspace_mode(
 }
 
 #[tauri::command]
+pub fn link_external_collection(
+    workspace_id: String,
+    collection_path: String,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().unwrap().link_external_collection(&workspace_id, PathBuf::from(collection_path))
+}
+
+#[tauri::command]
 pub async fn open_folder_picker(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
