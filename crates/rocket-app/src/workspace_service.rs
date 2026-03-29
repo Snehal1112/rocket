@@ -157,6 +157,57 @@ impl WorkspaceService {
         Ok(())
     }
 
+    pub fn get_workspace_config(&self, workspace_id: &str) -> DomainResult<WorkspaceConfig> {
+        let registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id(workspace_id)
+            .ok_or_else(|| DomainError::NotFound(workspace_id.into()))?;
+        self.config_repo.load(&workspace.path)
+    }
+
+    /// Open an existing workspace from disk. The directory must contain `workspace.yml`.
+    pub fn open_workspace(&self, path: PathBuf) -> DomainResult<Workspace> {
+        if !path.join("workspace.yml").exists() {
+            return Err(DomainError::NotFound(
+                "workspace.yml not found in the selected directory".into(),
+            ));
+        }
+
+        let config = self.config_repo.load(&path)?;
+        let mut registry = self.repo.load()?;
+
+        if registry.workspaces.iter().any(|w| w.path == path) {
+            return Err(DomainError::AlreadyExists("This workspace is already open".into()));
+        }
+
+        if registry.name_exists(&config.name, None) {
+            return Err(DomainError::AlreadyExists(config.name.clone()));
+        }
+
+        let mut workspace = Workspace::new(&config.name, path.clone());
+        workspace.description = config.description;
+
+        registry.workspaces.push(workspace.clone());
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceCreated {
+            id: workspace.id.clone(),
+            name: workspace.name.clone(),
+            path: path.to_string_lossy().to_string(),
+        });
+        Ok(workspace)
+    }
+
+    pub fn get_multi_workspace_mode(&self) -> DomainResult<bool> {
+        Ok(self.repo.load()?.multi_workspace_mode)
+    }
+
+    pub fn set_multi_workspace_mode(&self, enabled: bool) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        registry.multi_workspace_mode = enabled;
+        self.repo.save(&registry)?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         if id == "default" {
             return Err(DomainError::InvalidInput(
@@ -414,5 +465,60 @@ mod tests {
         assert!(ws_path.join("workspace.yml").exists());
         assert!(ws_path.join("collections").is_dir());
         assert!(ws_path.join("environments").is_dir());
+    }
+
+    #[test]
+    fn get_workspace_config_returns_config() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Configurable", tmp.path().join("cfg-ws")).unwrap();
+        let config = svc.get_workspace_config(&ws.id).unwrap();
+        assert_eq!(config.name, "Configurable");
+    }
+
+    #[test]
+    fn open_existing_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("ext-ws");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        let cfg = WorkspaceConfig::new("External");
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        std::fs::write(ws_path.join("workspace.yml"), yaml).unwrap();
+
+        let ws = svc.open_workspace(ws_path).unwrap();
+        assert_eq!(ws.name, "External");
+        assert_eq!(svc.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn open_workspace_without_yml_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("no-cfg");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        assert!(svc.open_workspace(ws_path).is_err());
+    }
+
+    #[test]
+    fn open_workspace_already_registered_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("dup");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        let cfg = WorkspaceConfig::new("Dup");
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        std::fs::write(ws_path.join("workspace.yml"), yaml).unwrap();
+        svc.open_workspace(ws_path.clone()).unwrap();
+        assert!(svc.open_workspace(ws_path).is_err());
+    }
+
+    #[test]
+    fn get_and_set_multi_workspace_mode() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(!svc.get_multi_workspace_mode().unwrap());
+        svc.set_multi_workspace_mode(true).unwrap();
+        assert!(svc.get_multi_workspace_mode().unwrap());
     }
 }
