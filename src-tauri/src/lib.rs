@@ -10,7 +10,7 @@ use rocket_app::{
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
+    FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
@@ -40,8 +40,10 @@ pub fn run() {
             let active_workspace_path: Arc<Mutex<PathBuf>> =
                 Arc::new(Mutex::new(PathBuf::new()));
             let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
+            let workspace_config_repo = Box::new(FsWorkspaceConfigRepo::new());
             let workspace_svc = WorkspaceService::new(
                 workspace_repo,
+                workspace_config_repo,
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 Arc::clone(&active_workspace_path),
             );
@@ -202,6 +204,13 @@ pub fn run() {
             commands::workspaces::rename_workspace,
             commands::workspaces::close_workspace,
             commands::workspaces::delete_workspace,
+            commands::workspaces::pin_workspace,
+            commands::workspaces::unpin_workspace,
+            commands::workspaces::update_workspace_description,
+            commands::workspaces::open_workspace,
+            commands::workspaces::get_workspace_config,
+            commands::workspaces::get_multi_workspace_mode,
+            commands::workspaces::set_multi_workspace_mode,
             commands::workspaces::open_folder_picker,
         ])
         .run(tauri::generate_context!())

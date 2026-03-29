@@ -8,6 +8,12 @@ import {
   renameWorkspace as apiRename,
   closeWorkspace as apiClose,
   deleteWorkspace as apiDelete,
+  pinWorkspace as apiPin,
+  unpinWorkspace as apiUnpin,
+  updateWorkspaceDescription as apiUpdateDescription,
+  openWorkspaceFromDisk as apiOpenFromDisk,
+  getMultiWorkspaceMode,
+  setMultiWorkspaceMode as apiSetMultiMode,
   type Workspace,
 } from '@/lib/tauri-api'
 import { usePaneStore } from '@/stores/pane-store'
@@ -17,12 +23,18 @@ interface WorkspaceState {
   workspaces: Workspace[]
   activeWorkspaceId: string
   initialized: boolean
+  multiWorkspaceMode: boolean
   loadWorkspaces: () => Promise<void>
   createWorkspace: (name: string, path: string) => Promise<void>
   switchWorkspace: (id: string) => Promise<void>
   renameWorkspace: (id: string, newName: string) => Promise<void>
   closeWorkspace: (id: string) => Promise<void>
   deleteWorkspace: (id: string) => Promise<void>
+  pinWorkspace: (id: string) => Promise<void>
+  unpinWorkspace: (id: string) => Promise<void>
+  updateDescription: (id: string, description: string | null) => Promise<void>
+  openWorkspaceFromDisk: (path: string) => Promise<void>
+  setMultiWorkspaceMode: (enabled: boolean) => Promise<void>
 }
 
 // Module-level guard so concurrent loadWorkspaces() calls await one promise.
@@ -32,16 +44,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   activeWorkspaceId: '',
   initialized: false,
+  multiWorkspaceMode: false,
 
   loadWorkspaces: async () => {
     if (get().initialized) return
     if (initPromise) return initPromise
     initPromise = (async () => {
-      const [workspaces, active] = await Promise.all([
+      const [workspaces, active, mode] = await Promise.all([
         listWorkspaces(),
         getActiveWorkspace(),
+        getMultiWorkspaceMode(),
       ])
-      set({ workspaces, activeWorkspaceId: active.id, initialized: true })
+      set({ workspaces, activeWorkspaceId: active.id, multiWorkspaceMode: mode, initialized: true })
       subscribeToEvents()
     })()
     return initPromise
@@ -52,6 +66,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   renameWorkspace: async (id, newName) => { await apiRename(id, newName) },
   closeWorkspace: async (id) => { await apiClose(id) },
   deleteWorkspace: async (id) => { await apiDelete(id) },
+  pinWorkspace: async (id) => { await apiPin(id) },
+  unpinWorkspace: async (id) => { await apiUnpin(id) },
+  updateDescription: async (id, description) => { await apiUpdateDescription(id, description) },
+  openWorkspaceFromDisk: async (path) => { await apiOpenFromDisk(path) },
+  setMultiWorkspaceMode: async (enabled) => {
+    await apiSetMultiMode(enabled)
+    set({ multiWorkspaceMode: enabled })
+  },
 }))
 
 function subscribeToEvents() {
@@ -91,6 +113,33 @@ function subscribeToEvents() {
       return { workspaces: s.workspaces.filter((w) => w.id !== payload.id) }
     })
   })
+
+  listen<{ id: string }>('workspace-pinned', ({ payload }) => {
+    useWorkspaceStore.setState((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === payload.id ? { ...w, pinned: true } : w
+      ),
+    }))
+  })
+
+  listen<{ id: string }>('workspace-unpinned', ({ payload }) => {
+    useWorkspaceStore.setState((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === payload.id ? { ...w, pinned: false } : w
+      ),
+    }))
+  })
+
+  listen<{ id: string; description: string | null }>(
+    'workspace-description-updated',
+    ({ payload }) => {
+      useWorkspaceStore.setState((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === payload.id ? { ...w, description: payload.description } : w
+        ),
+      }))
+    }
+  )
 }
 
 function closeTabsForWorkspacePath(workspacePath: string) {

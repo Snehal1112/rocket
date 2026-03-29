@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use rocket_app::WorkspaceService;
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
-use rocket_workspace::Workspace;
+use rocket_workspace::{Workspace, WorkspaceConfig};
 use tauri::State;
 
 #[tauri::command]
@@ -71,6 +71,62 @@ pub fn delete_workspace(
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
     svc.lock().unwrap().delete(&id)
+}
+
+#[tauri::command]
+pub fn pin_workspace(
+    id: String,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().unwrap().pin(&id)
+}
+
+#[tauri::command]
+pub fn unpin_workspace(
+    id: String,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().unwrap().unpin(&id)
+}
+
+#[tauri::command]
+pub fn update_workspace_description(
+    id: String,
+    description: Option<String>,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().unwrap().update_description(&id, description.as_deref())
+}
+
+#[tauri::command]
+pub fn open_workspace(
+    path: String,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<Workspace, DomainError> {
+    svc.lock().unwrap().open_workspace(PathBuf::from(path))
+}
+
+#[tauri::command]
+pub fn get_workspace_config(
+    workspace_id: String,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<WorkspaceConfig, DomainError> {
+    svc.lock().unwrap().get_workspace_config(&workspace_id)
+}
+
+#[tauri::command]
+pub fn get_multi_workspace_mode(
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<bool, DomainError> {
+    svc.lock().unwrap().get_multi_workspace_mode()
+}
+
+#[tauri::command]
+pub fn set_multi_workspace_mode(
+    enabled: bool,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().unwrap().set_multi_workspace_mode(enabled)
 }
 
 #[tauri::command]

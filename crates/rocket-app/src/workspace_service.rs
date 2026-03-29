@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_workspace::{Workspace, WorkspaceRepository};
+use rocket_workspace::{Workspace, WorkspaceRepository, WorkspaceConfig, WorkspaceConfigRepository};
 
 pub struct WorkspaceService {
     repo: Box<dyn WorkspaceRepository>,
+    config_repo: Box<dyn WorkspaceConfigRepository>,
     publisher: Box<dyn EventPublisher>,
     active_path: Arc<Mutex<PathBuf>>,
 }
@@ -15,10 +16,11 @@ pub struct WorkspaceService {
 impl WorkspaceService {
     pub fn new(
         repo: Box<dyn WorkspaceRepository>,
+        config_repo: Box<dyn WorkspaceConfigRepository>,
         publisher: Box<dyn EventPublisher>,
         active_path: Arc<Mutex<PathBuf>>,
     ) -> Self {
-        Self { repo, publisher, active_path }
+        Self { repo, config_repo, publisher, active_path }
     }
 
     pub fn list(&self) -> DomainResult<Vec<Workspace>> {
@@ -40,6 +42,16 @@ impl WorkspaceService {
                 DomainError::Io(format!("Failed to create workspace directory: {e}"))
             })?;
         }
+        // Create subdirectories.
+        fs::create_dir_all(path.join("collections")).map_err(|e| {
+            DomainError::Io(format!("Failed to create collections dir: {e}"))
+        })?;
+        fs::create_dir_all(path.join("environments")).map_err(|e| {
+            DomainError::Io(format!("Failed to create environments dir: {e}"))
+        })?;
+        // Write workspace.yml inside the workspace directory.
+        let config = WorkspaceConfig::new(name);
+        self.config_repo.save(&path, &config)?;
         let mut registry = self.repo.load()?;
         if registry.name_exists(name, None) {
             return Err(DomainError::AlreadyExists(name.into()));
@@ -109,6 +121,93 @@ impl WorkspaceService {
         Ok(())
     }
 
+    pub fn pin(&self, id: &str) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.pinned = true;
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspacePinned { id: id.to_string() });
+        Ok(())
+    }
+
+    pub fn unpin(&self, id: &str) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.pinned = false;
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceUnpinned { id: id.to_string() });
+        Ok(())
+    }
+
+    pub fn update_description(&self, id: &str, description: Option<&str>) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.description = description.map(|s| s.to_string());
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceDescriptionUpdated {
+            id: id.to_string(),
+            description: description.map(|s| s.to_string()),
+        });
+        Ok(())
+    }
+
+    pub fn get_workspace_config(&self, workspace_id: &str) -> DomainResult<WorkspaceConfig> {
+        let registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id(workspace_id)
+            .ok_or_else(|| DomainError::NotFound(workspace_id.into()))?;
+        self.config_repo.load(&workspace.path)
+    }
+
+    /// Open an existing workspace from disk. The directory must contain `workspace.yml`.
+    pub fn open_workspace(&self, path: PathBuf) -> DomainResult<Workspace> {
+        if !path.join("workspace.yml").exists() {
+            return Err(DomainError::NotFound(
+                "workspace.yml not found in the selected directory".into(),
+            ));
+        }
+
+        let config = self.config_repo.load(&path)?;
+        let mut registry = self.repo.load()?;
+
+        if registry.workspaces.iter().any(|w| w.path == path) {
+            return Err(DomainError::AlreadyExists("This workspace is already open".into()));
+        }
+
+        if registry.name_exists(&config.name, None) {
+            return Err(DomainError::AlreadyExists(config.name.clone()));
+        }
+
+        let mut workspace = Workspace::new(&config.name, path.clone());
+        workspace.description = config.description;
+
+        registry.workspaces.push(workspace.clone());
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceCreated {
+            id: workspace.id.clone(),
+            name: workspace.name.clone(),
+            path: path.to_string_lossy().to_string(),
+        });
+        Ok(workspace)
+    }
+
+    pub fn get_multi_workspace_mode(&self) -> DomainResult<bool> {
+        Ok(self.repo.load()?.multi_workspace_mode)
+    }
+
+    pub fn set_multi_workspace_mode(&self, enabled: bool) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        registry.multi_workspace_mode = enabled;
+        self.repo.save(&registry)?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         if id == "default" {
             return Err(DomainError::InvalidInput(
@@ -146,7 +245,8 @@ mod tests {
     use super::*;
     use rocket_shared::error::DomainResult;
     use rocket_shared::events::NullEventPublisher;
-    use rocket_workspace::{WorkspaceRegistry};
+    use rocket_workspace::{WorkspaceRegistry, WorkspaceConfig, WorkspaceConfigRepository};
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
@@ -172,12 +272,40 @@ mod tests {
         }
     }
 
+    struct MockWorkspaceConfigRepo;
+
+    impl WorkspaceConfigRepository for MockWorkspaceConfigRepo {
+        fn load(&self, workspace_path: &Path) -> DomainResult<WorkspaceConfig> {
+            let config_path = workspace_path.join("workspace.yml");
+            if config_path.exists() {
+                let content = std::fs::read_to_string(&config_path)
+                    .map_err(|e| DomainError::Io(e.to_string()))?;
+                serde_yaml::from_str(&content)
+                    .map_err(|e| DomainError::InvalidInput(e.to_string()))
+            } else {
+                let name = workspace_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Test".into());
+                Ok(WorkspaceConfig::new(name))
+            }
+        }
+        fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()> {
+            std::fs::create_dir_all(workspace_path)
+                .map_err(|e| DomainError::Io(e.to_string()))?;
+            let content = serde_yaml::to_string(config)
+                .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+            std::fs::write(workspace_path.join("workspace.yml"), content)
+                .map_err(|e| DomainError::Io(e.to_string()))
+        }
+    }
+
     fn make_service(tmp: &TempDir) -> WorkspaceService {
         let default_path = tmp.path().join("default");
         std::fs::create_dir_all(&default_path).unwrap();
         let repo = Box::new(MockWorkspaceRepo::new(default_path.clone()));
+        let config_repo = Box::new(MockWorkspaceConfigRepo);
         let active_path = Arc::new(Mutex::new(default_path));
-        WorkspaceService::new(repo, Box::new(NullEventPublisher), active_path)
+        WorkspaceService::new(repo, config_repo, Box::new(NullEventPublisher), active_path)
     }
 
     #[test]
@@ -272,5 +400,125 @@ mod tests {
         let ws = svc.create("ToDelete", path.clone()).unwrap();
         svc.delete(&ws.id).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn pin_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Pinnable", tmp.path().join("pin-ws")).unwrap();
+        svc.pin(&ws.id).unwrap();
+        let list = svc.list().unwrap();
+        let pinned = list.iter().find(|w| w.id == ws.id).unwrap();
+        assert!(pinned.pinned);
+    }
+
+    #[test]
+    fn unpin_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.unpin("default").unwrap();
+        let list = svc.list().unwrap();
+        let def = list.iter().find(|w| w.id == "default").unwrap();
+        assert!(!def.pinned);
+    }
+
+    #[test]
+    fn pin_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.pin("nonexistent").is_err());
+    }
+
+    #[test]
+    fn update_description_sets_value() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.update_description("default", Some("My desc")).unwrap();
+        let ws = svc.get_active().unwrap();
+        assert_eq!(ws.description, Some("My desc".to_string()));
+    }
+
+    #[test]
+    fn update_description_to_none_clears_it() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.update_description("default", Some("Initial")).unwrap();
+        svc.update_description("default", None).unwrap();
+        let ws = svc.get_active().unwrap();
+        assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn update_description_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.update_description("nope", Some("x")).is_err());
+    }
+
+    #[test]
+    fn create_writes_workspace_yml_and_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("structured-ws");
+        svc.create("Structured", ws_path.clone()).unwrap();
+        assert!(ws_path.join("workspace.yml").exists());
+        assert!(ws_path.join("collections").is_dir());
+        assert!(ws_path.join("environments").is_dir());
+    }
+
+    #[test]
+    fn get_workspace_config_returns_config() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Configurable", tmp.path().join("cfg-ws")).unwrap();
+        let config = svc.get_workspace_config(&ws.id).unwrap();
+        assert_eq!(config.name, "Configurable");
+    }
+
+    #[test]
+    fn open_existing_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("ext-ws");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        let cfg = WorkspaceConfig::new("External");
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        std::fs::write(ws_path.join("workspace.yml"), yaml).unwrap();
+
+        let ws = svc.open_workspace(ws_path).unwrap();
+        assert_eq!(ws.name, "External");
+        assert_eq!(svc.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn open_workspace_without_yml_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("no-cfg");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        assert!(svc.open_workspace(ws_path).is_err());
+    }
+
+    #[test]
+    fn open_workspace_already_registered_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("dup");
+        std::fs::create_dir_all(&ws_path).unwrap();
+        let cfg = WorkspaceConfig::new("Dup");
+        let yaml = serde_yaml::to_string(&cfg).unwrap();
+        std::fs::write(ws_path.join("workspace.yml"), yaml).unwrap();
+        svc.open_workspace(ws_path.clone()).unwrap();
+        assert!(svc.open_workspace(ws_path).is_err());
+    }
+
+    #[test]
+    fn get_and_set_multi_workspace_mode() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(!svc.get_multi_workspace_mode().unwrap());
+        svc.set_multi_workspace_mode(true).unwrap();
+        assert!(svc.get_multi_workspace_mode().unwrap());
     }
 }

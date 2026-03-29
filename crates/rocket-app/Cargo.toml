@@ -12,6 +12,7 @@ rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-workspace = { path = "../rocket-workspace" }
 serde.workspace = true
+serde_yaml.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
 log.workspace = true
