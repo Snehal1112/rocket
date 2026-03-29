@@ -1,6 +1,7 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { Copy, Check, Clock, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
 import type { ResponseState } from '@/types/pane-types';
@@ -137,26 +138,25 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
       {/* Tab bar with copy button. */}
       <div className="flex items-center border-b border-border/70 px-1 shrink-0">
-        <div className="flex h-8 flex-1 items-center gap-0">
-          {(['pretty', 'raw', 'preview', 'headers'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveView(tab)}
-              className={`h-7 px-3 text-sm capitalize transition-colors ${
-                activeView === tab
-                  ? 'border-b-2 border-primary text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {tab}
-              {tab === 'headers' && headerCount > 0 && (
+        <Tabs
+          value={activeView}
+          onValueChange={(v) => setActiveView(v as ViewTab)}
+          className="flex-1"
+        >
+          <TabsList>
+            <TabsTrigger value="pretty">Pretty</TabsTrigger>
+            <TabsTrigger value="raw">Raw</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="headers">
+              Headers
+              {headerCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
                   ({headerCount})
                 </span>
               )}
-            </button>
-          ))}
-        </div>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* Copy body button — visible on body tabs. */}
         {(activeView === 'pretty' || activeView === 'raw') && response.body && (
