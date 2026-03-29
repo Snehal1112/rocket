@@ -86,26 +86,25 @@
   --chart-4: hsl(283 52% 49%);
   --chart-5: hsl(343 74% 52%);
 
+  --sidebar: oklch(0.97 0 0);
+  --sidebar-foreground: hsl(222 47% 11%);
+  --sidebar-primary: hsl(213 88% 42%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(212 86% 94%);
+  --sidebar-accent-foreground: hsl(213 88% 30%);
+  --sidebar-border: oklch(0.88 0 0);
+  --sidebar-ring: hsl(213 88% 42%);
+
   /* Monaco editor syntax theme. */
   --monaco-bg: #f5f8fc;
   --monaco-fg: #1a1f36;
   --monaco-line-highlight: #eef2f9;
   --monaco-line-number: #9ca3af;
-  --monaco-string: 16a34a;
-  --monaco-number: d97706;
-  --monaco-keyword: 7c3aed;
-  --monaco-comment: 9ca3af;
-  --monaco-type: 2563eb;
-
-  /* Sidebar: dark blue sidebar. */
-  --sidebar: hsl(222 47% 11%);
-  --sidebar-foreground: hsl(210 40% 95%);
-  --sidebar-primary: hsl(213 88% 52%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(213 50% 20%);
-  --sidebar-accent-foreground: hsl(210 40% 95%);
-  --sidebar-border: hsl(214 31% 25%);
-  --sidebar-ring: hsl(213 88% 42%);
+  --monaco-string: #16a34a;
+  --monaco-number: #d97706;
+  --monaco-keyword: #7c3aed;
+  --monaco-comment: #9ca3af;
+  --monaco-type: #2563eb;
 }
 
 .dark {
@@ -135,25 +134,25 @@
   --chart-4: hsl(282 60% 62%);
   --chart-5: hsl(340 78% 61%);
 
+  --sidebar: oklch(0.17 0 0);
+  --sidebar-foreground: hsl(0 0% 87%);
+  --sidebar-primary: hsl(207 100% 42%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(204 100% 18%);
+  --sidebar-accent-foreground: hsl(0 0% 90%);
+  --sidebar-border: oklch(0.28 0 0);
+  --sidebar-ring: hsl(207 100% 42%);
+
   /* Monaco editor syntax theme. */
   --monaco-bg: #1f1f1f;
   --monaco-fg: #dedede;
   --monaco-line-highlight: #242424;
   --monaco-line-number: #666666;
-  --monaco-string: 4ade80;
-  --monaco-number: fbbf24;
-  --monaco-keyword: a78bfa;
-  --monaco-comment: 6b7280;
-  --monaco-type: 60a5fa;
-
-  --sidebar: hsl(0 0% 8%);
-  --sidebar-foreground: hsl(0 0% 87%);
-  --sidebar-primary: hsl(207 100% 52%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(0 0% 15%);
-  --sidebar-accent-foreground: hsl(0 0% 87%);
-  --sidebar-border: hsl(0 0% 19%);
-  --sidebar-ring: hsl(207 100% 42%);
+  --monaco-string: #4ade80;
+  --monaco-number: #fbbf24;
+  --monaco-keyword: #a78bfa;
+  --monaco-comment: #6b7280;
+  --monaco-type: #60a5fa;
 }
 
 /* Thin scrollbars matching the legacy design. */
@@ -175,7 +174,7 @@
   }
   /* Standardize all Lucide icons to 1px stroke weight. */
   .lucide {
-    stroke-width: 1;
+    stroke-width: 1.5;
   }
 }
             
