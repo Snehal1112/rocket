@@ -1,4 +1,4 @@
-import { X, Folder, GitBranch } from 'lucide-react';
+import { X, Folder, GitBranch, LayoutDashboard, Globe } from 'lucide-react';
 import type { Tab } from '@/types/pane-types';
 import { isRequestTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
@@ -45,6 +45,12 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
         </span>
       ) : isGitTab(tab) ? (
         <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+      ) : isWorkspaceTab(tab) ? (
+        <>
+          {tab.activeSection === 'overview' && <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+          {tab.activeSection === 'environments' && <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+          {tab.activeSection === 'git' && <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+        </>
       ) : (
         <Folder className="h-3 w-3 shrink-0 text-primary" />
       )}
