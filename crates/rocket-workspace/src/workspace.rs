@@ -8,6 +8,8 @@ pub struct Workspace {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -23,6 +25,7 @@ impl Workspace {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.to_string(),
             path,
+            description: None,
         }
     }
 
@@ -42,6 +45,7 @@ impl WorkspaceRegistry {
             id: "default".to_string(),
             name: "Default Workspace".to_string(),
             path: default_path,
+            description: None,
         };
         Self {
             active_workspace_id: default.id.clone(),
@@ -104,5 +108,31 @@ mod tests {
     fn find_by_id_returns_none_for_missing() {
         let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
         assert!(reg.find_by_id("nonexistent").is_none());
+    }
+
+    #[test]
+    fn new_workspace_has_no_description() {
+        let ws = Workspace::new("Test", PathBuf::from("/tmp/test"));
+        assert_eq!(ws.description, None);
+    }
+
+    #[test]
+    fn workspace_description_serde_roundtrip() {
+        let ws = Workspace {
+            id: "test-id".to_string(),
+            name: "Test".to_string(),
+            path: PathBuf::from("/tmp/test"),
+            description: Some("My description".to_string()),
+        };
+        let yaml = serde_yaml::to_string(&ws).unwrap();
+        let back: Workspace = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.description, Some("My description".to_string()));
+    }
+
+    #[test]
+    fn workspace_deserializes_without_description_backward_compat() {
+        let yaml = "id: old-ws\nname: Old\npath: /tmp/old\n";
+        let ws: Workspace = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(ws.description, None);
     }
 }
