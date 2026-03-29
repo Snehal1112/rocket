@@ -1,3 +1,4 @@
+import { type as osType } from '@tauri-apps/plugin-os';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TitleBar } from '@/components/title-bar';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
@@ -48,6 +49,12 @@ function App() {
   useEffect(() => {
     const unsub = usePaneStore.subscribe(scheduleSaveUiState)
     return unsub
+  }, []);
+
+  useEffect(() => {
+    if (osType() === 'linux') {
+      document.documentElement.classList.add('linux');
+    }
   }, []);
 
   return (
