@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { METHOD_TEXT_COLOR, statusTextColor } from '@/lib/colors';
 import { listHistory, searchHistory } from '@/lib/tauri-api';
 import type { HistoryEntry } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -21,27 +22,6 @@ const STATUS_OPTIONS = [
   { label: '5xx', min: 500, max: 599 },
 ] as const;
 type StatusLabel = (typeof STATUS_OPTIONS)[number]['label'];
-
-// Returns Tailwind text color for an HTTP status code.
-function statusColor(status: number): string {
-  if (status >= 200 && status < 300) return 'text-emerald-500';
-  if (status >= 300 && status < 400) return 'text-blue-500';
-  if (status >= 400 && status < 500) return 'text-amber-500';
-  if (status >= 500) return 'text-red-500';
-  return 'text-muted-foreground';
-}
-
-// Returns Tailwind text color for an HTTP method badge.
-function methodColor(method: string): string {
-  switch (method.toUpperCase()) {
-    case 'GET':    return 'text-emerald-500';
-    case 'POST':   return 'text-amber-500';
-    case 'PUT':    return 'text-blue-500';
-    case 'PATCH':  return 'text-violet-500';
-    case 'DELETE': return 'text-red-500';
-    default:       return 'text-muted-foreground';
-  }
-}
 
 // Formats an ISO timestamp to a short local time string (e.g. "12:34 PM").
 function formatTime(iso: string): string {
@@ -143,7 +123,7 @@ export function HistoryPanel() {
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="h-7 pl-7 text-xs"
+            className="h-7 pl-7 text-sm"
             placeholder="Search URL..."
             value={urlQuery}
             onChange={(e) => handleUrlChange(e.target.value)}
@@ -154,7 +134,7 @@ export function HistoryPanel() {
         <div className="flex gap-2">
           {/* Method filter. */}
           <select
-            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={method}
             onChange={(e) => setMethod(e.target.value as MethodOption)}
             aria-label="Filter by HTTP method"
@@ -168,7 +148,7 @@ export function HistoryPanel() {
 
           {/* Status filter. */}
           <select
-            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-xs shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="h-7 flex-1 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             value={statusLabel}
             onChange={(e) => setStatusLabel(e.target.value as StatusLabel)}
             aria-label="Filter by status code"
@@ -185,7 +165,7 @@ export function HistoryPanel() {
       {/* Entry list. */}
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 ? (
-          <p className="p-4 text-center text-xs text-muted-foreground">
+          <p className="p-4 text-center text-sm text-muted-foreground">
             No history yet. Execute a request to see it here.
           </p>
         ) : (
@@ -203,12 +183,12 @@ export function HistoryPanel() {
                     <span
                       className={cn(
                         'w-12 shrink-0 text-xs font-semibold',
-                        methodColor(entry.method),
+                        METHOD_TEXT_COLOR[entry.method.toUpperCase()] ?? 'text-muted-foreground',
                       )}
                     >
                       {entry.method}
                     </span>
-                    <span className="truncate text-xs text-foreground">
+                    <span className="truncate text-sm text-foreground">
                       {displayUrl(entry.url)}
                     </span>
                   </div>
@@ -216,7 +196,7 @@ export function HistoryPanel() {
                   {/* Bottom row: status, duration, timestamp. */}
                   <div className="mt-0.5 flex items-center gap-1.5 pl-14">
                     <span
-                      className={cn('text-xs font-medium', statusColor(entry.status))}
+                      className={cn('text-xs font-medium', statusTextColor(entry.status))}
                     >
                       {entry.status}
                     </span>

@@ -1,17 +1,7 @@
-import { X, Folder } from 'lucide-react';
-import type { Tab, HttpMethod } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
-
-// Method text colors matching legacy constants.
-const METHOD_TEXT_COLORS: Record<HttpMethod, string> = {
-  GET: 'text-green-600',
-  POST: 'text-blue-600',
-  PUT: 'text-orange-600',
-  PATCH: 'text-yellow-600',
-  DELETE: 'text-red-600',
-  OPTIONS: 'text-gray-500',
-  HEAD: 'text-gray-500',
-};
+import { X, Folder, GitBranch } from 'lucide-react';
+import type { Tab } from '@/types/pane-types';
+import { isRequestTab, isGitTab } from '@/types/pane-types';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
@@ -43,16 +33,18 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           onSelect();
         }
       }}
-      className={`group flex items-center gap-1.5 px-3 py-2 text-xs border-r border-border/70 cursor-pointer shrink-0 min-w-0 max-w-[190px] transition-all ${
+      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 max-w-[190px] transition-all ${
         isActive
           ? 'bg-background/95 border-b-2 border-b-primary -mb-px text-foreground'
           : 'hover:bg-accent/50 text-muted-foreground'
       }`}
     >
       {isRequestTab(tab) ? (
-        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLORS[tab.request.method]}`}>
+        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLOR[tab.request.method] ?? ''}`}>
           {tab.request.method}
         </span>
+      ) : isGitTab(tab) ? (
+        <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
       ) : (
         <Folder className="h-3 w-3 shrink-0 text-primary" />
       )}

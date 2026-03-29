@@ -1,7 +1,5 @@
 import { useState } from 'react';
 import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
-import { useGitStore } from '@/stores/git-store';
-import { GitStatusBadge } from '@/components/git/GitStatusBadge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +23,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { cn } from '@/lib/utils';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { renameRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
@@ -32,17 +31,6 @@ import { isActiveRequest } from './tree-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import type { RequestTab, RequestState } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
-
-// Text color per HTTP method.
-const METHOD_COLOR: Record<string, string> = {
-  GET:     'text-emerald-500',
-  POST:    'text-amber-500',
-  PUT:     'text-blue-500',
-  PATCH:   'text-violet-500',
-  DELETE:  'text-red-500',
-  OPTIONS: 'text-cyan-500',
-  HEAD:    'text-pink-500',
-};
 
 interface RequestNodeProps {
   uid: string;
@@ -63,10 +51,6 @@ export function RequestNode({
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
-  // Look up the git status for this file by matching the tail of the git path.
-  const gitStatusData = useGitStore((s) => s.status);
-  const gitFile = gitStatusData?.files.find((f) => f.path === path || f.path.endsWith(`/${path}`));
-  const gitStatus = gitFile?.status ?? 'unchanged';
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
 
@@ -92,7 +76,7 @@ export function RequestNode({
     usePaneStore.getState().openTab(tab);
   }
 
-  const methodColor = METHOD_COLOR[method.toUpperCase()] ?? 'text-foreground';
+  const methodColor = METHOD_TEXT_COLOR[method.toUpperCase()] ?? 'text-foreground';
 
   return (
     <ContextMenu>
@@ -100,17 +84,17 @@ export function RequestNode({
         <div className="group relative flex items-center">
           <TreeItem value={uid} active={active} className="flex-1">
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
+              className="flex items-center gap-1 w-full px-2 py-0.5 text-sm rounded-sm cursor-pointer"
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <span className={cn('w-10 shrink-0 font-mono text-2xs font-bold', methodColor)}>
+              <span className={cn('w-10 shrink-0 font-mono text-2xs font-semibold', methodColor)}>
                 {method}
               </span>
               {isRenaming ? (
                 <Input
                   autoFocus
-                  className="h-6 text-xs flex-1"
+                  className="h-6 text-sm flex-1"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -121,10 +105,7 @@ export function RequestNode({
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <>
-                  <span className="truncate text-foreground">{name}</span>
-                  <GitStatusBadge status={gitStatus} />
-                </>
+                <span className="truncate text-foreground">{name}</span>
               )}
             </TreeItemContent>
           </TreeItem>

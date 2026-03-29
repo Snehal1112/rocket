@@ -7,3 +7,4 @@ pub mod execution;
 pub mod history;
 pub mod oauth2;
 pub mod templates;
+pub mod workspaces;

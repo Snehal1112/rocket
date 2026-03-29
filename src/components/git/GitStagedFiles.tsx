@@ -33,10 +33,10 @@ export function GitStagedFiles() {
   return (
     <div>
       <div className="flex items-center justify-between px-2 py-1">
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-sm font-medium text-muted-foreground">
           Staged ({staged.length})
         </span>
-        <Button variant="ghost" size="sm" className="h-5 text-xs" onClick={() => unstageAll()}>
+        <Button variant="ghost" size="sm" className="h-5 text-sm" onClick={() => unstageAll()}>
           Unstage all
         </Button>
       </div>

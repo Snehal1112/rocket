@@ -254,12 +254,12 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
     <div className="space-y-4">
       {/* Auth type selector. */}
       <Select value={auth.authType} onValueChange={(val) => setType(val as AuthType)}>
-        <SelectTrigger className="w-[200px] h-8 text-xs">
+        <SelectTrigger className="w-[200px] h-8 text-sm">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {authTypes.map((t) => (
-            <SelectItem key={t.value} value={t.value} className="text-xs">
+            <SelectItem key={t.value} value={t.value} className="text-sm">
               {t.label}
             </SelectItem>
           ))}
@@ -290,7 +290,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             <User className="h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Username"
-              className="flex-1 text-xs h-8"
+              className="flex-1 text-sm h-8"
               value={auth.basic.username}
               onChange={(e) =>
                 onChange({
@@ -305,7 +305,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             <Input
               type="password"
               placeholder="Password"
-              className="flex-1 text-xs h-8"
+              className="flex-1 text-sm h-8"
               value={auth.basic.password}
               onChange={(e) =>
                 onChange({
@@ -324,7 +324,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           <Key className="h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Token"
-            className="flex-1 text-xs h-8"
+            className="flex-1 text-sm h-8"
             value={auth.bearer.token}
             onChange={(e) =>
               onChange({
@@ -341,7 +341,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
         <div className="space-y-2">
           <Input
             placeholder="Key"
-            className="text-xs h-8"
+            className="text-sm h-8"
             value={auth.apiKey.key}
             onChange={(e) =>
               onChange({
@@ -352,7 +352,7 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           />
           <Input
             placeholder="Value"
-            className="text-xs h-8"
+            className="text-sm h-8"
             value={auth.apiKey.value}
             onChange={(e) =>
               onChange({
@@ -373,12 +373,12 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
               })
             }
           >
-            <SelectTrigger className="w-[120px] h-8 text-xs">
+            <SelectTrigger className="w-[120px] h-8 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="header" className="text-xs">Header</SelectItem>
-              <SelectItem value="query" className="text-xs">Query Param</SelectItem>
+              <SelectItem value="header" className="text-sm">Header</SelectItem>
+              <SelectItem value="query" className="text-sm">Query Param</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -391,14 +391,14 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           <div className="space-y-3">
             {/* Grant Type. */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Grant Type</label>
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">Grant Type</label>
               <Select value={o.grantType} onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}>
-                <SelectTrigger className="w-[200px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-[200px] h-8 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="client_credentials" className="text-xs">Client Credentials</SelectItem>
-                  <SelectItem value="password" className="text-xs">Password</SelectItem>
-                  <SelectItem value="authorization_code" className="text-xs">Authorization Code</SelectItem>
-                  <SelectItem value="implicit" className="text-xs">Implicit</SelectItem>
+                  <SelectItem value="client_credentials" className="text-sm">Client Credentials</SelectItem>
+                  <SelectItem value="password" className="text-sm">Password</SelectItem>
+                  <SelectItem value="authorization_code" className="text-sm">Authorization Code</SelectItem>
+                  <SelectItem value="implicit" className="text-sm">Implicit</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -406,93 +406,93 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Authorization URL — auth code and implicit only. */}
             {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Authorization URL</label>
-                <Input className="text-xs h-8 font-mono" placeholder="https://auth.example.com/authorize" value={o.authorizationUrl} onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })} />
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Authorization URL</label>
+                <Input className="text-sm h-8 font-mono" placeholder="https://auth.example.com/authorize" value={o.authorizationUrl} onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })} />
               </div>
             )}
 
             {/* Token URL — hidden for implicit. */}
             {o.grantType !== 'implicit' && (
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Token URL</label>
-                <Input className="text-xs h-8 font-mono" placeholder="https://auth.example.com/token" value={o.tokenUrl} onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })} />
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Token URL</label>
+                <Input className="text-sm h-8 font-mono" placeholder="https://auth.example.com/token" value={o.tokenUrl} onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })} />
               </div>
             )}
 
             {/* Callback URL + State — auth code and implicit only. */}
             {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (<>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Callback URL</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Callback URL</label>
                 <div className="flex gap-1.5">
-                  <Input className="text-xs h-8 font-mono flex-1" value={o.callbackUrl} onChange={(e) => patchOAuth2({ callbackUrl: e.target.value })} />
-                  <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.callbackUrl)} title="Copy">Copy</Button>
+                  <Input className="text-sm h-8 font-mono flex-1" value={o.callbackUrl} onChange={(e) => patchOAuth2({ callbackUrl: e.target.value })} />
+                  <Button variant="outline" size="sm" className="h-8 px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.callbackUrl)} title="Copy">Copy</Button>
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">State</label>
-                <Input className="text-xs h-8" placeholder="Leave empty for auto-generated" value={o.state} onChange={(e) => patchOAuth2({ state: e.target.value })} />
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">State</label>
+                <Input className="text-sm h-8" placeholder="Leave empty for auto-generated" value={o.state} onChange={(e) => patchOAuth2({ state: e.target.value })} />
               </div>
             </>)}
 
             {/* Client ID + Secret — Secret hidden for implicit. */}
             <div className={o.grantType === 'implicit' ? '' : 'grid grid-cols-2 gap-2'}>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Client ID</label>
-                <Input className="text-xs h-8" placeholder="client-id" value={o.clientId} onChange={(e) => patchOAuth2({ clientId: e.target.value })} />
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Client ID</label>
+                <Input className="text-sm h-8" placeholder="client-id" value={o.clientId} onChange={(e) => patchOAuth2({ clientId: e.target.value })} />
               </div>
               {o.grantType !== 'implicit' && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Client Secret</label>
-                  <Input className="text-xs h-8" type="password" placeholder="client-secret" value={o.clientSecret} onChange={(e) => patchOAuth2({ clientSecret: e.target.value })} />
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Client Secret</label>
+                  <Input className="text-sm h-8" type="password" placeholder="client-secret" value={o.clientSecret} onChange={(e) => patchOAuth2({ clientSecret: e.target.value })} />
                 </div>
               )}
             </div>
 
             {/* Scope — always visible. */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Scope</label>
-              <Input className="text-xs h-8" placeholder="read write" value={o.scope} onChange={(e) => patchOAuth2({ scope: e.target.value })} />
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">Scope</label>
+              <Input className="text-sm h-8" placeholder="read write" value={o.scope} onChange={(e) => patchOAuth2({ scope: e.target.value })} />
             </div>
 
             {/* Username + Password — password grant only. */}
             {o.grantType === 'password' && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Username</label>
-                  <Input className="text-xs h-8" placeholder="user@example.com" value={o.username} onChange={(e) => patchOAuth2({ username: e.target.value })} />
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Username</label>
+                  <Input className="text-sm h-8" placeholder="user@example.com" value={o.username} onChange={(e) => patchOAuth2({ username: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Password</label>
-                  <Input className="text-xs h-8" type="password" value={o.password} onChange={(e) => patchOAuth2({ password: e.target.value })} />
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Password</label>
+                  <Input className="text-sm h-8" type="password" value={o.password} onChange={(e) => patchOAuth2({ password: e.target.value })} />
                 </div>
               </div>
             )}
 
             {/* Advanced Options — collapsible. */}
-            <details className="text-xs">
+            <details className="text-sm">
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground py-1">Advanced Options</summary>
               <div className="space-y-3 mt-2 pl-1">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Client Authentication</label>
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Client Authentication</label>
                   <Select value={o.clientAuthentication} onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}>
-                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-full h-8 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="body" className="text-xs">Send in Request Body</SelectItem>
-                      <SelectItem value="header" className="text-xs">Send as Basic Auth Header</SelectItem>
+                      <SelectItem value="body" className="text-sm">Send in Request Body</SelectItem>
+                      <SelectItem value="header" className="text-sm">Send as Basic Auth Header</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Header Prefix</label>
-                  <Input className="text-xs h-8" value={o.headerPrefix} onChange={(e) => patchOAuth2({ headerPrefix: e.target.value })} />
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Header Prefix</label>
+                  <Input className="text-sm h-8" value={o.headerPrefix} onChange={(e) => patchOAuth2({ headerPrefix: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Add Token To</label>
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Add Token To</label>
                   <Select value={o.addTokenTo} onValueChange={(v) => patchOAuth2({ addTokenTo: v as 'header' | 'queryParams' })}>
-                    <SelectTrigger className="w-full h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-full h-8 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="header" className="text-xs">Header</SelectItem>
-                      <SelectItem value="queryParams" className="text-xs">Query Params</SelectItem>
+                      <SelectItem value="header" className="text-sm">Header</SelectItem>
+                      <SelectItem value="queryParams" className="text-sm">Query Params</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -506,33 +506,33 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
             {/* Token section. */}
             <div className="space-y-2 border-t border-border/50 pt-3 mt-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Access Token</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1 block">Access Token</label>
                 <div className="flex gap-1.5">
-                  <Input className="h-8 flex-1 text-xs truncate" readOnly value={o.accessToken} placeholder="(none)" title={o.accessToken || undefined} />
-                  <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.accessToken)} title="Copy">Copy</Button>
+                  <Input className="h-8 flex-1 text-sm truncate" readOnly value={o.accessToken} placeholder="(none)" title={o.accessToken || undefined} />
+                  <Button variant="outline" size="sm" className="h-8 px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.accessToken)} title="Copy">Copy</Button>
                 </div>
               </div>
               {o.refreshToken && (
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Refresh Token</label>
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">Refresh Token</label>
                   <div className="flex gap-1.5">
-                    <Input className="h-8 flex-1 text-xs truncate" readOnly value={o.refreshToken} />
-                    <Button variant="outline" size="sm" className="h-8 px-2 text-xs shrink-0" onClick={() => navigator.clipboard.writeText(o.refreshToken)} title="Copy">Copy</Button>
+                    <Input className="h-8 flex-1 text-sm truncate" readOnly value={o.refreshToken} />
+                    <Button variant="outline" size="sm" className="h-8 px-2 text-sm shrink-0" onClick={() => navigator.clipboard.writeText(o.refreshToken)} title="Copy">Copy</Button>
                   </div>
                 </div>
               )}
               <p className="text-2xs text-muted-foreground">{tokenExpiryDisplay(o.expiresIn, o.tokenAcquiredAt)}</p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="h-8 text-xs" disabled={gettingToken || (!o.tokenUrl && o.grantType !== 'implicit')} onClick={handleGetToken}>
+                <Button variant="outline" size="sm" className="h-8 text-sm" disabled={gettingToken || (!o.tokenUrl && o.grantType !== 'implicit')} onClick={handleGetToken}>
                   {gettingToken ? 'Waiting...' : 'Get Token'}
                 </Button>
                 {o.refreshToken && (
-                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={gettingToken || !o.tokenUrl} onClick={handleRefreshToken}>
+                  <Button variant="outline" size="sm" className="h-8 text-sm" disabled={gettingToken || !o.tokenUrl} onClick={handleRefreshToken}>
                     Refresh
                   </Button>
                 )}
               </div>
-              {tokenError && <p className="text-2xs text-destructive">{tokenError}</p>}
+              {tokenError && <p className="text-xs text-destructive">{tokenError}</p>}
             </div>
           </div>
         );
@@ -542,11 +542,11 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
       {auth.authType === 'aws-sig-v4' && auth.awsSigV4 && (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            <label className="text-sm font-medium text-muted-foreground mb-1 block">
               Access Key
             </label>
             <Input
-              className="text-xs h-8"
+              className="text-sm h-8"
               placeholder="AKIAIOSFODNN7EXAMPLE"
               value={auth.awsSigV4.accessKey}
               onChange={(e) => patchAWS({ accessKey: e.target.value })}
@@ -554,11 +554,11 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           </div>
 
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            <label className="text-sm font-medium text-muted-foreground mb-1 block">
               Secret Key
             </label>
             <Input
-              className="text-xs h-8"
+              className="text-sm h-8"
               type="password"
               placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
               value={auth.awsSigV4.secretKey}
@@ -568,22 +568,22 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">
                 Region
               </label>
               <Input
-                className="text-xs h-8"
+                className="text-sm h-8"
                 placeholder="us-east-1"
                 value={auth.awsSigV4.region}
                 onChange={(e) => patchAWS({ region: e.target.value })}
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              <label className="text-sm font-medium text-muted-foreground mb-1 block">
                 Service
               </label>
               <Input
-                className="text-xs h-8"
+                className="text-sm h-8"
                 placeholder="execute-api"
                 value={auth.awsSigV4.service}
                 onChange={(e) => patchAWS({ service: e.target.value })}
@@ -592,11 +592,11 @@ export function AuthEditor({ auth, onChange, showInherit = false }: AuthEditorPr
           </div>
 
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            <label className="text-sm font-medium text-muted-foreground mb-1 block">
               Session Token
             </label>
             <Input
-              className="text-xs h-8"
+              className="text-sm h-8"
               type="password"
               placeholder="(optional)"
               value={auth.awsSigV4.sessionToken}

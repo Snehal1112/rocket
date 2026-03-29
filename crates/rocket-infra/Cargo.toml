@@ -9,6 +9,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
+rocket-workspace = { path = "../rocket-workspace" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

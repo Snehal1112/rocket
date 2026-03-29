@@ -64,7 +64,7 @@ export function GitCloneDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-xs">Clone from Git</Button>
+        <Button variant="ghost" size="sm" className="text-sm">Clone from Git</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -72,26 +72,26 @@ export function GitCloneDialog() {
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label className="text-xs">Repository URL</Label>
+            <Label className="text-sm">Repository URL</Label>
             <Input
               placeholder="https://github.com/..."
               value={url}
               onChange={(e) => handleUrlChange(e.target.value)}
-              className="h-8 text-xs"
+              className="h-8 text-sm"
             />
           </div>
           <div>
-            <Label className="text-xs">Destination Path</Label>
+            <Label className="text-sm">Destination Path</Label>
             <Input
               value={destPath}
               onChange={(e) => setDestPath(e.target.value)}
-              className="h-8 text-xs"
+              className="h-8 text-sm"
             />
           </div>
           <div>
-            <Label className="text-xs">Authentication</Label>
+            <Label className="text-sm">Authentication</Label>
             <Select value={authType} onValueChange={setAuthType}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="sshAgent">SSH Agent</SelectItem>
                 <SelectItem value="sshKey">SSH Key</SelectItem>
@@ -102,31 +102,31 @@ export function GitCloneDialog() {
           </div>
           {authType === 'token' && (
             <div>
-              <Label className="text-xs">Token</Label>
+              <Label className="text-sm">Token</Label>
               <Input
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                className="h-8 text-xs"
+                className="h-8 text-sm"
               />
             </div>
           )}
           {authType === 'userPass' && (
             <>
               <div>
-                <Label className="text-xs">Username</Label>
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Username</Label>
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="h-8 text-sm" />
               </div>
               <div>
-                <Label className="text-xs">Password</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-xs" />
+                <Label className="text-sm">Password</Label>
+                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-sm" />
               </div>
             </>
           )}
           {authType === 'sshKey' && (
             <div>
-              <Label className="text-xs">Private Key Path</Label>
-              <Input value={privateKeyPath} onChange={(e) => setPrivateKeyPath(e.target.value)} className="h-8 text-xs" />
+              <Label className="text-sm">Private Key Path</Label>
+              <Input value={privateKeyPath} onChange={(e) => setPrivateKeyPath(e.target.value)} className="h-8 text-sm" />
             </div>
           )}
           {error && <p className="text-xs text-destructive">{error}</p>}

@@ -29,6 +29,13 @@ impl EventPublisher for TauriEventBus {
                 "environment-changed"
             }
             DomainEvent::HistoryCleared => "history-changed",
+            // Workspace events — each variant gets its own channel so the
+            // frontend store can update the precise slice of state it needs.
+            DomainEvent::WorkspaceCreated { .. } => "workspace-created",
+            DomainEvent::WorkspaceSwitched { .. } => "workspace-switched",
+            DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
+            DomainEvent::WorkspaceClosed { .. } => "workspace-closed",
+            DomainEvent::WorkspaceDeleted { .. } => "workspace-deleted",
             // Git events
             DomainEvent::GitStatusChanged { .. }
             | DomainEvent::GitCommit { .. }

@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Folder, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { METHOD_BADGE_COLOR } from '@/lib/colors';
 import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem } from '@/lib/tauri-api';
@@ -12,17 +13,6 @@ interface RequestListProps {
   items: CollectionItem[];
   collectionName: string;
 }
-
-// Maps each HTTP method to its badge color classes.
-const METHOD_COLORS: Record<string, string> = {
-  GET:     'text-emerald-500 border-emerald-500/30 bg-emerald-500/10',
-  POST:    'text-amber-500   border-amber-500/30   bg-amber-500/10',
-  PUT:     'text-blue-500    border-blue-500/30    bg-blue-500/10',
-  PATCH:   'text-violet-500  border-violet-500/30  bg-violet-500/10',
-  DELETE:  'text-red-500     border-red-500/30     bg-red-500/10',
-  OPTIONS: 'text-cyan-500    border-cyan-500/30    bg-cyan-500/10',
-  HEAD:    'text-pink-500    border-pink-500/30    bg-pink-500/10',
-};
 
 type RequestItem = Extract<CollectionItem, { type: 'request' }>;
 
@@ -132,7 +122,7 @@ export function RequestList({ items, collectionName }: RequestListProps) {
               {/* Request rows. */}
               <div className="rounded-md border overflow-hidden">
                 {group.requests.map((req, ri) => {
-                  const methodClass = METHOD_COLORS[req.method] ?? 'text-foreground border-border bg-muted';
+                  const methodClass = METHOD_BADGE_COLOR[req.method] ?? 'text-foreground border-border bg-muted';
                   return (
                     <button
                       key={req.uid}

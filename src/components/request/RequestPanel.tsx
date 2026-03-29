@@ -32,6 +32,7 @@ import { AuthEditor } from './AuthEditor';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import { SaveRequestButton } from './SaveRequestButton';
 import { VariableAwareUrlInput } from './VariableAwareUrlInput';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type {
   RequestTab,
   HttpMethod,
@@ -45,16 +46,6 @@ import { getCollectionSettings } from '@/lib/tauri-api';
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
 ];
-
-const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: 'text-green-600 dark:text-green-400',
-  POST: 'text-blue-600 dark:text-blue-400',
-  PUT: 'text-orange-600 dark:text-orange-400',
-  PATCH: 'text-yellow-600 dark:text-yellow-400',
-  DELETE: 'text-red-600 dark:text-red-400',
-  OPTIONS: 'text-gray-500',
-  HEAD: 'text-gray-400',
-};
 
 type SectionTab = 'params' | 'headers' | 'body' | 'auth';
 
@@ -243,13 +234,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
           >
             <SelectTrigger
-              className={cn('h-8 w-[7rem] text-xs font-bold', METHOD_COLORS[request.method])}
+              className={cn('h-8 w-[7rem] text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {METHODS.map((m) => (
-                <SelectItem key={m} value={m} className={cn('text-xs font-bold', METHOD_COLORS[m])}>
+                <SelectItem key={m} value={m} className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}>
                   {m}
                 </SelectItem>
               ))}
@@ -288,10 +279,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
         {urlError && (
-          <p className="text-2xs text-destructive px-3 py-1">{urlError}</p>
+          <p className="text-xs text-destructive px-3 py-1">{urlError}</p>
         )}
         {curlImported && (
-          <p className="text-2xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
+          <p className="text-xs text-green-600 dark:text-green-400 px-3 py-1">Imported from cURL</p>
         )}
 
         {/* Section tabs — matching legacy TabsList styling. */}
@@ -301,7 +292,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           className="flex-1 flex flex-col min-h-0"
         >
           <TabsList className="w-full justify-start rounded-none border-b border-border/70 bg-card/60 h-9 px-3">
-            <TabsTrigger value="params" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="params" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Params
               {enabledParamCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -309,7 +300,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="headers" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="headers" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Headers
               {enabledHeaderCount > 0 && (
                 <span className="ml-1 text-2xs text-muted-foreground">
@@ -317,10 +308,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="body" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="body" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Body
             </TabsTrigger>
-            <TabsTrigger value="auth" className="text-xs rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <TabsTrigger value="auth" className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Auth
             </TabsTrigger>
           </TabsList>

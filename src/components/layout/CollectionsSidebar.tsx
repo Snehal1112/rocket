@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   listCollections,
   getCollection,
@@ -28,23 +29,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Folder, Search, Plus, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HistoryPanel } from "@/components/history/HistoryPanel";
 import { Tree } from "@/components/ui/tree";
 import { CollectionNode } from "@/components/collections/CollectionNode";
 import type { DeleteTarget } from "@/components/collections/tree-utils";
-import { GitSidebarPanel } from "@/components/git/GitSidebarPanel";
-import { useGitStore } from "@/stores/git-store";
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
@@ -54,11 +45,6 @@ export function CollectionsSidebar() {
   const [selectedId, setSelectedId] = useState<string>("");
 
   const [view, setView] = useState<"collections" | "history">("collections");
-
-  // Count changed files for the Git tab badge.
-  const gitStatus = useGitStore((s) => s.status);
-  const changedCount =
-    gitStatus?.files.filter((f) => f.status !== "unchanged").length ?? 0;
 
   const handleImport = useCallback(async () => {
     const file = await open({
@@ -264,81 +250,84 @@ export function CollectionsSidebar() {
   useEffect(() => {
     void fetchCollections();
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+
     onCollectionChanged(() => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
-      if (cancelled)
-        fn(); // Already unmounted — immediately unsubscribe.
-      else unlisten = fn;
+      if (cancelled) fn();
+      else unlisteners.push(fn);
     });
+
+    // Reload when the user switches workspaces — the backend now reads from
+    // the new workspace path, so we just need to trigger a fresh fetch.
+    listen("workspace-switched", () => {
+      void fetchCollections();
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    });
+
     return () => {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, [fetchCollections]);
 
   return (
     <div className="h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border/50">
-      <Tabs
-        defaultValue="collections"
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <TabsList className="w-full shrink-0 rounded-none border-b border-border/50 h-9 px-2">
-          <TabsTrigger value="collections" className="flex-1 text-xs">
-            Collections
-          </TabsTrigger>
-          <TabsTrigger value="git" className="flex-1 text-xs">
-            Git
-            {changedCount > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[9px] px-1 h-4">
-                {changedCount}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent
-          value="collections"
-          className="flex-1 flex flex-col overflow-hidden mt-0"
-        >
-          {/* View selector and action icons. */}
-          <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-            <Select
-              value={view}
-              onValueChange={(v) => setView(v as "collections" | "history")}
-            >
-              <SelectTrigger className="h-8 flex-1 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="collections">Collections</SelectItem>
-                <SelectItem value="history">History</SelectItem>
-              </SelectContent>
-            </Select>
+      <div className="flex-1 flex flex-col overflow-hidden">
+          {/* View tabs and action icons (Bruno-style). */}
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setView("collections")}
+                className={cn(
+                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                  view === "collections"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+              >
+                Collections
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("history")}
+                className={cn(
+                  "px-2 py-1 text-xs font-medium rounded-md transition-colors",
+                  view === "history"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+              >
+                History
+              </button>
+            </div>
             {view === "collections" && (
-              <>
+              <div className="flex items-center gap-0.5">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCreating(true)}
                   title="New Collection"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0"
+                  className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
                   onClick={() => void handleImport()}
                   title="Import Collection"
                 >
-                  <Upload className="h-4 w-4" />
+                  <Upload className="h-3.5 w-3.5" />
                 </Button>
-              </>
+              </div>
             )}
           </div>
 
@@ -349,7 +338,7 @@ export function CollectionsSidebar() {
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    className="h-7 pl-7 text-xs"
+                    className="h-8 pl-7 text-sm"
                     placeholder="Search requests..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -360,7 +349,7 @@ export function CollectionsSidebar() {
                   <div className="px-1">
                     <Input
                       autoFocus
-                      className="h-7 text-xs"
+                      className="h-8 text-sm"
                       placeholder="Collection name"
                       value={newName}
                       onChange={(e) => {
@@ -382,7 +371,7 @@ export function CollectionsSidebar() {
                       }}
                     />
                     {createError && (
-                      <p className="text-2xs text-destructive mt-0.5 px-1">
+                      <p className="text-xs text-destructive mt-0.5 px-1">
                         {createError}
                       </p>
                     )}
@@ -397,13 +386,13 @@ export function CollectionsSidebar() {
                     {summaries.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-8 px-4">
                         <Folder className="h-8 w-8 text-muted-foreground/50 mb-2" />
-                        <p className="text-xs text-muted-foreground mb-3">
+                        <p className="text-sm text-muted-foreground mb-3">
                           No collections yet.
                         </p>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-xs"
+                          className="text-sm"
                           onClick={() => setIsCreating(true)}
                         >
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
@@ -433,12 +422,7 @@ export function CollectionsSidebar() {
               <HistoryPanel />
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="git" className="flex-1 overflow-hidden mt-0">
-          <GitSidebarPanel />
-        </TabsContent>
-      </Tabs>
+      </div>
 
       <AlertDialog
         open={!!deleteTarget}

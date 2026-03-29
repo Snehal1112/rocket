@@ -92,7 +92,7 @@ export function CollectionVariablesEditor({
                     placeholder="VARIABLE_NAME"
                     value={v.key}
                     onChange={(e) => updateVar(i, { key: e.target.value })}
-                    className="h-7 text-xs font-mono"
+                    className="h-7 text-sm font-mono"
                   />
                 </TableCell>
 
@@ -102,7 +102,7 @@ export function CollectionVariablesEditor({
                     placeholder="Default value"
                     value={v.initialValue}
                     onChange={(e) => updateVar(i, { initialValue: e.target.value })}
-                    className="h-7 text-xs"
+                    className="h-7 text-sm"
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>
@@ -113,7 +113,7 @@ export function CollectionVariablesEditor({
                     placeholder="Current value"
                     value={v.value}
                     onChange={(e) => updateVar(i, { value: e.target.value })}
-                    className="h-7 text-xs"
+                    className="h-7 text-sm"
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>
@@ -152,12 +152,12 @@ export function CollectionVariablesEditor({
           </TableBody>
         </Table>
       ) : (
-        <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+        <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
           No collection variables defined.
         </div>
       )}
 
-      <Button variant="ghost" size="sm" onClick={addVar} className="text-xs">
+      <Button variant="ghost" size="sm" onClick={addVar} className="text-sm">
         <Plus className="h-3 w-3 mr-1" />
         Add Variable
       </Button>

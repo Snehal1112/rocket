@@ -3,11 +3,13 @@ import { TitleBar } from '@/components/title-bar';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
 import { StatusBar } from '@/components/layout/StatusBar';
+import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 function App() {
   const root = usePaneStore((s) => s.root);
@@ -17,6 +19,11 @@ function App() {
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [consoleHeight, setConsoleHeight] = useState(280);
   useKeyboardShortcuts();
+
+  const loadWorkspaces = useWorkspaceStore((s) => s.loadWorkspaces);
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-background via-background to-accent/25 text-sm">
@@ -51,6 +58,7 @@ function App() {
           </>
         )}
         <main className="flex-1 flex flex-col min-w-0">
+          <WorkspaceToolbar />
           <ErrorBoundary>
             <PaneRenderer node={root} />
           </ErrorBoundary>

@@ -25,6 +25,7 @@ rocket-history.workspace = true
 rocket-app.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true
+rocket-workspace.workspace = true
 
 # Tauri
 tauri = { version = "2", features = [] }

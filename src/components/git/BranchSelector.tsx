@@ -27,7 +27,7 @@ export function BranchSelector() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-6 gap-1 text-xs">
+        <Button variant="ghost" size="sm" className="h-6 gap-1 text-sm">
           <GitBranch className="h-3 w-3" />
           {status?.branch ?? 'main'}
         </Button>
@@ -38,7 +38,7 @@ export function BranchSelector() {
             placeholder="Search branches..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-7 text-xs"
+            className="h-7 text-sm"
           />
         </div>
         <Separator />
@@ -46,7 +46,7 @@ export function BranchSelector() {
           {filtered.map((branch) => (
             <div
               key={branch.name}
-              className="group flex items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-xs"
+              className="group flex items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm"
               onClick={() => {
                 if (!branch.isHead) switchBranch(branch.name);
                 setOpen(false);
@@ -93,7 +93,7 @@ export function BranchSelector() {
             placeholder="New branch..."
             value={newBranchName}
             onChange={(e) => setNewBranchName(e.target.value)}
-            className="h-7 text-xs"
+            className="h-7 text-sm"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <Button

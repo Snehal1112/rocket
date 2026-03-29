@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { statusTextColor } from '@/lib/colors';
 import { useConsoleStore, type ConsoleEntry } from '@/stores/console-store';
 
 interface ConsolePanelProps {
@@ -13,14 +14,6 @@ interface ConsolePanelProps {
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
-
-function statusColor(status: number): string {
-  if (status >= 500 || status === 0) return 'text-red-500';
-  if (status >= 400) return 'text-orange-500';
-  if (status >= 300) return 'text-yellow-500';
-  if (status >= 200) return 'text-green-500';
-  return 'text-muted-foreground';
-}
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -92,7 +85,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
 
       {/* Toolbar. */}
       <div className="flex items-center gap-2 px-2 py-1 border-b border-border/70 shrink-0">
-        <span className="text-xs font-medium">Console</span>
+        <span className="text-sm font-medium">Console</span>
         {entries.length > 0 && (
           <span className="text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
             {entries.length}
@@ -103,12 +96,12 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
           placeholder="Filter by URL"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-6 text-xs w-48"
+          className="h-6 text-sm w-48"
         />
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-xs"
+          className="h-6 px-2 text-sm"
           onClick={clearEntries}
           aria-label="Clear console"
         >
@@ -120,7 +113,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       {/* Entry list. */}
       <div className="flex-1 overflow-y-auto font-mono text-2xs">
         {filtered.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             No requests sent yet
           </div>
         ) : (
@@ -137,7 +130,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                 <span className="text-muted-foreground w-16 shrink-0">{formatTime(entry.timestamp)}</span>
                 <span className="font-semibold w-12 shrink-0">{entry.method}</span>
                 <span className="flex-1 truncate text-foreground/80">{entry.url}</span>
-                <span className={cn('w-10 text-right shrink-0 font-semibold', statusColor(entry.status))}>
+                <span className={cn('w-10 text-right shrink-0 font-semibold', statusTextColor(entry.status))}>
                   {entry.status || 'ERR'}
                 </span>
                 <span className="text-muted-foreground w-16 text-right shrink-0">

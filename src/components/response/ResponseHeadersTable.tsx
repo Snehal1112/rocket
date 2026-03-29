@@ -48,7 +48,7 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
           placeholder="Filter headers..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="h-7 pl-7 text-xs"
+          className="h-7 pl-7 text-sm"
           aria-label="Filter headers"
         />
       </div>

@@ -1,15 +1,16 @@
 mod commands;
 mod tauri_event_bus;
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use rocket_app::{
     CollectionService, CookieService, EnvironmentService, GitAppService,
-    HistoryService, RequestExecutionService, TemplateService,
+    HistoryService, RequestExecutionService, TemplateService, WorkspaceService,
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    NotifyFileWatcher, ReqwestExecutor,
+    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
@@ -29,18 +30,37 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Determine data directories.
+            // Determine the application data directory.
             let data_dir = dirs::home_dir()
                 .expect("Home directory not found")
                 .join(".rocket-api");
-            let collections_dir = data_dir.join("collections");
-            let environments_dir = data_dir.join("environments");
-            let history_dir = data_dir.join("history");
-            let templates_dir = data_dir.join("templates");
-            let cookies_dir = data_dir.join("cookies");
+            std::fs::create_dir_all(&data_dir).ok();
+
+            // Workspace service — manages workspace switching.
+            let active_workspace_path: Arc<Mutex<PathBuf>> =
+                Arc::new(Mutex::new(PathBuf::new()));
+            let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
+            let workspace_svc = WorkspaceService::new(
+                workspace_repo,
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                Arc::clone(&active_workspace_path),
+            );
+
+            // Bootstrap the active workspace path from persisted state.
+            let active_ws = workspace_svc
+                .get_active()
+                .expect("failed to load active workspace on startup");
+            *active_workspace_path.lock().unwrap() = active_ws.path.clone();
+
+            // Derive per-service directories from the active workspace.
+            let workspace_base = active_ws.path.clone();
+            let collections_dir = workspace_base.join("collections");
+            let environments_dir = workspace_base.join("environments");
+            let history_dir = workspace_base.join("history");
+            let templates_dir = workspace_base.join("templates");
+            let cookies_dir = workspace_base.join("cookies");
 
             for dir in [
-                &data_dir,
                 &collections_dir,
                 &environments_dir,
                 &history_dir,
@@ -56,8 +76,11 @@ pub fn run() {
 
             // Application services — no event publishing.
             // The file watcher is the single source of truth for sidebar updates.
+            // SharedPathCollectionRepo resolves the base directory from
+            // active_workspace_path at call time, so switching workspaces
+            // automatically redirects all collection reads/writes.
             let collection_svc = CollectionService::new(
-                Box::new(FsCollectionRepo::new(collections_dir.clone())),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
             );
             let env_svc = EnvironmentService::new(
                 Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
@@ -97,6 +120,8 @@ pub fn run() {
             app.manage(cookie_svc);
             app.manage(exec_svc);
             app.manage(git_svc);
+            app.manage(Mutex::new(workspace_svc));
+            app.manage(active_workspace_path);
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
@@ -170,6 +195,14 @@ pub fn run() {
             commands::git::git_stash_drop,
             commands::git::git_conflicts,
             commands::git::git_resolve_conflict,
+            commands::workspaces::list_workspaces,
+            commands::workspaces::get_active_workspace,
+            commands::workspaces::create_workspace,
+            commands::workspaces::switch_workspace,
+            commands::workspaces::rename_workspace,
+            commands::workspaces::close_workspace,
+            commands::workspaces::delete_workspace,
+            commands::workspaces::open_folder_picker,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

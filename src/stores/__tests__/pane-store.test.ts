@@ -1,8 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { usePaneStore } from '../pane-store';
-import type { LeafNode, SplitNode, ResponseState, RequestTab } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import type { LeafNode, SplitNode, ResponseState, RequestTab, CollectionTab } from '@/types/pane-types';
+import { isRequestTab, isGitTab } from '@/types/pane-types';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { scheduleAutoSave } from '@/lib/auto-save';
+
+vi.mock('@/lib/auto-save', () => ({
+  scheduleAutoSave: vi.fn(),
+}))
 
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
@@ -294,5 +299,172 @@ describe('pane-store', () => {
     usePaneStore.getState().reset();
     const leaf = getLeaf();
     expect(leaf.tabs).toHaveLength(0);
+  });
+
+  // ── closeAll ──────────────────────────────────────────────────────────────
+
+  it('closeAll resets the pane tree to a single empty leaf', () => {
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().closeAll();
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+  });
+
+  it('closeAll auto-saves only dirty request tabs that have a source', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    const dirtyWithSource: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+      source: { collection: 'my-col', path: 'req1' },
+    };
+    const dirtyNoSource: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+    };
+    const cleanWithSource: RequestTab = {
+      ...makeTab(),
+      isDirty: false,
+      source: { collection: 'my-col', path: 'req2' },
+    };
+
+    usePaneStore.getState().openTab(dirtyWithSource);
+    usePaneStore.getState().openTab(dirtyNoSource);
+    usePaneStore.getState().openTab(cleanWithSource);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledWith(
+      dirtyWithSource.id,
+      'my-col',
+      'req1',
+      dirtyWithSource.title,
+      dirtyWithSource.request,
+    );
+  });
+
+  it('closeAll flushes dirty tabs in a split pane layout', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    // Open one tab so we can split.
+    usePaneStore.getState().openTab(makeTab());
+    const initialLeaf = getLeaf();
+    usePaneStore.getState().splitGroup(initialLeaf.groupId, 'horizontal');
+
+    // Get the right pane's groupId.
+    const { root } = usePaneStore.getState();
+    if (root.type !== 'split') throw new Error('Expected split');
+    const rightLeaf = root.children[1] as LeafNode;
+
+    // Add a dirty tab with source to the right pane.
+    const dirtyTab: RequestTab = {
+      ...makeTab(),
+      isDirty: true,
+      source: { collection: 'col', path: 'req' },
+    };
+    usePaneStore.getState().openTab(dirtyTab, rightLeaf.groupId);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).toHaveBeenCalledWith(
+      dirtyTab.id,
+      'col',
+      'req',
+      dirtyTab.title,
+      dirtyTab.request,
+    );
+  });
+
+  it('closeAll does not call scheduleAutoSave for non-request tabs', () => {
+    const mockSave = vi.mocked(scheduleAutoSave);
+    mockSave.mockClear();
+
+    const collectionTab: CollectionTab = {
+      id: crypto.randomUUID(),
+      title: 'My Collection',
+      isDirty: true,
+      tabType: 'collection',
+      collectionName: 'my-col',
+    };
+    usePaneStore.getState().openTab(collectionTab);
+    usePaneStore.getState().closeAll();
+
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  // ── switchCollection ────────────────────────────────────────────────
+
+  it('switchCollection snapshots current tabs and restores target', () => {
+    const tab1 = makeTab();
+    const tab2 = makeTab();
+    usePaneStore.getState().openTab(tab1);
+    usePaneStore.getState().setActiveCollection('collectionA');
+
+    // Switch to collectionB (no tabs yet)
+    usePaneStore.getState().switchCollection('collectionB');
+    const leafAfterSwitch = getLeaf();
+    expect(leafAfterSwitch.tabs).toHaveLength(0);
+    expect(usePaneStore.getState().activeCollection).toBe('collectionB');
+
+    // Open a tab in collectionB
+    usePaneStore.getState().openTab(tab2);
+
+    // Switch back to collectionA — should restore tab1
+    usePaneStore.getState().switchCollection('collectionA');
+    const leafBack = getLeaf();
+    expect(leafBack.tabs).toHaveLength(1);
+    expect(leafBack.tabs[0].id).toBe(tab1.id);
+    expect(leafBack.activeTabId).toBe(tab1.id);
+  });
+
+  it('switchCollection to never-opened collection shows empty tabs', () => {
+    usePaneStore.getState().setActiveCollection('existingCol');
+    usePaneStore.getState().openTab(makeTab());
+
+    usePaneStore.getState().switchCollection('brandNewCol');
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+    expect(leaf.activeTabId).toBe('');
+  });
+
+  it('switchCollection from null activeCollection does not throw and sets active collection', () => {
+    // Fresh store has activeCollection === null
+    expect(usePaneStore.getState().activeCollection).toBeNull();
+
+    usePaneStore.getState().switchCollection('firstCol');
+    expect(usePaneStore.getState().activeCollection).toBe('firstCol');
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(0);
+  });
+
+  it('getOpenTabCount returns correct count per collection', () => {
+    usePaneStore.getState().setActiveCollection('colA');
+    usePaneStore.getState().openTab(makeTab());
+    usePaneStore.getState().openTab(makeTab());
+
+    usePaneStore.getState().switchCollection('colB');
+    usePaneStore.getState().openTab(makeTab());
+
+    expect(usePaneStore.getState().getOpenTabCount('colA')).toBe(2);
+    expect(usePaneStore.getState().getOpenTabCount('colB')).toBe(1);
+    expect(usePaneStore.getState().getOpenTabCount('colC')).toBe(0);
+  });
+
+  // ── isGitTab ──────────────────────────────────────────────────────────────
+
+  it('isGitTab returns true for git tabs and false for others', () => {
+    const gitTab = {
+      id: 'git:test',
+      title: 'Git',
+      tabType: 'git' as const,
+      collectionName: 'test',
+      collectionPath: '/path/to/test',
+      isDirty: false,
+    };
+    const requestTab = makeTab();
+    expect(isGitTab(gitTab)).toBe(true);
+    expect(isGitTab(requestTab)).toBe(false);
   });
 });

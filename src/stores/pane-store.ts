@@ -46,14 +46,16 @@ function updateSplitSizes(
 }
 
 // Builds the initial store state with one empty leaf.
-function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId'> {
+function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId' | 'activeCollection' | 'collectionTabState'> {
   const leaf = createDefaultLeaf();
-  return { root: leaf, activeGroupId: leaf.groupId };
+  return { root: leaf, activeGroupId: leaf.groupId, activeCollection: null, collectionTabState: {} };
 }
 
 export interface PaneState {
   root: PaneNode;
   activeGroupId: string;
+  activeCollection: string | null;
+  collectionTabState: Record<string, { tabs: Tab[]; activeTabId: string }>;
 
   // Tab actions.
   openTab: (tab: Tab, groupId?: string) => void;
@@ -77,8 +79,14 @@ export interface PaneState {
   // Conflict tab action.
   openConflictTab: (conflictState: ConflictState) => void;
 
+  // Collection-keyed tab state actions.
+  setActiveCollection: (name: string) => void;
+  switchCollection: (name: string) => void;
+  getOpenTabCount: (collection: string) => number;
+
   // Utility.
   reset: () => void;
+  closeAll: () => void;
 
   updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
   updateTabTitle: (tabId: string, title: string) => void;
@@ -282,8 +290,81 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     get().openTab(tab);
   },
 
+  setActiveCollection(name) {
+    set({ activeCollection: name });
+  },
+
+  switchCollection(name) {
+    const { root, activeGroupId, activeCollection, collectionTabState } = get();
+    // No-op if already on this collection.
+    if (name === activeCollection) return;
+    // Only the active leaf is snapshotted. In split-pane layouts, tabs in
+    // non-active panes are not included. This is an accepted design limitation
+    // for the current feature scope.
+    const activeLeaf = findActiveLeaf(root, activeGroupId);
+
+    // Snapshot current collection's tabs into the keyed state map.
+    const updatedState = { ...collectionTabState };
+    if (activeCollection) {
+      updatedState[activeCollection] = {
+        tabs: activeLeaf.tabs,
+        activeTabId: activeLeaf.activeTabId,
+      };
+    }
+
+    // Restore target collection's tabs (or empty if never visited).
+    const targetState = updatedState[name];
+    const restoredTabs = targetState?.tabs ?? [];
+    const restoredActiveTabId = targetState?.activeTabId ?? '';
+
+    const newRoot = updateLeaf(root, activeGroupId, (leaf) => ({
+      ...leaf,
+      tabs: restoredTabs,
+      activeTabId: restoredActiveTabId,
+    }));
+
+    set({
+      root: newRoot,
+      activeCollection: name,
+      collectionTabState: updatedState,
+    });
+  },
+
+  getOpenTabCount(collection) {
+    const { activeCollection, collectionTabState, root, activeGroupId } = get();
+    if (collection === activeCollection) {
+      const leaf = findActiveLeaf(root, activeGroupId);
+      return leaf.tabs.length;
+    }
+    return collectionTabState[collection]?.tabs.length ?? 0;
+  },
+
   reset() {
     set(buildInitialState());
+  },
+
+  closeAll() {
+    const { root } = get();
+    const flush = (node: PaneNode): void => {
+      if (node.type === 'leaf') {
+        for (const tab of node.tabs) {
+          if (tab.isDirty && tab.source && isRequestTab(tab)) {
+            scheduleAutoSave(
+              tab.id,
+              tab.source.collection,
+              tab.source.path,
+              tab.title,
+              tab.request,
+            );
+          }
+        }
+      } else {
+        flush(node.children[0]);
+        flush(node.children[1]);
+      }
+    };
+    flush(root);
+    get().reset();
   },
 
   updateTabSource(tabId, source) {

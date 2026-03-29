@@ -4115,6 +4115,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-workspace"
+version = "0.1.0"
+dependencies = [
+ "rocket-shared",
+ "serde",
+ "serde_yaml",
+ "uuid",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

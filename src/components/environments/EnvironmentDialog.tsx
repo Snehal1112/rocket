@@ -115,7 +115,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     type="button"
                     onClick={() => setSelectedName(env.name)}
                     className={cn(
-                      'w-full text-left px-2 py-1.5 text-xs rounded-sm truncate',
+                      'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
                       selectedName === env.name
                         ? 'bg-accent text-accent-foreground'
                         : 'text-foreground hover:bg-muted/60',
@@ -127,7 +127,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 {isAddingEnv && (
                   <Input
                     autoFocus
-                    className="h-7 text-xs"
+                    className="h-7 text-sm"
                     placeholder="Environment name"
                     value={newEnvName}
                     onChange={(e) => setNewEnvName(e.target.value)}
@@ -188,14 +188,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           placeholder="Key"
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
-                          className="flex-1 text-xs h-7"
+                          className="flex-1 text-sm h-7"
                         />
                         <Input
                           placeholder="Value"
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
-                          className="flex-1 text-xs h-7"
+                          className="flex-1 text-sm h-7"
                         />
                         <Button
                           variant="ghost"
@@ -223,14 +223,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                   </div>
                 </ScrollArea>
                 <div className="p-3 pt-0">
-                  <Button variant="ghost" size="sm" onClick={addVariable} className="text-xs">
+                  <Button variant="ghost" size="sm" onClick={addVariable} className="text-sm">
                     <Plus className="h-3 w-3 mr-1" />
                     Add Variable
                   </Button>
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
                 Select or create an environment.
               </div>
             )}

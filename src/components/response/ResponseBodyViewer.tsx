@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import { Copy, Check, Clock, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
+import { statusBadgeColor, timeColor } from '@/lib/colors';
 import type { ResponseState } from '@/types/pane-types';
 
 type ViewTab = ResponseState['activeView'];
@@ -72,22 +73,6 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
-// Color-coded status badge based on HTTP status range.
-function statusClasses(status: number): string {
-  if (status >= 500) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-  if (status >= 400) return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-  if (status >= 300) return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800';
-  if (status >= 200) return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800';
-  return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
-}
-
-// Color-coded time: green (<200ms), yellow (200-1000ms), red (>1s).
-function timeClasses(ms: number): string {
-  if (ms <= 200) return 'text-green-600 dark:text-green-400';
-  if (ms <= 1000) return 'text-yellow-600 dark:text-yellow-400';
-  return 'text-red-600 dark:text-red-400';
-}
-
 export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
   const [activeView, setActiveView] = useState<ViewTab>(
     response.activeView ?? 'pretty',
@@ -130,14 +115,14 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
       <div className="flex items-center gap-2 border-b border-border/70 px-3 py-1.5 shrink-0">
         {/* Status badge. */}
         <span
-          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${statusClasses(response.status)}`}
+          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-sm font-semibold ${statusBadgeColor(response.status)}`}
         >
           {response.status === 0 ? 'ERR' : response.status} {response.statusText}
         </span>
 
         {/* Time badge with clock icon, color-coded. */}
         {response.durationMs > 0 && (
-          <span className={`inline-flex items-center gap-1 text-xs font-medium ${timeClasses(response.durationMs)}`}>
+          <span className={`inline-flex items-center gap-1 text-xs font-medium ${timeColor(response.durationMs)}`}>
             <Clock className="h-3 w-3" />
             {formatDuration(response.durationMs)}
           </span>
@@ -157,7 +142,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
             <button
               key={tab}
               onClick={() => setActiveView(tab)}
-              className={`h-7 px-3 text-xs capitalize transition-colors ${
+              className={`h-7 px-3 text-sm capitalize transition-colors ${
                 activeView === tab
                   ? 'border-b-2 border-primary text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'

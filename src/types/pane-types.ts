@@ -66,10 +66,16 @@ export interface ConflictTab extends BaseTab {
   conflictState: ConflictState;
 }
 
-export type Tab = RequestTab | CollectionTab | DiffTab | ConflictTab;
+export interface GitTab extends BaseTab {
+  tabType: 'git';
+  collectionName: string;
+  collectionPath: string;
+}
+
+export type Tab = RequestTab | CollectionTab | DiffTab | ConflictTab | GitTab;
 
 export function isRequestTab(tab: Tab): tab is RequestTab {
-  return tab.tabType !== 'collection' && tab.tabType !== 'diff' && tab.tabType !== 'conflict';
+  return tab.tabType === 'request' || tab.tabType === 'history';
 }
 
 export function isDiffTab(tab: Tab): tab is DiffTab {
@@ -78,6 +84,10 @@ export function isDiffTab(tab: Tab): tab is DiffTab {
 
 export function isConflictTab(tab: Tab): tab is ConflictTab {
   return tab.tabType === 'conflict';
+}
+
+export function isGitTab(tab: Tab): tab is GitTab {
+  return tab.tabType === 'git';
 }
 
 export interface RequestState {
