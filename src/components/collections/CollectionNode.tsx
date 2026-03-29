@@ -226,12 +226,12 @@ export function CollectionNode({
             >
               {open ? (
                 <ChevronDown
-                  className="h-4 w-4 flex-none text-primary-foreground"
+                  className="h-4 w-4 flex-none text-muted-foreground"
                   strokeWidth={1.5}
                 />
               ) : (
                 <ChevronRight
-                  className="h-4 w-4 flex-none text-primary-foreground"
+                  className="h-4 w-4 flex-none text-muted-foreground"
                   strokeWidth={1.5}
                 />
               )}
@@ -382,7 +382,7 @@ export function CollectionNode({
       </ContextMenuContent>
 
       {open && collection && (
-        <div className="pl-1.5 border-l border-border/30 ml-2">
+        <div className="pl-1.5 border-l border-border/50 ml-2">
           {filteredItems.map((item) => {
             if (item.type === "folder") {
               return (
