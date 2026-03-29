@@ -111,6 +111,28 @@ impl WorkspaceService {
         Ok(())
     }
 
+    pub fn pin(&self, id: &str) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.pinned = true;
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspacePinned { id: id.to_string() });
+        Ok(())
+    }
+
+    pub fn unpin(&self, id: &str) -> DomainResult<()> {
+        let mut registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id_mut(id)
+            .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        workspace.pinned = false;
+        self.repo.save(&registry)?;
+        self.publisher.publish(DomainEvent::WorkspaceUnpinned { id: id.to_string() });
+        Ok(())
+    }
+
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         if id == "default" {
             return Err(DomainError::InvalidInput(
@@ -303,5 +325,33 @@ mod tests {
         let ws = svc.create("ToDelete", path.clone()).unwrap();
         svc.delete(&ws.id).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn pin_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let ws = svc.create("Pinnable", tmp.path().join("pin-ws")).unwrap();
+        svc.pin(&ws.id).unwrap();
+        let list = svc.list().unwrap();
+        let pinned = list.iter().find(|w| w.id == ws.id).unwrap();
+        assert!(pinned.pinned);
+    }
+
+    #[test]
+    fn unpin_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        svc.unpin("default").unwrap();
+        let list = svc.list().unwrap();
+        let def = list.iter().find(|w| w.id == "default").unwrap();
+        assert!(!def.pinned);
+    }
+
+    #[test]
+    fn pin_nonexistent_fails() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        assert!(svc.pin("nonexistent").is_err());
     }
 }
