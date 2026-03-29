@@ -36,6 +36,9 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
             DomainEvent::WorkspaceClosed { .. } => "workspace-closed",
             DomainEvent::WorkspaceDeleted { .. } => "workspace-deleted",
+            DomainEvent::WorkspacePinned { .. } => "workspace-pinned",
+            DomainEvent::WorkspaceUnpinned { .. } => "workspace-unpinned",
+            DomainEvent::WorkspaceDescriptionUpdated { .. } => "workspace-description-updated",
             // Git events
             DomainEvent::GitStatusChanged { .. }
             | DomainEvent::GitCommit { .. }
