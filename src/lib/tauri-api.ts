@@ -290,6 +290,25 @@ export interface Workspace {
   id: string;
   name: string;
   path: string;
+  description?: string | null;
+  pinned: boolean;
+}
+
+export interface CollectionReference {
+  name: string;
+  type: 'embedded' | 'external';
+  path?: string;
+}
+
+export interface WorkspaceEnvironmentsConfig {
+  activeEnvironment?: string | null;
+}
+
+export interface WorkspaceConfig {
+  name: string;
+  description?: string | null;
+  collections: CollectionReference[];
+  environments: WorkspaceEnvironmentsConfig;
 }
 
 // ============================================================
@@ -595,3 +614,24 @@ export const deleteWorkspace = (id: string) =>
 
 export const openFolderPicker = () =>
   invoke<string | null>('open_folder_picker');
+
+export const pinWorkspace = (id: string) =>
+  invoke<void>('pin_workspace', { id })
+
+export const unpinWorkspace = (id: string) =>
+  invoke<void>('unpin_workspace', { id })
+
+export const updateWorkspaceDescription = (id: string, description: string | null) =>
+  invoke<void>('update_workspace_description', { id, description })
+
+export const openWorkspaceFromDisk = (path: string) =>
+  invoke<Workspace>('open_workspace', { path })
+
+export const getWorkspaceConfig = (workspaceId: string) =>
+  invoke<WorkspaceConfig>('get_workspace_config', { workspaceId })
+
+export const getMultiWorkspaceMode = () =>
+  invoke<boolean>('get_multi_workspace_mode')
+
+export const setMultiWorkspaceMode = (enabled: boolean) =>
+  invoke<void>('set_multi_workspace_mode', { enabled })
