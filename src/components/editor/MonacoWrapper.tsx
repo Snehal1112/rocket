@@ -27,7 +27,6 @@ export function MonacoWrapper({
 
   const handleMount: OnMount = (_editor, monaco) => {
     defineThemes(monaco);
-    monaco.editor.setTheme(themeName);
   };
 
   return (
