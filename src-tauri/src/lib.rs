@@ -204,6 +204,13 @@ pub fn run() {
             commands::workspaces::rename_workspace,
             commands::workspaces::close_workspace,
             commands::workspaces::delete_workspace,
+            commands::workspaces::pin_workspace,
+            commands::workspaces::unpin_workspace,
+            commands::workspaces::update_workspace_description,
+            commands::workspaces::open_workspace,
+            commands::workspaces::get_workspace_config,
+            commands::workspaces::get_multi_workspace_mode,
+            commands::workspaces::set_multi_workspace_mode,
             commands::workspaces::open_folder_picker,
         ])
         .run(tauri::generate_context!())
