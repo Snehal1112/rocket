@@ -87,6 +87,7 @@ function subscribeToEvents() {
     // Clear all tabs from the previous workspace before activating the new one.
     usePaneStore.getState().closeAll()
     useWorkspaceStore.setState({ activeWorkspaceId: payload.id })
+    usePaneStore.getState().openWorkspaceTabs(payload.id, payload.id === 'default')
   })
 
   listen<{ id: string; oldName: string; newName: string }>(
