@@ -96,7 +96,7 @@
   --sidebar-border: oklch(0.88 0 0);
   --sidebar-ring: hsl(213 88% 42%);
 
-  /* Monaco editor syntax theme. */
+  /* Monaco editor — VS Code Default Light Modern syntax theme. */
   --monaco-bg: #ffffff;
   --monaco-fg: #000000;
   --monaco-line-highlight: #add6ff26;
@@ -144,7 +144,7 @@
   --sidebar-border: hsl(0 0% 27%);
   --sidebar-ring: hsl(207 100% 42%);
 
-  /* Monaco editor syntax theme. */
+  /* Monaco editor — VS Code Default Dark Modern syntax theme. */
   --monaco-bg: #1f1f1f;
   --monaco-fg: #d4d4d4;
   --monaco-line-highlight: #2a2d2e;
