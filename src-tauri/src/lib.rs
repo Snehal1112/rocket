@@ -10,7 +10,7 @@ use rocket_app::{
 };
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    FsWorkspaceRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
+    FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
@@ -40,8 +40,10 @@ pub fn run() {
             let active_workspace_path: Arc<Mutex<PathBuf>> =
                 Arc::new(Mutex::new(PathBuf::new()));
             let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
+            let workspace_config_repo = Box::new(FsWorkspaceConfigRepo::new());
             let workspace_svc = WorkspaceService::new(
                 workspace_repo,
+                workspace_config_repo,
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 Arc::clone(&active_workspace_path),
             );

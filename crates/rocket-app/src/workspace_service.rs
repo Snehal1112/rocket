@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex};
 
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_workspace::{Workspace, WorkspaceRepository};
+use rocket_workspace::{Workspace, WorkspaceRepository, WorkspaceConfig, WorkspaceConfigRepository};
 
 pub struct WorkspaceService {
     repo: Box<dyn WorkspaceRepository>,
+    config_repo: Box<dyn WorkspaceConfigRepository>,
     publisher: Box<dyn EventPublisher>,
     active_path: Arc<Mutex<PathBuf>>,
 }
@@ -15,10 +16,11 @@ pub struct WorkspaceService {
 impl WorkspaceService {
     pub fn new(
         repo: Box<dyn WorkspaceRepository>,
+        config_repo: Box<dyn WorkspaceConfigRepository>,
         publisher: Box<dyn EventPublisher>,
         active_path: Arc<Mutex<PathBuf>>,
     ) -> Self {
-        Self { repo, publisher, active_path }
+        Self { repo, config_repo, publisher, active_path }
     }
 
     pub fn list(&self) -> DomainResult<Vec<Workspace>> {
@@ -146,7 +148,8 @@ mod tests {
     use super::*;
     use rocket_shared::error::DomainResult;
     use rocket_shared::events::NullEventPublisher;
-    use rocket_workspace::{WorkspaceRegistry};
+    use rocket_workspace::{WorkspaceRegistry, WorkspaceConfig, WorkspaceConfigRepository};
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
@@ -172,12 +175,40 @@ mod tests {
         }
     }
 
+    struct MockWorkspaceConfigRepo;
+
+    impl WorkspaceConfigRepository for MockWorkspaceConfigRepo {
+        fn load(&self, workspace_path: &Path) -> DomainResult<WorkspaceConfig> {
+            let config_path = workspace_path.join("workspace.yml");
+            if config_path.exists() {
+                let content = std::fs::read_to_string(&config_path)
+                    .map_err(|e| DomainError::Io(e.to_string()))?;
+                serde_yaml::from_str(&content)
+                    .map_err(|e| DomainError::InvalidInput(e.to_string()))
+            } else {
+                let name = workspace_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Test".into());
+                Ok(WorkspaceConfig::new(name))
+            }
+        }
+        fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()> {
+            std::fs::create_dir_all(workspace_path)
+                .map_err(|e| DomainError::Io(e.to_string()))?;
+            let content = serde_yaml::to_string(config)
+                .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+            std::fs::write(workspace_path.join("workspace.yml"), content)
+                .map_err(|e| DomainError::Io(e.to_string()))
+        }
+    }
+
     fn make_service(tmp: &TempDir) -> WorkspaceService {
         let default_path = tmp.path().join("default");
         std::fs::create_dir_all(&default_path).unwrap();
         let repo = Box::new(MockWorkspaceRepo::new(default_path.clone()));
+        let config_repo = Box::new(MockWorkspaceConfigRepo);
         let active_path = Arc::new(Mutex::new(default_path));
-        WorkspaceService::new(repo, Box::new(NullEventPublisher), active_path)
+        WorkspaceService::new(repo, config_repo, Box::new(NullEventPublisher), active_path)
     }
 
     #[test]
