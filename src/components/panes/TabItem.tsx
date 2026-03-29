@@ -1,6 +1,6 @@
 import { X, Folder, GitBranch } from 'lucide-react';
 import type { Tab } from '@/types/pane-types';
-import { isRequestTab, isGitTab } from '@/types/pane-types';
+import { isRequestTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 
 function getTabTitle(tab: Tab): string {
@@ -54,14 +54,16 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           ●
         </span>
       )}
-      <button
-        type="button"
-        aria-label="Close tab"
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-        className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      {!isWorkspaceTab(tab) && (
+        <button
+          type="button"
+          aria-label="Close tab"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }

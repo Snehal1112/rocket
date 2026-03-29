@@ -11,6 +11,7 @@ import { PanelRight, PanelBottom } from 'lucide-react';
 import { TabItem } from './TabItem';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
+import { isWorkspaceTab } from '@/types/pane-types';
 
 // Request tab bar matching legacy RequestTabs styling.
 export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tabId: string) => void }) {
@@ -84,10 +85,14 @@ export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tab
               Rename
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId)}>
+            <ContextMenuItem
+              disabled={isWorkspaceTab(tab)}
+              onClick={() => onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId)}
+            >
               Close
             </ContextMenuItem>
             <ContextMenuItem
+              disabled={isWorkspaceTab(tab)}
               onClick={() => {
                 node.tabs
                   .filter((t) => t.id !== tab.id)
