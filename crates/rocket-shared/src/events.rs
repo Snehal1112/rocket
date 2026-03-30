@@ -46,6 +46,8 @@ pub enum DomainEvent {
     GitStashChanged { collection: String },
     GitConflictDetected { collection: String, files: Vec<String> },
     GitCloned { url: String, dest: String },
+    GitRemoteAdded { collection: String, name: String, url: String },
+    GitRemoteRemoved { collection: String, name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
