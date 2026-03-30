@@ -12,6 +12,7 @@ import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
 import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
+import { GitCloneDialog } from '@/components/git/GitCloneDialog';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
@@ -27,6 +28,7 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<string>('changes');
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
+  const [showCloneDialog, setShowCloneDialog] = useState(false);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspace = workspaces.find((w) => w.id === workspaceId);
@@ -74,16 +76,25 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
           This workspace is not a Git repository.
         </p>
         {workspacePath && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              await gitInit(workspacePath);
-              await checkAndLoad(workspacePath);
-            }}
-          >
-            Initialize Git
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await gitInit(workspacePath);
+                await checkAndLoad(workspacePath);
+              }}
+            >
+              Initialize Git
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowCloneDialog(true)}
+            >
+              Clone Repository
+            </Button>
+          </div>
         )}
       </div>
     );
@@ -179,6 +190,7 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
 
       {showCredentialsDialog && <GitCredentialsDialog />}
       <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
+      <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
     </div>
   );
 }
