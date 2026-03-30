@@ -160,6 +160,7 @@ pub fn run() {
             commands::collections::reorder_items,
             commands::collections::get_collection_settings,
             commands::collections::save_collection_settings,
+            commands::collections::scan_collections_in_path,
             commands::environments::list_environments,
             commands::environments::get_environment,
             commands::environments::save_environment,

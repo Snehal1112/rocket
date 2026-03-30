@@ -1,6 +1,9 @@
 use rocket_app::CollectionService;
 use rocket_collection::{Collection, CollectionSummary, Request};
 use rocket_shared::error::DomainError;
+use serde::Serialize;
+use std::fs;
+use std::path::Path;
 use tauri::State;
 
 #[tauri::command]
@@ -126,4 +129,41 @@ pub fn save_collection_settings(
     svc: State<'_, CollectionService>,
 ) -> Result<(), DomainError> {
     svc.save_settings(&collection, &settings)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionScanResult {
+    pub name: String,
+    pub path: String,
+}
+
+#[tauri::command]
+pub fn scan_collections_in_path(path: String) -> Result<Vec<CollectionScanResult>, DomainError> {
+    let dir = Path::new(&path);
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+    let mut results = Vec::new();
+    let entries = fs::read_dir(dir)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| DomainError::Internal(e.to_string()))?;
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        if entry_path.join("opencollection.yml").exists() {
+            results.push(CollectionScanResult {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+            });
+        }
+    }
+    results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(results)
 }
