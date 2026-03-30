@@ -4,6 +4,7 @@ use crate::{
     commit::CommitInfo, stash::StashEntry,
     conflict::{ConflictFile, ConflictResolution},
     credentials::GitCredentials,
+    remote::RemoteInfo,
 };
 
 pub trait GitService: Send + Sync {
@@ -11,6 +12,12 @@ pub trait GitService: Send + Sync {
     fn is_repo(&self, path: &str) -> bool;
     fn init(&self, path: &str) -> DomainResult<()>;
     fn clone_repo(&self, url: &str, dest_path: &str, creds: &GitCredentials) -> DomainResult<()>;
+
+    // Remotes
+    fn list_remotes(&self, path: &str) -> DomainResult<Vec<RemoteInfo>>;
+    fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()>;
+    fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()>;
+    fn set_remote_url(&self, path: &str, name: &str, url: &str) -> DomainResult<()>;
 
     // Status + diff
     fn status(&self, path: &str) -> DomainResult<RepoStatus>;
