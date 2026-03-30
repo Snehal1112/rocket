@@ -22,6 +22,10 @@ import {
   gitLog,
   gitConflicts,
   gitResolveConflict,
+  gitListRemotes,
+  gitAddRemote,
+  gitRemoveRemote,
+  gitSetRemoteUrl,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
@@ -30,6 +34,7 @@ import {
   type CommitInfo,
   type ConflictFile,
   type ConflictResolution,
+  type RemoteInfo,
 } from '@/lib/tauri-api';
 
 interface GitState {
@@ -39,6 +44,7 @@ interface GitState {
   conflicts: ConflictFile[];
   stashes: StashEntry[];
   branches: BranchList | null;
+  remotes: RemoteInfo[];
   commitLog: CommitInfo[];
   loading: boolean;
   error: string | null;
@@ -50,6 +56,7 @@ interface GitState {
   refreshConflicts: () => Promise<void>;
   refreshStashes: () => Promise<void>;
   refreshBranches: () => Promise<void>;
+  refreshRemotes: () => Promise<void>;
   refreshLog: (limit?: number) => Promise<void>;
   resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
@@ -66,6 +73,9 @@ interface GitState {
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
+  addRemote: (name: string, url: string) => Promise<void>;
+  removeRemote: (name: string) => Promise<void>;
+  setRemoteUrl: (name: string, url: string) => Promise<void>;
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
   push: (remote?: string) => Promise<void>;
@@ -81,6 +91,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   conflicts: [],
   stashes: [],
   branches: null,
+  remotes: [],
   commitLog: [],
   loading: false,
   error: null,
@@ -98,6 +109,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         set({ status, loading: false });
         await get().refreshStashes();
         await get().refreshBranches();
+        await get().refreshRemotes();
       } else {
         set({ status: null, loading: false });
       }
@@ -160,6 +172,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const branches = await gitBranches(collectionPath);
       set({ branches });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Reload the remote list from disk.
+  refreshRemotes: async () => {
+    const { collectionPath, isRepo } = get();
+    if (!collectionPath || !isRepo) return;
+    try {
+      const remotes = await gitListRemotes(collectionPath);
+      set({ remotes });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -350,6 +374,42 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  // Add a new remote.
+  addRemote: async (name: string, url: string) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitAddRemote(collectionPath, name, url);
+      await get().refreshRemotes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Remove a remote.
+  removeRemote: async (name: string) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitRemoveRemote(collectionPath, name);
+      await get().refreshRemotes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Update the URL for an existing remote.
+  setRemoteUrl: async (name: string, url: string) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitSetRemoteUrl(collectionPath, name, url);
+      await get().refreshRemotes();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   // Store credentials and close the dialog.
   setCredentials: (creds) => set({ credentials: creds, showCredentialsDialog: false }),
 
@@ -405,6 +465,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       conflicts: [],
       stashes: [],
       branches: null,
+      remotes: [],
       commitLog: [],
       loading: false,
       error: null,
