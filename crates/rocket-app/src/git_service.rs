@@ -1,7 +1,7 @@
 use rocket_git::service::GitService;
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution,
-    FileDiff, GitCredentials, RepoStatus, StashEntry,
+    FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -32,6 +32,34 @@ impl GitAppService {
             dest: dest_path.to_string(),
         });
         Ok(())
+    }
+
+    // Remotes
+    pub fn list_remotes(&self, path: &str) -> DomainResult<Vec<RemoteInfo>> {
+        self.git.list_remotes(path)
+    }
+
+    pub fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
+        self.git.add_remote(path, name, url)?;
+        self.events.publish(DomainEvent::GitRemoteAdded {
+            collection: path.to_string(),
+            name: name.to_string(),
+            url: url.to_string(),
+        });
+        Ok(())
+    }
+
+    pub fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()> {
+        self.git.remove_remote(path, name)?;
+        self.events.publish(DomainEvent::GitRemoteRemoved {
+            collection: path.to_string(),
+            name: name.to_string(),
+        });
+        Ok(())
+    }
+
+    pub fn set_remote_url(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
+        self.git.set_remote_url(path, name, url)
     }
 
     // Status + diff
