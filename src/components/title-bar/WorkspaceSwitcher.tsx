@@ -133,7 +133,7 @@ export function WorkspaceSwitcher() {
           </Button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="center" className="min-w-[220px]">
+        <DropdownMenuContent align="center" className="min-w-[220px] bg-card/50 backdrop-blur-sm border border-border/70">
           {pinned.map(renderWorkspaceRow)}
           {pinned.length > 0 && unpinned.length > 0 && <DropdownMenuSeparator />}
           {unpinned.map(renderWorkspaceRow)}

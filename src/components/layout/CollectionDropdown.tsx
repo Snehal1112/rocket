@@ -66,9 +66,12 @@ export function CollectionDropdown() {
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
+      <PopoverContent
+        className="w-72 p-0 bg-card/50 backdrop-blur-sm border border-border/70 rounded-sm"
+        align="start"
+      >
         {/* Workspace section */}
-        <div className="px-3 py-2.5 border-b border-border">
+        <div className="px-3 py-2.5 border-b border-border/70">
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
             Workspace
           </p>
@@ -158,7 +161,6 @@ export function CollectionDropdown() {
         ) : (
           ""
         )}
-
       </PopoverContent>
     </Popover>
   );
