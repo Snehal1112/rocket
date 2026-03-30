@@ -284,6 +284,11 @@ export type GitCredentials =
   | { type: "userPass"; username: string; password: string }
   | { type: "token"; token: string };
 
+export interface RemoteInfo {
+  name: string;
+  url: string;
+}
+
 // ============================================================
 // Workspace types
 // ============================================================
@@ -530,6 +535,18 @@ export const gitConflicts = (collectionPath: string) =>
 
 export const gitResolveConflict = (collectionPath: string, file: string, resolution: ConflictResolution) =>
   invoke<void>("git_resolve_conflict", { collectionPath, file, resolution });
+
+export const gitListRemotes = (collectionPath: string) =>
+  invoke<RemoteInfo[]>("git_list_remotes", { collectionPath });
+
+export const gitAddRemote = (collectionPath: string, name: string, url: string) =>
+  invoke<void>("git_add_remote", { collectionPath, name, url });
+
+export const gitRemoveRemote = (collectionPath: string, name: string) =>
+  invoke<void>("git_remove_remote", { collectionPath, name });
+
+export const gitSetRemoteUrl = (collectionPath: string, name: string, url: string) =>
+  invoke<void>("git_set_remote_url", { collectionPath, name, url });
 
 // ============================================================
 // Realtime events
