@@ -183,7 +183,7 @@
    Body padding creates a visible gap for the border to render against the desktop. */
 html.linux body {
   background: transparent;
-  padding: 8px;
+  min-width: 500px;
 }
 
 html.linux #root {
