@@ -48,7 +48,7 @@ impl WorkspaceRegistry {
     pub fn new_with_default(default_path: PathBuf) -> Self {
         let default = Workspace {
             id: "default".to_string(),
-            name: "Default Workspace".to_string(),
+            name: "My Workspace".to_string(),
             path: default_path,
             description: None,
             pinned: true,
@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn name_exists_case_insensitive() {
         let reg = WorkspaceRegistry::new_with_default(PathBuf::from("/tmp/default"));
-        assert!(reg.name_exists("default workspace", None));
-        assert!(!reg.name_exists("default workspace", Some("default")));
+        assert!(reg.name_exists("my workspace", None));
+        assert!(!reg.name_exists("my workspace", Some("default")));
     }
 
     #[test]
