@@ -10,6 +10,7 @@ use crate::conflict::{ConflictFile, ConflictResolution};
 use crate::credentials::GitCredentials;
 use crate::diff::{DiffHunk, DiffLine, FileDiff, LineType};
 use crate::service::GitService;
+use crate::remote::RemoteInfo;
 use crate::stash::StashEntry;
 use crate::status::{FileStatus, GitStatus, RepoStatus};
 
@@ -225,6 +226,46 @@ impl GitService for Git2Service {
         git2::build::RepoBuilder::new()
             .fetch_options(fetch_opts)
             .clone(url, Path::new(dest_path))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    fn list_remotes(&self, path: &str) -> DomainResult<Vec<RemoteInfo>> {
+        let repo = open_repo(path)?;
+        let remote_names = repo
+            .remotes()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let mut remotes = Vec::new();
+        for name in remote_names.iter().flatten() {
+            let remote = repo
+                .find_remote(name)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            let url = remote.url().unwrap_or("").to_string();
+            remotes.push(RemoteInfo {
+                name: name.to_string(),
+                url,
+            });
+        }
+        Ok(remotes)
+    }
+
+    fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        repo.remote(name, url)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        repo.remote_delete(name)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    fn set_remote_url(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+        repo.remote_set_url(name, url)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
     }
@@ -1108,5 +1149,75 @@ mod tests {
         assert_eq!(stashes.len(), 1); // still there
         let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
         assert_eq!(content, "stash this"); // restored
+    }
+
+    #[test]
+    fn list_remotes_empty_for_fresh_repo() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let remotes = svc.list_remotes(&path).unwrap();
+        assert!(remotes.is_empty());
+    }
+
+    #[test]
+    fn add_and_list_remote() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        let remotes = svc.list_remotes(&path).unwrap();
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0].name, "origin");
+        assert_eq!(remotes[0].url, "https://github.com/user/repo.git");
+    }
+
+    #[test]
+    fn add_multiple_remotes() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        svc.add_remote(&path, "upstream", "https://github.com/upstream/repo.git").unwrap();
+        let remotes = svc.list_remotes(&path).unwrap();
+        assert_eq!(remotes.len(), 2);
+        let names: Vec<&str> = remotes.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"origin"));
+        assert!(names.contains(&"upstream"));
+    }
+
+    #[test]
+    fn remove_remote() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        svc.remove_remote(&path, "origin").unwrap();
+        let remotes = svc.list_remotes(&path).unwrap();
+        assert!(remotes.is_empty());
+    }
+
+    #[test]
+    fn set_remote_url() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://github.com/user/old.git").unwrap();
+        svc.set_remote_url(&path, "origin", "https://github.com/user/new.git").unwrap();
+        let remotes = svc.list_remotes(&path).unwrap();
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0].url, "https://github.com/user/new.git");
+    }
+
+    #[test]
+    fn add_duplicate_remote_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        let result = svc.add_remote(&path, "origin", "https://github.com/user/other.git");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn remove_nonexistent_remote_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let result = svc.remove_remote(&path, "nonexistent");
+        assert!(result.is_err());
     }
 }
