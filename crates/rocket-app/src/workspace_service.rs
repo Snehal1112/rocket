@@ -404,7 +404,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
         let ws = svc.create("Alpha", tmp.path().join("ws")).unwrap();
-        assert!(svc.rename(&ws.id, "Default Workspace").is_err());
+        assert!(svc.rename(&ws.id, "My Workspace").is_err());
     }
 
     #[test]
