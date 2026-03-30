@@ -48,7 +48,9 @@ impl EventPublisher for TauriEventBus {
             | DomainEvent::BranchMerged { .. }
             | DomainEvent::GitStashChanged { .. }
             | DomainEvent::GitConflictDetected { .. }
-            | DomainEvent::GitCloned { .. } => "git-changed",
+            | DomainEvent::GitCloned { .. }
+            | DomainEvent::GitRemoteAdded { .. }
+            | DomainEvent::GitRemoteRemoved { .. } => "git-changed",
         };
         let _ = self.app.emit(event_name, &event);
     }

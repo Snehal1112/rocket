@@ -1,7 +1,7 @@
 use rocket_app::GitAppService;
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution,
-    FileDiff, GitCredentials, RepoStatus, StashEntry,
+    FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainError;
 use tauri::State;
@@ -137,4 +137,24 @@ pub fn git_conflicts(collection_path: String, svc: State<'_, GitAppService>) -> 
 #[tauri::command]
 pub fn git_resolve_conflict(collection_path: String, file: String, resolution: ConflictResolution, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.resolve_conflict(&collection_path, &file, &resolution)
+}
+
+#[tauri::command]
+pub fn git_list_remotes(collection_path: String, svc: State<'_, GitAppService>) -> Result<Vec<RemoteInfo>, DomainError> {
+    svc.list_remotes(&collection_path)
+}
+
+#[tauri::command]
+pub fn git_add_remote(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+    svc.add_remote(&collection_path, &name, &url)
+}
+
+#[tauri::command]
+pub fn git_remove_remote(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+    svc.remove_remote(&collection_path, &name)
+}
+
+#[tauri::command]
+pub fn git_set_remote_url(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+    svc.set_remote_url(&collection_path, &name, &url)
 }
