@@ -11,9 +11,12 @@ import { GitChangedFiles } from '@/components/git/GitChangedFiles';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
+import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
+import { Settings } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface WorkspaceGitTabProps {
   workspaceId: string;
@@ -23,6 +26,7 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   // null = loading, false = not a repo, true = is a repo
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<string>('changes');
+  const [showRemotesDialog, setShowRemotesDialog] = useState(false);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspace = workspaces.find((w) => w.id === workspaceId);
@@ -99,7 +103,24 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
             </span>
           )}
         </div>
-        <GitRemoteActions />
+        <div className="flex items-center gap-1">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => setShowRemotesDialog(true)}
+                >
+                  <Settings className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>Manage Remotes</p></TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <GitRemoteActions />
+        </div>
       </div>
 
       {/* Sub-tab layout for changes, log, and stash. */}
@@ -157,6 +178,7 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
       </Tabs>
 
       {showCredentialsDialog && <GitCredentialsDialog />}
+      <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
     </div>
   );
 }
