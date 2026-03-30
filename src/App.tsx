@@ -13,9 +13,6 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
 import { useState, useEffect } from 'react';
 
-declare function requestIdleCallback(cb: IdleRequestCallback, opts?: IdleRequestOptions): number;
-declare function cancelIdleCallback(id: number): void;
-
 function App() {
   const root = usePaneStore((s) => s.root);
   const [showSplash, setShowSplash] = useState(true);
@@ -61,12 +58,10 @@ function App() {
   }, []);
 
   // Preload Monaco in the background after the app shell renders.
+  // requestIdleCallback is Chrome-only; setTimeout works in all WebViews.
   useEffect(() => {
-    const id = requestIdleCallback(
-      () => { void import('@/components/editor/MonacoWrapper'); },
-      { timeout: 2000 },
-    );
-    return () => cancelIdleCallback(id);
+    const id = setTimeout(() => { void import('@/components/editor/MonacoWrapper'); }, 200);
+    return () => clearTimeout(id);
   }, []);
 
   return (
