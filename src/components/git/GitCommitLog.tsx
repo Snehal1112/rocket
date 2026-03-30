@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Separator } from '@/components/ui/separator';
 import { useGitStore } from '@/stores/git-store';
 
 // Return a human-readable relative time string for an ISO timestamp.
@@ -42,32 +40,28 @@ export function GitCommitLog() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="space-y-0.5 p-1">
-        {commitLog.map((commit, i) => (
-          <div key={commit.fullId}>
-            <div className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/50">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge
-                      variant="outline"
-                      className="shrink-0 cursor-pointer font-mono text-[9px] px-1"
-                      onClick={() => navigator.clipboard.writeText(commit.fullId)}
-                    >
-                      {commit.id}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent><p>{commit.fullId} (click to copy)</p></TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{commit.message}</p>
-                <p className="text-[10px] text-muted-foreground">
-                  {commit.author} · {relativeTime(commit.timestamp)}
-                </p>
-              </div>
+      <div className="p-1">
+        {commitLog.map((commit) => (
+          <div key={commit.fullId} className="flex items-start gap-2 px-2 py-[5px] hover:bg-muted/50">
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => navigator.clipboard.writeText(commit.fullId)}
+                  >
+                    {commit.id}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent><p>{commit.fullId} (click to copy)</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-medium leading-snug">{commit.message}</p>
+              <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                {commit.author} · {relativeTime(commit.timestamp)}
+              </p>
             </div>
-            {i < commitLog.length - 1 && <Separator />}
           </div>
         ))}
         {commitLog.length >= limit && (

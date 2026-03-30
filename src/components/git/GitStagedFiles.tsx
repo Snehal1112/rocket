@@ -32,11 +32,12 @@ export function GitStagedFiles() {
 
   return (
     <div>
-      <div className="flex items-center justify-between px-2 py-1">
-        <span className="text-sm font-medium text-muted-foreground">
-          Staged ({staged.length})
+      <div className="flex items-center justify-between px-2 py-1.5">
+        <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground">
+          Staged Changes
+          <span className="ml-1.5 font-mono normal-case tracking-normal opacity-70">{staged.length}</span>
         </span>
-        <Button variant="ghost" size="sm" className="h-5 text-sm" onClick={() => unstageAll()}>
+        <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[11px] text-muted-foreground" onClick={() => unstageAll()}>
           Unstage all
         </Button>
       </div>

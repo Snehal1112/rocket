@@ -19,17 +19,27 @@ export function GitFileRow({ file, onStage, onUnstage, onDiscard, onClick }: Git
 
   return (
     <div
-      className="group flex items-center gap-1.5 rounded px-2 py-0.5 hover:bg-muted/50 cursor-pointer text-sm"
+      className="group flex items-center gap-1.5 px-2 py-[3px] hover:bg-muted/50 cursor-pointer min-w-0"
       onClick={onClick}
     >
       <GitStatusBadge status={file.status} />
-      <span className="truncate font-mono text-xs">{fileName}</span>
+
+      {/* Filename — monospace, primary */}
+      <span className="truncate font-mono text-[13px] min-w-0 leading-snug">
+        {fileName}
+      </span>
+
+      {/* Folder path — secondary, muted */}
       {folder && (
-        <span className="truncate text-xs text-muted-foreground">{folder}</span>
+        <span className="shrink-0 text-[11px] text-muted-foreground/60 truncate max-w-[35%]">
+          {folder}
+        </span>
       )}
-      <div className="ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {file.staged && onUnstage && (
-          <TooltipProvider delayDuration={300}>
+
+      {/* Action buttons — visible on hover */}
+      <div className="ml-auto shrink-0 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <TooltipProvider delayDuration={300}>
+          {file.staged && onUnstage && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); onUnstage(); }}>
@@ -38,10 +48,8 @@ export function GitFileRow({ file, onStage, onUnstage, onDiscard, onClick }: Git
               </TooltipTrigger>
               <TooltipContent side="left"><p>Unstage</p></TooltipContent>
             </Tooltip>
-          </TooltipProvider>
-        )}
-        {!file.staged && onStage && (
-          <TooltipProvider delayDuration={300}>
+          )}
+          {!file.staged && onStage && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); onStage(); }}>
@@ -50,20 +58,18 @@ export function GitFileRow({ file, onStage, onUnstage, onDiscard, onClick }: Git
               </TooltipTrigger>
               <TooltipContent side="left"><p>Stage</p></TooltipContent>
             </Tooltip>
-          </TooltipProvider>
-        )}
-        {!file.staged && onDiscard && (
-          <TooltipProvider delayDuration={300}>
+          )}
+          {!file.staged && onDiscard && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={(e) => { e.stopPropagation(); onDiscard(); }}>
+                <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); onDiscard(); }}>
                   <Undo2 className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left"><p>Discard changes</p></TooltipContent>
             </Tooltip>
-          </TooltipProvider>
-        )}
+          )}
+        </TooltipProvider>
       </div>
     </div>
   );

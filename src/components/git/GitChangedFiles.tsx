@@ -47,11 +47,12 @@ export function GitChangedFiles() {
 
   return (
     <div>
-      <div className="flex items-center justify-between px-2 py-1">
-        <span className="text-sm font-medium text-muted-foreground">
-          Changes ({unstaged.length})
+      <div className="flex items-center justify-between px-2 py-1.5">
+        <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground">
+          Changes
+          <span className="ml-1.5 font-mono normal-case tracking-normal opacity-70">{unstaged.length}</span>
         </span>
-        <Button variant="ghost" size="sm" className="h-5 text-sm" onClick={() => stageAll()}>
+        <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[11px] text-muted-foreground" onClick={() => stageAll()}>
           Stage all
         </Button>
       </div>

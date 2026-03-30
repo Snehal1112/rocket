@@ -22,10 +22,11 @@ export function GitStashSection() {
 
   return (
     <div>
-      <div className="flex items-center gap-1 px-2 py-1">
-        <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-sm font-medium text-muted-foreground">
-          Stash ({stashes.length})
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <Archive className="h-3 w-3 text-muted-foreground" />
+        <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground">
+          Stash
+          <span className="ml-1.5 font-mono normal-case tracking-normal opacity-70">{stashes.length}</span>
         </span>
       </div>
       <div className="flex gap-1 px-2 pb-1">
@@ -49,11 +50,11 @@ export function GitStashSection() {
       {stashes.map((stash) => (
         <div
           key={stash.index}
-          className="group flex items-center gap-1.5 rounded px-2 py-0.5 hover:bg-muted/50 text-sm"
+          className="group flex items-center gap-1.5 px-2 py-[3px] hover:bg-muted/50 text-[13px]"
         >
-          <span className="truncate text-sm">{stash.message}</span>
+          <span className="truncate font-mono text-[13px]">{stash.message}</span>
           {stash.branch && (
-            <span className="text-xs text-muted-foreground">({stash.branch})</span>
+            <span className="text-[11px] text-muted-foreground/60 shrink-0">{stash.branch}</span>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
