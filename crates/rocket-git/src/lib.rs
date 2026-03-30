@@ -5,6 +5,7 @@ pub mod commit;
 pub mod stash;
 pub mod conflict;
 pub mod credentials;
+pub mod remote;
 pub mod service;
 pub mod git2_service;
 
@@ -15,5 +16,6 @@ pub use commit::*;
 pub use stash::*;
 pub use conflict::*;
 pub use credentials::*;
+pub use remote::*;
 pub use service::GitService;
 pub use git2_service::Git2Service;
