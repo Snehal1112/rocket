@@ -289,6 +289,11 @@ export interface RemoteInfo {
   url: string;
 }
 
+export interface CollectionScanResult {
+  name: string;
+  path: string;
+}
+
 // ============================================================
 // Workspace types
 // ============================================================
@@ -547,6 +552,9 @@ export const gitRemoveRemote = (collectionPath: string, name: string) =>
 
 export const gitSetRemoteUrl = (collectionPath: string, name: string, url: string) =>
   invoke<void>("git_set_remote_url", { collectionPath, name, url });
+
+export const scanCollectionsInPath = (path: string) =>
+  invoke<CollectionScanResult[]>("scan_collections_in_path", { path });
 
 // ============================================================
 // Realtime events
