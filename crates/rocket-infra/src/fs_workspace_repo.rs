@@ -13,7 +13,7 @@ impl FsWorkspaceRepo {
     pub fn new(app_data_dir: PathBuf) -> Self {
         Self {
             registry_path: app_data_dir.join("workspaces.yml"),
-            default_workspace_path: app_data_dir.join("Default Workspace"),
+            default_workspace_path: app_data_dir.join("My Workspace"),
         }
     }
 }
@@ -72,9 +72,9 @@ mod tests {
         let registry = repo.load().unwrap();
         assert_eq!(registry.workspaces.len(), 1);
         assert_eq!(registry.workspaces[0].id, "default");
-        assert_eq!(registry.workspaces[0].name, "Default Workspace");
+        assert_eq!(registry.workspaces[0].name, "My Workspace");
         assert!(tmp.path().join("workspaces.yml").exists());
-        assert!(tmp.path().join("Default Workspace").exists());
+        assert!(tmp.path().join("My Workspace").exists());
     }
 
     #[test]
