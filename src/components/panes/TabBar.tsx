@@ -6,8 +6,9 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PanelRight, PanelBottom } from 'lucide-react';
+import { PanelRight, PanelBottom, Plus } from 'lucide-react';
 import { TabItem } from './TabItem';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
@@ -17,9 +18,9 @@ import { isWorkspaceTab } from '@/types/pane-types';
 export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tabId: string) => void }) {
   const setActiveTab = usePaneStore((s) => s.setActiveTab);
   const closeTab = usePaneStore((s) => s.closeTab);
-
   const splitGroup = usePaneStore((s) => s.splitGroup);
   const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
+  const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
 
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -111,6 +112,27 @@ export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tab
           </ContextMenuContent>
         </ContextMenu>
       ))}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="New request"
+            title="New request - Right-click for more types"
+            onClick={() => openEphemeralTab('http')}
+            className="ml-1 h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => openEphemeralTab('http')}>HTTP</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('graphql')}>GraphQL</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('grpc')}>gRPC</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('websocket')}>WebSocket</ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     </div>
   );
 }
