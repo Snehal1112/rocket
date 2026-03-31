@@ -66,5 +66,5 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
 
   if (!diffState) return null;
 
-  return <DiffViewer diffState={diffState} />;
+  return <DiffViewer key={`${diffState.filePath}:${diffState.isStaged}`} diffState={diffState} />;
 }
