@@ -11,6 +11,7 @@ import { GitLandingPanel } from '@/components/git/GitLandingPanel';
 import { GitLinksSection } from '@/components/git/GitLinksSection';
 import { GitFileList } from '@/components/git/GitFileList';
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
+import { BranchSelector } from '@/components/git/BranchSelector';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { useGitStore } from '@/stores/git-store';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
@@ -105,12 +106,13 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
         {/* LEFT PANEL */}
         <div className="w-80 border-r border-border/70 flex flex-col overflow-hidden">
 
-          {/* Collection name header */}
+          {/* Collection name header with branch selector. */}
           <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0">
             <Package className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-medium truncate">
+            <span className="text-sm font-medium truncate flex-1">
               {collectionName}
             </span>
+            <BranchSelector />
           </div>
 
           {/* Changes section with commit form */}
