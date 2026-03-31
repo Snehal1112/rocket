@@ -157,7 +157,7 @@ export function GitLandingPanel() {
           ) : (
             <ArrowDown className="h-3.5 w-3.5" />
           )}
-          Pull
+          Pull{behind > 0 ? ` ↓${behind}` : ''}
         </Button>
         <Button variant="outline" size="sm" onClick={handlePush} disabled={pushing}>
           {pushing ? (
@@ -165,7 +165,7 @@ export function GitLandingPanel() {
           ) : (
             <ArrowUp className="h-3.5 w-3.5" />
           )}
-          Push
+          Push{ahead > 0 ? ` ↑${ahead}` : ''}
         </Button>
       </div>
 
