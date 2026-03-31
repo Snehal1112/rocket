@@ -58,7 +58,11 @@ export function EditorGroup({ node }: { node: LeafNode }) {
 
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
-    if (tab && tab.isDirty && !tab.source) {
+    // Guard if ephemeral (no source) or has unsaved edits.
+    const needsGuard =
+      (tab && isRequestTab(tab) && !tab.source) ||
+      (tab?.isDirty ?? false);
+    if (tab && needsGuard) {
       setPendingCloseTabId(tabId);
     } else {
       closeTab(tabId, node.groupId);
@@ -98,7 +102,14 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
             <AlertDialogDescription>
-              This request has never been saved to a collection. Close anyway?
+              {(() => {
+                if (!pendingCloseTabId) return null;
+                const found = node.tabs.find((t) => t.id === pendingCloseTabId);
+                if (found && isRequestTab(found) && !found.source) {
+                  return 'This request has never been saved to a collection. Closing it will discard all changes. Close anyway?';
+                }
+                return 'This request has unsaved changes. Close anyway?';
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
