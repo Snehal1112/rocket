@@ -69,7 +69,11 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
       return
     }
     try {
-      await createWorkspace(trimmedName, path)
+      // Append workspace name to the chosen directory so each workspace
+      // lives in its own subfolder and can be deleted safely.
+      const sep = path.includes('\\') ? '\\' : '/';
+      const fullPath = path.endsWith(sep) ? path + trimmedName : path + sep + trimmedName;
+      await createWorkspace(trimmedName, fullPath)
       handleClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create workspace')
