@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react';
-import { DiffEditor } from '@monaco-editor/react';
+import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import { DiffHeader } from './DiffHeader';
 import { VisualDiffView } from './VisualDiffView';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
-import { useTheme } from '@/hooks/useTheme';
+import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import type { DiffState } from '@/types/pane-types';
 
 interface DiffViewerProps {
@@ -33,7 +33,8 @@ function getLanguage(filePath: string): string {
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
-  const { isDark } = useTheme();
+  const { themeName, defineThemes } = useMonacoTheme();
+  const handleDiffMount: DiffOnMount = (_editor, monaco) => { defineThemes(monaco); };
 
   // Persist mode preference across sessions.
   const [mode, setMode] = useState<'text' | 'visual'>(() => {
@@ -85,7 +86,8 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
             original={diffState.oldContent}
             modified={diffState.newContent}
             language={language}
-            theme={isDark ? 'vs-dark' : 'vs'}
+            theme={themeName}
+            onMount={handleDiffMount}
             options={{
               readOnly: true,
               renderSideBySide: true,

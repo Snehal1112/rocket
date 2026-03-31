@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import Editor from '@monaco-editor/react';
+import Editor, { type OnMount } from '@monaco-editor/react';
 import { gitResolveConflict } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
-import { useTheme } from '@/hooks/useTheme';
+import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import type { ConflictState } from '@/types/pane-types';
 
 interface ConflictResolverProps {
@@ -15,7 +15,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
   const { refreshStatus, abortMerge } = useGitStore();
-  const { isDark } = useTheme();
+  const { themeName, defineThemes } = useMonacoTheme();
+  const handleMount: OnMount = (_editor, monaco) => { defineThemes(monaco); };
 
   const handleAbort = async () => {
     await abortMerge();
@@ -55,7 +56,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           <Editor
             value={manualContent}
             onChange={(v) => setManualContent(v ?? '')}
-            theme={isDark ? 'vs-dark' : 'vs'}
+            theme={themeName}
+            onMount={handleMount}
             options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
           />
         </div>
@@ -80,7 +82,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           <div className="flex-1">
             <Editor
               value={conflictState.ours}
-              theme={isDark ? 'vs-dark' : 'vs'}
+              theme={themeName}
+            onMount={handleMount}
               options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
             />
           </div>
@@ -90,7 +93,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           <div className="flex-1">
             <Editor
               value={conflictState.theirs}
-              theme={isDark ? 'vs-dark' : 'vs'}
+              theme={themeName}
+            onMount={handleMount}
               options={{ readOnly: true, minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
             />
           </div>
