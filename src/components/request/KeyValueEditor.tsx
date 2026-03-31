@@ -46,6 +46,14 @@ export function KeyValueEditor({
   return (
     <div className="space-y-2">
       {label && <div className="text-xs font-medium text-muted-foreground">{label}</div>}
+      {entries.length > 0 && (
+        <div className="flex gap-2 items-center text-[10px] text-muted-foreground uppercase tracking-wider">
+          <div className="w-4" />
+          <div className="flex-1">{keyPlaceholder}</div>
+          <div className="flex-1">{valuePlaceholder}</div>
+          <div className="w-7" />
+        </div>
+      )}
       {entries.map((entry) => (
         <div key={entry.id} className="flex gap-2 items-center">
           <Checkbox
