@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Monaco } from '@monaco-editor/react';
+import { loader } from '@monaco-editor/react';
 
 export function useMonacoTheme() {
   const [isDark, setIsDark] = useState(() =>
@@ -25,14 +26,23 @@ export function useMonacoTheme() {
     };
   }, []);
 
+  // Apply theme change globally so all editors update in real time.
+  useEffect(() => {
+    const name = isDark ? 'rocket-dark' : 'rocket-light';
+    loader.init().then((monaco) => {
+      monaco.editor.setTheme(name);
+    });
+  }, [isDark]);
+
   const themeName = isDark ? 'rocket-dark' : 'rocket-light';
 
+  // Themes are defined in main.tsx before any editor mounts.
+  // This is a no-op safety net for editors that mount before main.tsx runs.
   function defineThemes(monaco: Monaco) {
     monaco.editor.defineTheme('rocket-light', {
       base: 'vs',
       inherit: true,
       rules: [
-        // VS Code Default Light Modern token colors.
         { token: 'string', foreground: 'a31515' },
         { token: 'string.key.json', foreground: '0451a5' },
         { token: 'number', foreground: '098658' },
@@ -55,7 +65,6 @@ export function useMonacoTheme() {
       base: 'vs-dark',
       inherit: true,
       rules: [
-        // VS Code Default Dark Modern token colors.
         { token: 'string', foreground: 'ce9178' },
         { token: 'string.key.json', foreground: '9cdcfe' },
         { token: 'number', foreground: 'b5cea8' },
