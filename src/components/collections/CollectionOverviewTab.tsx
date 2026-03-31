@@ -11,6 +11,8 @@ import {
 } from '@/lib/tauri-api';
 import { MethodBreakdown } from './MethodBreakdown';
 import { RequestList } from './RequestList';
+import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
+import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { CollectionVariablesEditor } from './CollectionVariablesEditor';
@@ -164,6 +166,8 @@ const TABS: { label: string; value: CollectionSection }[] = [
   { label: 'Overview', value: 'overview' },
   { label: 'Authorization', value: 'auth' },
   { label: 'Variables', value: 'variables' },
+  { label: 'Readme', value: 'readme' },
+  { label: 'Tags', value: 'tags' },
 ];
 
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
@@ -179,9 +183,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
+  const [readme, setReadme] = useState('');
 
   // Guard against stale section values from before the tab redesign.
-  const validSections: CollectionSection[] = ['overview', 'auth', 'variables'];
+  const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
     ? tab.activeSection!
     : 'overview';
@@ -202,6 +207,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         setAuth(toAuthState(s.auth));
         setHeaders(toKeyValueEntries(s.headers));
         setVariables(s.variables ?? []);
+        setReadme(s.readme ?? '');
       })
       .catch((err) => {
         console.error('[CollectionOverviewTab] load failed', err);
@@ -221,12 +227,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           enabled: h.enabled,
         })),
         description: description || undefined,
+        readme: readme || undefined,
         variables,
       } as any);
     } catch (err) {
       console.error('[CollectionOverviewTab] save failed', err);
     }
-  }, [collectionName, auth, headers, description, variables]);
+  }, [collectionName, auth, headers, description, readme, variables]);
 
   if (loading) {
     return (
@@ -365,6 +372,27 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   Save
                 </Button>
               </div>
+            </div>
+          )}
+
+          {/* Readme tab. */}
+          {activeSection === 'readme' && (
+            <div className="space-y-4">
+              <MarkdownEditor
+                value={readme}
+                onChange={setReadme}
+                onBlur={saveSettings}
+              />
+              <div className="flex justify-end">
+                <Button size="sm" onClick={saveSettings}>Save</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Tags tab. */}
+          {activeSection === 'tags' && (
+            <div>
+              <TagsList collection={collection} />
             </div>
           )}
         </div>
