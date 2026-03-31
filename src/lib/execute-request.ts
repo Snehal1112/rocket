@@ -55,7 +55,7 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   }
 }
 
-function toApiBody(body: BodyState, resolve = (s: string) => s): Body | undefined {
+export function toApiBody(body: BodyState, resolve = (s: string) => s): Body | undefined {
   if (body.mode === 'none') return undefined;
   if (body.mode === 'formdata') {
     return {
