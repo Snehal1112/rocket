@@ -25,12 +25,19 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Cmd/Ctrl+S — save draft to collection.
+      // Cmd/Ctrl+S — open save-to-collection for ephemeral tabs, else save draft.
       if (e.key === 's') {
         e.preventDefault();
         const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
-        if (tab) {
-          window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }));
+        if (!tab) return;
+        if (isRequestTab(tab) && !tab.source) {
+          window.dispatchEvent(
+            new CustomEvent('rocket:save-to-collection', { detail: { tabId: tab.id } }),
+          );
+        } else {
+          window.dispatchEvent(
+            new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }),
+          );
         }
         return;
       }

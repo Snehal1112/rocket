@@ -45,6 +45,7 @@ import { findTabInTree } from '@/lib/pane-utils';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { getCollectionSettings } from '@/lib/tauri-api';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
+import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -87,6 +88,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
+  const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [curlImported, setCurlImported] = useState(false);
@@ -103,6 +105,16 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     };
   }, []);
+
+  // Listen for save-to-collection events targeted at this tab.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId: string }>).detail;
+      if (detail?.tabId === tab.id) setSaveToCollectionOpen(true);
+    };
+    window.addEventListener('rocket:save-to-collection', handler);
+    return () => window.removeEventListener('rocket:save-to-collection', handler);
+  }, [tab.id]);
 
   // Fetch collection variables for URL input overlay.
   useEffect(() => {
@@ -454,6 +466,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           >
             <Zap className="h-3.5 w-3.5" />
           </Button>
+
+          {!tab.source && (
+            <>
+              <Button size="sm" variant="outline" className="h-7"
+                onClick={() => setSaveToCollectionOpen(true)}>
+                Save to Collection
+              </Button>
+              <SaveToCollectionDialog
+                open={saveToCollectionOpen}
+                tab={tab}
+                onClose={() => setSaveToCollectionOpen(false)}
+              />
+            </>
+          )}
 
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
