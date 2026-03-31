@@ -10,13 +10,24 @@ export function BranchSelector() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [newBranchName, setNewBranchName] = useState('');
-  const { branches, switchBranch, createBranch, deleteBranch, mergeBranch, status } = useGitStore();
+  const { branches, switchBranch, createBranch, deleteBranch, mergeBranch, checkoutRemoteBranch, status } = useGitStore();
 
   if (!branches) return null;
 
   const filtered = branches.local.filter((b) =>
     b.name.toLowerCase().includes(search.toLowerCase())
   );
+
+  const filteredRemote = branches.remote
+    .filter((b) => {
+      // Exclude HEAD pointer and branches that already have a local counterpart.
+      if (b.name.endsWith('/HEAD')) return false;
+      const localName = b.name.split('/').slice(1).join('/');
+      return (
+        !branches.local.some((l) => l.name === localName) &&
+        b.name.toLowerCase().includes(search.toLowerCase())
+      );
+    });
 
   const handleCreate = async () => {
     if (!newBranchName.trim()) return;
@@ -86,6 +97,29 @@ export function BranchSelector() {
               )}
             </div>
           ))}
+          {filteredRemote.length > 0 && (
+            <>
+              <div className="px-2 py-1 text-xs text-muted-foreground font-medium mt-1">
+                Remote
+              </div>
+              {filteredRemote.map((branch) => {
+                const localName = branch.name.split('/').slice(1).join('/');
+                return (
+                  <div
+                    key={branch.name}
+                    className="flex items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm"
+                    onClick={() => {
+                      checkoutRemoteBranch(branch.name);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="w-3.5" />
+                    <span className="truncate flex-1 text-muted-foreground">{localName}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
         <Separator />
         <div className="flex gap-1 p-2">
