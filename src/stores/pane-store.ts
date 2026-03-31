@@ -358,9 +358,35 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   openWorkspaceTabs(workspaceId) {
-    get().closeAll();
-    const sections: WorkspaceTabSection[] = ['overview', 'environments', 'git'];
+    const { root, activeGroupId, activeCollection, collectionTabState } = get();
 
+    // Snapshot the current collection's tabs so they survive the switch.
+    const updatedState = { ...collectionTabState };
+    if (activeCollection) {
+      const activeLeaf = findActiveLeaf(root, activeGroupId);
+      updatedState[activeCollection] = {
+        tabs: activeLeaf.tabs,
+        activeTabId: activeLeaf.activeTabId,
+      };
+    }
+
+    // Flush dirty tabs before resetting the pane tree.
+    const flush = (node: PaneNode): void => {
+      if (node.type === 'leaf') {
+        for (const tab of node.tabs) {
+          if (tab.isDirty && tab.source && isRequestTab(tab)) {
+            scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
+          }
+        }
+      } else {
+        flush(node.children[0]);
+        flush(node.children[1]);
+      }
+    };
+    flush(root);
+
+    // Build workspace tabs.
+    const sections: WorkspaceTabSection[] = ['overview', 'environments', 'git'];
     const tabs: WorkspaceTab[] = sections.map((section) => ({
       id: `workspace:${workspaceId}:${section}`,
       title: section === 'git' ? 'Git UI' : section.charAt(0).toUpperCase() + section.slice(1),
@@ -370,16 +396,19 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       activeSection: section,
     }));
 
-    const overviewId = tabs[0].id;
-    const { root } = get();
-    // Get the root leaf after closeAll() which resets to a single leaf.
-    const rootLeaf = root as LeafNode;
-    const newRoot = updateLeaf(root, rootLeaf.groupId, (leaf) => ({
-      ...leaf,
+    // Reset pane tree to a single leaf with workspace tabs.
+    const leaf = createDefaultLeaf();
+    const newRoot = updateLeaf(leaf, leaf.groupId, (l) => ({
+      ...l,
       tabs,
-      activeTabId: overviewId,
+      activeTabId: tabs[0].id,
     }));
-    set({ root: newRoot, activeGroupId: rootLeaf.groupId });
+    set({
+      root: newRoot,
+      activeGroupId: leaf.groupId,
+      activeCollection: null,
+      collectionTabState: updatedState,
+    });
   },
 
   isWorkspaceMode() {
