@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
+  FilePlus,
   Folder,
   LayoutDashboard,
   Search,
@@ -62,6 +63,7 @@ export function CollectionsSidebar() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const multiWorkspaceMode = useWorkspaceStore((s) => s.multiWorkspaceMode);
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
+  const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
   const handleImport = useCallback(async () => {
@@ -391,6 +393,16 @@ export function CollectionsSidebar() {
                 title="Import Collection"
               >
                 <Upload className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => openEphemeralTab('http')}
+                aria-label="New unsaved request"
+                title="New unsaved request"
+              >
+                <FilePlus className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="ghost"
