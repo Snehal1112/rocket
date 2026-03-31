@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { DiffEditor } from '@monaco-editor/react';
 import { DiffHeader } from './DiffHeader';
+import { VisualDiffView } from './VisualDiffView';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
 import { useTheme } from '@/hooks/useTheme';
 import type { DiffState } from '@/types/pane-types';
@@ -29,10 +30,20 @@ function getLanguage(filePath: string): string {
   return map[ext] ?? 'plaintext';
 }
 
-// Renders a side-by-side Monaco diff for a single file with staged/working toggle.
+// Renders a side-by-side Monaco diff or visual structured diff for a single file.
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
   const { isDark } = useTheme();
+
+  // Persist mode preference across sessions.
+  const [mode, setMode] = useState<'text' | 'visual'>(() => {
+    return (localStorage.getItem('git-diff-mode') as 'text' | 'visual') ?? 'text';
+  });
+
+  const handleModeChange = useCallback((m: 'text' | 'visual') => {
+    setMode(m);
+    localStorage.setItem('git-diff-mode', m);
+  }, []);
 
   const handleToggleStaged = useCallback(async (isStaged: boolean) => {
     try {
@@ -50,26 +61,41 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
     }
   }, [diffState.collectionPath, diffState.filePath]);
 
+  // Visual mode is only available for JSON request files.
+  const canShowVisual = diffState.filePath.endsWith('.json');
   const language = getLanguage(diffState.filePath);
 
   return (
     <div className="flex flex-col h-full">
-      <DiffHeader diffState={diffState} onToggleStaged={handleToggleStaged} />
-      <div className="flex-1">
-        <DiffEditor
-          original={diffState.oldContent}
-          modified={diffState.newContent}
-          language={language}
-          theme={isDark ? 'vs-dark' : 'vs'}
-          options={{
-            readOnly: true,
-            renderSideBySide: true,
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            fontSize: 12,
-          }}
+      <DiffHeader
+        diffState={diffState}
+        onToggleStaged={handleToggleStaged}
+        mode={mode}
+        onModeChange={handleModeChange}
+        canShowVisual={canShowVisual}
+      />
+      {mode === 'visual' && canShowVisual ? (
+        <VisualDiffView
+          oldContent={diffState.oldContent}
+          newContent={diffState.newContent}
         />
-      </div>
+      ) : (
+        <div className="flex-1">
+          <DiffEditor
+            original={diffState.oldContent}
+            modified={diffState.newContent}
+            language={language}
+            theme={isDark ? 'vs-dark' : 'vs'}
+            options={{
+              readOnly: true,
+              renderSideBySide: true,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: 12,
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

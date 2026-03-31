@@ -6,15 +6,35 @@ import type { GitStatusKind } from '@/lib/tauri-api';
 interface DiffHeaderProps {
   diffState: DiffState;
   onToggleStaged: (isStaged: boolean) => void;
+  mode: 'text' | 'visual';
+  onModeChange: (mode: 'text' | 'visual') => void;
+  canShowVisual: boolean;
 }
 
-// Header bar showing file status badge, path, and staged/working toggle.
-export function DiffHeader({ diffState, onToggleStaged }: DiffHeaderProps) {
+// Header bar showing file status badge, path, staged/working toggle, and text/visual mode toggle.
+export function DiffHeader({
+  diffState,
+  onToggleStaged,
+  mode,
+  onModeChange,
+  canShowVisual,
+}: DiffHeaderProps) {
   return (
     <div className="flex items-center gap-2 border-b px-3 py-1.5">
       <GitStatusBadge status={diffState.status as GitStatusKind} />
       <span className="font-mono text-xs truncate">{diffState.filePath}</span>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        {canShowVisual && (
+          <Tabs
+            value={mode}
+            onValueChange={(v) => onModeChange(v as 'text' | 'visual')}
+          >
+            <TabsList className="h-6">
+              <TabsTrigger value="text" className="text-xs px-2 py-0.5">Text</TabsTrigger>
+              <TabsTrigger value="visual" className="text-xs px-2 py-0.5">Visual</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
         <Tabs
           value={diffState.isStaged ? 'staged' : 'working'}
           onValueChange={(v) => onToggleStaged(v === 'staged')}
