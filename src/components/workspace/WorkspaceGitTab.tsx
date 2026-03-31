@@ -1,23 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { BranchSelector } from '@/components/git/BranchSelector';
-import { GitRemoteActions } from '@/components/git/GitRemoteActions';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
-import { GitStagedFiles } from '@/components/git/GitStagedFiles';
-import { GitChangedFiles } from '@/components/git/GitChangedFiles';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
 import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitCloneDialog } from '@/components/git/GitCloneDialog';
+import { GitLandingPanel } from '@/components/git/GitLandingPanel';
+import { GitLinksSection } from '@/components/git/GitLinksSection';
+import { GitFileList } from '@/components/git/GitFileList';
+import { DiffViewForFile } from '@/components/git/DiffViewForFile';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
-import { Settings } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Package, ChevronDown } from 'lucide-react';
+import type { FileStatus } from '@/lib/tauri-api';
+
+type RightPanelView =
+  | { kind: 'landing' }
+  | { kind: 'diff'; file: FileStatus }
+  | { kind: 'commits' }
+  | { kind: 'stashes' };
 
 interface WorkspaceGitTabProps {
   workspaceId: string;
@@ -26,7 +31,7 @@ interface WorkspaceGitTabProps {
 export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   // null = loading, false = not a repo, true = is a repo
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<string>('changes');
+  const [rightPanel, setRightPanel] = useState<RightPanelView>({ kind: 'landing' });
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
 
@@ -34,7 +39,7 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   const workspace = workspaces.find((w) => w.id === workspaceId);
   const workspacePath = workspace?.path ?? null;
 
-  const { status, showCredentialsDialog, setCollection, refreshLog } = useGitStore();
+  const { showCredentialsDialog, setCollection } = useGitStore();
 
   // Check git repo status and initialize the git store when the path is known.
   const checkAndLoad = useCallback(async (path: string) => {
@@ -55,11 +60,6 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
       void checkAndLoad(workspacePath);
     }
   }, [workspacePath, checkAndLoad]);
-
-  // Refresh the commit log when switching to the log sub-tab.
-  useEffect(() => {
-    if (activeSubTab === 'log') void refreshLog();
-  }, [activeSubTab, refreshLog]);
 
   if (isRepo === null) {
     return (
@@ -100,94 +100,67 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
     );
   }
 
-  const changedCount = status?.files.filter((f) => f.status !== 'unchanged').length ?? 0;
-
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Top bar: branch selector + remote actions. */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border/70 shrink-0">
-        <div className="flex items-center gap-2">
-          <BranchSelector />
-          {status && !status.isClean && (
-            <span className="text-xs text-muted-foreground">
-              {changedCount} changed {changedCount === 1 ? 'file' : 'files'}
+    <div className="flex flex-col h-full">
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* LEFT PANEL */}
+        <div className="w-80 border-r border-border/70 flex flex-col overflow-hidden">
+
+          {/* Collection name header */}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0">
+            <Package className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-medium truncate">
+              {workspace?.name ?? 'Collection'}
             </span>
+          </div>
+
+          {/* Changes section with commit form */}
+          <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border/70">
+            <Collapsible defaultOpen>
+              <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium text-primary">
+                <ChevronDown className="h-3 w-3" />
+                Changes
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 space-y-2">
+                <GitCommitForm />
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+
+          {/* File list */}
+          <GitFileList
+            onFileClick={(file) => setRightPanel({ kind: 'diff', file })}
+          />
+
+          {/* Links section */}
+          <div className="shrink-0 border-t border-border/70">
+            <GitLinksSection
+              onNavigate={(view) => setRightPanel({ kind: view })}
+              onOpenRemotes={() => setShowRemotesDialog(true)}
+            />
+          </div>
+        </div>
+
+        {/* RIGHT PANEL */}
+        <div className="flex-1 overflow-hidden">
+          {rightPanel.kind === 'landing' && <GitLandingPanel />}
+          {rightPanel.kind === 'diff' && (
+            <DiffViewForFile file={rightPanel.file} collectionPath={workspacePath!} />
+          )}
+          {rightPanel.kind === 'commits' && <GitCommitLog />}
+          {rightPanel.kind === 'stashes' && (
+            <ScrollArea className="h-full">
+              <div className="p-4">
+                <GitStashSection />
+              </div>
+            </ScrollArea>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setShowRemotesDialog(true)}
-                >
-                  <Settings className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>Manage Remotes</p></TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <GitRemoteActions />
-        </div>
+
       </div>
 
-      {/* Sub-tab layout for changes, log, and stash. */}
-      <Tabs
-        value={activeSubTab}
-        onValueChange={setActiveSubTab}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <TabsList className="w-full shrink-0 rounded-none border-b border-border/70 bg-card/60 h-9 px-3 justify-start">
-          <TabsTrigger
-            value="changes"
-            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
-          >
-            Changes
-            {changedCount > 0 && (
-              <span className="ml-1 text-2xs text-muted-foreground">({changedCount})</span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger
-            value="log"
-            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
-          >
-            Log
-          </TabsTrigger>
-          <TabsTrigger
-            value="stash"
-            className="text-sm rounded-none data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
-          >
-            Stash
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="changes" className="flex-1 overflow-hidden mt-0">
-          <ScrollArea className="h-full">
-            <div className="p-4 space-y-4 max-w-2xl">
-              <GitCommitForm />
-              <Separator />
-              <GitStagedFiles />
-              <GitChangedFiles />
-            </div>
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="log" className="flex-1 overflow-hidden mt-0">
-          <GitCommitLog />
-        </TabsContent>
-
-        <TabsContent value="stash" className="flex-1 overflow-hidden mt-0">
-          <ScrollArea className="h-full">
-            <div className="p-4">
-              <GitStashSection />
-            </div>
-          </ScrollArea>
-        </TabsContent>
-      </Tabs>
-
+      {/* Dialogs */}
       {showCredentialsDialog && <GitCredentialsDialog />}
       <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
       <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
