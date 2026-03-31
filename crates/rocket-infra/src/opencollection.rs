@@ -455,6 +455,9 @@ pub struct OcHttpRequestDetails {
 /// Complete HTTP request — top-level YAML file struct.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcHttpRequest {
+    /// Stable identity for tab deduplication across reloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
     pub info: OcHttpRequestInfo,
     pub http: OcHttpRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]

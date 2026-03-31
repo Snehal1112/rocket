@@ -818,7 +818,7 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let docs: Option<Documentation> = oc.docs.map(Documentation::text);
 
     Request {
-        uid: uuid::Uuid::new_v4().to_string(),
+        uid: oc.uid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name,
         method,
         url,
@@ -924,6 +924,7 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
     let docs = req.docs.and_then(|d| d.content().map(String::from));
 
     OcHttpRequest {
+        uid: Some(req.uid),
         info,
         http,
         runtime,
