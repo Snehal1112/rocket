@@ -14,7 +14,7 @@ export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) 
       keyPlaceholder="Param name"
       valuePlaceholder="Value"
       addLabel="Add Query Param"
-      label="Query Params"
+      label="Query"
     />
   );
 }
