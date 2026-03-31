@@ -353,7 +353,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     const tabs: WorkspaceTab[] = sections.map((section) => ({
       id: `workspace:${workspaceId}:${section}`,
-      title: section.charAt(0).toUpperCase() + section.slice(1),
+      title: section === 'git' ? 'Git UI' : section.charAt(0).toUpperCase() + section.slice(1),
       isDirty: false,
       tabType: 'workspace',
       workspaceId,

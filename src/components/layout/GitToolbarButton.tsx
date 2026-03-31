@@ -13,7 +13,7 @@ export function GitToolbarButton() {
     if (!activeCollection) return;
     const tab: GitTab = {
       id: `git:${activeCollection}`,
-      title: 'Git',
+      title: 'Git UI',
       tabType: 'git',
       collectionName: activeCollection,
       collectionPath: collectionPath ?? '',
