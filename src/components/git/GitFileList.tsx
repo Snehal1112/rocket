@@ -17,7 +17,7 @@ interface GitFileListProps {
 }
 
 export function GitFileList({ onFileClick }: GitFileListProps) {
-  const { status, stageAll, unstageAll, discardFiles } = useGitStore();
+  const { status, stageFiles, stageAll, unstageFiles, unstageAll, discardFiles } = useGitStore();
 
   const staged = status?.files.filter((f) => f.staged) ?? [];
   const unstaged = status?.files.filter((f) => !f.staged && f.status !== 'unchanged') ?? [];
@@ -79,13 +79,43 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
           {unstaged.map((file) => (
             <div
               key={file.path}
-              className="flex items-center justify-between px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer"
+              className="group flex items-center justify-between px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer"
               onClick={() => onFileClick(file)}
             >
-              <span className="text-sm truncate flex-1">{file.path}</span>
-              <span className={`text-xs font-medium ${GIT_STATUS_CONFIG[file.status].className}`}>
-                {GIT_STATUS_CONFIG[file.status].label}
-              </span>
+              <span className="text-sm truncate flex-1 min-w-0">{file.path}</span>
+              <div className="flex items-center gap-0.5">
+                <span className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}>
+                  {GIT_STATUS_CONFIG[file.status].label}
+                </span>
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={(e) => { e.stopPropagation(); discardFiles([file.path]); }}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Discard</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={(e) => { e.stopPropagation(); stageFiles([file.path]); }}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Stage</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
             </div>
           ))}
 
@@ -117,13 +147,30 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
               {staged.map((file) => (
                 <div
                   key={file.path}
-                  className="flex items-center justify-between px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer"
+                  className="group flex items-center justify-between px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer"
                   onClick={() => onFileClick(file)}
                 >
-                  <span className="text-sm truncate flex-1">{file.path}</span>
-                  <span className={`text-xs font-medium ${GIT_STATUS_CONFIG[file.status].className}`}>
-                    {GIT_STATUS_CONFIG[file.status].label}
-                  </span>
+                  <span className="text-sm truncate flex-1 min-w-0">{file.path}</span>
+                  <div className="flex items-center gap-0.5">
+                    <span className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}>
+                      {GIT_STATUS_CONFIG[file.status].label}
+                    </span>
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5"
+                            onClick={(e) => { e.stopPropagation(); unstageFiles([file.path]); }}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Unstage</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
                 </div>
               ))}
             </>
