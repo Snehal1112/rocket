@@ -22,6 +22,7 @@ export function GitCommitForm() {
         placeholder="Commit message..."
         value={message}
         onChange={(e) => setMessage(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') void handleCommit(); }}
         className="text-sm h-8"
       />
       <Button
