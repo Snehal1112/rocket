@@ -34,12 +34,13 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   const [rightPanel, setRightPanel] = useState<RightPanelView>({ kind: 'landing' });
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(true);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspace = workspaces.find((w) => w.id === workspaceId);
   const workspacePath = workspace?.path ?? null;
 
-  const { showCredentialsDialog, setCollection } = useGitStore();
+  const { showCredentialsDialog, setCollection, refreshLog } = useGitStore();
 
   // Check git repo status and initialize the git store when the path is known.
   const checkAndLoad = useCallback(async (path: string) => {
@@ -60,6 +61,11 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
       void checkAndLoad(workspacePath);
     }
   }, [workspacePath, checkAndLoad]);
+
+  // Load the commit log when the commits view is opened.
+  useEffect(() => {
+    if (rightPanel.kind === 'commits') void refreshLog();
+  }, [rightPanel.kind, refreshLog]);
 
   if (isRepo === null) {
     return (
@@ -117,9 +123,9 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
 
           {/* Changes section with commit form */}
           <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border/70">
-            <Collapsible defaultOpen>
+            <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
               <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium text-primary">
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className={`h-3 w-3 transition-transform ${!changesOpen ? '-rotate-90' : ''}`} />
                 Changes
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2 space-y-2">
