@@ -42,7 +42,7 @@ export function EnvironmentSwitcher() {
               )}
             />
             <span className="max-w-[120px] truncate">{activeName}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">

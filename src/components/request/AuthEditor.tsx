@@ -218,7 +218,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       {auth.authType === 'basic' && auth.basic && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <User className="h-4 w-4 text-muted-foreground" />
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Username"
               className="flex-1 text-sm"
@@ -232,7 +232,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
             />
           </div>
           <div className="flex items-center gap-2">
-            <Lock className="h-4 w-4 text-muted-foreground" />
+            <Lock className="h-3.5 w-3.5 text-muted-foreground" />
             <Input
               type="password"
               placeholder="Password"
@@ -252,7 +252,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       {/* Bearer: icon + token input. */}
       {auth.authType === 'bearer' && auth.bearer && (
         <div className="flex items-center gap-2">
-          <Key className="h-4 w-4 text-muted-foreground" />
+          <Key className="h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Token"
             className="flex-1 text-sm"
@@ -407,9 +407,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 onClick={() => setAdvancedOpen(!advancedOpen)}
               >
                 {advancedOpen ? (
-                  <ChevronDown className="h-3 w-3" />
+                  <ChevronDown className="h-3.5 w-3.5" />
                 ) : (
-                  <ChevronRight className="h-3 w-3" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 )}
                 Advanced Options
               </button>

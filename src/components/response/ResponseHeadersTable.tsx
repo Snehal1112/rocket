@@ -86,9 +86,9 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
                     onClick={() => handleCopy(h.key, h.value)}
                   >
                     {copiedKey === h.key ? (
-                      <Check className="h-3 w-3 text-emerald-500" />
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
                     ) : (
-                      <Copy className="h-3 w-3" />
+                      <Copy className="h-3.5 w-3.5" />
                     )}
                   </Button>
                 </TableCell>

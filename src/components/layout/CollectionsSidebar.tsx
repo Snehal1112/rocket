@@ -429,7 +429,7 @@ export function CollectionsSidebar() {
                   openWorkspaceTabs(activeWorkspace.id)
                 }
               >
-                <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground mr-2" />
+                <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground mr-2" />
                 <span className="truncate">{activeWorkspace.name}</span>
               </Button>
             </div>

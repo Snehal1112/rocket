@@ -72,7 +72,7 @@ export function KeyValueEditor({
             className="h-7 w-7"
             aria-label={`Remove ${entry.key || 'unnamed'}`}
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </Button>
         </div>
       ))}

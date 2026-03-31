@@ -31,7 +31,7 @@ export function GitToolbarButton() {
       disabled={!activeCollection}
       title="Open Git panel"
     >
-      <GitBranch className="h-4 w-4" />
+      <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
     </Button>
   );
 }

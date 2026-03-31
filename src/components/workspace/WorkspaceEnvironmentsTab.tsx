@@ -213,7 +213,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
                       )}
                       title={variable.enabled ? 'Disable variable' : 'Enable variable'}
                     >
-                      {variable.enabled && <Check className="h-3 w-3" />}
+                      {variable.enabled && <Check className="h-3.5 w-3.5" />}
                     </Button>
 
                     {/* Key input. */}
@@ -242,9 +242,9 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
                       title={variable.secret ? 'Show value' : 'Hide value'}
                     >
                       {variable.secret ? (
-                        <EyeOff className="h-3 w-3" />
+                        <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
                       ) : (
-                        <Eye className="h-3 w-3" />
+                        <Eye className="h-3.5 w-3.5 text-muted-foreground" />
                       )}
                     </Button>
 
@@ -256,7 +256,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
                       onClick={() => removeVar(idx)}
                       title="Delete variable"
                     >
-                      <X className="h-3 w-3" />
+                      <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 ))}

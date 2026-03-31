@@ -44,7 +44,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           {tab.request.method}
         </span>
       ) : isGitTab(tab) ? (
-        <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       ) : isWorkspaceTab(tab) ? (
         <>
           {tab.activeSection === 'overview' && <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
@@ -52,7 +52,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           {tab.activeSection === 'git' && <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         </>
       ) : (
-        <Folder className="h-3 w-3 shrink-0 text-primary" />
+        <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
       )}
       <span className="truncate">{getTabTitle(tab)}</span>
       {tab.isDirty && (
@@ -68,7 +68,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           onClick={(e) => { e.stopPropagation(); onClose(); }}
           className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
         >
-          <X className="h-3 w-3" />
+          <X className="h-3.5 w-3.5" />
         </button>
       )}
     </div>

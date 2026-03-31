@@ -227,12 +227,12 @@ export function CollectionNode({
             >
               {open ? (
                 <ChevronDown
-                  className="h-4 w-4 flex-none text-muted-foreground"
+                  className="h-3.5 w-3.5 flex-none text-muted-foreground"
                   strokeWidth={1.5}
                 />
               ) : (
                 <ChevronRight
-                  className="h-4 w-4 flex-none text-muted-foreground"
+                  className="h-3.5 w-3.5 flex-none text-muted-foreground"
                   strokeWidth={1.5}
                 />
               )}

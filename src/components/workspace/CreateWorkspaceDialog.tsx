@@ -104,7 +104,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
                 size="sm"
                 onClick={() => void handlePickFolder()}
               >
-                <FolderOpen className="h-4 w-4 mr-1.5" />
+                <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
                 Browse
               </Button>
             </div>

@@ -125,14 +125,14 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         {/* Time badge with clock icon, color-coded. */}
         {response.durationMs > 0 && (
           <span className={`inline-flex items-center gap-1 text-xs font-medium ${timeColor(response.durationMs)}`}>
-            <Clock className="h-3 w-3" />
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
             {formatDuration(response.durationMs)}
           </span>
         )}
 
         {/* Size badge with file icon. */}
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <FileText className="h-3 w-3" />
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
           {formatBytes(response.sizeBytes)}
         </span>
       </div>
@@ -169,9 +169,9 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
             onClick={handleCopyBody}
           >
             {copied ? (
-              <Check className="h-3 w-3 text-emerald-500" />
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
             ) : (
-              <Copy className="h-3 w-3" />
+              <Copy className="h-3.5 w-3.5" />
             )}
           </Button>
         )}

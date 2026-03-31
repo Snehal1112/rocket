@@ -103,10 +103,10 @@ export function TabBar({ node, onCloseTab }: { node: LeafNode; onCloseTab?: (tab
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => splitGroup(node.groupId, 'horizontal')}>
-              <PanelRight className="size-4 mr-2" /> Split Right
+              <PanelRight className="h-3.5 w-3.5 mr-2" /> Split Right
             </ContextMenuItem>
             <ContextMenuItem onClick={() => splitGroup(node.groupId, 'vertical')}>
-              <PanelBottom className="size-4 mr-2" /> Split Down
+              <PanelBottom className="h-3.5 w-3.5 mr-2" /> Split Down
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

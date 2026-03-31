@@ -198,9 +198,9 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           title={variable.secret ? 'Show value' : 'Hide value'}
                         >
                           {variable.secret ? (
-                            <EyeOff className="h-3 w-3" />
+                            <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
                           ) : (
-                            <Eye className="h-3 w-3" />
+                            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
                           )}
                         </Button>
                         <Button
@@ -209,7 +209,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           className="h-6 w-6 shrink-0"
                           onClick={() => removeVariable(idx)}
                         >
-                          <X className="h-3 w-3" />
+                          <X className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     ))}

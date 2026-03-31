@@ -20,7 +20,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         onClick={onConsoleToggle}
         aria-label="Toggle Console"
       >
-        <Terminal className="h-3 w-3" />
+        <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
         Console
         {entryCount > 0 && (
           <span className="text-2xs px-1 rounded-full bg-muted text-muted-foreground">
