@@ -12,11 +12,11 @@ import { useGitStore } from '@/stores/git-store';
 import { GIT_STATUS_CONFIG } from '@/lib/colors';
 import type { FileStatus } from '@/lib/tauri-api';
 
-interface Props {
+interface GitFileListProps {
   onFileClick: (file: FileStatus) => void;
 }
 
-export function GitFileList({ onFileClick }: Props) {
+export function GitFileList({ onFileClick }: GitFileListProps) {
   const { status, stageAll, unstageAll, discardFiles } = useGitStore();
 
   const staged = status?.files.filter((f) => f.staged) ?? [];
