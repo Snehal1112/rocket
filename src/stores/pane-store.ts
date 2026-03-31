@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, CollectionTab, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { renameRequest } from '@/lib/tauri-api';
@@ -105,6 +105,16 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (tab.tabType !== 'workspace' && get().isWorkspaceMode()) {
       get().closeAll();
     }
+
+    // Derive the collection name from the tab so the dropdown updates.
+    const collectionName =
+      tab.tabType === 'collection'
+        ? (tab as CollectionTab).collectionName
+        : tab.source?.collection ?? null;
+    if (collectionName && collectionName !== get().activeCollection) {
+      get().switchCollection(collectionName);
+    }
+
     const { root, activeGroupId } = get();
     // Match by uid — if the tab is already open anywhere, activate it.
     const existing = findTabInTree(root, tab.id);
