@@ -87,6 +87,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
   }
 
   return {
+    requestType: 'http',
     method: req.method as RequestState['method'],
     url: req.url,
     queryParams: parseQueryParams(req.url),
@@ -105,6 +106,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
 // Creates a blank GET request with no params, headers, body, or auth.
 export function createDefaultRequest(): RequestState {
   return {
+    requestType: 'http',
     method: 'GET',
     url: '',
     pathParams: [],

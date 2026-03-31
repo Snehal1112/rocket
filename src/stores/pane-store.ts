@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, LeafNode, SplitNode, CollectionSection, CollectionTab, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
+import type { PaneNode, Tab, ResponseState, RequestState, RequestTab, LeafNode, SplitNode, CollectionSection, CollectionTab, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { renameRequest } from '@/lib/tauri-api';
 import {
   createDefaultLeaf,
+  createDefaultRequest,
   findTabInTree,
   findActiveLeaf,
   updateLeaf,
@@ -59,6 +60,7 @@ export interface PaneState {
 
   // Tab actions.
   openTab: (tab: Tab, groupId?: string) => void;
+  openEphemeralTab: (requestType?: 'http' | 'graphql' | 'grpc' | 'websocket') => void;
   closeTab: (tabId: string, groupId: string) => void;
   setActiveTab: (tabId: string, groupId: string) => void;
   moveTab: (tabId: string, fromGroupId: string, toGroupId: string) => void;
@@ -133,6 +135,18 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       activeTabId: tab.id,
     }));
     set({ root: newRoot, activeGroupId: targetGroupId });
+  },
+
+  openEphemeralTab(requestType = 'http' as const) {
+    const tab: RequestTab = {
+      id: crypto.randomUUID(),
+      title: 'Untitled',
+      tabType: 'request',
+      request: { ...createDefaultRequest(), requestType },
+      response: null,
+      isDirty: false,
+    };
+    get().openTab(tab);
   },
 
   closeTab(tabId, groupId) {

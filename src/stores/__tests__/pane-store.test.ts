@@ -70,6 +70,7 @@ describe('pane-store', () => {
       title: 'My Request',
       tabType: 'request' as const,
       request: {
+        requestType: 'http' as const,
         method: 'GET' as const,
         url: 'https://example.com',
         pathParams: [],
@@ -437,6 +438,34 @@ describe('pane-store', () => {
     expect(usePaneStore.getState().activeCollection).toBe('firstCol');
     const leaf = getLeaf();
     expect(leaf.tabs).toHaveLength(0);
+  });
+
+  // ── openEphemeralTab ──────────────────────────────────────────────────────
+
+  describe('openEphemeralTab', () => {
+    it('opens a request tab with no source and title "Untitled"', () => {
+      usePaneStore.getState().openEphemeralTab();
+      const leaf = getLeaf();
+      expect(leaf.tabs).toHaveLength(1);
+      const tab = leaf.tabs[0];
+      expect(tab.tabType).toBe('request');
+      expect(tab.title).toBe('Untitled');
+      if (isRequestTab(tab)) {
+        expect(tab.source).toBeUndefined();
+        expect(tab.isDirty).toBe(false);
+        expect(tab.request.requestType).toBe('http');
+      }
+    });
+
+    it('openEphemeralTab with "graphql" sets requestType correctly', () => {
+      usePaneStore.getState().openEphemeralTab('graphql');
+      const leaf = getLeaf();
+      const tab = leaf.tabs[0];
+      expect(isRequestTab(tab)).toBe(true);
+      if (isRequestTab(tab)) {
+        expect(tab.request.requestType).toBe('graphql');
+      }
+    });
   });
 
   it('getOpenTabCount returns correct count per collection', () => {

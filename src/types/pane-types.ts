@@ -103,6 +103,7 @@ export function isGitTab(tab: Tab): tab is GitTab {
 }
 
 export interface RequestState {
+  requestType: 'http' | 'graphql' | 'grpc' | 'websocket';
   method: HttpMethod;
   url: string;
   pathParams: KeyValueEntry[];
