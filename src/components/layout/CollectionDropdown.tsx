@@ -58,9 +58,13 @@ export function CollectionDropdown() {
           size="sm"
           className="h-7 gap-1.5 px-2.5 text-sm font-medium"
         >
-          <Clock size={14} className="shrink-0" />
+          {activeCollection ? (
+            <Clock size={14} className="shrink-0" />
+          ) : (
+            <Briefcase size={14} className="shrink-0" />
+          )}
           <span className="max-w-[120px] truncate">
-            {activeCollection ?? "Select collection"}
+            {activeCollection ?? activeWorkspace}
           </span>
           {activeCollection && (
             <span className="text-muted-foreground">{activeTabCount}</span>
