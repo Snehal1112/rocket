@@ -90,6 +90,11 @@ pub fn git_switch_branch(collection_path: String, name: String, svc: State<'_, G
 }
 
 #[tauri::command]
+pub fn git_checkout_remote_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+    svc.checkout_remote_branch(&collection_path, &name)
+}
+
+#[tauri::command]
 pub fn git_create_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.create_branch(&collection_path, &name)
 }

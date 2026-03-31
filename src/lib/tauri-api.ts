@@ -513,6 +513,9 @@ export const gitBranches = (collectionPath: string) =>
 export const gitSwitchBranch = (collectionPath: string, name: string) =>
   invoke<void>("git_switch_branch", { collectionPath, name });
 
+export const gitCheckoutRemoteBranch = (collectionPath: string, name: string) =>
+  invoke<void>("git_checkout_remote_branch", { collectionPath, name });
+
 export const gitCreateBranch = (collectionPath: string, name: string) =>
   invoke<void>("git_create_branch", { collectionPath, name });
 

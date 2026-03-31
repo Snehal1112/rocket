@@ -152,6 +152,15 @@ impl GitAppService {
         Ok(())
     }
 
+    pub fn checkout_remote_branch(&self, path: &str, name: &str) -> DomainResult<()> {
+        self.git.checkout_remote_branch(path, name)?;
+        self.events.publish(DomainEvent::BranchSwitched {
+            collection: path.to_string(),
+            branch: name.to_string(),
+        });
+        Ok(())
+    }
+
     pub fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.create_branch(path, name)
     }

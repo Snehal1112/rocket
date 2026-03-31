@@ -197,6 +197,7 @@ pub fn run() {
             commands::git::git_fetch,
             commands::git::git_branches,
             commands::git::git_switch_branch,
+            commands::git::git_checkout_remote_branch,
             commands::git::git_create_branch,
             commands::git::git_delete_branch,
             commands::git::git_merge_branch,
