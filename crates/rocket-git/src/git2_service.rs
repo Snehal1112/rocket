@@ -177,26 +177,28 @@ fn ahead_behind(repo: &Repository) -> (usize, usize) {
         None => return (0, 0),
     };
 
-    let branch = match repo.find_branch(
-        head.shorthand().unwrap_or("main"),
-        git2::BranchType::Local,
-    ) {
+    let branch_name = head.shorthand().unwrap_or("main");
+
+    let branch = match repo.find_branch(branch_name, git2::BranchType::Local) {
         Ok(b) => b,
         Err(_) => return (0, 0),
     };
 
-    let upstream = match branch.upstream() {
-        Ok(u) => u,
-        Err(_) => return (0, 0),
-    };
+    // Try the configured upstream first.
+    let upstream_oid = branch
+        .upstream()
+        .ok()
+        .and_then(|u| u.get().target())
+        // Fall back to refs/remotes/origin/<branch> when no upstream is configured.
+        .or_else(|| {
+            let refname = format!("refs/remotes/origin/{}", branch_name);
+            repo.find_reference(&refname).ok().and_then(|r| r.target())
+        });
 
-    let upstream_oid = match upstream.get().target() {
-        Some(oid) => oid,
-        None => return (0, 0),
-    };
-
-    repo.graph_ahead_behind(local_oid, upstream_oid)
-        .unwrap_or((0, 0))
+    match upstream_oid {
+        Some(oid) => repo.graph_ahead_behind(local_oid, oid).unwrap_or((0, 0)),
+        None => (0, 0),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1243,6 +1245,48 @@ mod tests {
         let svc = Git2Service::new();
         let result = svc.remove_remote(&path, "nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn status_ahead_behind_with_remote() {
+        let (_dir, path) = setup_repo();
+        let repo = Repository::open(&path).unwrap();
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Create a bare remote to push to.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        // Add the bare repo as "origin" and push main.
+        let mut remote = repo.remote("origin", &remote_path).unwrap();
+        remote
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+
+        // Make one more local commit (ahead by 1).
+        fs::write(Path::new(&path).join("extra.txt"), "extra").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("extra.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(
+            Some("refs/heads/main"),
+            &sig,
+            &sig,
+            "second",
+            &tree,
+            &[&head_commit],
+        )
+        .unwrap();
+
+        // No upstream tracking configured — falls back to refs/remotes/origin/main.
+        let svc = Git2Service::new();
+        let status = svc.status(&path).unwrap();
+        assert_eq!(status.ahead, 1, "should be 1 commit ahead");
+        assert_eq!(status.behind, 0, "should be 0 commits behind");
     }
 
     #[test]
