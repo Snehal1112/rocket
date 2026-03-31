@@ -4,6 +4,17 @@ import { loader } from "@monaco-editor/react";
 import "./index.css";
 import App from "./App";
 
+// Apply theme class synchronously before React renders.
+// This prevents a flash of wrong theme in Monaco and other components
+// that read document.documentElement.classList during initialization.
+const storedTheme = localStorage.getItem('rocket-theme');
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
+  document.documentElement.classList.add('dark');
+} else {
+  document.documentElement.classList.remove('dark');
+}
+
 // Bundle Monaco entirely from the local package — no CDN dependency.
 // Workers are loaded via Vite's ?worker import, and the editor core
 // is passed to @monaco-editor/react's loader via dynamic import.
