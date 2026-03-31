@@ -34,6 +34,7 @@ import { usePaneStore } from "@/stores/pane-store";
 import { createDefaultRequest } from "@/lib/pane-utils";
 import { FolderNode } from "./FolderNode";
 import { RequestNode } from "./RequestNode";
+import { CreateRequestDialog } from "@/components/request/CreateRequestDialog";
 import type { CollectionSummary, Collection } from "@/lib/tauri-api";
 import type { CollectionTab } from "@/types/pane-types";
 import type { DeleteTarget } from "./tree-utils";
@@ -74,6 +75,7 @@ export function CollectionNode({
   const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState("");
+  const [createRequestOpen, setCreateRequestOpen] = useState(false);
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
@@ -289,11 +291,7 @@ export function CollectionNode({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => {
-                  setOpen(true);
-                  setCreatingRequest(true);
-                  setNewRequestName("");
-                }}
+                onClick={() => setCreateRequestOpen(true)}
               >
                 <Plus className="h-3.5 w-3.5 mr-2" /> New Request
               </DropdownMenuItem>
@@ -349,11 +347,7 @@ export function CollectionNode({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          onClick={() => {
-            setOpen(true);
-            setCreatingRequest(true);
-            setNewRequestName("");
-          }}
+          onClick={() => setCreateRequestOpen(true)}
         >
           New Request
         </ContextMenuItem>
@@ -440,6 +434,11 @@ export function CollectionNode({
           )}
         </div>
       )}
+      <CreateRequestDialog
+        open={createRequestOpen}
+        collectionName={summary.name}
+        onClose={() => setCreateRequestOpen(false)}
+      />
     </ContextMenu>
   );
 }
