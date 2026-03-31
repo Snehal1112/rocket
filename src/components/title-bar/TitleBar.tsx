@@ -1,12 +1,8 @@
 import { type as osType } from "@tauri-apps/plugin-os";
-import { Sun, Moon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useTheme } from "@/hooks/useTheme";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { WindowControls } from "./WindowControls";
 
 export function TitleBar() {
-  const { isDark, toggleTheme } = useTheme();
   const isMac = osType() === "macos";
 
   return (
@@ -26,20 +22,6 @@ export function TitleBar() {
       <WorkspaceSwitcher />
 
       <div className="flex-1" data-tauri-drag-region />
-
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={toggleTheme}
-        className="h-7 w-7 rounded-full mr-2"
-        title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      >
-        {isDark ? (
-          <Sun className="h-3.5 w-3.5" />
-        ) : (
-          <Moon className="h-3.5 w-3.5" />
-        )}
-      </Button>
 
       {!isMac && <WindowControls />}
     </div>
