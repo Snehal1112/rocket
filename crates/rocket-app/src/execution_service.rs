@@ -517,6 +517,7 @@ mod tests {
 
         let settings = CollectionSettings {
             description: None,
+            readme: None,
             auth: Some(Auth::Bearer { token: "col_tok".into() }),
             headers: vec![],
             variables: vec![],

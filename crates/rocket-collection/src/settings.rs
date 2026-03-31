@@ -24,6 +24,10 @@ pub struct CollectionSettings {
     #[serde(default)]
     pub description: Option<String>,
 
+    /// Optional markdown readme for this collection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readme: Option<String>,
+
     /// Optional auth applied to all requests in this collection.
     #[serde(default)]
     pub auth: Option<Auth>,

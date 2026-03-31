@@ -1169,6 +1169,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
     let settings = if let Some(defaults) = oc.request {
         CollectionSettings {
             description: oc.docs,
+            readme: oc.readme.clone(),
             auth: defaults.auth.map(Auth::from),
             headers: defaults
                 .headers
@@ -1195,6 +1196,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
     } else {
         CollectionSettings {
             description: oc.docs,
+            readme: oc.readme,
             ..CollectionSettings::default()
         }
     };
@@ -1291,6 +1293,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         items: if items.is_empty() { None } else { Some(items) },
         request,
         docs: col.settings.description,
+        readme: col.settings.readme,
         bundled: None,
         extensions: None,
     }

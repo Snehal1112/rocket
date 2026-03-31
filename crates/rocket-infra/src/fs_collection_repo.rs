@@ -224,6 +224,7 @@ impl CollectionRepository for FsCollectionRepo {
             items: None,
             request: None,
             docs: None,
+            readme: None,
             bundled: None,
             extensions: None,
         };
@@ -452,6 +453,7 @@ impl CollectionRepository for FsCollectionRepo {
         if let Some(defaults) = oc.request {
             Ok(CollectionSettings {
                 description: oc.docs,
+                readme: oc.readme.clone(),
                 auth: defaults.auth.map(rocket_shared::types::Auth::from),
                 headers: defaults
                     .headers
@@ -482,6 +484,7 @@ impl CollectionRepository for FsCollectionRepo {
         } else {
             Ok(CollectionSettings {
                 description: oc.docs,
+                readme: oc.readme,
                 ..CollectionSettings::default()
             })
         }
@@ -508,6 +511,7 @@ impl CollectionRepository for FsCollectionRepo {
                 items: None,
                 request: None,
                 docs: None,
+                readme: None,
                 bundled: None,
                 extensions: None,
             }
@@ -558,6 +562,7 @@ impl CollectionRepository for FsCollectionRepo {
             None
         };
         oc.docs = settings.description.clone();
+        oc.readme = settings.readme.clone();
 
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
@@ -819,6 +824,7 @@ mod tests {
 
         let original = rocket_collection::CollectionSettings {
             description: None,
+            readme: None,
             auth: Some(Auth::Bearer { token: "tok_abc".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
             variables: vec![],
@@ -838,6 +844,7 @@ mod tests {
         // Save settings, then verify the request count stays zero.
         let settings = rocket_collection::CollectionSettings {
             description: None,
+            readme: None,
             auth: Some(Auth::None),
             headers: vec![],
             variables: vec![],
@@ -857,6 +864,7 @@ mod tests {
 
         let settings = CollectionSettings {
             description: Some("My API docs".into()),
+            readme: None,
             auth: Some(Auth::Bearer { token: "tok".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
             variables: vec![],
