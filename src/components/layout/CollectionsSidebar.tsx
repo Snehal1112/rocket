@@ -287,6 +287,15 @@ export function CollectionsSidebar() {
       else unlisteners.push(fn);
     });
 
+    // Reload when git operations change the branch (files on disk change).
+    listen("git-changed", () => {
+      if (listDebounce.current) clearTimeout(listDebounce.current);
+      listDebounce.current = setTimeout(() => void fetchCollections(), 300);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    });
+
     return () => {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
