@@ -95,6 +95,8 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             Clone Repository
           </Button>
         </div>
+        {showCredentialsDialog && <GitCredentialsDialog />}
+        <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
       </div>
     );
   }

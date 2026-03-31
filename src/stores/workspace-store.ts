@@ -33,7 +33,7 @@ interface WorkspaceState {
   pinWorkspace: (id: string) => Promise<void>
   unpinWorkspace: (id: string) => Promise<void>
   updateDescription: (id: string, description: string | null) => Promise<void>
-  openWorkspaceFromDisk: (path: string) => Promise<void>
+  openWorkspaceFromDisk: (path: string) => Promise<Workspace>
   setMultiWorkspaceMode: (enabled: boolean) => Promise<void>
 }
 
@@ -69,7 +69,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   pinWorkspace: async (id) => { await apiPin(id) },
   unpinWorkspace: async (id) => { await apiUnpin(id) },
   updateDescription: async (id, description) => { await apiUpdateDescription(id, description) },
-  openWorkspaceFromDisk: async (path) => { await apiOpenFromDisk(path) },
+  openWorkspaceFromDisk: async (path) => {
+    const ws = await apiOpenFromDisk(path);
+    return ws;
+  },
   setMultiWorkspaceMode: async (enabled) => {
     await apiSetMultiMode(enabled)
     set({ multiWorkspaceMode: enabled })

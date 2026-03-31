@@ -83,7 +83,8 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   const handleOpen = async (collectionPath: string) => {
     try {
-      await useWorkspaceStore.getState().openWorkspaceFromDisk(collectionPath);
+      const ws = await useWorkspaceStore.getState().openWorkspaceFromDisk(collectionPath);
+      await useWorkspaceStore.getState().switchWorkspace(ws.id);
       onOpenChange(false);
     } catch (e) {
       setError(String(e));
