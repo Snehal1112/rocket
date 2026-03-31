@@ -403,12 +403,44 @@ export const saveEnvironment = (env: Environment) =>
 export const deleteEnvironment = (name: string) =>
   invoke<void>("delete_environment", { name });
 
+export interface LoadTestConfig {
+  concurrency: number;
+  totalRequests: number;
+}
+
+export interface LoadTestResult {
+  totalRequests: number;
+  succeeded: number;
+  failed: number;
+  minLatencyMs: number;
+  avgLatencyMs: number;
+  p50LatencyMs: number;
+  p95LatencyMs: number;
+  p99LatencyMs: number;
+  maxLatencyMs: number;
+  requestsPerSecond: number;
+  totalDurationMs: number;
+}
+
 // ============================================================
 // Request execution
 // ============================================================
 
 export const executeRequest = (input: ExecuteRequestInput) =>
   invoke<HttpResponse>("execute_request", { input });
+
+export const runLoadTest = (
+  request: {
+    method: HttpMethod;
+    url: string;
+    headers: Header[];
+    queryParams: QueryParam[];
+    body?: Body | null;
+    auth: Auth;
+    options: RequestOptions;
+  },
+  config: LoadTestConfig,
+) => invoke<LoadTestResult>("run_load_test_command", { request, config });
 
 // ============================================================
 // History
