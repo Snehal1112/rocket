@@ -27,6 +27,7 @@ import {
   gitAddRemote,
   gitRemoveRemote,
   gitSetRemoteUrl,
+  gitCheckoutRemoteBranch,
   type RepoStatus,
   type FileStatus,
   type StashEntry,
@@ -72,6 +73,7 @@ interface GitState {
   applyStash: (index: number) => Promise<void>;
   dropStash: (index: number) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
+  checkoutRemoteBranch: (name: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -352,6 +354,19 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  // Check out a remote branch as a new local tracking branch.
+  checkoutRemoteBranch: async (name) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitCheckoutRemoteBranch(collectionPath, name);
+      await get().refreshStatus();
+      await get().refreshBranches();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   // Create a new branch with the given name.
   createBranch: async (name) => {
     const { collectionPath } = get();
@@ -466,6 +481,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await gitFetch(collectionPath, remote ?? 'origin', credentials);
       await get().refreshStatus();
+      await get().refreshBranches();
     } catch (e) {
       set({ error: String(e) });
     }
