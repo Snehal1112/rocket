@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { FolderOpen } from 'lucide-react'
-import { openFolderPicker } from '@/lib/tauri-api'
+import { openFolderPicker, getAppDataDir } from '@/lib/tauri-api'
 import { useWorkspaceStore } from '@/stores/workspace-store'
 
 interface Props {
@@ -24,6 +24,13 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
   const [error, setError] = useState('')
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace)
   const workspaces = useWorkspaceStore((s) => s.workspaces)
+
+  // Pre-fill path with the default data directory when the dialog opens.
+  useEffect(() => {
+    if (open && !path) {
+      getAppDataDir().then(setPath).catch(() => {});
+    }
+  }, [open]);
 
   const handleClose = () => {
     setName('')
