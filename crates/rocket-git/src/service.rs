@@ -55,6 +55,7 @@ pub trait GitService: Send + Sync {
     // Conflicts
     fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>>;
     fn resolve_conflict(&self, path: &str, file: &str, resolution: &ConflictResolution) -> DomainResult<()>;
+    fn abort_merge(&self, path: &str) -> DomainResult<()>;
 }
 
 #[cfg(test)]

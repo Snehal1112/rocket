@@ -957,6 +957,30 @@ impl GitService for Git2Service {
 
         Ok(())
     }
+
+    fn abort_merge(&self, path: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+
+        // Get HEAD commit to reset to.
+        let head = repo.head()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let head_commit = head.peel_to_commit()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Hard reset index and working directory to HEAD.
+        repo.reset(
+            head_commit.as_object(),
+            git2::ResetType::Hard,
+            None,
+        )
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Clean up merge/revert/cherry-pick state files.
+        repo.cleanup_state()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1219,5 +1243,35 @@ mod tests {
         let svc = Git2Service::new();
         let result = svc.remove_remote(&path, "nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn abort_merge_resets_to_head() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create a branch with a conflicting change.
+        svc.create_branch(&path, "conflict-branch").unwrap();
+        svc.switch_branch(&path, "conflict-branch").unwrap();
+        fs::write(dir.path().join("test.bru"), "conflict content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "conflict commit").unwrap();
+
+        // Switch back to main and make a different change to the same file.
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "main content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "main commit").unwrap();
+
+        // Attempt merge — this may leave the repo in a conflicted state.
+        let _ = svc.merge_branch(&path, "conflict-branch");
+
+        // Abort the merge.
+        svc.abort_merge(&path).unwrap();
+
+        // Verify the repo is clean and on main.
+        let status = svc.status(&path).unwrap();
+        assert!(status.is_clean, "Repo should be clean after abort");
+        assert_eq!(status.branch, "main");
     }
 }
