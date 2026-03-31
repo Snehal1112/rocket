@@ -5,6 +5,7 @@ pub mod environments;
 pub mod execution;
 pub mod git;
 pub mod history;
+pub mod load_test;
 pub mod oauth2;
 pub mod templates;
 pub mod ui_state;

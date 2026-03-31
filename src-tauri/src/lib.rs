@@ -166,6 +166,7 @@ pub fn run() {
             commands::environments::save_environment,
             commands::environments::delete_environment,
             commands::execution::execute_request,
+            commands::load_test::run_load_test_command,
             commands::history::list_history,
             commands::history::get_history_entry,
             commands::history::clear_history,
