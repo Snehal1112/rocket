@@ -1,6 +1,6 @@
 import { X, Folder, GitBranch, LayoutDashboard, Globe } from 'lucide-react';
 import type { Tab } from '@/types/pane-types';
-import { isRequestTab, isWorkspaceTab } from '@/types/pane-types';
+import { isRequestTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 
 function getTabTitle(tab: Tab): string {
@@ -43,6 +43,8 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
         <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLOR[tab.request.method] ?? ''}`}>
           {tab.request.method}
         </span>
+      ) : isGitTab(tab) ? (
+        <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
       ) : isWorkspaceTab(tab) ? (
         <>
           {tab.activeSection === 'overview' && <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
