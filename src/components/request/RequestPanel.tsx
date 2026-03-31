@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RocketLiftOff } from '@/components/illustrations';
 import {
@@ -44,6 +44,7 @@ import { isRequestTab } from '@/types/pane-types';
 import { findTabInTree } from '@/lib/pane-utils';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { getCollectionSettings } from '@/lib/tauri-api';
+import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -85,6 +86,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
+  const [showLoadTest, setShowLoadTest] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [curlImported, setCurlImported] = useState(false);
@@ -443,6 +445,16 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             {sending ? 'Sending...' : 'Send'}
           </Button>
 
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={() => setShowLoadTest(true)}
+            title="Load test"
+          >
+            <Zap className="h-3.5 w-3.5" />
+          </Button>
+
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
         {urlError && (
@@ -531,6 +543,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </div>
         )}
       </div>
+
+      <LoadTestDialog
+        open={showLoadTest}
+        onOpenChange={setShowLoadTest}
+        request={request}
+      />
 
       {/* Unsaved changes dialog. */}
       <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
