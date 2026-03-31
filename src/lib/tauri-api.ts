@@ -541,6 +541,9 @@ export const gitConflicts = (collectionPath: string) =>
 export const gitResolveConflict = (collectionPath: string, file: string, resolution: ConflictResolution) =>
   invoke<void>("git_resolve_conflict", { collectionPath, file, resolution });
 
+export const gitAbortMerge = (collectionPath: string) =>
+  invoke<void>("git_abort_merge", { collectionPath });
+
 export const gitListRemotes = (collectionPath: string) =>
   invoke<RemoteInfo[]>("git_list_remotes", { collectionPath });
 

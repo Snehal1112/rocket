@@ -22,6 +22,7 @@ import {
   gitLog,
   gitConflicts,
   gitResolveConflict,
+  gitAbortMerge,
   gitListRemotes,
   gitAddRemote,
   gitRemoveRemote,
@@ -59,6 +60,7 @@ interface GitState {
   refreshRemotes: () => Promise<void>;
   refreshLog: (limit?: number) => Promise<void>;
   resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
+  abortMerge: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
@@ -146,6 +148,19 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!collectionPath) return;
     try {
       await gitResolveConflict(collectionPath, file, resolution);
+      await get().refreshStatus();
+      await get().refreshConflicts();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  // Abort a merge and reset to HEAD.
+  abortMerge: async () => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    try {
+      await gitAbortMerge(collectionPath);
       await get().refreshStatus();
       await get().refreshConflicts();
     } catch (e) {

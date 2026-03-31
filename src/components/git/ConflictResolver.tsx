@@ -14,8 +14,12 @@ interface ConflictResolverProps {
 export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
-  const { refreshStatus } = useGitStore();
+  const { refreshStatus, abortMerge } = useGitStore();
   const { isDark } = useTheme();
+
+  const handleAbort = async () => {
+    await abortMerge();
+  };
 
   const handleResolve = async (resolution: 'ours' | 'theirs' | 'custom', content?: string) => {
     try {
@@ -36,6 +40,9 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           <Badge variant="destructive" className="text-[9px]">Conflict</Badge>
           <span className="font-mono text-sm truncate">{conflictState.filePath}</span>
           <div className="ml-auto flex gap-1">
+            <Button variant="outline" size="sm" className="h-6 text-sm text-destructive" onClick={handleAbort}>
+              Abort Merge
+            </Button>
             <Button variant="outline" size="sm" className="h-6 text-sm" onClick={() => setManualMode(false)}>
               Back
             </Button>
@@ -61,6 +68,11 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
       <div className="flex items-center gap-2 border-b px-3 py-1.5">
         <Badge variant="destructive" className="text-[9px]">Conflict</Badge>
         <span className="font-mono text-sm truncate">{conflictState.filePath}</span>
+        <div className="ml-auto">
+          <Button variant="outline" size="sm" className="h-6 text-sm text-destructive" onClick={handleAbort}>
+            Abort Merge
+          </Button>
+        </div>
       </div>
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col border-r">
