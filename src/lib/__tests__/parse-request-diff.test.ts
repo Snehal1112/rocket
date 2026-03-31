@@ -122,4 +122,38 @@ describe('parseRequestDiff', () => {
     const diff = parseRequestDiff(a, b)!;
     expect(diff.preRequestScript.changed).toBe(false);
   });
+
+  it('detects header enabled flag change', () => {
+    const old = JSON.stringify({
+      ...baseRequest,
+      headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
+    });
+    const nw = JSON.stringify({
+      ...baseRequest,
+      headers: [{ key: 'Accept', value: 'application/json', enabled: false }],
+    });
+    const diff = parseRequestDiff(old, nw)!;
+    const row = diff.headers.find((h) => h.key === 'Accept')!;
+    expect(row.status).toBe('modified');
+    expect(row.oldRow?.enabled).toBe(true);
+    expect(row.newRow?.enabled).toBe(false);
+  });
+
+  it('detects body mode change', () => {
+    const old = JSON.stringify({ ...baseRequest, body: null });
+    const nw = JSON.stringify({ ...baseRequest, body: { mode: 'json', content: '{}' } });
+    const diff = parseRequestDiff(old, nw)!;
+    expect(diff.body.changed).toBe(true);
+    expect(diff.body.oldValue?.mode).toBe('none');
+    expect(diff.body.newValue?.mode).toBe('json');
+  });
+
+  it('detects auth type change', () => {
+    const old = JSON.stringify({ ...baseRequest, auth: { type: 'none' } });
+    const nw = JSON.stringify({ ...baseRequest, auth: { type: 'bearer' } });
+    const diff = parseRequestDiff(old, nw)!;
+    expect(diff.auth.changed).toBe(true);
+    expect(diff.auth.oldValue).toBe('none');
+    expect(diff.auth.newValue).toBe('bearer');
+  });
 });

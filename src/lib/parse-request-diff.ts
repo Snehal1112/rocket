@@ -25,7 +25,7 @@ function tryParseRequest(content: string | undefined): RequestJson | null {
     const obj = JSON.parse(content) as unknown;
     if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
     const r = obj as Record<string, unknown>;
-    // Must have at least one of method or url to qualify as a request file.
+    // Must have at least one of method or url (non-empty) to qualify as a request file.
     if (!r.method && !r.url) return null;
     return r as RequestJson;
   } catch {
@@ -47,6 +47,8 @@ function field<T>(label: string, oldVal: T | undefined, newVal: T | undefined): 
 /** Diffs two KV-row arrays by key, preserving new order and appending removed keys at end. */
 function diffRows(oldRows: KVRow[], newRows: KVRow[]): RowChange[] {
   const result: RowChange[] = [];
+  // Duplicate keys collapse to last-wins; HTTP allows duplicate headers but
+  // this is rare in practice for stored request files.
   const oldMap = new Map(oldRows.map((r) => [r.key, r]));
   const newMap = new Map(newRows.map((r) => [r.key, r]));
 

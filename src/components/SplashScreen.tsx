@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -16,8 +16,8 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
 
   useEffect(() => {
     // Load lottie.min.js from public/ via a script tag.
-    const script = document.createElement('script');
-    script.src = '/lottie.min.js';
+    const script = document.createElement("script");
+    script.src = "/lottie.min.js";
     script.async = true;
 
     script.onload = () => {
@@ -26,13 +26,13 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
 
       const anim = lottie.loadAnimation({
         container: containerRef.current,
-        renderer: 'svg',
+        renderer: "svg",
         loop: false,
         autoplay: true,
-        path: '/rocket-launch.json',
+        path: "/rocket-launch.json",
       });
 
-      anim.addEventListener('complete', () => {
+      anim.addEventListener("complete", () => {
         setLiftingOff(true);
         setTimeout(onComplete, 1000);
       });
@@ -49,18 +49,18 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex flex-col items-center justify-center bg-background',
+        "fixed inset-0 z-50 flex flex-col border border- items-center justify-center bg-background",
         liftingOff
-          ? 'opacity-0 transition-opacity duration-[400ms] delay-[600ms]'
-          : 'opacity-100',
+          ? "opacity-0 transition-opacity duration-[400ms] delay-[600ms]"
+          : "opacity-100",
       )}
     >
       <div
         className={cn(
-          mounted ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
+          mounted ? "scale-100 opacity-100" : "scale-95 opacity-0",
           liftingOff
-            ? 'transition-transform duration-[800ms] ease-in -translate-y-[100vh]'
-            : 'transition-all duration-300',
+            ? "transition-transform duration-[800ms] ease-in -translate-y-[100vh]"
+            : "transition-all duration-300",
         )}
       >
         <div className="relative flex flex-col items-center">
