@@ -1,26 +1,27 @@
 import { GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { usePaneStore } from '@/stores/pane-store';
-import { useGitStore } from '@/stores/git-store';
-import type { GitTab } from '@/types/pane-types';
+import { useWorkspaceStore } from '@/stores/workspace-store';
+import type { PaneNode } from '@/types/pane-types';
 
 export function GitToolbarButton() {
-  const activeCollection = usePaneStore((s) => s.activeCollection);
-  const openTab = usePaneStore((s) => s.openTab);
-  const collectionPath = useGitStore((s) => s.collectionPath);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const isWorkspaceMode = usePaneStore((s) => s.isWorkspaceMode);
+  const setActiveTab = usePaneStore((s) => s.setActiveTab);
+  const root = usePaneStore((s) => s.root);
 
   const handleClick = () => {
-    if (!activeCollection) return;
-    const tab: GitTab = {
-      id: `git:${activeCollection}`,
-      title: 'Git',
-      tabType: 'git',
-      collectionName: activeCollection,
-      collectionPath: collectionPath ?? '',
-      isDirty: false,
-    };
-    openTab(tab);
+    if (!activeWorkspaceId) return;
+    const gitTabId = `workspace:${activeWorkspaceId}:git`;
+
+    // Find which editor group contains the git tab.
+    const groupId = findGroupWithTab(root, gitTabId);
+    if (groupId) {
+      setActiveTab(gitTabId, groupId);
+    }
   };
+
+  const enabled = isWorkspaceMode() && !!activeWorkspaceId;
 
   return (
     <Button
@@ -28,10 +29,18 @@ export function GitToolbarButton() {
       size="icon"
       className="h-7 w-7"
       onClick={handleClick}
-      disabled={!activeCollection}
+      disabled={!enabled}
       title="Open Git panel"
     >
       <GitBranch className="h-4 w-4" />
     </Button>
   );
+}
+
+// Walk the pane tree to find which group contains the given tab id.
+function findGroupWithTab(node: PaneNode, tabId: string): string | null {
+  if (node.type === 'leaf') {
+    return node.tabs.some((t) => t.id === tabId) ? node.groupId : null;
+  }
+  return findGroupWithTab(node.children[0], tabId) ?? findGroupWithTab(node.children[1], tabId);
 }
