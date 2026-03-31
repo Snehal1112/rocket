@@ -77,7 +77,7 @@ export function KeyValueEditor({
         </div>
       ))}
       <Button variant="ghost" size="sm" onClick={addEntry} className="text-xs">
-        <Plus className="h-3 w-3 mr-1" />
+        <Plus className="h-3.5 w-3.5 mr-1" />
         {addLabel}
       </Button>
     </div>

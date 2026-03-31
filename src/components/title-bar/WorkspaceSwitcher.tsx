@@ -84,7 +84,7 @@ export function WorkspaceSwitcher() {
           }
         }}
       >
-        <Pin className={cn("h-3 w-3", ws.pinned && "fill-current")} />
+        <Pin className={cn("h-3.5 w-3.5", ws.pinned && "fill-current")} />
       </Button>
 
       {/* Per-workspace context menu */}

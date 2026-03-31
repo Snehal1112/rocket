@@ -28,7 +28,7 @@ export function BranchSelector() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="h-6 gap-1 text-sm">
-          <GitBranch className="h-3 w-3" />
+          <GitBranch className="h-3.5 w-3.5" />
           {status?.branch ?? 'main'}
         </Button>
       </PopoverTrigger>
@@ -52,7 +52,7 @@ export function BranchSelector() {
                 setOpen(false);
               }}
             >
-              {branch.isHead && <Check className="h-3 w-3 text-primary" />}
+              {branch.isHead && <Check className="h-3.5 w-3.5 text-primary" />}
               {!branch.isHead && <span className="w-3" />}
               <span className="truncate flex-1">{branch.name}</span>
               {!branch.isHead && (
@@ -68,7 +68,7 @@ export function BranchSelector() {
                     }}
                     title="Merge into current"
                   >
-                    <GitBranch className="h-3 w-3" />
+                    <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -80,7 +80,7 @@ export function BranchSelector() {
                     }}
                     title="Delete branch"
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               )}
@@ -103,7 +103,7 @@ export function BranchSelector() {
             onClick={handleCreate}
             disabled={!newBranchName.trim()}
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>
       </PopoverContent>

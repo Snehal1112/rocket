@@ -53,7 +53,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                     className="h-5 w-5"
                     onClick={handleDiscardAll}
                   >
-                    <RotateCcw className="h-3 w-3" />
+                    <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Discard all unstaged</TooltipContent>
@@ -66,7 +66,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                     className="h-5 w-5"
                     onClick={handleStageAll}
                   >
-                    <Plus className="h-3 w-3" />
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Stage all</TooltipContent>
@@ -96,7 +96,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                         className="h-5 w-5"
                         onClick={(e) => { e.stopPropagation(); discardFiles([file.path]); }}
                       >
-                        <RotateCcw className="h-3 w-3" />
+                        <RotateCcw className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Discard</TooltipContent>
@@ -109,7 +109,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                         className="h-5 w-5"
                         onClick={(e) => { e.stopPropagation(); stageFiles([file.path]); }}
                       >
-                        <Plus className="h-3 w-3" />
+                        <Plus className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Stage</TooltipContent>
@@ -134,7 +134,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                         className="h-5 w-5"
                         onClick={handleUnstageAll}
                       >
-                        <Minus className="h-3 w-3" />
+                        <Minus className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Unstage all</TooltipContent>
@@ -164,7 +164,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                             className="h-5 w-5"
                             onClick={(e) => { e.stopPropagation(); unstageFiles([file.path]); }}
                           >
-                            <Minus className="h-3 w-3" />
+                            <Minus className="h-3.5 w-3.5" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>Unstage</TooltipContent>

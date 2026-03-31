@@ -121,7 +121,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border/70">
             <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
               <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium text-primary">
-                <ChevronDown className={`h-3 w-3 transition-transform ${!changesOpen ? '-rotate-90' : ''}`} />
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? '-rotate-90' : ''}`} />
                 Changes
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2 space-y-2">

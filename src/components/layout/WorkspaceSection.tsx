@@ -77,7 +77,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
             </button>
 
             {/* Workspace icon. */}
-            <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 
             {/* Workspace name or inline rename input. */}
             {isRenaming ? (
@@ -114,10 +114,10 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
 
         <ContextMenuContent>
           <ContextMenuItem onSelect={handleOpenWorkspace}>
-            <LayoutDashboard className="mr-2 h-4 w-4" /> Open workspace home
+            <LayoutDashboard className="mr-2 h-3.5 w-3.5" /> Open workspace home
           </ContextMenuItem>
           <ContextMenuItem onSelect={startRenaming}>
-            <Pencil className="mr-2 h-4 w-4" /> Rename workspace
+            <Pencil className="mr-2 h-3.5 w-3.5" /> Rename workspace
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
@@ -125,7 +125,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
             disabled={workspace.id === 'default'}
             onSelect={handleClose}
           >
-            <X className="mr-2 h-4 w-4" /> Close workspace
+            <X className="mr-2 h-3.5 w-3.5" /> Close workspace
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

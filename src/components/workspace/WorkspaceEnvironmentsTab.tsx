@@ -265,7 +265,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
 
             <div className="p-3 pt-0">
               <Button variant="ghost" size="sm" onClick={addVar} className="text-sm">
-                <Plus className="h-3 w-3 mr-1" />
+                <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Variable
               </Button>
             </div>

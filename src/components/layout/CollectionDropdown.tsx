@@ -63,7 +63,7 @@ export function CollectionDropdown() {
           {activeCollection && (
             <span className="text-muted-foreground">{activeTabCount}</span>
           )}
-          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent

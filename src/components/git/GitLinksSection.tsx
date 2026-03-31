@@ -19,7 +19,7 @@ export function GitLinksSection({ onNavigate, onOpenRemotes }: GitLinksSectionPr
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
         <div className="flex items-center gap-1 px-3 py-2 cursor-pointer text-sm font-medium text-primary">
-          <ChevronDown className={`h-3 w-3 transition-transform ${!open ? '-rotate-90' : ''}`} />
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${!open ? '-rotate-90' : ''}`} />
           Links
         </div>
       </CollapsibleTrigger>

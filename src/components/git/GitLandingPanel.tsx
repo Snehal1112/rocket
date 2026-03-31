@@ -171,7 +171,7 @@ export function GitLandingPanel() {
 
       {/* Last fetched timestamp. */}
       <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1.5">
-        <Clock className="h-3 w-3" />
+        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
         Last fetched:{' '}
         <span className="font-medium text-foreground">{lastFetched ?? 'Never'}</span>
       </p>

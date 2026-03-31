@@ -23,7 +23,7 @@ export function GitStashSection() {
   return (
     <div>
       <div className="flex items-center gap-1.5 px-2 py-1.5">
-        <Archive className="h-3 w-3 text-muted-foreground" />
+        <Archive className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground">
           Stash
           <span className="ml-1.5 font-mono normal-case tracking-normal opacity-70">{stashes.length}</span>
@@ -63,7 +63,7 @@ export function GitStashSection() {
                 size="icon"
                 className="ml-auto h-5 w-5 opacity-0 group-hover:opacity-100"
               >
-                <MoreHorizontal className="h-3 w-3" />
+                <MoreHorizontal className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

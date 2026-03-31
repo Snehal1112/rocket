@@ -124,8 +124,8 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                 onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
               >
                 {expandedId === entry.id
-                  ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 }
                 <span className="text-muted-foreground w-16 shrink-0">{formatTime(entry.timestamp)}</span>
                 <span className="font-semibold w-12 shrink-0">{entry.method}</span>
