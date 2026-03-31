@@ -74,13 +74,7 @@ export interface ConflictTab extends BaseTab {
   conflictState: ConflictState;
 }
 
-export interface GitTab extends BaseTab {
-  tabType: 'git';
-  collectionName: string;
-  collectionPath: string;
-}
-
-export type Tab = RequestTab | CollectionTab | WorkspaceTab | DiffTab | ConflictTab | GitTab;
+export type Tab = RequestTab | CollectionTab | WorkspaceTab | DiffTab | ConflictTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';
@@ -96,10 +90,6 @@ export function isDiffTab(tab: Tab): tab is DiffTab {
 
 export function isConflictTab(tab: Tab): tab is ConflictTab {
   return tab.tabType === 'conflict';
-}
-
-export function isGitTab(tab: Tab): tab is GitTab {
-  return tab.tabType === 'git';
 }
 
 export interface RequestState {

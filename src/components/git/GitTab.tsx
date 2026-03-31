@@ -13,10 +13,8 @@ import { GitStashSection } from './GitStashSection';
 import { GitCredentialsDialog } from './GitCredentialsDialog';
 import { useGitStore } from '@/stores/git-store';
 import { gitInit } from '@/lib/tauri-api';
-import type { GitTab as GitTabType } from '@/types/pane-types';
-
 interface GitTabProps {
-  tab: GitTabType;
+  tab: { collectionName: string; collectionPath: string };
 }
 
 export function GitTab({ tab }: GitTabProps) {

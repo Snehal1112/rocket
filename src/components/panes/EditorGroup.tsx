@@ -15,13 +15,12 @@ import { RequestPanel } from '@/components/request/RequestPanel';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { DiffViewer } from '@/components/git/DiffViewer';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
-import { GitTab } from '@/components/git/GitTab';
 import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
 import { WorkspaceEnvironmentsTab } from '@/components/workspace/WorkspaceEnvironmentsTab';
 import { WorkspaceGitTab } from '@/components/workspace/WorkspaceGitTab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isDiffTab, isRequestTab, isConflictTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
+import { isDiffTab, isRequestTab, isConflictTab, isWorkspaceTab } from '@/types/pane-types';
 
 // Branded empty state shown when no tabs are open.
 function EmptyState() {
@@ -76,8 +75,6 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <DiffViewer diffState={activeTab.diffState} />
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
-          ) : isGitTab(activeTab) ? (
-            <GitTab tab={activeTab} />
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
