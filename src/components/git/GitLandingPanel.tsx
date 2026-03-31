@@ -11,15 +11,26 @@ import {
   GitCommit,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useGitStore } from '@/stores/git-store';
 
 export function GitLandingPanel() {
-  const { status, push, pull, fetch } = useGitStore();
+  const { status, push, pull, fetch, saveStash, popStash } = useGitStore();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
+  const [showStashDialog, setShowStashDialog] = useState(false);
 
   const handleFetch = async () => {
     const { credentials } = useGitStore.getState();
@@ -43,6 +54,34 @@ export function GitLandingPanel() {
       pull();
       return;
     }
+
+    // Check if working tree has uncommitted changes.
+    const { status: currentStatus } = useGitStore.getState();
+    if (currentStatus && !currentStatus.isClean) {
+      setShowStashDialog(true);
+      return;
+    }
+
+    setPulling(true);
+    try { await pull(); } finally { setPulling(false); }
+  };
+
+  const handleStashAndPull = async () => {
+    setShowStashDialog(false);
+    setPulling(true);
+    try {
+      await saveStash('Auto-stash before pull');
+      await pull();
+      await popStash(0);
+    } catch {
+      // If pop fails (conflict), stash is preserved for manual resolution.
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  const handlePullAnyway = async () => {
+    setShowStashDialog(false);
     setPulling(true);
     try { await pull(); } finally { setPulling(false); }
   };
@@ -128,6 +167,23 @@ export function GitLandingPanel() {
           </>
         )}
       </div>
+
+      {/* Auto-stash confirmation dialog. */}
+      <AlertDialog open={showStashDialog} onOpenChange={setShowStashDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uncommitted Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have uncommitted changes. Pulling may cause conflicts or data loss. Would you like to stash your changes first?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePullAnyway}>Pull Anyway</AlertDialogAction>
+            <AlertDialogAction onClick={handleStashAndPull}>Stash & Pull</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
