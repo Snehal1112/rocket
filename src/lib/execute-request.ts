@@ -80,7 +80,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   // Build merged variable resolution: env vars (high priority) + collection vars (fallback).
   const envVars = useEnvStore.getState().getActiveVariables();
 
-  let collectionVars: Record<string, string> = {};
+  const collectionVars: Record<string, string> = {};
   const { root } = usePaneStore.getState();
   const found = findTabInTree(root, tabId);
   if (found?.tab.source?.collection) {
