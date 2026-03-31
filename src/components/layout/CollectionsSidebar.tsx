@@ -375,7 +375,7 @@ export function CollectionsSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
                 onClick={() => setIsCreating(true)}
                 aria-label="New Collection"
                 title="New Collection"
@@ -385,7 +385,7 @@ export function CollectionsSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
                 onClick={() => void handleImport()}
                 aria-label="Import Collection"
                 title="Import Collection"
@@ -395,7 +395,7 @@ export function CollectionsSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
                 aria-label={
                   multiWorkspaceMode
                     ? "Switch to single workspace mode"

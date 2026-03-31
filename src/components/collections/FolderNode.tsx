@@ -94,7 +94,7 @@ export function FolderNode({
           <div className="group relative flex items-center">
             <TreeItem value={basePath} open={open} onOpenChange={setOpen} className="flex-1">
               <TreeItemContent
-                className="flex items-center gap-1 w-full px-2 py-0.5 text-xs rounded-sm cursor-pointer"
+                className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer"
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
@@ -147,7 +147,7 @@ export function FolderNode({
 
       {open && (
         // Indentation guide line.
-        <div className="pl-1.5 border-l border-border/50 ml-2">
+        <div className="pl-1.5 border-l border-border/70 ml-2">
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
               const folderPath = `${basePath}/${item.name}`;
@@ -175,7 +175,7 @@ export function FolderNode({
             );
           })}
           {creatingRequest && (
-            <div className="flex items-center gap-1 px-2 py-0.5 text-xs">
+            <div className="flex items-center gap-1 px-2 py-1 text-xs">
               <Input
                 autoFocus
                 className="h-5 text-xs flex-1"

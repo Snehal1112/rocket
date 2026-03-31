@@ -82,7 +82,7 @@ export function RequestNode({
         <div className="group relative flex items-center">
           <TreeItem value={uid} active={active} className="flex-1">
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-0.5 text-sm rounded-sm cursor-pointer"
+              className="flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer"
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >

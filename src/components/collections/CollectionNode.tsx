@@ -220,7 +220,7 @@ export function CollectionNode({
             className="flex-1"
           >
             <TreeItemContent
-              className="flex gap-3 w-full px-2 py-0.5 cursor-pointer"
+              className="flex gap-3 w-full px-2 py-1 cursor-pointer"
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               aria-label={`${open ? "Collapse" : "Expand"} collection ${summary.name}`}
@@ -385,7 +385,7 @@ export function CollectionNode({
       </ContextMenuContent>
 
       {open && collection && (
-        <div className="pl-1.5 border-l border-border/50 ml-2">
+        <div className="pl-1.5 border-l border-border/70 ml-2">
           {filteredItems.map((item) => {
             if (item.type === "folder") {
               return (
@@ -422,7 +422,7 @@ export function CollectionNode({
             );
           })}
           {creatingRequest && (
-            <div className="flex items-center gap-1 px-2 py-0.5 text-sm">
+            <div className="flex items-center gap-1 px-2 py-1 text-sm">
               <Input
                 autoFocus
                 className="h-5 text-sm flex-1"
