@@ -38,11 +38,21 @@ export function GitLandingPanel() {
   };
 
   const handlePull = async () => {
+    const { credentials } = useGitStore.getState();
+    if (!credentials) {
+      pull();
+      return;
+    }
     setPulling(true);
     try { await pull(); } finally { setPulling(false); }
   };
 
   const handlePush = async () => {
+    const { credentials } = useGitStore.getState();
+    if (!credentials) {
+      push();
+      return;
+    }
     setPushing(true);
     try { await push(); } finally { setPushing(false); }
   };
