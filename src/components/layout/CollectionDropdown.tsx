@@ -20,10 +20,12 @@ export function CollectionDropdown() {
   const switchCollection = usePaneStore((s) => s.switchCollection);
   const getOpenTabCount = usePaneStore((s) => s.getOpenTabCount);
 
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeWorkspace = useWorkspaceStore((s) => {
     const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
     return ws?.name ?? "Untitled Workspace";
   });
+  const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
 
   const fetchCollections = useCallback(async () => {
     try {
@@ -70,12 +72,19 @@ export function CollectionDropdown() {
         className="w-72 p-0 bg-card/50 backdrop-blur-sm border border-border/70 rounded-sm"
         align="start"
       >
-        {/* Workspace section */}
-        <div className="px-3 py-2.5 border-b border-border/70">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
+        {/* Workspace section — clickable to open workspace tabs. */}
+        <div className="border-b border-border/70">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium px-3 pt-2.5 mb-1.5">
             Workspace
           </p>
-          <div className="flex items-center justify-between">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between px-3 pb-2.5 hover:bg-accent/50 transition-colors"
+            onClick={() => {
+              openWorkspaceTabs(activeWorkspaceId);
+              setOpen(false);
+            }}
+          >
             <div className="flex items-center gap-2">
               <Briefcase size={14} className="text-muted-foreground" />
               <span className="text-sm font-medium">{activeWorkspace}</span>
@@ -83,7 +92,7 @@ export function CollectionDropdown() {
             <span className="text-xs text-muted-foreground">
               {summaries.length}
             </span>
-          </div>
+          </button>
         </div>
 
         {/* Collections section */}
