@@ -31,6 +31,7 @@ export function GitLandingPanel() {
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
   const [showStashDialog, setShowStashDialog] = useState(false);
+  const [showFetchFirstDialog, setShowFetchFirstDialog] = useState(false);
 
   const handleFetch = async () => {
     const { credentials } = useGitStore.getState();
@@ -92,6 +93,38 @@ export function GitLandingPanel() {
       push();
       return;
     }
+
+    // Suggest fetching first if never fetched this session or behind remote.
+    const { status: currentStatus } = useGitStore.getState();
+    if (!lastFetched || (currentStatus && currentStatus.behind > 0)) {
+      setShowFetchFirstDialog(true);
+      return;
+    }
+
+    setPushing(true);
+    try { await push(); } finally { setPushing(false); }
+  };
+
+  const handleFetchAndPush = async () => {
+    setShowFetchFirstDialog(false);
+    setPushing(true);
+    try {
+      await fetch();
+      setLastFetched(new Date().toLocaleTimeString());
+      // Re-check status after fetch — if now behind, abort push.
+      const { status: freshStatus } = useGitStore.getState();
+      if (freshStatus && freshStatus.behind > 0) {
+        setPushing(false);
+        return;
+      }
+      await push();
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const handlePushAnyway = async () => {
+    setShowFetchFirstDialog(false);
     setPushing(true);
     try { await push(); } finally { setPushing(false); }
   };
@@ -181,6 +214,25 @@ export function GitLandingPanel() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handlePullAnyway}>Pull Anyway</AlertDialogAction>
             <AlertDialogAction onClick={handleStashAndPull}>Stash & Pull</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Fetch-before-push confirmation dialog. */}
+      <AlertDialog open={showFetchFirstDialog} onOpenChange={setShowFetchFirstDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fetch Before Push</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(status?.behind ?? 0) > 0
+                ? `Your branch is ${status?.behind} commits behind the remote. Fetching first ensures you have the latest changes and reduces the risk of conflicts.`
+                : 'You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePushAnyway}>Push Anyway</AlertDialogAction>
+            <AlertDialogAction onClick={handleFetchAndPush}>Fetch & Push</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
