@@ -41,6 +41,7 @@ pub trait GitService: Send + Sync {
     // Branches
     fn branches(&self, path: &str) -> DomainResult<BranchList>;
     fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()>;
+    fn checkout_remote_branch(&self, path: &str, remote_branch: &str) -> DomainResult<()>;
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()>;
     fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()>;
     fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()>;

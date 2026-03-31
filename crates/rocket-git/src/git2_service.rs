@@ -646,6 +646,52 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    fn checkout_remote_branch(&self, path: &str, remote_branch: &str) -> DomainResult<()> {
+        let repo = open_repo(path)?;
+
+        // remote_branch is e.g. "origin/feature-x".
+        let local_name = remote_branch
+            .split('/')
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("/");
+
+        if local_name.is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "Invalid remote branch name: {remote_branch}"
+            )));
+        }
+
+        // Resolve the remote-tracking ref to a commit.
+        let remote_ref = format!("refs/remotes/{remote_branch}");
+        let reference = repo
+            .find_reference(&remote_ref)
+            .map_err(|e| DomainError::Internal(format!("Remote branch not found: {e}")))?;
+        let commit = reference
+            .peel_to_commit()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Create a local branch pointing at the same commit.
+        repo.branch(&local_name, &commit, false)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Set upstream tracking.
+        let mut local_branch = repo
+            .find_branch(&local_name, git2::BranchType::Local)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        local_branch
+            .set_upstream(Some(remote_branch))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Switch HEAD to the new local branch.
+        repo.set_head(&format!("refs/heads/{local_name}"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        Ok(())
+    }
+
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let head_commit = repo
@@ -1287,6 +1333,51 @@ mod tests {
         let status = svc.status(&path).unwrap();
         assert_eq!(status.ahead, 1, "should be 1 commit ahead");
         assert_eq!(status.behind, 0, "should be 0 commits behind");
+    }
+
+    #[test]
+    fn checkout_remote_branch_creates_local_tracking() {
+        let (_dir, path) = setup_repo();
+        let repo = Repository::open(&path).unwrap();
+
+        // Create a bare remote and push main.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        let mut remote = repo.remote("origin", &remote_path).unwrap();
+        remote
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+
+        // Create a feature branch on the bare remote by pushing from a clone.
+        let clone_dir = TempDir::new().unwrap();
+        let clone_path = clone_dir.path().to_string_lossy().to_string();
+        let clone_repo = Repository::clone(&remote_path, &clone_path).unwrap();
+        let clone_head = clone_repo.head().unwrap().peel_to_commit().unwrap();
+        clone_repo.branch("feature-x", &clone_head, false).unwrap();
+        clone_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/feature-x:refs/heads/feature-x"], None)
+            .unwrap();
+
+        // Fetch in our original repo so we get origin/feature-x.
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        svc.fetch(&path, "origin", &creds).unwrap();
+
+        // Checkout the remote branch.
+        svc.checkout_remote_branch(&path, "origin/feature-x").unwrap();
+
+        // Verify local branch exists and is checked out.
+        let status = svc.status(&path).unwrap();
+        assert_eq!(status.branch, "feature-x");
+
+        // Verify upstream is set.
+        let branches = svc.branches(&path).unwrap();
+        let local = branches.local.iter().find(|b| b.name == "feature-x").unwrap();
+        assert_eq!(local.upstream.as_deref(), Some("origin/feature-x"));
     }
 
     #[test]
