@@ -22,6 +22,12 @@ export function GitLandingPanel() {
   const [lastFetched, setLastFetched] = useState<string | null>(null);
 
   const handleFetch = async () => {
+    const { credentials } = useGitStore.getState();
+    if (!credentials) {
+      // Store will open the credentials dialog; skip timestamp update.
+      fetch();
+      return;
+    }
     setFetching(true);
     try {
       await fetch();
