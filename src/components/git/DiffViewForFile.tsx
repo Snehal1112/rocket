@@ -19,6 +19,7 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setDiffState(null);
 
     const fetchDiff = async () => {
       try {
@@ -45,7 +46,7 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
     return () => {
       cancelled = true;
     };
-  }, [file.path, file.staged, file.status, collectionPath]);
+  }, [file.path, file.staged, collectionPath]);
 
   if (loading) {
     return (
