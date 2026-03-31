@@ -87,8 +87,8 @@ function KVTable({ title, rows }: { title: string; rows: RowChange[] }) {
       <div className="border rounded-md overflow-hidden">
         <table className="w-full text-xs">
           <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className={cn('border-b last:border-0', ROW_BG[row.status])}>
+            {rows.map((row) => (
+              <tr key={row.key} className={cn('border-b last:border-0', ROW_BG[row.status])}>
                 <td className={cn('py-1.5 pl-2 pr-1 font-bold w-4', ROW_BADGE[row.status])}>
                   {ROW_LABEL[row.status]}
                 </td>
