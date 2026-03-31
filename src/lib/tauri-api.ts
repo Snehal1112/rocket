@@ -64,6 +64,7 @@ export interface CollectionVariable {
 
 export interface CollectionSettings {
   description?: string;
+  readme?: string;
   auth?: Auth;
   headers: Header[];
   variables: CollectionVariable[];
@@ -88,6 +89,7 @@ export interface Request {
   body?: Body;
   auth: Auth;
   fileName?: string;
+  tags?: string[];
 }
 
 export interface Folder {
