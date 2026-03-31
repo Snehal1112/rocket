@@ -221,4 +221,12 @@ impl GitAppService {
     pub fn resolve_conflict(&self, path: &str, file: &str, resolution: &ConflictResolution) -> DomainResult<()> {
         self.git.resolve_conflict(path, file, resolution)
     }
+
+    pub fn abort_merge(&self, path: &str) -> DomainResult<()> {
+        self.git.abort_merge(path)?;
+        self.events.publish(DomainEvent::GitStatusChanged {
+            collection: path.to_string(),
+        });
+        Ok(())
+    }
 }

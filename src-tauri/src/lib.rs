@@ -207,6 +207,7 @@ pub fn run() {
             commands::git::git_stash_drop,
             commands::git::git_conflicts,
             commands::git::git_resolve_conflict,
+            commands::git::git_abort_merge,
             commands::git::git_list_remotes,
             commands::git::git_add_remote,
             commands::git::git_remove_remote,

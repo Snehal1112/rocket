@@ -140,6 +140,11 @@ pub fn git_resolve_conflict(collection_path: String, file: String, resolution: C
 }
 
 #[tauri::command]
+pub fn git_abort_merge(collection_path: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+    svc.abort_merge(&collection_path)
+}
+
+#[tauri::command]
 pub fn git_list_remotes(collection_path: String, svc: State<'_, GitAppService>) -> Result<Vec<RemoteInfo>, DomainError> {
     svc.list_remotes(&collection_path)
 }
