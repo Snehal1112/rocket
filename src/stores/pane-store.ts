@@ -85,7 +85,7 @@ export interface PaneState {
   getOpenTabCount: (collection: string) => number;
 
   // Workspace tabs.
-  openWorkspaceTabs: (workspaceId: string, isDefault: boolean) => void;
+  openWorkspaceTabs: (workspaceId: string) => void;
   isWorkspaceMode: () => boolean;
 
   // Utility.
@@ -347,10 +347,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     return collectionTabState[collection]?.tabs.length ?? 0;
   },
 
-  openWorkspaceTabs(workspaceId, isDefault) {
+  openWorkspaceTabs(workspaceId) {
     get().closeAll();
-    const sections: WorkspaceTabSection[] = ['overview', 'environments'];
-    if (!isDefault) sections.push('git');
+    const sections: WorkspaceTabSection[] = ['overview', 'environments', 'git'];
 
     const tabs: WorkspaceTab[] = sections.map((section) => ({
       id: `workspace:${workspaceId}:${section}`,

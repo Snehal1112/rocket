@@ -31,7 +31,7 @@ function App() {
         const { workspaceId } = uiState.workspaceTabs
         const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId)
         if (ws) {
-          usePaneStore.getState().openWorkspaceTabs(ws.id, ws.id === 'default')
+          usePaneStore.getState().openWorkspaceTabs(ws.id)
         }
       }
       // Task 9: First-launch fallback
@@ -39,7 +39,7 @@ function App() {
         const store = useWorkspaceStore.getState()
         const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
         if (activeWs) {
-          usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+          usePaneStore.getState().openWorkspaceTabs(activeWs.id)
         }
       }
     }

@@ -426,10 +426,7 @@ export function CollectionsSidebar() {
                 variant="ghost"
                 className="w-full justify-start h-8 px-2 text-sm font-medium"
                 onClick={() =>
-                  openWorkspaceTabs(
-                    activeWorkspace.id,
-                    activeWorkspace.id === "default",
-                  )
+                  openWorkspaceTabs(activeWorkspace.id)
                 }
               >
                 <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground mr-2" />

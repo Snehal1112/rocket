@@ -87,7 +87,7 @@ function subscribeToEvents() {
     // Clear all tabs from the previous workspace before activating the new one.
     usePaneStore.getState().closeAll()
     useWorkspaceStore.setState({ activeWorkspaceId: payload.id })
-    usePaneStore.getState().openWorkspaceTabs(payload.id, payload.id === 'default')
+    usePaneStore.getState().openWorkspaceTabs(payload.id)
   })
 
   listen<{ id: string; oldName: string; newName: string }>(
@@ -109,7 +109,7 @@ function subscribeToEvents() {
       const store = useWorkspaceStore.getState()
       const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
       if (activeWs) {
-        usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+        usePaneStore.getState().openWorkspaceTabs(activeWs.id)
       }
     }
   })
@@ -124,7 +124,7 @@ function subscribeToEvents() {
       const store = useWorkspaceStore.getState()
       const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
       if (activeWs) {
-        usePaneStore.getState().openWorkspaceTabs(activeWs.id, activeWs.id === 'default')
+        usePaneStore.getState().openWorkspaceTabs(activeWs.id)
       }
     }
   })

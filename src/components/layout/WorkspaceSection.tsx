@@ -25,7 +25,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleOpenWorkspace = () => {
-    usePaneStore.getState().openWorkspaceTabs(workspace.id, workspace.id === 'default')
+    usePaneStore.getState().openWorkspaceTabs(workspace.id)
   }
 
   const handleRename = (newName: string) => {
