@@ -7,11 +7,16 @@ vi.mock('@/lib/tauri-api', () => ({
   listEnvironments: vi.fn(),
   saveEnvironment: vi.fn(),
   deleteEnvironment: vi.fn(),
+  getGlobalEnvironmentName: vi.fn().mockResolvedValue(null),
+  setGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
+  getProcessEnvVars: vi.fn().mockResolvedValue({}),
+  getEnvironment: vi.fn().mockResolvedValue(null),
 }));
 
-import { listEnvironments } from '@/lib/tauri-api';
+import { listEnvironments, getGlobalEnvironmentName } from '@/lib/tauri-api';
 
 const mockListEnvironments = vi.mocked(listEnvironments);
+const mockGetGlobalEnvironmentName = vi.mocked(getGlobalEnvironmentName);
 
 const makeEnv = (name: string): Environment => ({ name, variables: [] });
 
@@ -133,5 +138,59 @@ describe('env-store', () => {
     await useEnvStore.getState().updateEnvironment(updated);
 
     expect(useEnvStore.getState().environments[0]).toEqual(updated);
+  });
+});
+
+describe('getGlobalVariables', () => {
+  beforeEach(() => {
+    useEnvStore.setState({ globalEnvName: null, globalEnv: null, processEnvVars: {} });
+    vi.clearAllMocks();
+  });
+
+  it('returns enabled vars only', () => {
+    useEnvStore.setState({
+      globalEnv: {
+        name: 'shared',
+        variables: [
+          { key: 'A', value: 'a', enabled: true },
+          { key: 'B', value: 'b', enabled: false },
+        ],
+      } as any,
+    });
+    const vars = useEnvStore.getState().getGlobalVariables();
+    expect(vars['A']).toBe('a');
+    expect(vars['B']).toBeUndefined();
+  });
+
+  it('returns empty object when globalEnv is null', () => {
+    useEnvStore.setState({ globalEnv: null });
+    expect(useEnvStore.getState().getGlobalVariables()).toEqual({});
+  });
+});
+
+describe('fetchGlobalEnv', () => {
+  beforeEach(() => {
+    useEnvStore.setState({ globalEnvName: null, globalEnv: null, processEnvVars: {} });
+    vi.clearAllMocks();
+  });
+
+  it('null name clears state', async () => {
+    mockGetGlobalEnvironmentName.mockResolvedValueOnce(null);
+    await useEnvStore.getState().fetchGlobalEnv();
+    expect(useEnvStore.getState().globalEnv).toBeNull();
+    expect(useEnvStore.getState().globalEnvName).toBeNull();
+  });
+
+  it('sets globalEnv when collection and env are available', async () => {
+    const env: Environment = { name: 'shared', variables: [] };
+    mockGetGlobalEnvironmentName.mockResolvedValueOnce('shared');
+    const { getEnvironment: mockGetEnv } = await import('@/lib/tauri-api');
+    vi.mocked(mockGetEnv).mockResolvedValueOnce(env);
+
+    useEnvStore.setState({ activeCollection: 'col-a' });
+    await useEnvStore.getState().fetchGlobalEnv();
+
+    expect(useEnvStore.getState().globalEnvName).toBe('shared');
+    expect(useEnvStore.getState().globalEnv).toEqual(env);
   });
 });

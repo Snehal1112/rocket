@@ -3,6 +3,10 @@ import {
   listEnvironments,
   saveEnvironment,
   deleteEnvironment as deleteEnvApi,
+  getGlobalEnvironmentName,
+  setGlobalEnvironment,
+  getProcessEnvVars,
+  getEnvironment,
   type Environment,
 } from '@/lib/tauri-api';
 
@@ -21,12 +25,26 @@ export interface EnvState {
   deleteEnvironment: (name: string) => Promise<void>;
   getActiveVariables: () => Record<string, string>;
   resolveVariables: (text: string) => string;
+
+  // Global environment state.
+  globalEnvName: string | null;
+  globalEnv: Environment | null;
+  processEnvVars: Record<string, string>;
+
+  // Global environment actions.
+  fetchGlobalEnv: () => Promise<void>;
+  setGlobalEnv: (name: string | null) => Promise<void>;
+  loadProcessEnvVars: () => Promise<void>;
+  getGlobalVariables: () => Record<string, string>;
 }
 
 export const useEnvStore = create<EnvState>((set, get) => ({
   environments: [],
   activeEnvId: null,
   activeCollection: null,
+  globalEnvName: null,
+  globalEnv: null,
+  processEnvVars: {},
 
   async loadEnvironments(collection) {
     set({ activeCollection: collection });
@@ -105,5 +123,35 @@ export const useEnvStore = create<EnvState>((set, get) => ({
     return text.replace(VAR_REGEX, (match, key) => {
       return key in vars ? vars[key] : match;
     });
+  },
+
+  async fetchGlobalEnv() {
+    const name = await getGlobalEnvironmentName();
+    if (!name) { set({ globalEnvName: null, globalEnv: null }); return; }
+    const { activeCollection } = get();
+    if (activeCollection) {
+      try {
+        const env = await getEnvironment(activeCollection, name);
+        set({ globalEnvName: name, globalEnv: env }); return;
+      } catch {}
+    }
+    set({ globalEnvName: name, globalEnv: null });
+  },
+
+  async setGlobalEnv(name) {
+    await setGlobalEnvironment(name);
+    await get().fetchGlobalEnv();
+  },
+
+  async loadProcessEnvVars() {
+    set({ processEnvVars: await getProcessEnvVars() });
+  },
+
+  getGlobalVariables() {
+    const { globalEnv } = get();
+    if (!globalEnv) return {};
+    return Object.fromEntries(
+      globalEnv.variables.filter(v => v.enabled).map(v => [v.key, v.value])
+    );
   },
 }));
