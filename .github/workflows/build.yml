@@ -21,7 +21,7 @@ jobs:
             rust_target: x86_64-pc-windows-msvc
           - platform: macos-latest
             rust_target: aarch64-apple-darwin
-          - platform: macos-13
+          - platform: macos-latest
             rust_target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.platform }}
@@ -39,6 +39,13 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+
+      - name: Set up macOS cross-compilation environment
+        if: matrix.rust_target == 'x86_64-apple-darwin'
+        run: |
+          echo "CC_x86_64_apple_darwin=clang" >> $GITHUB_ENV
+          echo "CFLAGS_x86_64_apple_darwin=-target x86_64-apple-macos10.12" >> $GITHUB_ENV
+          echo "LDFLAGS_x86_64_apple_darwin=-target x86_64-apple-macos10.12" >> $GITHUB_ENV
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
