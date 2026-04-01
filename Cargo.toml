@@ -27,7 +27,7 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "cookies", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "multipart", "rustls-tls", "http2", "charset", "macos-system-configuration"] }
 notify = "6"
 sha2 = "0.10"
 hmac = "0.12"
