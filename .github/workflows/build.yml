@@ -55,8 +55,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Install frontend dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0

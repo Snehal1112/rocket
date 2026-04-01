@@ -38,8 +38,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Install frontend dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: TypeScript check
         run: yarn tsc --noEmit
