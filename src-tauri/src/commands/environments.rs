@@ -40,7 +40,7 @@ pub fn delete_environment(
 pub fn get_global_environment_name(
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<Option<String>, DomainError> {
-    workspace_svc.lock().unwrap().get_global_environment_name()
+    workspace_svc.lock().expect("workspace service lock poisoned").get_global_environment_name()
 }
 
 #[tauri::command]
@@ -48,7 +48,7 @@ pub fn set_global_environment(
     name: Option<String>,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    workspace_svc.lock().unwrap().set_global_environment(name)
+    workspace_svc.lock().expect("workspace service lock poisoned").set_global_environment(name)
 }
 
 #[tauri::command]

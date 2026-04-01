@@ -469,20 +469,7 @@ impl CollectionRepository for FsCollectionRepo {
                     .variables
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|v| {
-                        let value = v
-                            .value
-                            .as_ref()
-                            .map(|vv| vv.data().to_string())
-                            .unwrap_or_default();
-                        CollectionVariable {
-                            key: v.name,
-                            value: value.clone(),
-                            initial_value: value,
-                            enabled: !v.disabled.unwrap_or(false),
-                            secret: false,
-                        }
-                    })
+                    .map(oc_variable_to_collection_variable)
                     .collect(),
             })
         } else {
@@ -548,14 +535,8 @@ impl CollectionRepository for FsCollectionRepo {
                         settings
                             .variables
                             .iter()
-                            .map(|cv| OcVariable {
-                                name: cv.key.clone(),
-                                value: Some(rocket_shared::variable_value::VariableValue::simple(
-                                    &cv.value,
-                                )),
-                                description: None,
-                                disabled: if cv.enabled { None } else { Some(true) },
-                            })
+                            .cloned()
+                            .map(collection_variable_to_oc_variable)
                             .collect(),
                     )
                 },
@@ -608,6 +589,8 @@ impl CollectionRepository for FsCollectionRepo {
                             if let Some(vars) = req.variables {
                                 for v in vars {
                                     let cv = oc_variable_to_collection_variable(v);
+                                    // Disabled vars are skipped entirely; they don't
+                                    // shadow enabled vars from an outer folder.
                                     if cv.enabled {
                                         merged.insert(cv.key.clone(), cv);
                                     }
