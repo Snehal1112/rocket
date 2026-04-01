@@ -86,7 +86,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
               <span className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}>
                 {GIT_STATUS_CONFIG[file.status].label}
               </span>
-              <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="hidden gap-0.5 shrink-0 group-hover:flex">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -152,7 +152,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
                   <span className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}>
                     {GIT_STATUS_CONFIG[file.status].label}
                   </span>
-                  <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="hidden gap-0.5 shrink-0 group-hover:flex">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
