@@ -1,4 +1,6 @@
-use rocket_app::EnvironmentService;
+use std::sync::Mutex;
+
+use rocket_app::{EnvironmentService, WorkspaceService};
 use rocket_environment::Environment;
 use rocket_infra::FsEnvironmentRepo;
 use rocket_shared::{error::DomainError, events::NullEventPublisher};
@@ -77,4 +79,24 @@ pub fn delete_environment(
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     env_service_for(&collection, &ws)?.delete(&name)
+}
+
+#[tauri::command]
+pub fn get_global_environment_name(
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<Option<String>, DomainError> {
+    workspace_svc.lock().expect("workspace service lock poisoned").get_global_environment_name()
+}
+
+#[tauri::command]
+pub fn set_global_environment(
+    name: Option<String>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    workspace_svc.lock().expect("workspace service lock poisoned").set_global_environment(name)
+}
+
+#[tauri::command]
+pub fn get_process_env_vars() -> std::collections::HashMap<String, String> {
+    std::env::vars().collect()
 }

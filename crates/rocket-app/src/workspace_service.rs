@@ -197,6 +197,18 @@ impl WorkspaceService {
         Ok(workspace)
     }
 
+    pub fn get_global_environment_name(&self) -> DomainResult<Option<String>> {
+        let path = self.active_path.lock().expect("active workspace path lock poisoned").clone();
+        Ok(self.config_repo.load(&path)?.global_environment)
+    }
+
+    pub fn set_global_environment(&self, name: Option<String>) -> DomainResult<()> {
+        let path = self.active_path.lock().expect("active workspace path lock poisoned").clone();
+        let mut config = self.config_repo.load(&path)?;
+        config.global_environment = name;
+        self.config_repo.save(&path, &config)
+    }
+
     pub fn get_multi_workspace_mode(&self) -> DomainResult<bool> {
         Ok(self.repo.load()?.multi_workspace_mode)
     }
