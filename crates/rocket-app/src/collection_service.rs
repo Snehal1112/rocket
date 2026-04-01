@@ -1,4 +1,4 @@
-use rocket_collection::{Collection, CollectionRepository, CollectionSummary, Request};
+use rocket_collection::{Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::error::DomainResult;
 
 pub struct CollectionService {
@@ -83,6 +83,22 @@ impl CollectionService {
     ) -> DomainResult<()> {
         self.repo.save_settings(name, settings)
     }
+
+    pub fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo.get_folder_chain_variables(collection, request_path)
+    }
+
+    pub fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
+        self.repo.save_folder_variables(collection, folder_path, vars)
+    }
+
+    pub fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo.get_request_variables(collection, request_path)
+    }
+
+    pub fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
+        self.repo.save_request_variables(collection, request_path, vars)
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +174,10 @@ mod tests {
         fn save_settings(&self, _: &str, _: &rocket_collection::CollectionSettings) -> DomainResult<()> {
             Ok(())
         }
+        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
     }
 
     fn make_service() -> CollectionService {

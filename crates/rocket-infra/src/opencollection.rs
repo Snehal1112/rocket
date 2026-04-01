@@ -370,7 +370,7 @@ pub enum OcAction {
 }
 
 /// HTTP request runtime configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OcHttpRequestRuntime {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<OcVariable>,
@@ -741,6 +741,23 @@ pub struct OcFolderInfo {
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Folder-level request defaults (variables, auth, headers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<OcRequestDefaults>,
+}
+
+impl Default for OcFolderInfo {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            uid: None,
+            description: None,
+            folder_type: Some("folder".into()),
+            seq: None,
+            tags: Vec::new(),
+            request: None,
+        }
+    }
 }
 
 /// Folder — contains nested items and optional request defaults.
@@ -895,7 +912,7 @@ pub struct OcRequestSettings {
 }
 
 /// Request defaults — applied to all requests in a folder or collection.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OcRequestDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<Vec<OcHttpRequestHeader>>,

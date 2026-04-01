@@ -2,7 +2,7 @@ use rocket_shared::error::DomainResult;
 
 use crate::collection::Collection;
 use crate::request::Request;
-use crate::settings::CollectionSettings;
+use crate::settings::{CollectionSettings, CollectionVariable};
 use crate::summary::CollectionSummary;
 
 /// Repository trait for Collection persistence.
@@ -62,6 +62,19 @@ pub trait CollectionRepository: Send + Sync {
 
     /// Persist collection-level settings to collection.json.
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()>;
+
+    /// Walk the full folder ancestor chain for a request path and return
+    /// merged variables (outer folder first; inner folder wins on collision).
+    fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+
+    /// Persist folder-level variables to the folder's folder.yml.
+    fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()>;
+
+    /// Read request-level variables from a request .yml file's runtime.variables[].
+    fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+
+    /// Persist request-level variables to a request .yml file's runtime.variables[].
+    fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()>;
 }
 
 #[cfg(test)]

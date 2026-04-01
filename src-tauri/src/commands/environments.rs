@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use rocket_app::{EnvironmentService, WorkspaceService};
 use rocket_environment::Environment;
 use rocket_infra::FsEnvironmentRepo;
