@@ -13,9 +13,10 @@ import { GitFileList } from '@/components/git/GitFileList';
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
 import { BranchSelector } from '@/components/git/BranchSelector';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
+import { Separator } from '@/components/ui/separator';
 import { useGitStore } from '@/stores/git-store';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
-import { Package, ChevronDown } from 'lucide-react';
+import { Package, ChevronDown, ArrowLeft } from 'lucide-react';
 import type { FileStatus } from '@/lib/tauri-api';
 
 type RightPanelView =
@@ -145,19 +146,43 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
         </div>
 
         {/* RIGHT PANEL */}
-        <div className="flex-1 overflow-hidden">
-          {rightPanel.kind === 'landing' && <GitLandingPanel />}
-          {rightPanel.kind === 'diff' && (
-            <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {/* Breadcrumb header — visible when not on landing/overview. */}
+          {rightPanel.kind !== 'landing' && (
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => setRightPanel({ kind: 'landing' })}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Overview
+              </Button>
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-xs text-muted-foreground truncate">
+                {rightPanel.kind === 'diff' && rightPanel.file.path}
+                {rightPanel.kind === 'commits' && 'Commit History'}
+                {rightPanel.kind === 'stashes' && 'Stashes'}
+              </span>
+            </div>
           )}
-          {rightPanel.kind === 'commits' && <GitCommitLog />}
-          {rightPanel.kind === 'stashes' && (
-            <ScrollArea className="h-full">
-              <div className="p-4">
-                <GitStashSection />
-              </div>
-            </ScrollArea>
-          )}
+
+          {/* Right panel content. */}
+          <div className="flex-1 overflow-hidden">
+            {rightPanel.kind === 'landing' && <GitLandingPanel />}
+            {rightPanel.kind === 'diff' && (
+              <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
+            )}
+            {rightPanel.kind === 'commits' && <GitCommitLog />}
+            {rightPanel.kind === 'stashes' && (
+              <ScrollArea className="h-full">
+                <div className="p-4">
+                  <GitStashSection />
+                </div>
+              </ScrollArea>
+            )}
+          </div>
         </div>
 
       </div>
