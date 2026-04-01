@@ -383,10 +383,19 @@ impl GitService for Git2Service {
     fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
+        let workdir = repo.workdir()
+            .ok_or_else(|| DomainError::Internal("No working directory".into()))?;
         for file in files {
-            index
-                .add_path(Path::new(file))
-                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            let file_path = workdir.join(file);
+            if file_path.exists() {
+                // File exists — add its current content to the index.
+                index.add_path(Path::new(file))
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+            } else {
+                // File was deleted — remove it from the index.
+                index.remove_path(Path::new(file))
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+            }
         }
         index.write().map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
@@ -1124,6 +1133,20 @@ mod tests {
         svc.unstage(&path, &["test.bru"]).unwrap();
         let status2 = svc.status(&path).unwrap();
         assert!(status2.files.iter().any(|f| f.path == "test.bru" && !f.staged));
+    }
+
+    #[test]
+    fn stage_deleted_file() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // Delete a tracked file.
+        fs::remove_file(Path::new(&path).join("test.bru")).unwrap();
+        let status = svc.status(&path).unwrap();
+        assert!(status.files.iter().any(|f| f.path == "test.bru" && !f.staged));
+        // Stage the deletion.
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let status2 = svc.status(&path).unwrap();
+        assert!(status2.files.iter().any(|f| f.path == "test.bru" && f.staged));
     }
 
     #[test]
