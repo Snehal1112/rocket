@@ -43,6 +43,7 @@ export default defineConfig(async () => ({
             '@radix-ui/react-tabs',
             '@radix-ui/react-tooltip',
           ],
+          'vendor-monaco': ['monaco-editor'],
         },
       },
     },
