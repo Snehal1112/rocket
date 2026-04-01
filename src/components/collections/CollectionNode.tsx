@@ -397,7 +397,7 @@ export function CollectionNode({
             }
             return (
               <RequestNode
-                key={item.fileName ?? item.uid}
+                key={`request-${item.uid}`}
                 uid={item.uid}
                 name={item.name}
                 method={item.method}
