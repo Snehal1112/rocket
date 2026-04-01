@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct CollectionVariable {
     pub key: String,
     pub value: String,
-    /// Initial/default value (for Postman export compatibility).
-    #[serde(default)]
+    /// Initial/default value committed to Git; fallback when value is empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub initial_value: String,
     pub enabled: bool,
     /// Mark as secret to hide in the UI (like Bruno).

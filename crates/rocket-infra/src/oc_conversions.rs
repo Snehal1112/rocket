@@ -690,6 +690,32 @@ fn domain_number_to_inheritable(v: RequestSettingValue<f64>) -> InheritableNumbe
 // Variable conversions
 // ============================================================
 
+/// Convert an OcVariable to a CollectionVariable.
+/// Both value and initial_value are set from the same OC source; they may
+/// diverge later when the user adds a local override.
+pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
+    let val = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
+    CollectionVariable {
+        key:           v.name,
+        value:         val.clone(),
+        initial_value: val,
+        enabled:       !v.disabled.unwrap_or(false),
+        secret:        false,
+    }
+}
+
+/// Convert a CollectionVariable to an OcVariable.
+/// Uses value when non-empty; falls back to initial_value.
+pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable {
+    let effective = if !cv.value.is_empty() { cv.value } else { cv.initial_value };
+    OcVariable {
+        name:        cv.key,
+        value:       if effective.is_empty() { None } else { Some(VariableValue::simple(effective)) },
+        description: None,
+        disabled:    if cv.enabled { None } else { Some(true) },
+    }
+}
+
 impl From<OcVariable> for Variable {
     fn from(oc: OcVariable) -> Self {
         Variable {
@@ -1182,16 +1208,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
                 .variables
                 .unwrap_or_default()
                 .into_iter()
-                .map(|v| {
-                    let var: Variable = v.into();
-                    CollectionVariable {
-                        key: var.key,
-                        value: var.value.clone(),
-                        initial_value: var.value,
-                        enabled: var.enabled,
-                        secret: var.secret,
-                    }
-                })
+                .map(oc_variable_to_collection_variable)
                 .collect(),
         }
     } else {
@@ -1264,12 +1281,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
                         col.settings
                             .variables
                             .into_iter()
-                            .map(|cv| OcVariable {
-                                name: cv.key,
-                                value: Some(VariableValue::simple(cv.value)),
-                                description: None,
-                                disabled: if cv.enabled { None } else { Some(true) },
-                            })
+                            .map(collection_variable_to_oc_variable)
                             .collect(),
                     )
                 },
