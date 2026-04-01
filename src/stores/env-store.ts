@@ -31,8 +31,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   async loadEnvironments(collection) {
     set({ activeCollection: collection });
     try {
-      // Cast needed until Task 3 updates the tauri-api signatures.
-      const environments = await (listEnvironments as any)(collection) as Environment[];
+      const environments = await listEnvironments(collection);
       // Discard if another collection was loaded while we awaited.
       if (get().activeCollection !== collection) return;
       set({ environments });
@@ -62,8 +61,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
     const { activeCollection } = get();
     if (!activeCollection) throw new Error('No active collection');
     const env: Environment = { name, variables: [] };
-    // Cast needed until Task 3 updates the tauri-api signatures.
-    await (saveEnvironment as any)(activeCollection, env);
+    await saveEnvironment(activeCollection, env);
     await get().loadEnvironments(activeCollection);
     get().setActiveEnv(name);
   },
@@ -71,8 +69,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   async updateEnvironment(env) {
     const { activeCollection } = get();
     if (!activeCollection) throw new Error('No active collection');
-    // Cast needed until Task 3 updates the tauri-api signatures.
-    await (saveEnvironment as any)(activeCollection, env);
+    await saveEnvironment(activeCollection, env);
     set((state) => ({
       environments: state.environments.map((e) => (e.name === env.name ? env : e)),
     }));
@@ -81,8 +78,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   async deleteEnvironment(name) {
     const { activeCollection } = get();
     if (!activeCollection) throw new Error('No active collection');
-    // Cast needed until Task 3 updates the tauri-api signatures.
-    await (deleteEnvApi as any)(activeCollection, name);
+    await deleteEnvApi(activeCollection, name);
     set((state) => ({
       environments: state.environments.filter((e) => e.name !== name),
       activeEnvId: state.activeEnvId === name ? null : state.activeEnvId,

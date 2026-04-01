@@ -9,9 +9,9 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  listCollections, listEnvironments,
+  listCollections,
   linkExternalCollection, openFolderPicker, createCollection, deleteCollection,
-  type CollectionSummary, type Environment,
+  type CollectionSummary,
 } from '@/lib/tauri-api';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -27,17 +27,12 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const openTab = usePaneStore((s) => s.openTab);
 
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
-  const [environments, setEnvironments] = useState<Environment[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
 
   const refresh = useCallback(async () => {
-    const [cols, envs] = await Promise.all([
-      listCollections(),
-      listEnvironments(),
-    ]);
+    const cols = await listCollections();
     setSummaries(cols);
-    setEnvironments(envs);
   }, [workspaceId]);
 
   useEffect(() => {
@@ -90,7 +85,6 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   }
 
   const collectionCount = summaries.length;
-  const environmentCount = environments.length;
   const totalRequests = summaries.reduce((sum, c) => sum + (c.requestCount ?? 0), 0);
 
   return (
@@ -111,7 +105,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
             <p className="text-xs text-muted-foreground">Collections</p>
           </div>
           <div className="rounded-lg border border-border p-3">
-            <p className="text-2xl font-semibold">{environmentCount}</p>
+            <p className="text-2xl font-semibold">—</p>
             <p className="text-xs text-muted-foreground">Environments</p>
           </div>
           <div className="rounded-lg border border-border p-3">

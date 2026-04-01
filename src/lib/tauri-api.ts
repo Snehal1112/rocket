@@ -391,17 +391,17 @@ export const saveCollectionSettings = (
 // Environments
 // ============================================================
 
-export const listEnvironments = () =>
-  invoke<Environment[]>("list_environments");
+export const listEnvironments = (collection: string) =>
+  invoke<Environment[]>("list_environments", { collection });
 
-export const getEnvironment = (name: string) =>
-  invoke<Environment>("get_environment", { name });
+export const getEnvironment = (collection: string, name: string) =>
+  invoke<Environment>("get_environment", { collection, name });
 
-export const saveEnvironment = (env: Environment) =>
-  invoke<void>("save_environment", { env });
+export const saveEnvironment = (collection: string, env: Environment) =>
+  invoke<void>("save_environment", { collection, env });
 
-export const deleteEnvironment = (name: string) =>
-  invoke<void>("delete_environment", { name });
+export const deleteEnvironment = (collection: string, name: string) =>
+  invoke<void>("delete_environment", { collection, name });
 
 export interface LoadTestConfig {
   concurrency: number;

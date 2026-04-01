@@ -86,7 +86,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
             ) : activeTab.activeSection === 'environments' ? (
-              <WorkspaceEnvironmentsTab workspaceId={activeTab.workspaceId} />
+              <WorkspaceEnvironmentsTab />
             ) : activeTab.activeSection === 'git' ? (
               <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
             ) : null

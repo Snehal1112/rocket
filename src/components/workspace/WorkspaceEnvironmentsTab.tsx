@@ -5,15 +5,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { listEnvironments, saveEnvironment, deleteEnvironment } from '@/lib/tauri-api';
+import { useEnvStore } from '@/stores/env-store';
 import type { Variable, Environment } from '@/lib/tauri-api';
 
-interface WorkspaceEnvironmentsTabProps {
-  workspaceId: string;
-}
+export function WorkspaceEnvironmentsTab() {
+  const environments = useEnvStore((s) => s.environments);
+  const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
+  const deleteEnv = useEnvStore((s) => s.deleteEnvironment);
+  const createEnvironment = useEnvStore((s) => s.createEnvironment);
 
-export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsTabProps) {
-  const [environments, setEnvironments] = useState<Environment[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
@@ -21,17 +21,13 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load environments when workspace changes.
+  // Select first env when list changes (e.g. after collection switch).
   useEffect(() => {
-    listEnvironments()
-      .then((envs) => {
-        setEnvironments(envs);
-        setSelectedName(envs[0]?.name ?? null);
-      })
-      .catch((err) => {
-        console.error('[WorkspaceEnvironmentsTab] failed to load environments', err);
-      });
-  }, [workspaceId]);
+    setSelectedName((prev) => {
+      if (prev && environments.find((e) => e.name === prev)) return prev;
+      return environments[0]?.name ?? null;
+    });
+  }, [environments]);
 
   // Sync editing vars when selected env changes.
   useEffect(() => {
@@ -43,11 +39,11 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
   const persistEnv = useCallback((env: Environment) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      void saveEnvironment(env).catch((err) => {
+      void updateEnvironment(env).catch((err) => {
         console.error('[WorkspaceEnvironmentsTab] failed to save environment', err);
       });
     }, 400);
-  }, []);
+  }, [updateEnvironment]);
 
   // Apply a variable update at index and persist.
   const updateVar = useCallback(
@@ -58,9 +54,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
       setEditingVars(updated);
       const env = environments.find((e) => e.name === selectedName);
       if (env) {
-        const updatedEnv = { ...env, variables: updated };
-        setEnvironments((prev) => prev.map((e) => (e.name === selectedName ? updatedEnv : e)));
-        persistEnv(updatedEnv);
+        persistEnv({ ...env, variables: updated });
       }
     },
     [selectedName, editingVars, environments, persistEnv],
@@ -74,9 +68,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
     setEditingVars(updated);
     const env = environments.find((e) => e.name === selectedName);
     if (env) {
-      const updatedEnv = { ...env, variables: updated };
-      setEnvironments((prev) => prev.map((e) => (e.name === selectedName ? updatedEnv : e)));
-      persistEnv(updatedEnv);
+      persistEnv({ ...env, variables: updated });
     }
   }, [selectedName, editingVars, environments, persistEnv]);
 
@@ -88,9 +80,7 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
       setEditingVars(updated);
       const env = environments.find((e) => e.name === selectedName);
       if (env) {
-        const updatedEnv = { ...env, variables: updated };
-        setEnvironments((prev) => prev.map((e) => (e.name === selectedName ? updatedEnv : e)));
-        persistEnv(updatedEnv);
+        persistEnv({ ...env, variables: updated });
       }
     },
     [selectedName, editingVars, environments, persistEnv],
@@ -104,30 +94,26 @@ export function WorkspaceEnvironmentsTab({ workspaceId }: WorkspaceEnvironmentsT
       setNewEnvName('');
       return;
     }
-    const newEnv: Environment = { name: trimmed, variables: [] };
     try {
-      await saveEnvironment(newEnv);
-      setEnvironments((prev) => [...prev, newEnv]);
+      await createEnvironment(trimmed);
       setSelectedName(trimmed);
     } catch (err) {
       console.error('[WorkspaceEnvironmentsTab] failed to create environment', err);
     }
     setIsAddingEnv(false);
     setNewEnvName('');
-  }, [newEnvName]);
+  }, [newEnvName, createEnvironment]);
 
   // Delete the selected environment.
   const handleDeleteEnv = useCallback(async () => {
     if (!selectedName) return;
     try {
-      await deleteEnvironment(selectedName);
-      const remaining = environments.filter((e) => e.name !== selectedName);
-      setEnvironments(remaining);
-      setSelectedName(remaining[0]?.name ?? null);
+      await deleteEnv(selectedName);
+      setSelectedName(environments.find((e) => e.name !== selectedName)?.name ?? null);
     } catch (err) {
       console.error('[WorkspaceEnvironmentsTab] failed to delete environment', err);
     }
-  }, [selectedName, environments]);
+  }, [selectedName, environments, deleteEnv]);
 
   return (
     <div className="h-full flex">
