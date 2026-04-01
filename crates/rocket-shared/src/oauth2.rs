@@ -10,12 +10,14 @@ pub struct OAuth2ClientCredentials {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OAuth2ResourceOwner {
     pub username: String,
     pub password: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OAuth2PKCE {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,6 +32,7 @@ pub enum OAuth2TokenPlacement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OAuth2TokenConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -38,6 +41,7 @@ pub struct OAuth2TokenConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OAuth2AdditionalParameter {
     pub name: String,
     pub value: String,

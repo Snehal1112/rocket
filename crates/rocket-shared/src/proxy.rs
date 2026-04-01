@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Proxy authentication credentials.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProxyAuth {
     pub username: String,
     pub password: String,

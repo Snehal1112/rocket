@@ -85,6 +85,7 @@ impl<'de> Deserialize<'de> for VariableValue {
 
 /// OpenCollection VariableValueVariant — a named variant with a value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VariableValueVariant {
     pub title: String,
     #[serde(default)]

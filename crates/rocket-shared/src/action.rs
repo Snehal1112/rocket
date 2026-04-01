@@ -4,6 +4,7 @@ use crate::description::Description;
 
 /// Selector for extracting a value from request/response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionSelector {
     pub expression: String,
     pub method: String, // "jsonq"
@@ -11,6 +12,7 @@ pub struct ActionSelector {
 
 /// Target variable for an action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionVariable {
     pub name: String,
     pub scope: String, // "runtime" | "request" | "folder" | "collection" | "environment"
