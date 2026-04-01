@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_app::{
-    CollectionService, CookieService, EnvironmentService, GitAppService,
+    CollectionService, CookieService, GitAppService,
     HistoryService, RequestExecutionService, TemplateService, WorkspaceService,
 };
 use rocket_infra::{
@@ -93,10 +93,6 @@ pub fn run() {
             let collection_svc = CollectionService::new(
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
             );
-            let env_svc = EnvironmentService::new(
-                Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
-                Box::new(NullEventPublisher),
-            );
             let history_svc = HistoryService::new(
                 Box::new(FsHistoryRepo::new(history_dir.clone())),
                 Box::new(NullEventPublisher),
@@ -125,7 +121,6 @@ pub fn run() {
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
-            app.manage(env_svc);
             app.manage(history_svc);
             app.manage(template_svc);
             app.manage(cookie_svc);
