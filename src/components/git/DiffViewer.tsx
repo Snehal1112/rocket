@@ -1,10 +1,10 @@
-import { useState, useCallback } from 'react';
-import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
-import { DiffHeader } from './DiffHeader';
-import { VisualDiffView } from './VisualDiffView';
-import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
-import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
-import type { DiffState } from '@/types/pane-types';
+import { useState, useCallback } from "react";
+import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
+import { DiffHeader } from "./DiffHeader";
+import { VisualDiffView } from "./VisualDiffView";
+import { gitDiff, gitDiffStaged } from "@/lib/tauri-api";
+import { useMonacoTheme } from "@/components/editor/useMonacoTheme";
+import type { DiffState } from "@/types/pane-types";
 
 interface DiffViewerProps {
   diffState: DiffState;
@@ -12,58 +12,65 @@ interface DiffViewerProps {
 
 // Maps file extension to a Monaco language identifier.
 function getLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
-    json: 'json',
-    js: 'javascript',
-    ts: 'typescript',
-    tsx: 'typescript',
-    jsx: 'javascript',
-    md: 'markdown',
-    yaml: 'yaml',
-    yml: 'yaml',
-    xml: 'xml',
-    html: 'html',
-    css: 'css',
-    bru: 'plaintext',
+    json: "json",
+    js: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    md: "markdown",
+    yaml: "yaml",
+    yml: "yaml",
+    xml: "xml",
+    html: "html",
+    css: "css",
+    bru: "plaintext",
   };
-  return map[ext] ?? 'plaintext';
+  return map[ext] ?? "plaintext";
 }
 
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
   const { themeName, defineThemes } = useMonacoTheme();
-  const handleDiffMount: DiffOnMount = (_editor, monaco) => { defineThemes(monaco); };
+  const handleDiffMount: DiffOnMount = (_editor, monaco) => {
+    defineThemes(monaco);
+  };
 
   // Persist mode preference across sessions.
-  const [mode, setMode] = useState<'text' | 'visual'>(() => {
-    return (localStorage.getItem('git-diff-mode') as 'text' | 'visual') ?? 'text';
+  const [mode, setMode] = useState<"text" | "visual">(() => {
+    return (
+      (localStorage.getItem("git-diff-mode") as "text" | "visual") ?? "text"
+    );
   });
 
-  const handleModeChange = useCallback((m: 'text' | 'visual') => {
+  const handleModeChange = useCallback((m: "text" | "visual") => {
     setMode(m);
-    localStorage.setItem('git-diff-mode', m);
+    localStorage.setItem("git-diff-mode", m);
   }, []);
 
-  const handleToggleStaged = useCallback(async (isStaged: boolean) => {
-    try {
-      const diff = isStaged
-        ? await gitDiffStaged(diffState.collectionPath, diffState.filePath)
-        : await gitDiff(diffState.collectionPath, diffState.filePath);
-      setDiffState({
-        ...diffState,
-        oldContent: diff.oldContent ?? '',
-        newContent: diff.newContent ?? '',
-        isStaged,
-      });
-    } catch {
-      // Keep current state on error.
-    }
-  }, [diffState.collectionPath, diffState.filePath]);
+  const handleToggleStaged = useCallback(
+    async (isStaged: boolean) => {
+      try {
+        const diff = isStaged
+          ? await gitDiffStaged(diffState.collectionPath, diffState.filePath)
+          : await gitDiff(diffState.collectionPath, diffState.filePath);
+        setDiffState({
+          ...diffState,
+          oldContent: diff.oldContent ?? "",
+          newContent: diff.newContent ?? "",
+          isStaged,
+        });
+      } catch {
+        // Keep current state on error.
+      }
+    },
+    [diffState.collectionPath, diffState.filePath],
+  );
 
   // Visual mode is only available for JSON request files.
-  const canShowVisual = diffState.filePath.endsWith('.json');
+  const canShowVisual = diffState.filePath.endsWith(".yml");
   const language = getLanguage(diffState.filePath);
 
   return (
@@ -75,7 +82,7 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
         onModeChange={handleModeChange}
         canShowVisual={canShowVisual}
       />
-      {mode === 'visual' && canShowVisual ? (
+      {mode === "visual" && canShowVisual ? (
         <VisualDiffView
           oldContent={diffState.oldContent}
           newContent={diffState.newContent}

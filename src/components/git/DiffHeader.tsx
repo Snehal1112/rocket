@@ -1,13 +1,13 @@
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { GitStatusBadge } from './GitStatusBadge';
-import type { DiffState } from '@/types/pane-types';
-import type { GitStatusKind } from '@/lib/tauri-api';
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GitStatusBadge } from "./GitStatusBadge";
+import type { DiffState } from "@/types/pane-types";
+import type { GitStatusKind } from "@/lib/tauri-api";
 
 interface DiffHeaderProps {
   diffState: DiffState;
   onToggleStaged: (isStaged: boolean) => void;
-  mode: 'text' | 'visual';
-  onModeChange: (mode: 'text' | 'visual') => void;
+  mode: "text" | "visual";
+  onModeChange: (mode: "text" | "visual") => void;
   canShowVisual: boolean;
 }
 
@@ -27,21 +27,29 @@ export function DiffHeader({
         {canShowVisual && (
           <Tabs
             value={mode}
-            onValueChange={(v) => onModeChange(v as 'text' | 'visual')}
+            onValueChange={(v) => onModeChange(v as "text" | "visual")}
           >
             <TabsList className="h-6">
-              <TabsTrigger value="text" className="text-xs px-2 py-0.5">Text</TabsTrigger>
-              <TabsTrigger value="visual" className="text-xs px-2 py-0.5">Visual</TabsTrigger>
+              <TabsTrigger value="text" className="text-xs px-2 py-0.5">
+                Text
+              </TabsTrigger>
+              <TabsTrigger value="visual" className="text-xs px-2 py-0.5">
+                Visual
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         )}
         <Tabs
-          value={diffState.isStaged ? 'staged' : 'working'}
-          onValueChange={(v) => onToggleStaged(v === 'staged')}
+          value={diffState.isStaged ? "staged" : "working"}
+          onValueChange={(v) => onToggleStaged(v === "staged")}
         >
           <TabsList className="h-6">
-            <TabsTrigger value="working" className="text-xs px-2 py-0.5">Working</TabsTrigger>
-            <TabsTrigger value="staged" className="text-xs px-2 py-0.5">Staged</TabsTrigger>
+            <TabsTrigger value="working" className="text-xs px-2 py-0.5">
+              Working
+            </TabsTrigger>
+            <TabsTrigger value="staged" className="text-xs px-2 py-0.5">
+              Staged
+            </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>

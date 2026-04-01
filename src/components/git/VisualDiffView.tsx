@@ -1,6 +1,6 @@
-import { cn } from '@/lib/utils';
-import { parseRequestDiff } from '@/lib/parse-request-diff';
-import type { RowChange } from '@/types/visual-diff-types';
+import { cn } from "@/lib/utils";
+import { parseRequestDiff } from "@/lib/parse-request-diff";
+import type { RowChange } from "@/types/visual-diff-types";
 
 interface VisualDiffViewProps {
   oldContent: string | undefined;
@@ -22,9 +22,11 @@ function DiffField({
   if (!changed) {
     return (
       <tr>
-        <td className="py-1 pr-4 text-muted-foreground w-32 align-top">{label}</td>
+        <td className="py-1 pr-4 text-muted-foreground w-32 align-top">
+          {label}
+        </td>
         <td className="py-1 font-mono text-xs" colSpan={2}>
-          {newValue ?? oldValue ?? '—'}
+          {newValue ?? oldValue ?? "—"}
         </td>
       </tr>
     );
@@ -33,8 +35,12 @@ function DiffField({
     <>
       {oldValue !== undefined && (
         <tr className="bg-red-50 dark:bg-red-950/20">
-          <td className="py-1 pr-4 text-muted-foreground w-32 align-top">{label}</td>
-          <td className="py-1 pr-2 text-xs text-red-500 dark:text-red-400 w-8 align-top">old</td>
+          <td className="py-1 pr-4 text-muted-foreground w-32 align-top">
+            {label}
+          </td>
+          <td className="py-1 pr-2 text-xs text-red-500 dark:text-red-400 w-8 align-top">
+            old
+          </td>
           <td className="py-1 font-mono text-xs text-red-700 dark:text-red-300 line-through break-all">
             {oldValue}
           </td>
@@ -43,9 +49,11 @@ function DiffField({
       {newValue !== undefined && (
         <tr className="bg-green-50 dark:bg-green-950/20">
           <td className="py-1 pr-4 text-muted-foreground w-32 align-top">
-            {oldValue !== undefined ? '' : label}
+            {oldValue !== undefined ? "" : label}
           </td>
-          <td className="py-1 pr-2 text-xs text-green-500 dark:text-green-400 w-8 align-top">new</td>
+          <td className="py-1 pr-2 text-xs text-green-500 dark:text-green-400 w-8 align-top">
+            new
+          </td>
           <td className="py-1 font-mono text-xs text-green-700 dark:text-green-300 break-all">
             {newValue}
           </td>
@@ -55,25 +63,25 @@ function DiffField({
   );
 }
 
-const ROW_BG: Record<RowChange['status'], string> = {
-  added: 'bg-green-50 dark:bg-green-950/20',
-  removed: 'bg-red-50 dark:bg-red-950/20',
-  modified: 'bg-amber-50 dark:bg-amber-950/20',
-  unchanged: '',
+const ROW_BG: Record<RowChange["status"], string> = {
+  added: "bg-green-50 dark:bg-green-950/20",
+  removed: "bg-red-50 dark:bg-red-950/20",
+  modified: "bg-amber-50 dark:bg-amber-950/20",
+  unchanged: "",
 };
 
-const ROW_BADGE: Record<RowChange['status'], string> = {
-  added: 'text-green-600 dark:text-green-400',
-  removed: 'text-red-600 dark:text-red-400',
-  modified: 'text-amber-600 dark:text-amber-400',
-  unchanged: 'text-muted-foreground',
+const ROW_BADGE: Record<RowChange["status"], string> = {
+  added: "text-green-600 dark:text-green-400",
+  removed: "text-red-600 dark:text-red-400",
+  modified: "text-amber-600 dark:text-amber-400",
+  unchanged: "text-muted-foreground",
 };
 
-const ROW_LABEL: Record<RowChange['status'], string> = {
-  added: 'A',
-  removed: 'D',
-  modified: 'M',
-  unchanged: '',
+const ROW_LABEL: Record<RowChange["status"], string> = {
+  added: "A",
+  removed: "D",
+  modified: "M",
+  unchanged: "",
 };
 
 // Renders a key/value list diff (headers, params) as a table with status indicators.
@@ -88,24 +96,32 @@ function KVTable({ title, rows }: { title: string; rows: RowChange[] }) {
         <table className="w-full text-xs">
           <tbody>
             {rows.map((row) => (
-              <tr key={row.key} className={cn('border-b last:border-0', ROW_BG[row.status])}>
-                <td className={cn('py-1.5 pl-2 pr-1 font-bold w-4', ROW_BADGE[row.status])}>
+              <tr
+                key={row.key}
+                className={cn("border-b last:border-0", ROW_BG[row.status])}
+              >
+                <td
+                  className={cn(
+                    "py-1.5 pl-2 pr-1 font-bold w-4",
+                    ROW_BADGE[row.status],
+                  )}
+                >
                   {ROW_LABEL[row.status]}
                 </td>
                 <td className="py-1.5 px-2 font-mono text-muted-foreground w-1/3">
                   {row.key}
                 </td>
                 <td className="py-1.5 px-2 font-mono opacity-60 w-1/3 line-through">
-                  {row.status === 'removed' || row.status === 'modified'
-                    ? (row.oldRow?.value ?? '')
-                    : ''}
+                  {row.status === "removed" || row.status === "modified"
+                    ? (row.oldRow?.value ?? "")
+                    : ""}
                 </td>
                 <td className="py-1.5 px-2 font-mono">
-                  {row.status === 'added' || row.status === 'modified'
-                    ? (row.newRow?.value ?? '')
-                    : row.status === 'unchanged'
-                      ? (row.newRow?.value ?? '')
-                      : ''}
+                  {row.status === "added" || row.status === "modified"
+                    ? (row.newRow?.value ?? "")
+                    : row.status === "unchanged"
+                      ? (row.newRow?.value ?? "")
+                      : ""}
                 </td>
               </tr>
             ))}
@@ -117,7 +133,10 @@ function KVTable({ title, rows }: { title: string; rows: RowChange[] }) {
 }
 
 // Renders API request file changes as a structured field-by-field comparison.
-export function VisualDiffView({ oldContent, newContent }: VisualDiffViewProps) {
+export function VisualDiffView({
+  oldContent,
+  newContent,
+}: VisualDiffViewProps) {
   const diff = parseRequestDiff(oldContent, newContent);
 
   if (!diff) {
@@ -172,7 +191,9 @@ export function VisualDiffView({ oldContent, newContent }: VisualDiffViewProps) 
                   label="Mode"
                   oldValue={diff.body.oldValue?.mode}
                   newValue={diff.body.newValue?.mode}
-                  changed={diff.body.oldValue?.mode !== diff.body.newValue?.mode}
+                  changed={
+                    diff.body.oldValue?.mode !== diff.body.newValue?.mode
+                  }
                 />
               </tbody>
             </table>
@@ -215,12 +236,12 @@ export function VisualDiffView({ oldContent, newContent }: VisualDiffViewProps) 
                     label={diff.preRequestScript.label}
                     oldValue={
                       diff.preRequestScript.oldValue !== undefined
-                        ? `${diff.preRequestScript.oldValue.slice(0, 60)}${diff.preRequestScript.oldValue.length > 60 ? '…' : ''}`
+                        ? `${diff.preRequestScript.oldValue.slice(0, 60)}${diff.preRequestScript.oldValue.length > 60 ? "…" : ""}`
                         : undefined
                     }
                     newValue={
                       diff.preRequestScript.newValue !== undefined
-                        ? `${diff.preRequestScript.newValue.slice(0, 60)}${diff.preRequestScript.newValue.length > 60 ? '…' : ''}`
+                        ? `${diff.preRequestScript.newValue.slice(0, 60)}${diff.preRequestScript.newValue.length > 60 ? "…" : ""}`
                         : undefined
                     }
                     changed={diff.preRequestScript.changed}
@@ -231,12 +252,12 @@ export function VisualDiffView({ oldContent, newContent }: VisualDiffViewProps) 
                     label={diff.postResponseScript.label}
                     oldValue={
                       diff.postResponseScript.oldValue !== undefined
-                        ? `${diff.postResponseScript.oldValue.slice(0, 60)}${diff.postResponseScript.oldValue.length > 60 ? '…' : ''}`
+                        ? `${diff.postResponseScript.oldValue.slice(0, 60)}${diff.postResponseScript.oldValue.length > 60 ? "…" : ""}`
                         : undefined
                     }
                     newValue={
                       diff.postResponseScript.newValue !== undefined
-                        ? `${diff.postResponseScript.newValue.slice(0, 60)}${diff.postResponseScript.newValue.length > 60 ? '…' : ''}`
+                        ? `${diff.postResponseScript.newValue.slice(0, 60)}${diff.postResponseScript.newValue.length > 60 ? "…" : ""}`
                         : undefined
                     }
                     changed={diff.postResponseScript.changed}
@@ -249,7 +270,9 @@ export function VisualDiffView({ oldContent, newContent }: VisualDiffViewProps) 
       )}
 
       {!diff.hasChanges && (
-        <p className="text-center text-xs text-muted-foreground py-8">No changes detected.</p>
+        <p className="text-center text-xs text-muted-foreground py-8">
+          No changes detected.
+        </p>
       )}
     </div>
   );
