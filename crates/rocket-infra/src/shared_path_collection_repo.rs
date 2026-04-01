@@ -22,7 +22,7 @@ impl SharedPathCollectionRepo {
     }
 
     fn repo(&self) -> FsCollectionRepo {
-        let base = self.active_workspace_path.lock().unwrap().join("collections");
+        let base = self.active_workspace_path.lock().expect("active workspace path lock poisoned").join("collections");
         FsCollectionRepo::new(base)
     }
 }

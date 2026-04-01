@@ -75,7 +75,7 @@ impl WorkspaceService {
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
         registry.active_workspace_id = id.to_string();
         self.repo.save(&registry)?;
-        *self.active_path.lock().unwrap() = workspace.path.clone();
+        *self.active_path.lock().expect("active workspace path lock poisoned") = workspace.path.clone();
         self.publisher.publish(DomainEvent::WorkspaceSwitched {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
@@ -114,7 +114,7 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().unwrap() = registry.workspaces[0].path.clone();
+            *self.active_path.lock().expect("active workspace path lock poisoned") = registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceClosed { id: id.to_string() });
@@ -273,7 +273,7 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().unwrap() = registry.workspaces[0].path.clone();
+            *self.active_path.lock().expect("active workspace path lock poisoned") = registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceDeleted { id: id.to_string() });

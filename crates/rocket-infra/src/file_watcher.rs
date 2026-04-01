@@ -58,13 +58,13 @@ impl NotifyFileWatcher {
             .watch(&collections_dir, RecursiveMode::Recursive)
             .map_err(|e| e.to_string())?;
 
-        *self.watcher.lock().unwrap() = Some(watcher);
+        *self.watcher.lock().expect("file watcher lock poisoned") = Some(watcher);
         Ok(())
     }
 
     /// Stop watching by dropping the underlying watcher.
     pub fn stop(&self) {
-        *self.watcher.lock().unwrap() = None;
+        *self.watcher.lock().expect("file watcher lock poisoned") = None;
     }
 }
 
