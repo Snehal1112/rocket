@@ -257,7 +257,7 @@ export function CollectionNode({
                   <span className="truncate font-medium text-foreground">
                     {summary.name}
                   </span>
-                  {summary.refType === 'external' && (
+                  {summary.refType === "external" && (
                     <span className="ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                       ext
                     </span>
@@ -290,9 +290,7 @@ export function CollectionNode({
                 Overview
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => setCreateRequestOpen(true)}
-              >
+              <DropdownMenuItem onClick={() => setCreateRequestOpen(true)}>
                 <Plus className="h-3.5 w-3.5 mr-2" /> New Request
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -346,9 +344,7 @@ export function CollectionNode({
           Overview
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => setCreateRequestOpen(true)}
-        >
+        <ContextMenuItem onClick={() => setCreateRequestOpen(true)}>
           New Request
         </ContextMenuItem>
         <ContextMenuItem onClick={() => void onNewFolder(summary.name, "")}>
