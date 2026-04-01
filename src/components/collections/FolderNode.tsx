@@ -166,7 +166,7 @@ export function FolderNode({
             const requestPath = `${basePath}/${fileName}`;
             return (
               <RequestNode
-                key={item.uid}
+                key={item.fileName ?? item.uid}
                 uid={item.uid} name={item.name} method={item.method}
                 collectionName={collectionName} path={requestPath}
                 itemData={item} summaries={summaries}
