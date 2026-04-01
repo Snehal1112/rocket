@@ -1,4 +1,6 @@
-use rocket_app::EnvironmentService;
+use std::sync::Mutex;
+
+use rocket_app::{EnvironmentService, WorkspaceService};
 use rocket_environment::Environment;
 use rocket_shared::error::DomainError;
 use tauri::State;
@@ -32,4 +34,24 @@ pub fn delete_environment(
     svc: State<'_, EnvironmentService>,
 ) -> Result<(), DomainError> {
     svc.delete(&name)
+}
+
+#[tauri::command]
+pub fn get_global_environment_name(
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<Option<String>, DomainError> {
+    workspace_svc.lock().unwrap().get_global_environment_name()
+}
+
+#[tauri::command]
+pub fn set_global_environment(
+    name: Option<String>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    workspace_svc.lock().unwrap().set_global_environment(name)
+}
+
+#[tauri::command]
+pub fn get_process_env_vars() -> std::collections::HashMap<String, String> {
+    std::env::vars().collect()
 }

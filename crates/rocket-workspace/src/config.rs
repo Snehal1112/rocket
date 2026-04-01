@@ -44,6 +44,9 @@ pub struct WorkspaceConfig {
     pub collections: Vec<CollectionReference>,
     #[serde(default)]
     pub environments: WorkspaceEnvironmentsConfig,
+    /// Name of the selected global environment (workspace/environments/<n>.yml).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_environment: Option<String>,
 }
 
 impl WorkspaceConfig {
@@ -54,6 +57,7 @@ impl WorkspaceConfig {
             description: None,
             collections: Vec::new(),
             environments: WorkspaceEnvironmentsConfig::default(),
+            global_environment: None,
         }
     }
 
@@ -208,5 +212,18 @@ mod tests {
         assert_eq!(cfg.name, "Minimal");
         assert!(cfg.collections.is_empty());
         assert_eq!(cfg.description, None);
+    }
+
+    #[test]
+    fn workspace_global_environment_roundtrip() {
+        let yaml = "name: test\nglobalEnvironment: staging";
+        let ws: WorkspaceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(ws.global_environment, Some("staging".into()));
+    }
+
+    #[test]
+    fn workspace_global_environment_defaults_none() {
+        let ws: WorkspaceConfig = serde_yaml::from_str("name: test").unwrap();
+        assert!(ws.global_environment.is_none());
     }
 }
