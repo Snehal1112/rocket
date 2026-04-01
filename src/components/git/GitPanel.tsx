@@ -1,29 +1,33 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { GitCommitForm } from '@/components/git/GitCommitForm';
-import { GitCommitLog } from '@/components/git/GitCommitLog';
-import { GitStashSection } from '@/components/git/GitStashSection';
-import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
-import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
-import { GitCloneDialog } from '@/components/git/GitCloneDialog';
-import { GitLandingPanel } from '@/components/git/GitLandingPanel';
-import { GitLinksSection } from '@/components/git/GitLinksSection';
-import { GitFileList } from '@/components/git/GitFileList';
-import { DiffViewForFile } from '@/components/git/DiffViewForFile';
-import { BranchSelector } from '@/components/git/BranchSelector';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
-import { Separator } from '@/components/ui/separator';
-import { useGitStore } from '@/stores/git-store';
-import { gitInit, gitIsRepo } from '@/lib/tauri-api';
-import { Package, ChevronDown, ArrowLeft } from 'lucide-react';
-import type { FileStatus } from '@/lib/tauri-api';
+import { useState, useEffect, useCallback } from "react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { GitCommitForm } from "@/components/git/GitCommitForm";
+import { GitCommitLog } from "@/components/git/GitCommitLog";
+import { GitStashSection } from "@/components/git/GitStashSection";
+import { GitCredentialsDialog } from "@/components/git/GitCredentialsDialog";
+import { GitRemotesDialog } from "@/components/git/GitRemotesDialog";
+import { GitCloneDialog } from "@/components/git/GitCloneDialog";
+import { GitLandingPanel } from "@/components/git/GitLandingPanel";
+import { GitLinksSection } from "@/components/git/GitLinksSection";
+import { GitFileList } from "@/components/git/GitFileList";
+import { DiffViewForFile } from "@/components/git/DiffViewForFile";
+import { BranchSelector } from "@/components/git/BranchSelector";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
+import { useGitStore } from "@/stores/git-store";
+import { gitInit, gitIsRepo } from "@/lib/tauri-api";
+import { Package, ChevronDown, ArrowLeft } from "lucide-react";
+import type { FileStatus } from "@/lib/tauri-api";
 
 type RightPanelView =
-  | { kind: 'landing' }
-  | { kind: 'diff'; file: FileStatus }
-  | { kind: 'commits' }
-  | { kind: 'stashes' };
+  | { kind: "landing" }
+  | { kind: "diff"; file: FileStatus }
+  | { kind: "commits" }
+  | { kind: "stashes" };
 
 interface GitPanelProps {
   collectionPath: string;
@@ -33,7 +37,10 @@ interface GitPanelProps {
 export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   // null = loading, false = not a repo, true = is a repo.
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
-  const [rightPanel, setRightPanel] = useState<RightPanelView>({ kind: 'landing' });
+  const [leftWidth, setLeftWidth] = useState(320);
+  const [rightPanel, setRightPanel] = useState<RightPanelView>({
+    kind: "landing",
+  });
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [changesOpen, setChangesOpen] = useState(true);
@@ -41,18 +48,21 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const { showCredentialsDialog, setCollection, refreshLog } = useGitStore();
 
   // Check git repo status and initialize the git store when the path is known.
-  const checkAndLoad = useCallback(async (path: string) => {
-    setIsRepo(null);
-    try {
-      const repo = await gitIsRepo(path);
-      setIsRepo(repo);
-      if (repo) {
-        await setCollection(path);
+  const checkAndLoad = useCallback(
+    async (path: string) => {
+      setIsRepo(null);
+      try {
+        const repo = await gitIsRepo(path);
+        setIsRepo(repo);
+        if (repo) {
+          await setCollection(path);
+        }
+      } catch {
+        setIsRepo(false);
       }
-    } catch {
-      setIsRepo(false);
-    }
-  }, [setCollection]);
+    },
+    [setCollection],
+  );
 
   useEffect(() => {
     void checkAndLoad(collectionPath);
@@ -60,7 +70,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
-    if (rightPanel.kind === 'commits') void refreshLog();
+    if (rightPanel.kind === "commits") void refreshLog();
   }, [rightPanel.kind, refreshLog]);
 
   if (isRepo === null) {
@@ -97,7 +107,10 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           </Button>
         </div>
         {showCredentialsDialog && <GitCredentialsDialog />}
-        <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
+        <GitCloneDialog
+          open={showCloneDialog}
+          onOpenChange={setShowCloneDialog}
+        />
       </div>
     );
   }
@@ -105,10 +118,11 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 flex overflow-hidden">
-
         {/* LEFT PANEL */}
-        <div className="w-80 border-r border-border/70 flex flex-col overflow-hidden">
-
+        <div
+          style={{ width: `${leftWidth}px` }}
+          className="shrink-0 border-r border-border/70 flex flex-col overflow-hidden"
+        >
           {/* Collection name header with branch selector. */}
           <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0">
             <Package className="h-3.5 w-3.5 text-muted-foreground" />
@@ -122,7 +136,9 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           <div className="shrink-0 px-3 pt-2.5 pb-2 space-y-2 border-b border-border/70">
             <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
               <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium text-primary">
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? '-rotate-90' : ''}`} />
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? "-rotate-90" : ""}`}
+                />
                 Changes
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2 space-y-2">
@@ -133,7 +149,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
           {/* File list */}
           <GitFileList
-            onFileClick={(file) => setRightPanel({ kind: 'diff', file })}
+            onFileClick={(file) => setRightPanel({ kind: "diff", file })}
           />
 
           {/* Links section */}
@@ -145,37 +161,60 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           </div>
         </div>
 
+        {/* Resize handle. */}
+        <div
+          role="separator"
+          className="w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = leftWidth;
+            const onMove = (ev: PointerEvent) => {
+              setLeftWidth(Math.min(500, Math.max(200, startWidth + ev.clientX - startX)));
+            };
+            const onUp = () => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+            };
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+          }}
+        />
+
         {/* RIGHT PANEL */}
         <div className="flex-1 overflow-hidden flex flex-col">
           {/* Breadcrumb header — visible when not on landing/overview. */}
-          {rightPanel.kind !== 'landing' && (
+          {rightPanel.kind !== "landing" && (
             <div className="flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0">
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 gap-1.5 text-xs"
-                onClick={() => setRightPanel({ kind: 'landing' })}
+                onClick={() => setRightPanel({ kind: "landing" })}
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 Overview
               </Button>
               <Separator orientation="vertical" className="h-4" />
               <span className="text-xs text-muted-foreground truncate">
-                {rightPanel.kind === 'diff' && rightPanel.file.path}
-                {rightPanel.kind === 'commits' && 'Commit History'}
-                {rightPanel.kind === 'stashes' && 'Stashes'}
+                {rightPanel.kind === "diff" && rightPanel.file.path}
+                {rightPanel.kind === "commits" && "Commit History"}
+                {rightPanel.kind === "stashes" && "Stashes"}
               </span>
             </div>
           )}
 
           {/* Right panel content. */}
           <div className="flex-1 overflow-hidden">
-            {rightPanel.kind === 'landing' && <GitLandingPanel />}
-            {rightPanel.kind === 'diff' && (
-              <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
+            {rightPanel.kind === "landing" && <GitLandingPanel />}
+            {rightPanel.kind === "diff" && (
+              <DiffViewForFile
+                file={rightPanel.file}
+                collectionPath={collectionPath}
+              />
             )}
-            {rightPanel.kind === 'commits' && <GitCommitLog />}
-            {rightPanel.kind === 'stashes' && (
+            {rightPanel.kind === "commits" && <GitCommitLog />}
+            {rightPanel.kind === "stashes" && (
               <ScrollArea className="h-full">
                 <div className="p-4">
                   <GitStashSection />
@@ -184,13 +223,18 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             )}
           </div>
         </div>
-
       </div>
 
       {/* Dialogs */}
       {showCredentialsDialog && <GitCredentialsDialog />}
-      <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
-      <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
+      <GitRemotesDialog
+        open={showRemotesDialog}
+        onOpenChange={setShowRemotesDialog}
+      />
+      <GitCloneDialog
+        open={showCloneDialog}
+        onOpenChange={setShowCloneDialog}
+      />
     </div>
   );
 }
