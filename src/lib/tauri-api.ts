@@ -724,13 +724,13 @@ export const getProcessEnvVars = () =>
 export const getFolderChainVariables = (collection: string, requestPath: string) =>
   invoke<CollectionVariable[]>('get_folder_chain_variables', { collection, requestPath });
 export const saveFolderVariables = (collection: string, folderPath: string, variables: CollectionVariable[]) =>
-  invoke<void>('save_folder_variables', { collection, folderPath, variables });
+  invoke<void>('save_folder_variables', { collection, folderPath, vars: variables });
 
 // Request variables
 export const getRequestVariables = (collection: string, requestPath: string) =>
   invoke<CollectionVariable[]>('get_request_variables', { collection, requestPath });
 export const saveRequestVariables = (collection: string, requestPath: string, variables: CollectionVariable[]) =>
-  invoke<void>('save_request_variables', { collection, requestPath, variables });
+  invoke<void>('save_request_variables', { collection, requestPath, vars: variables });
 
 // ============================================================
 // UI state persistence
