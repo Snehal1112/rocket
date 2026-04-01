@@ -48,7 +48,6 @@ dirs.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
 url = "2"
-openssl.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
