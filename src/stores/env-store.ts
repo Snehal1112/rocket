@@ -12,8 +12,9 @@ const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
 export interface EnvState {
   environments: Environment[];
   activeEnvId: string | null;
+  activeCollection: string | null;
 
-  loadEnvironments: () => Promise<void>;
+  loadEnvironments: (collection: string) => Promise<void>;
   setActiveEnv: (id: string | null) => void;
   createEnvironment: (name: string) => Promise<void>;
   updateEnvironment: (env: Environment) => Promise<void>;
@@ -22,54 +23,73 @@ export interface EnvState {
   resolveVariables: (text: string) => string;
 }
 
-const STORAGE_KEY = 'rocket-active-env';
-
 export const useEnvStore = create<EnvState>((set, get) => ({
   environments: [],
-  activeEnvId: localStorage.getItem(STORAGE_KEY),
+  activeEnvId: null,
+  activeCollection: null,
 
-  async loadEnvironments() {
+  async loadEnvironments(collection) {
+    set({ activeCollection: collection });
     try {
-      const environments = await listEnvironments();
+      // Cast needed until Task 3 updates the tauri-api signatures.
+      const environments = await (listEnvironments as any)(collection) as Environment[];
+      // Discard if another collection was loaded while we awaited.
+      if (get().activeCollection !== collection) return;
       set({ environments });
+      const stored = localStorage.getItem(`rocket-api:active-env:${collection}`);
+      const found = environments.find((e) => e.name === stored);
+      set({ activeEnvId: found?.name ?? null });
     } catch (err) {
       console.error('[EnvStore] Failed to load environments:', err);
+      // Only reset state if this collection is still active.
+      if (get().activeCollection === collection) {
+        set({ environments: [], activeEnvId: null });
+      }
     }
   },
 
   setActiveEnv(id) {
-    if (id) {
-      localStorage.setItem(STORAGE_KEY, id);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+    const { activeCollection } = get();
     set({ activeEnvId: id });
+    const key = activeCollection ? `rocket-api:active-env:${activeCollection}` : null;
+    if (key) {
+      if (id) localStorage.setItem(key, id);
+      else localStorage.removeItem(key);
+    }
   },
 
   async createEnvironment(name) {
+    const { activeCollection } = get();
+    if (!activeCollection) throw new Error('No active collection');
     const env: Environment = { name, variables: [] };
-    await saveEnvironment(env);
-    await get().loadEnvironments();
-    localStorage.setItem(STORAGE_KEY, name);
-    set({ activeEnvId: name });
+    // Cast needed until Task 3 updates the tauri-api signatures.
+    await (saveEnvironment as any)(activeCollection, env);
+    await get().loadEnvironments(activeCollection);
+    get().setActiveEnv(name);
   },
 
   async updateEnvironment(env) {
-    await saveEnvironment(env);
+    const { activeCollection } = get();
+    if (!activeCollection) throw new Error('No active collection');
+    // Cast needed until Task 3 updates the tauri-api signatures.
+    await (saveEnvironment as any)(activeCollection, env);
     set((state) => ({
-      environments: state.environments.map((e) =>
-        e.name === env.name ? env : e,
-      ),
+      environments: state.environments.map((e) => (e.name === env.name ? env : e)),
     }));
   },
 
   async deleteEnvironment(name) {
-    await deleteEnvApi(name);
-    if (get().activeEnvId === name) localStorage.removeItem(STORAGE_KEY);
+    const { activeCollection } = get();
+    if (!activeCollection) throw new Error('No active collection');
+    // Cast needed until Task 3 updates the tauri-api signatures.
+    await (deleteEnvApi as any)(activeCollection, name);
     set((state) => ({
       environments: state.environments.filter((e) => e.name !== name),
       activeEnvId: state.activeEnvId === name ? null : state.activeEnvId,
     }));
+    if (get().activeEnvId === null && activeCollection) {
+      localStorage.removeItem(`rocket-api:active-env:${activeCollection}`);
+    }
   },
 
   getActiveVariables() {
