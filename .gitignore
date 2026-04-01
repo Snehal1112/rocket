@@ -33,3 +33,4 @@ target
 .superpowers/
 .worktrees/
 .yarn/install-state.gz
+.worktrees/
