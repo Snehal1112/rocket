@@ -158,7 +158,7 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, Request as CollectionRequest};
+    use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable, Request as CollectionRequest};
     use rocket_environment::{Environment, Variable};
     use rocket_http::{CookieJar, HttpResponse};
     use rocket_shared::error::{DomainError, DomainResult};
@@ -323,6 +323,10 @@ mod tests {
             Ok(self.settings.clone())
         }
         fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> { Ok(()) }
+        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
     }
 
     fn sample_input(url: &str, env_name: Option<&str>) -> ExecuteRequestInput {

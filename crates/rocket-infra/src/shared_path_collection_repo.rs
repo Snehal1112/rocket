@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSettings, CollectionSummary, Request,
+    Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
+    Request,
 };
 use rocket_shared::error::DomainResult;
 
@@ -111,5 +112,39 @@ impl CollectionRepository for SharedPathCollectionRepo {
         settings: &CollectionSettings,
     ) -> DomainResult<()> {
         self.repo().save_settings(name, settings)
+    }
+
+    fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo().get_folder_chain_variables(collection, request_path)
+    }
+
+    fn save_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.repo().save_folder_variables(collection, folder_path, vars)
+    }
+
+    fn get_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo().get_request_variables(collection, request_path)
+    }
+
+    fn save_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.repo().save_request_variables(collection, request_path, vars)
     }
 }

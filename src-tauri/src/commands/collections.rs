@@ -1,5 +1,5 @@
 use rocket_app::CollectionService;
-use rocket_collection::{Collection, CollectionSummary, Request};
+use rocket_collection::{Collection, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::error::DomainError;
 use serde::Serialize;
 use std::fs;
@@ -166,4 +166,42 @@ pub fn scan_collections_in_path(path: String) -> Result<Vec<CollectionScanResult
     }
     results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(results)
+}
+
+#[tauri::command]
+pub fn get_folder_chain_variables(
+    collection: String,
+    request_path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Vec<CollectionVariable>, DomainError> {
+    svc.get_folder_chain_variables(&collection, &request_path)
+}
+
+#[tauri::command]
+pub fn save_folder_variables(
+    collection: String,
+    folder_path: String,
+    vars: Vec<CollectionVariable>,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.save_folder_variables(&collection, &folder_path, vars)
+}
+
+#[tauri::command]
+pub fn get_request_variables(
+    collection: String,
+    request_path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Vec<CollectionVariable>, DomainError> {
+    svc.get_request_variables(&collection, &request_path)
+}
+
+#[tauri::command]
+pub fn save_request_variables(
+    collection: String,
+    request_path: String,
+    vars: Vec<CollectionVariable>,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.save_request_variables(&collection, &request_path, vars)
 }

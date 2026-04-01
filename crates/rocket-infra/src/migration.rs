@@ -128,6 +128,7 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
                     folder_type: Some("folder".into()),
                     seq: None,
                     tags: Vec::new(),
+                    request: None,
                 };
                 let yaml = serde_yaml::to_string(&info)
                     .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;

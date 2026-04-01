@@ -7,10 +7,13 @@ use rocket_collection::{
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::migration::{detect_format, migrate_collection, CollectionFormat};
-use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
+use crate::oc_conversions::{
+    collection_variable_to_oc_variable, oc_http_request_to_request,
+    oc_variable_to_collection_variable, request_to_oc_http_request,
+};
 use crate::opencollection::{
-    OcAuth, OcCollection, OcFolderInfo, OcHttpRequest, OcHttpRequestHeader, OcInfo,
-    OcRequestDefaults, OcVariable,
+    OcAuth, OcCollection, OcFolderInfo, OcHttpRequest, OcHttpRequestHeader,
+    OcHttpRequestRuntime, OcInfo, OcRequestDefaults, OcVariable,
 };
 
 /// Read UID from YAML metadata (opencollection.yml or folder.yml).
@@ -383,6 +386,7 @@ impl CollectionRepository for FsCollectionRepo {
             folder_type: Some("folder".into()),
             seq: None,
             tags: Vec::new(),
+            request: None,
         };
         let yaml = serde_yaml::to_string(&info)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
@@ -574,6 +578,123 @@ impl CollectionRepository for FsCollectionRepo {
             let _ = fs::remove_file(&legacy);
         }
 
+        Ok(())
+    }
+
+    fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        let collection_dir = self.collection_path(collection);
+        let path = std::path::Path::new(request_path);
+        let dir_components: Vec<&str> = path
+            .parent()
+            .unwrap_or(std::path::Path::new(""))
+            .components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .collect();
+        // Merge variables from outermost to innermost folder; inner wins on collision.
+        let mut merged: std::collections::HashMap<String, CollectionVariable> =
+            std::collections::HashMap::new();
+        let mut current = collection_dir.clone();
+        for segment in &dir_components {
+            current = current.join(segment);
+            let folder_yml = current.join("folder.yml");
+            if folder_yml.exists() {
+                if let Ok(content) = fs::read_to_string(&folder_yml) {
+                    if let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
+                        if let Some(req) = info.request {
+                            if let Some(vars) = req.variables {
+                                for v in vars {
+                                    let cv = oc_variable_to_collection_variable(v);
+                                    if cv.enabled {
+                                        merged.insert(cv.key.clone(), cv);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut result: Vec<CollectionVariable> = merged.into_values().collect();
+        result.sort_by(|a, b| a.key.cmp(&b.key));
+        Ok(result)
+    }
+
+    fn save_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        let collection_dir = self.collection_path(collection);
+        let folder_dir = if folder_path.is_empty() {
+            collection_dir.clone()
+        } else {
+            self.validate_path(&collection_dir, std::path::Path::new(folder_path))?
+        };
+        let folder_yml_path = folder_dir.join("folder.yml");
+        let mut info: OcFolderInfo = if folder_yml_path.exists() {
+            let content = fs::read_to_string(&folder_yml_path)?;
+            serde_yaml::from_str::<OcFolderInfo>(&content)
+                .unwrap_or_default()
+        } else {
+            OcFolderInfo::default()
+        };
+        let oc_vars: Vec<OcVariable> = vars.into_iter().map(collection_variable_to_oc_variable).collect();
+        let req_defaults = info.request.take().unwrap_or_default();
+        info.request = Some(OcRequestDefaults {
+            variables: if oc_vars.is_empty() { None } else { Some(oc_vars) },
+            ..req_defaults
+        });
+        let yaml = serde_yaml::to_string(&info)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
+        fs::write(&folder_yml_path, yaml)?;
+        Ok(())
+    }
+
+    fn get_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        let collection_dir = self.collection_path(collection);
+        let file_path = resolve_request_path(self, &collection_dir, request_path)?;
+        let content = fs::read_to_string(&file_path)?;
+        let req: OcHttpRequest = serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
+        let vars = req
+            .runtime
+            .map(|r| r.variables)
+            .unwrap_or_default()
+            .into_iter()
+            .map(oc_variable_to_collection_variable)
+            .collect();
+        Ok(vars)
+    }
+
+    fn save_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        let collection_dir = self.collection_path(collection);
+        let file_path = resolve_request_path(self, &collection_dir, request_path)?;
+        let content = fs::read_to_string(&file_path)?;
+        let mut req: OcHttpRequest = serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
+        let oc_vars: Vec<OcVariable> = vars.into_iter().map(collection_variable_to_oc_variable).collect();
+        let runtime = req.runtime.take().unwrap_or_default();
+        req.runtime = Some(OcHttpRequestRuntime {
+            variables: oc_vars,
+            ..runtime
+        });
+        let yaml = serde_yaml::to_string(&req)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize request file: {e}")))?;
+        fs::write(&file_path, yaml)?;
         Ok(())
     }
 }
@@ -1205,5 +1326,71 @@ mod tests {
         assert!(col_dir.join("opencollection.yml").exists());
         assert!(col_dir.join("test.yml").exists());
         assert!(!col_dir.join("test.json").exists());
+    }
+
+    #[test]
+    fn folder_variables_roundtrip() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+
+        let vars = vec![
+            CollectionVariable { key: "BASE_URL".into(), value: "https://api.example.com".into(), initial_value: "".into(), enabled: true, secret: false },
+            CollectionVariable { key: "TIMEOUT".into(), value: "30".into(), initial_value: "".into(), enabled: true, secret: false },
+        ];
+        repo.save_folder_variables("my-api", "auth", vars.clone()).unwrap();
+
+        // save_folder_variables doesn't expose a direct getter; verify via get_folder_chain_variables.
+        let req = rocket_collection::Request::new("Login", HttpMethod::Get, "/login");
+        repo.save_request("my-api", "auth/login.yml", &req).unwrap();
+
+        let chain = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+        assert_eq!(chain.len(), 2);
+        let keys: Vec<&str> = chain.iter().map(|v| v.key.as_str()).collect();
+        assert!(keys.contains(&"BASE_URL"));
+        assert!(keys.contains(&"TIMEOUT"));
+    }
+
+    #[test]
+    fn folder_chain_inner_wins_on_collision() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "outer").unwrap();
+        repo.create_folder("my-api", "outer/inner").unwrap();
+
+        let outer_vars = vec![
+            CollectionVariable { key: "HOST".into(), value: "outer-host".into(), initial_value: "".into(), enabled: true, secret: false },
+        ];
+        let inner_vars = vec![
+            CollectionVariable { key: "HOST".into(), value: "inner-host".into(), initial_value: "".into(), enabled: true, secret: false },
+        ];
+        repo.save_folder_variables("my-api", "outer", outer_vars).unwrap();
+        repo.save_folder_variables("my-api", "outer/inner", inner_vars).unwrap();
+
+        let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
+        repo.save_request("my-api", "outer/inner/test.yml", &req).unwrap();
+
+        let chain = repo.get_folder_chain_variables("my-api", "outer/inner/test.yml").unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].key, "HOST");
+        assert_eq!(chain[0].value, "inner-host");
+    }
+
+    #[test]
+    fn request_variables_roundtrip() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
+        repo.save_request("my-api", "get-users.yml", &req).unwrap();
+
+        let vars = vec![
+            CollectionVariable { key: "PAGE".into(), value: "1".into(), initial_value: "".into(), enabled: true, secret: false },
+        ];
+        repo.save_request_variables("my-api", "get-users.yml", vars).unwrap();
+
+        let loaded = repo.get_request_variables("my-api", "get-users.yml").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].key, "PAGE");
+        assert_eq!(loaded[0].value, "1");
     }
 }
