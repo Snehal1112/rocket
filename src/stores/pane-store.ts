@@ -12,6 +12,7 @@ import {
   removeLeaf,
   splitLeaf,
 } from '@/lib/pane-utils';
+import { useEnvStore } from '@/stores/env-store';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(
@@ -360,6 +361,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       activeCollection: name,
       collectionTabState: updatedState,
     });
+
+    // Reload environments whenever the active collection changes.
+    useEnvStore.getState().loadEnvironments(name);
   },
 
   getOpenTabCount(collection) {

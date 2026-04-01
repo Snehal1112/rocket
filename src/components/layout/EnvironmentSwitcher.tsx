@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check, ChevronDown, Settings } from 'lucide-react';
 import {
   DropdownMenu,
@@ -10,22 +10,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
-import { usePaneStore } from '@/stores/pane-store';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 
 export function EnvironmentSwitcher() {
   const environments = useEnvStore((s) => s.environments);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const setActiveEnv = useEnvStore((s) => s.setActiveEnv);
-  const loadEnvironments = useEnvStore((s) => s.loadEnvironments);
-  // TODO(Task 4): replace with reactive collection switching.
-  const activeCollection = usePaneStore((s) => s.activeCollection);
 
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  useEffect(() => {
-    if (activeCollection) void loadEnvironments(activeCollection);
-  }, [loadEnvironments, activeCollection]);
 
   const activeName = activeEnvId ?? 'No Environment';
 

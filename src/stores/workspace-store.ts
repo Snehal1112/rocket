@@ -17,6 +17,7 @@ import {
   type Workspace,
 } from '@/lib/tauri-api'
 import { usePaneStore } from '@/stores/pane-store'
+import { useEnvStore } from '@/stores/env-store'
 import type { PaneNode } from '@/types/pane-types'
 
 interface WorkspaceState {
@@ -91,6 +92,8 @@ function subscribeToEvents() {
     usePaneStore.getState().closeAll()
     useWorkspaceStore.setState({ activeWorkspaceId: payload.id })
     usePaneStore.getState().openWorkspaceTabs(payload.id)
+    // Clear env state — the new workspace's collection will reload envs via switchCollection.
+    useEnvStore.setState({ environments: [], activeEnvId: null, activeCollection: null })
   })
 
   listen<{ id: string; oldName: string; newName: string }>(

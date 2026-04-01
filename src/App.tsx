@@ -9,6 +9,7 @@ import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
+import { useEnvStore } from '@/stores/env-store';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
 import { useState, useEffect } from 'react';
@@ -41,6 +42,12 @@ function App() {
         if (activeWs) {
           usePaneStore.getState().openWorkspaceTabs(activeWs.id)
         }
+      }
+
+      // Load environments for the initial collection, if one is active.
+      const initialCollection = usePaneStore.getState().activeCollection;
+      if (initialCollection) {
+        void useEnvStore.getState().loadEnvironments(initialCollection);
       }
     }
     void init()

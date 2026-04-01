@@ -16,6 +16,7 @@ import {
 } from "@/lib/tauri-api";
 import { usePaneStore } from "@/stores/pane-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useEnvStore } from "@/stores/env-store";
 import type { PaneNode } from "@/types/pane-types";
 import {
   AlertDialog,
@@ -267,14 +268,27 @@ export function CollectionsSidebar() {
   // Load collections on mount. Debounce file watcher events so rapid
   // filesystem changes collapse into one refresh.
   const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const envDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     void fetchCollections();
     let cancelled = false;
     const unlisteners: Array<() => void> = [];
 
-    onCollectionChanged(() => {
+    onCollectionChanged((event) => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
+
+      // Reload environments if an environment file changed.
+      if (event.path?.includes('/environments/') && event.collection) {
+        const { activeCollection } = useEnvStore.getState();
+        if (event.collection === activeCollection) {
+          if (envDebounce.current) clearTimeout(envDebounce.current);
+          envDebounce.current = setTimeout(
+            () => void useEnvStore.getState().loadEnvironments(activeCollection),
+            300,
+          );
+        }
+      }
     }).then((fn) => {
       if (cancelled) fn();
       else unlisteners.push(fn);
@@ -301,6 +315,7 @@ export function CollectionsSidebar() {
     return () => {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
+      if (envDebounce.current) clearTimeout(envDebounce.current);
       unlisteners.forEach((fn) => fn());
     };
   }, [fetchCollections]);
