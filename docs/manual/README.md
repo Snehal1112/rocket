@@ -51,6 +51,10 @@ Click the workspace name in the Collection Dropdown (or open the Overview tab) t
 - **Collections list** — each collection with its path, request count, and type badge
 - **Description** — editable text area for notes
 
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Workspace Overview Light](screenshots/12-workspace-overview-light.png) | ![Workspace Overview Dark](screenshots/12-workspace-overview-dark.png) |
+
 ### Creating a Workspace
 
 1. Open the workspace switcher in the title bar
@@ -112,6 +116,10 @@ Click the `...` button on any collection or folder, then **New Request**. A dial
 
 The request is saved to disk immediately and opens in a new tab.
 
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Create Request Dialog Light](screenshots/17-create-request-dialog-light.png) | ![Create Request Dialog Dark](screenshots/17-create-request-dialog-dark.png) |
+
 ### 2. Quick New Tab (`+` button)
 
 Click the `+` button at the end of the tab bar:
@@ -135,6 +143,10 @@ When viewing an unsaved request:
 4. Click **Save**
 
 The tab becomes a saved, collection-bound request with auto-save enabled.
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Save to Collection Light](screenshots/18-save-to-collection-light.png) | ![Save to Collection Dark](screenshots/18-save-to-collection-dark.png) |
 
 ---
 
@@ -258,6 +270,10 @@ Environments let you define variables (like `BASE_URL`, `API_KEY`) that are reso
 
 Rocket has built-in git support for version-controlling your collections. Open the **Git UI** tab from the workspace tabs or the git toolbar button.
 
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Git Panel Light](screenshots/13-git-panel-light.png) | ![Git Panel Dark](screenshots/13-git-panel-dark.png) |
+
 ### Two-Panel Layout
 
 - **Left panel** (resizable) — file list with staged/unstaged changes, commit form, branch selector
@@ -281,6 +297,10 @@ Click the branch name in the left panel header to:
 - **Delete** or **merge** branches
 - **Checkout remote branches** — after fetching, remote branches appear in a "Remote" section. Clicking one creates a local tracking branch and switches to it.
 
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Branch Selector Light](screenshots/15-branch-selector-light.png) | ![Branch Selector Dark](screenshots/15-branch-selector-dark.png) |
+
 ### Remote Operations
 
 The landing panel shows **Fetch**, **Pull**, and **Push** buttons with commit counts:
@@ -298,6 +318,10 @@ Click any changed file to see a side-by-side diff with:
 - Toggle between **Working** and **Staged** views
 
 A breadcrumb header shows the file path with a **"back to Overview"** button.
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Git Diff Light](screenshots/14-git-diff-light.png) | ![Git Diff Dark](screenshots/14-git-diff-dark.png) |
 
 ### Conflict Resolution
 
@@ -326,6 +350,10 @@ After completion, the dialog shows:
 - **Latency** — min, avg, max, P50, P95, P99
 - **Throughput** — requests per second
 - **Duration** — total wall-clock time
+
+| Light Mode | Dark Mode |
+|:---:|:---:|
+| ![Load Test Light](screenshots/16-load-test-light.png) | ![Load Test Dark](screenshots/16-load-test-dark.png) |
 
 ---
 
