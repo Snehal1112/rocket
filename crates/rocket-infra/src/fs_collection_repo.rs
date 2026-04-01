@@ -1393,4 +1393,35 @@ mod tests {
         assert_eq!(loaded[0].key, "PAGE");
         assert_eq!(loaded[0].value, "1");
     }
+
+    #[test]
+    fn folder_chain_root_request_returns_empty() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("Root", HttpMethod::Get, "/root");
+        repo.save_request("my-api", "root.yml", &req).unwrap();
+
+        let chain = repo.get_folder_chain_variables("my-api", "root.yml").unwrap();
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn folder_chain_skips_disabled_vars() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "v1").unwrap();
+
+        let vars = vec![
+            CollectionVariable { key: "ENABLED".into(), value: "yes".into(), initial_value: "".into(), enabled: true, secret: false },
+            CollectionVariable { key: "DISABLED".into(), value: "no".into(), initial_value: "".into(), enabled: false, secret: false },
+        ];
+        repo.save_folder_variables("my-api", "v1", vars).unwrap();
+
+        let req = rocket_collection::Request::new("R", HttpMethod::Get, "/r");
+        repo.save_request("my-api", "v1/r.yml", &req).unwrap();
+
+        let chain = repo.get_folder_chain_variables("my-api", "v1/r.yml").unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].key, "ENABLED");
+    }
 }
