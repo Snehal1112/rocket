@@ -85,6 +85,7 @@ interface GitState {
   push: (remote?: string) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
+  clearError: () => void;
   reset: () => void;
 }
 
@@ -452,6 +453,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
+    set({ error: null });
     try {
       await gitPush(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
@@ -466,6 +468,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
+    set({ error: null });
     try {
       await gitPull(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
@@ -481,6 +484,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
+    set({ error: null });
     try {
       await gitFetch(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
@@ -489,6 +493,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ error: String(e) });
     }
   },
+
+  clearError: () => set({ error: null }),
 
   // Reset the store back to its initial state.
   reset: () => {
