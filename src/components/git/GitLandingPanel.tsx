@@ -210,7 +210,7 @@ export function GitLandingPanel() {
               You have uncommitted changes. Pulling may cause conflicts or data loss. Would you like to stash your changes first?
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-wrap gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handlePullAnyway}>Pull Anyway</AlertDialogAction>
             <AlertDialogAction onClick={handleStashAndPull}>Stash & Pull</AlertDialogAction>
@@ -229,7 +229,7 @@ export function GitLandingPanel() {
                 : 'You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-wrap gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handlePushAnyway}>Push Anyway</AlertDialogAction>
             <AlertDialogAction onClick={handleFetchAndPush}>Fetch & Push</AlertDialogAction>
