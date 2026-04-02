@@ -126,16 +126,20 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   },
 
   async fetchGlobalEnv() {
-    const name = await getGlobalEnvironmentName();
-    if (!name) { set({ globalEnvName: null, globalEnv: null }); return; }
-    const { activeCollection } = get();
-    if (activeCollection) {
-      try {
-        const env = await getEnvironment(activeCollection, name);
-        set({ globalEnvName: name, globalEnv: env }); return;
-      } catch {}
+    try {
+      const name = await getGlobalEnvironmentName();
+      if (!name) { set({ globalEnvName: null, globalEnv: null }); return; }
+      const { activeCollection } = get();
+      if (activeCollection) {
+        try {
+          const env = await getEnvironment(activeCollection, name);
+          set({ globalEnvName: name, globalEnv: env }); return;
+        } catch {}
+      }
+      set({ globalEnvName: name, globalEnv: null });
+    } catch (err) {
+      console.error('[EnvStore] Failed to fetch global env:', err);
     }
-    set({ globalEnvName: name, globalEnv: null });
   },
 
   async setGlobalEnv(name) {
@@ -144,7 +148,11 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   },
 
   async loadProcessEnvVars() {
-    set({ processEnvVars: await getProcessEnvVars() });
+    try {
+      set({ processEnvVars: await getProcessEnvVars() });
+    } catch (err) {
+      console.error('[EnvStore] Failed to load process env vars:', err);
+    }
   },
 
   getGlobalVariables() {

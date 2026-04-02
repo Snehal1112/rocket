@@ -44,10 +44,14 @@ function App() {
         }
       }
 
+      // Load process env vars once at startup — they don't change at runtime.
+      void useEnvStore.getState().loadProcessEnvVars();
+
       // Load environments for the initial collection, if one is active.
       const initialCollection = usePaneStore.getState().activeCollection;
       if (initialCollection) {
         void useEnvStore.getState().loadEnvironments(initialCollection);
+        void useEnvStore.getState().fetchGlobalEnv();
       }
     }
     void init()
