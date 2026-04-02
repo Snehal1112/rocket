@@ -716,6 +716,16 @@ export const getGlobalEnvironmentName = () =>
 export const setGlobalEnvironment = (name: string | null) =>
   invoke<void>('set_global_environment', { name });
 
+// Workspace-level global environment CRUD
+export const listGlobalEnvironments = () =>
+  invoke<Environment[]>('list_global_environments');
+export const getGlobalEnvironment = (name: string) =>
+  invoke<Environment>('get_global_environment', { name });
+export const saveGlobalEnvironment = (env: Environment) =>
+  invoke<void>('save_global_environment', { env });
+export const deleteGlobalEnvironment = (name: string) =>
+  invoke<void>('delete_global_environment', { name });
+
 // Process env (read-only OS vars)
 export const getProcessEnvVars = () =>
   invoke<Record<string, string>>('get_process_env_vars');

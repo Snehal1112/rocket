@@ -94,6 +94,59 @@ pub fn set_global_environment(
     workspace_svc.lock().expect("workspace service lock poisoned").set_global_environment(name)
 }
 
+/// Creates an `EnvironmentService` scoped to the workspace-level environments directory.
+fn global_env_service(ws_path: &Path) -> Result<EnvironmentService, DomainError> {
+    let env_dir = ws_path.join("environments");
+    std::fs::create_dir_all(&env_dir).ok();
+    Ok(EnvironmentService::new(
+        Box::new(FsEnvironmentRepo::new(env_dir)),
+        Box::new(NullEventPublisher),
+    ))
+}
+
+#[tauri::command]
+pub fn list_global_environments(
+    workspace: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<Vec<Environment>, DomainError> {
+    let ws = workspace
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    global_env_service(&ws)?.list()
+}
+
+#[tauri::command]
+pub fn get_global_environment(
+    name: String,
+    workspace: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<Environment, DomainError> {
+    let ws = workspace
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    global_env_service(&ws)?.get(&name)
+}
+
+#[tauri::command]
+pub fn save_global_environment(
+    env: Environment,
+    workspace: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<(), DomainError> {
+    let ws = workspace
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    global_env_service(&ws)?.save(&env)
+}
+
+#[tauri::command]
+pub fn delete_global_environment(
+    name: String,
+    workspace: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<(), DomainError> {
+    let ws = workspace
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    global_env_service(&ws)?.delete(&name)
+}
+
 #[tauri::command]
 pub fn get_process_env_vars() -> std::collections::HashMap<String, String> {
     std::env::vars().collect()

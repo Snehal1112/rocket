@@ -11,6 +11,10 @@ vi.mock('@/lib/tauri-api', () => ({
   setGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
   getProcessEnvVars: vi.fn().mockResolvedValue({}),
   getEnvironment: vi.fn().mockResolvedValue(null),
+  getGlobalEnvironment: vi.fn().mockResolvedValue(null),
+  listGlobalEnvironments: vi.fn().mockResolvedValue([]),
+  saveGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
+  deleteGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { listEnvironments, getGlobalEnvironmentName } from '@/lib/tauri-api';
@@ -181,13 +185,12 @@ describe('fetchGlobalEnv', () => {
     expect(useEnvStore.getState().globalEnvName).toBeNull();
   });
 
-  it('sets globalEnv when collection and env are available', async () => {
+  it('sets globalEnv when the workspace-level env file exists', async () => {
     const env: Environment = { name: 'shared', variables: [] };
     mockGetGlobalEnvironmentName.mockResolvedValueOnce('shared');
-    const { getEnvironment: mockGetEnv } = await import('@/lib/tauri-api');
-    vi.mocked(mockGetEnv).mockResolvedValueOnce(env);
+    const { getGlobalEnvironment: mockGetGlobalEnv } = await import('@/lib/tauri-api');
+    vi.mocked(mockGetGlobalEnv).mockResolvedValueOnce(env);
 
-    useEnvStore.setState({ activeCollection: 'col-a' });
     await useEnvStore.getState().fetchGlobalEnv();
 
     expect(useEnvStore.getState().globalEnvName).toBe('shared');
