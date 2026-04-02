@@ -707,6 +707,42 @@ export const linkExternalCollection = (workspaceId: string, collectionPath: stri
   invoke<void>('link_external_collection', { workspaceId, collectionPath })
 
 // ============================================================
+// Variables
+// ============================================================
+
+// Global env (selection pointer in workspace.yml)
+export const getGlobalEnvironmentName = () =>
+  invoke<string | null>('get_global_environment_name');
+export const setGlobalEnvironment = (name: string | null) =>
+  invoke<void>('set_global_environment', { name });
+
+// Workspace-level global environment CRUD
+export const listGlobalEnvironments = () =>
+  invoke<Environment[]>('list_global_environments');
+export const getGlobalEnvironment = (name: string) =>
+  invoke<Environment>('get_global_environment', { name });
+export const saveGlobalEnvironment = (env: Environment) =>
+  invoke<void>('save_global_environment', { env });
+export const deleteGlobalEnvironment = (name: string) =>
+  invoke<void>('delete_global_environment', { name });
+
+// Process env (read-only OS vars)
+export const getProcessEnvVars = () =>
+  invoke<Record<string, string>>('get_process_env_vars');
+
+// Folder variables — server walks full parent chain
+export const getFolderChainVariables = (collection: string, requestPath: string) =>
+  invoke<CollectionVariable[]>('get_folder_chain_variables', { collection, requestPath });
+export const saveFolderVariables = (collection: string, folderPath: string, variables: CollectionVariable[]) =>
+  invoke<void>('save_folder_variables', { collection, folderPath, vars: variables });
+
+// Request variables
+export const getRequestVariables = (collection: string, requestPath: string) =>
+  invoke<CollectionVariable[]>('get_request_variables', { collection, requestPath });
+export const saveRequestVariables = (collection: string, requestPath: string, variables: CollectionVariable[]) =>
+  invoke<void>('save_request_variables', { collection, requestPath, vars: variables });
+
+// ============================================================
 // UI state persistence
 // ============================================================
 

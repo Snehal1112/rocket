@@ -3,6 +3,13 @@ import {
   listEnvironments,
   saveEnvironment,
   deleteEnvironment as deleteEnvApi,
+  getGlobalEnvironmentName,
+  setGlobalEnvironment,
+  getProcessEnvVars,
+  listGlobalEnvironments,
+  getGlobalEnvironment,
+  saveGlobalEnvironment as saveGlobalEnvironmentApi,
+  deleteGlobalEnvironment as deleteGlobalEnvironmentApi,
   type Environment,
 } from '@/lib/tauri-api';
 
@@ -21,12 +28,34 @@ export interface EnvState {
   deleteEnvironment: (name: string) => Promise<void>;
   getActiveVariables: () => Record<string, string>;
   resolveVariables: (text: string) => string;
+
+  // Global environment state.
+  globalEnvName: string | null;
+  globalEnv: Environment | null;
+  processEnvVars: Record<string, string>;
+
+  // Global environment actions.
+  fetchGlobalEnv: () => Promise<void>;
+  setGlobalEnv: (name: string | null) => Promise<void>;
+  loadProcessEnvVars: () => Promise<void>;
+  getGlobalVariables: () => Record<string, string>;
+
+  // Workspace-level environment list and CRUD.
+  globalEnvironments: Environment[];
+  loadGlobalEnvironments: () => Promise<void>;
+  createGlobalEnvironment: (name: string) => Promise<void>;
+  updateGlobalEnvironment: (env: Environment) => Promise<void>;
+  deleteGlobalEnvironment: (name: string) => Promise<void>;
 }
 
 export const useEnvStore = create<EnvState>((set, get) => ({
   environments: [],
   activeEnvId: null,
   activeCollection: null,
+  globalEnvName: null,
+  globalEnv: null,
+  processEnvVars: {},
+  globalEnvironments: [],
 
   async loadEnvironments(collection) {
     set({ activeCollection: collection });
@@ -105,5 +134,81 @@ export const useEnvStore = create<EnvState>((set, get) => ({
     return text.replace(VAR_REGEX, (match, key) => {
       return key in vars ? vars[key] : match;
     });
+  },
+
+  async fetchGlobalEnv() {
+    try {
+      const name = await getGlobalEnvironmentName();
+      if (!name) { set({ globalEnvName: null, globalEnv: null }); return; }
+      try {
+        const env = await getGlobalEnvironment(name);
+        set({ globalEnvName: name, globalEnv: env });
+      } catch {
+        // Global env name is set but the file doesn't exist yet.
+        set({ globalEnvName: name, globalEnv: null });
+      }
+    } catch (err) {
+      console.error('[EnvStore] Failed to fetch global env:', err);
+    }
+  },
+
+  async setGlobalEnv(name) {
+    await setGlobalEnvironment(name);
+    await get().fetchGlobalEnv();
+  },
+
+  async loadProcessEnvVars() {
+    try {
+      set({ processEnvVars: await getProcessEnvVars() });
+    } catch (err) {
+      console.error('[EnvStore] Failed to load process env vars:', err);
+    }
+  },
+
+  getGlobalVariables() {
+    const { globalEnv } = get();
+    if (!globalEnv) return {};
+    return Object.fromEntries(
+      globalEnv.variables.filter(v => v.enabled).map(v => [v.key, v.value])
+    );
+  },
+
+  async loadGlobalEnvironments() {
+    try {
+      const envs = await listGlobalEnvironments();
+      set({ globalEnvironments: envs });
+    } catch (err) {
+      console.error('[EnvStore] Failed to load global environments:', err);
+    }
+  },
+
+  async createGlobalEnvironment(name) {
+    const env: Environment = { name, variables: [] };
+    await saveGlobalEnvironmentApi(env);
+    await get().loadGlobalEnvironments();
+  },
+
+  async updateGlobalEnvironment(env) {
+    await saveGlobalEnvironmentApi(env);
+    set((state) => ({
+      globalEnvironments: state.globalEnvironments.map((e) =>
+        e.name === env.name ? env : e,
+      ),
+    }));
+    // If this is the active global env, refresh it.
+    if (get().globalEnvName === env.name) {
+      set({ globalEnv: env });
+    }
+  },
+
+  async deleteGlobalEnvironment(name) {
+    await deleteGlobalEnvironmentApi(name);
+    set((state) => ({
+      globalEnvironments: state.globalEnvironments.filter((e) => e.name !== name),
+    }));
+    // Clear globalEnv if it was the deleted one.
+    if (get().globalEnvName === name) {
+      set({ globalEnvName: null, globalEnv: null });
+    }
   },
 }));

@@ -364,6 +364,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Reload environments whenever the active collection changes.
     useEnvStore.getState().loadEnvironments(name);
+    void useEnvStore.getState().fetchGlobalEnv();
   },
 
   getOpenTabCount(collection) {

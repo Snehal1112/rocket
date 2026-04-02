@@ -4,12 +4,15 @@ import { useConsoleStore } from '@/stores/console-store';
 import {
   executeRequest,
   getCollectionSettings,
+  getFolderChainVariables,
+  getRequestVariables,
   type Auth,
   type Body,
+  type CollectionVariable,
   type Header,
 } from '@/lib/tauri-api';
 import { findTabInTree } from '@/lib/pane-utils';
-import { buildResolver } from '@/lib/url-variables';
+import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import type {
   AuthState,
   BodyState,
@@ -77,24 +80,49 @@ export function toApiBody(body: BodyState, resolve = (s: string) => s): Body | u
 // This is a plain async function so it can be called from both React
 // components and non-React contexts (e.g. keyboard shortcut handlers).
 export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
-  // Build merged variable resolution: env vars (high priority) + collection vars (fallback).
-  const envVars = useEnvStore.getState().getActiveVariables();
+  // Build the full 7-scope variable resolution context.
+  const envStore = useEnvStore.getState();
+  const envVars = envStore.getActiveVariables();
+  const globalVars = envStore.getGlobalVariables();
+  const processEnvVars = envStore.processEnvVars;
 
-  const collectionVars: Record<string, string> = {};
   const { root } = usePaneStore.getState();
   const found = findTabInTree(root, tabId);
-  if (found?.tab.source?.collection) {
+  const collection = found?.tab.source?.collection;
+  const requestPath = found?.tab.source?.path;
+
+  // Fetch collection-level variables from settings.
+  let collectionVars: CollectionVariable[] = [];
+  if (collection) {
     try {
-      const settings = await getCollectionSettings(found.tab.source.collection);
-      for (const v of settings.variables) {
-        if (v.enabled) collectionVars[v.key] = v.value || v.initialValue;
-      }
+      const settings = await getCollectionSettings(collection);
+      collectionVars = settings.variables;
     } catch {
-      // Collection settings unavailable — proceed with env vars only.
+      // Collection settings unavailable — proceed without collection vars.
     }
   }
 
-  const resolve = buildResolver(envVars, collectionVars);
+  // Fetch folder-chain variables (server walks full parent chain).
+  let folderVars: CollectionVariable[] = [];
+  if (collection && requestPath) {
+    try { folderVars = await getFolderChainVariables(collection, requestPath); } catch {}
+  }
+
+  // Fetch request-level variables.
+  let requestVars: CollectionVariable[] = [];
+  if (collection && requestPath) {
+    try { requestVars = await getRequestVariables(collection, requestPath); } catch {}
+  }
+
+  const ctx = buildVariableContext({
+    processEnvVars,
+    globalVars,
+    envVars,
+    collectionVars,
+    folderVars,
+    requestVars,
+  });
+  const resolve = (text: string) => resolveWithContext(text, ctx);
 
   // Resolve environment variables in all request fields.
   let resolvedUrl = resolve(request.url);

@@ -779,7 +779,7 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
     for entry in entries {
         let path = entry.path();
         let entry_name = entry.file_name().to_string_lossy().to_string();
-        if entry_name.starts_with('.') {
+        if entry_name.starts_with('.') || entry_name == "environments" {
             continue;
         }
         if path.is_dir() {
@@ -1178,6 +1178,19 @@ mod tests {
         let (dir, repo) = setup();
         repo.create("my-api").unwrap();
         assert!(dir.path().join("my-api/opencollection.yml").exists());
+    }
+
+    #[test]
+    fn environments_dir_not_shown_in_collection_tree() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        // Simulate the environments directory created by the env service.
+        fs::create_dir_all(dir.path().join("my-api/environments")).unwrap();
+        let col = repo.get("my-api").unwrap();
+        assert!(
+            !col.root.subfolder_names().contains(&"environments"),
+            "environments/ should not appear in the collection tree"
+        );
     }
 
     #[test]

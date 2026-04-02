@@ -9,10 +9,11 @@ import { useEnvStore } from '@/stores/env-store';
 import type { Variable, Environment } from '@/lib/tauri-api';
 
 export function WorkspaceEnvironmentsTab() {
-  const environments = useEnvStore((s) => s.environments);
-  const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
-  const deleteEnv = useEnvStore((s) => s.deleteEnvironment);
-  const createEnvironment = useEnvStore((s) => s.createEnvironment);
+  const environments = useEnvStore((s) => s.globalEnvironments);
+  const updateEnvironment = useEnvStore((s) => s.updateGlobalEnvironment);
+  const deleteEnv = useEnvStore((s) => s.deleteGlobalEnvironment);
+  const createEnvironment = useEnvStore((s) => s.createGlobalEnvironment);
+  const loadGlobalEnvironments = useEnvStore((s) => s.loadGlobalEnvironments);
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
@@ -20,6 +21,9 @@ export function WorkspaceEnvironmentsTab() {
   const [newEnvName, setNewEnvName] = useState('');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load workspace-level environments when the tab mounts.
+  useEffect(() => { void loadGlobalEnvironments(); }, [loadGlobalEnvironments]);
 
   // Select first env when list changes (e.g. after collection switch).
   useEffect(() => {
