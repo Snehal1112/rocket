@@ -27,7 +27,7 @@ import { useGitStore } from "@/stores/git-store";
 import { cn } from "@/lib/utils";
 
 export function GitLandingPanel() {
-  const { status, push, pull, fetch, saveStash, popStash } = useGitStore();
+  const { status, push, pull, fetch, saveStash, popStash, error, clearError } = useGitStore();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -69,6 +69,7 @@ export function GitLandingPanel() {
     setPulling(true);
     try {
       await pull();
+      setLastFetched(new Date().toLocaleTimeString());
     } finally {
       setPulling(false);
     }
@@ -80,6 +81,7 @@ export function GitLandingPanel() {
     try {
       await saveStash("Auto-stash before pull");
       await pull();
+      setLastFetched(new Date().toLocaleTimeString());
       await popStash(0);
     } catch {
       // If pop fails (conflict), stash is preserved for manual resolution.
@@ -93,6 +95,7 @@ export function GitLandingPanel() {
     setPulling(true);
     try {
       await pull();
+      setLastFetched(new Date().toLocaleTimeString());
     } finally {
       setPulling(false);
     }
@@ -151,6 +154,7 @@ export function GitLandingPanel() {
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
+  const hasConflicts = (status?.files.some((f) => f.status === "conflicted")) ?? false;
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
@@ -238,7 +242,7 @@ export function GitLandingPanel() {
               size="sm"
               className="flex-1"
               onClick={handlePush}
-              disabled={pushing}
+              disabled={pushing || hasConflicts}
             >
               {pushing ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -248,6 +252,20 @@ export function GitLandingPanel() {
               Push{ahead > 0 ? ` ↑${ahead}` : ""}
             </Button>
           </div>
+
+          {/* Inline error alert for failed push/pull/fetch operations. */}
+          {error && (
+            <div className="flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="flex-1 break-words">{error}</span>
+              <button
+                className="shrink-0 hover:opacity-70 leading-none"
+                onClick={clearError}
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {/* Sync status + last fetched timestamp in a single footer row */}
           <div className="flex items-center justify-between text-xs text-muted-foreground">
