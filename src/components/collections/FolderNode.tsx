@@ -7,6 +7,7 @@ import {
   Trash2,
   Pencil,
   MoreHorizontal,
+  Variable,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -28,6 +29,7 @@ import { moveItem, saveRequest } from "@/lib/tauri-api";
 import { usePaneStore } from "@/stores/pane-store";
 import { createDefaultRequest } from "@/lib/pane-utils";
 import { RequestNode } from "./RequestNode";
+import { FolderVariablesPopover } from "./FolderVariablesPopover";
 import type { CollectionItem, CollectionSummary } from "@/lib/tauri-api";
 import type { DeleteTarget } from "./tree-utils";
 
@@ -72,6 +74,7 @@ export function FolderNode({
   const [renameValue, setRenameValue] = useState(name);
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState("");
+  const [varsOpen, setVarsOpen] = useState(false);
   // Auto-expand when filter is active.
   useEffect(() => {
     if (filter) setOpen(true);
@@ -212,6 +215,10 @@ export function FolderNode({
                   <FolderPlus className="h-3.5 w-3.5 mr-2" /> New Folder
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setVarsOpen(true)}>
+                  <Variable className="h-3.5 w-3.5 mr-2" /> Variables
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => {
                     setRenameValue(name);
@@ -254,6 +261,10 @@ export function FolderNode({
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => setVarsOpen(true)}>
+            Variables
+          </ContextMenuItem>
+          <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {
               setRenameValue(name);
@@ -278,6 +289,15 @@ export function FolderNode({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      {/* Variables dialog for this folder. */}
+      <FolderVariablesPopover
+        open={varsOpen}
+        onClose={() => setVarsOpen(false)}
+        collection={collectionName}
+        folderPath={basePath}
+        folderName={name}
+      />
 
       {open && (
         // Indentation guide line.
