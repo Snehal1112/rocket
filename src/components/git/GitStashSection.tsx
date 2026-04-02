@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Archive, MoreHorizontal } from 'lucide-react';
 import { useGitStore } from '@/stores/git-store';
 
@@ -52,7 +53,14 @@ export function GitStashSection() {
           key={stash.index}
           className="group flex items-center gap-1.5 px-2 py-[3px] hover:bg-muted/50 text-[13px]"
         >
-          <span className="truncate font-mono text-[13px]">{stash.message}</span>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="truncate font-mono text-[13px] cursor-default">{stash.message}</span>
+              </TooltipTrigger>
+              <TooltipContent><p>{stash.message}</p></TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {stash.branch && (
             <span className="text-[11px] text-muted-foreground/60 shrink-0">{stash.branch}</span>
           )}
