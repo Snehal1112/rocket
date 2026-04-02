@@ -11,6 +11,7 @@ import { GitLandingPanel } from "@/components/git/GitLandingPanel";
 import { GitLinksSection } from "@/components/git/GitLinksSection";
 import { GitFileList } from "@/components/git/GitFileList";
 import { DiffViewForFile } from "@/components/git/DiffViewForFile";
+import { ConflictResolver } from "@/components/git/ConflictResolver";
 import { BranchSelector } from "@/components/git/BranchSelector";
 import {
   Collapsible,
@@ -20,7 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useGitStore } from "@/stores/git-store";
 import { gitInit, gitIsRepo } from "@/lib/tauri-api";
-import { Package, ChevronDown, ArrowLeft } from "lucide-react";
+import { Package, ChevronDown, ArrowLeft, AlertTriangle } from "lucide-react";
 import type { ConflictFile, FileStatus } from "@/lib/tauri-api";
 
 type RightPanelView =
@@ -46,7 +47,9 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [changesOpen, setChangesOpen] = useState(true);
 
-  const { showCredentialsDialog, setCollection, refreshLog } = useGitStore();
+  const { showCredentialsDialog, setCollection, refreshLog, status } = useGitStore();
+  const hasConflicts = (status?.files.some((f) => f.status === "conflicted")) ?? false;
+  const conflictCount = status?.files.filter((f) => f.status === "conflicted").length ?? 0;
 
   // Check git repo status and initialize the git store when the path is known.
   const checkAndLoad = useCallback(
@@ -133,6 +136,16 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             <BranchSelector />
           </div>
 
+          {/* In-merge banner — shown when there are conflicted files. */}
+          {hasConflicts && (
+            <div className="px-3 py-2 bg-destructive/10 border-b border-border/70 flex items-center gap-2 shrink-0">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+              <span className="text-xs text-destructive flex-1">
+                Merge in progress — {conflictCount} conflicted
+              </span>
+            </div>
+          )}
+
           {/* Changes section with commit form */}
           <div className="shrink-0 px-3 pt-2.5 pb-2 space-y-2 border-b border-border/70">
             <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
@@ -202,6 +215,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
               <Separator orientation="vertical" className="h-4" />
               <span className="text-xs text-muted-foreground truncate">
                 {rightPanel.kind === "diff" && rightPanel.file.path}
+                {rightPanel.kind === "conflict" && rightPanel.conflictFile.path}
                 {rightPanel.kind === "commits" && "Commit History"}
                 {rightPanel.kind === "stashes" && "Stashes"}
               </span>
@@ -215,6 +229,17 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
               <DiffViewForFile
                 file={rightPanel.file}
                 collectionPath={collectionPath}
+              />
+            )}
+            {rightPanel.kind === "conflict" && (
+              <ConflictResolver
+                conflictState={{
+                  filePath: rightPanel.conflictFile.path,
+                  collectionPath: collectionPath,
+                  ours: rightPanel.conflictFile.ours,
+                  theirs: rightPanel.conflictFile.theirs,
+                  ancestor: rightPanel.conflictFile.ancestor ?? null,
+                }}
               />
             )}
             {rightPanel.kind === "commits" && <GitCommitLog />}
