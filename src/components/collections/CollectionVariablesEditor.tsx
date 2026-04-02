@@ -16,11 +16,14 @@ import type { CollectionVariable } from '@/lib/tauri-api';
 interface CollectionVariablesEditorProps {
   variables: CollectionVariable[];
   onChange: (variables: CollectionVariable[]) => void;
+  /** When false, hides the built-in description banner. Default: true. */
+  showDescription?: boolean;
 }
 
 export function CollectionVariablesEditor({
   variables,
   onChange,
+  showDescription = true,
 }: CollectionVariablesEditorProps) {
   const updateVar = useCallback(
     (index: number, patch: Partial<CollectionVariable>) => {
@@ -48,12 +51,14 @@ export function CollectionVariablesEditor({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-        <p className="text-xs text-muted-foreground">
-          Collection variables are available to all requests via {'{{variable}}'} syntax.
-          Environment variables take precedence when both define the same key.
-        </p>
-      </div>
+      {showDescription && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            Collection variables are available to all requests via {'{{variable}}'} syntax.
+            Environment variables take precedence when both define the same key.
+          </p>
+        </div>
+      )}
 
       {variables.length > 0 ? (
         <Table>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
 import { getRequestVariables, saveRequestVariables } from '@/lib/tauri-api';
@@ -17,16 +17,28 @@ export function RequestVariablesPanel({
 }: RequestVariablesPanelProps) {
   const [vars, setVars] = useState<CollectionVariable[]>([]);
   const [saved, setSaved] = useState(false);
+  // Timer ref to cancel the "Saved" indicator on unmount.
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load variables on mount or when the request path changes.
   useEffect(() => {
+    let active = true;
     getRequestVariables(collection, requestPath)
       .then((loaded) => {
+        if (!active) return;
         setVars(loaded);
         onVarCountChange?.(loaded.length);
       })
-      .catch((err) => console.error('Failed to load request variables:', err));
+      .catch((err) => console.error('[RequestVariablesPanel] load failed:', err));
+    return () => { active = false; };
   }, [collection, requestPath, onVarCountChange]);
+
+  // Clear the "Saved" timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   const handleChange = useCallback(
     (updated: CollectionVariable[]) => {
@@ -37,12 +49,13 @@ export function RequestVariablesPanel({
   );
 
   const handleSave = useCallback(() => {
-    saveRequestVariables(collection, requestPath, vars)
+    void saveRequestVariables(collection, requestPath, vars)
       .then(() => {
         setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
+        if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
       })
-      .catch((err) => console.error('Failed to save request variables:', err));
+      .catch((err) => console.error('[RequestVariablesPanel] save failed:', err));
   }, [collection, requestPath, vars]);
 
   return (
@@ -54,7 +67,12 @@ export function RequestVariablesPanel({
         </p>
       </div>
 
-      <CollectionVariablesEditor variables={vars} onChange={handleChange} />
+      {/* showDescription=false avoids duplicating the built-in info banner. */}
+      <CollectionVariablesEditor
+        variables={vars}
+        onChange={handleChange}
+        showDescription={false}
+      />
 
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={handleSave}>
