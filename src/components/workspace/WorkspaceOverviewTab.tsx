@@ -18,6 +18,61 @@ import { usePaneStore } from '@/stores/pane-store';
 import { useEnvStore } from '@/stores/env-store';
 import type { CollectionTab } from '@/types/pane-types';
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// @ts-ignore -- consumed in subsequent task; suppress noUnusedLocals
+function renderMarkdown(raw: string): string {
+  if (!raw.trim()) return '';
+
+  const lines = raw.split('\n');
+  let html = '';
+  let inList = false;
+  let listType = '';
+
+  function closeList() {
+    if (inList) { html += `</${listType}>`; inList = false; listType = ''; }
+  }
+
+  function inlineFormat(line: string): string {
+    // Escape HTML first, then apply safe inline markdown
+    let s = escapeHtml(line);
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    s = s.replace(/`(.+?)`/g, '<code>$1</code>');
+    // Links: [text](url) — URL already escaped by escapeHtml, restore the parens
+    s = s.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" rel="noopener noreferrer">$1</a>');
+    return s;
+  }
+
+  for (const rawLine of lines) {
+
+    const line = rawLine;
+    if (/^### /.test(line)) { closeList(); html += `<h3>${inlineFormat(line.slice(4))}</h3>`; }
+    else if (/^## /.test(line)) { closeList(); html += `<h2>${inlineFormat(line.slice(3))}</h2>`; }
+    else if (/^# /.test(line)) { closeList(); html += `<h1>${inlineFormat(line.slice(2))}</h1>`; }
+    else if (/^---$/.test(line.trim())) { closeList(); html += '<hr />'; }
+    else if (/^- /.test(line)) {
+      if (!inList || listType !== 'ul') { closeList(); html += '<ul>'; inList = true; listType = 'ul'; }
+      html += `<li>${inlineFormat(line.slice(2))}</li>`;
+    }
+    else if (/^\d+\. /.test(line)) {
+      if (!inList || listType !== 'ol') { closeList(); html += '<ol>'; inList = true; listType = 'ol'; }
+      html += `<li>${inlineFormat(line.replace(/^\d+\. /, ''))}</li>`;
+    }
+    else if (line.trim() === '') { closeList(); }
+    else { closeList(); html += `<p>${inlineFormat(line)}</p>`; }
+  }
+  closeList();
+  return html;
+}
+
 interface WorkspaceOverviewTabProps {
   workspaceId: string;
 }
