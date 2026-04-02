@@ -178,6 +178,15 @@ pub fn get_folder_chain_variables(
 }
 
 #[tauri::command]
+pub fn get_folder_variables(
+    collection: String,
+    folder_path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Vec<CollectionVariable>, DomainError> {
+    svc.get_folder_variables(&collection, &folder_path)
+}
+
+#[tauri::command]
 pub fn save_folder_variables(
     collection: String,
     folder_path: String,

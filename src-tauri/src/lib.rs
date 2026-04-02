@@ -157,6 +157,7 @@ pub fn run() {
             commands::collections::save_collection_settings,
             commands::collections::scan_collections_in_path,
             commands::collections::get_folder_chain_variables,
+            commands::collections::get_folder_variables,
             commands::collections::save_folder_variables,
             commands::collections::get_request_variables,
             commands::collections::save_request_variables,

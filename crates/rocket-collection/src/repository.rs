@@ -67,6 +67,10 @@ pub trait CollectionRepository: Send + Sync {
     /// merged variables (outer folder first; inner folder wins on collision).
     fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>>;
 
+    /// Read only this folder's own variables from its folder.yml (no chain walk).
+    /// Returns an empty vec if the folder or its folder.yml does not exist.
+    fn get_folder_variables(&self, collection: &str, folder_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+
     /// Persist folder-level variables to the folder's folder.yml.
     fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()>;
 

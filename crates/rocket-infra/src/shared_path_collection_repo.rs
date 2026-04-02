@@ -122,6 +122,14 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().get_folder_chain_variables(collection, request_path)
     }
 
+    fn get_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo().get_folder_variables(collection, folder_path)
+    }
+
     fn save_folder_variables(
         &self,
         collection: &str,

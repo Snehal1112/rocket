@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CollectionVariablesEditor } from './CollectionVariablesEditor';
-import { getFolderChainVariables, saveFolderVariables } from '@/lib/tauri-api';
+import { getFolderVariables, saveFolderVariables } from '@/lib/tauri-api';
 import type { CollectionVariable } from '@/lib/tauri-api';
 
 interface FolderVariablesPopoverProps {
@@ -31,12 +31,12 @@ export function FolderVariablesPopover({
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Load folder variables when the dialog opens.
+  // Load only this folder's own variables when the dialog opens.
   useEffect(() => {
     if (!open) return;
-    void getFolderChainVariables(collection, `${folderPath}/placeholder`).then(
-      setVariables,
-    );
+    void getFolderVariables(collection, folderPath)
+      .then(setVariables)
+      .catch((err) => console.error('[FolderVariablesPopover] load failed:', err));
   }, [open, collection, folderPath]);
 
   const handleSave = useCallback(async () => {

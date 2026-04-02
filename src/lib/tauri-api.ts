@@ -733,6 +733,10 @@ export const getProcessEnvVars = () =>
 // Folder variables — server walks full parent chain
 export const getFolderChainVariables = (collection: string, requestPath: string) =>
   invoke<CollectionVariable[]>('get_folder_chain_variables', { collection, requestPath });
+
+// Folder variables — reads only this folder's own folder.yml (no chain walk)
+export const getFolderVariables = (collection: string, folderPath: string) =>
+  invoke<CollectionVariable[]>('get_folder_variables', { collection, folderPath });
 export const saveFolderVariables = (collection: string, folderPath: string, variables: CollectionVariable[]) =>
   invoke<void>('save_folder_variables', { collection, folderPath, vars: variables });
 

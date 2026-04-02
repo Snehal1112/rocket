@@ -638,6 +638,34 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(())
     }
 
+    fn get_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        let collection_dir = self.collection_path(collection);
+        let folder_dir = if folder_path.is_empty() {
+            collection_dir.clone()
+        } else {
+            self.validate_path(&collection_dir, std::path::Path::new(folder_path))?
+        };
+        let folder_yml = folder_dir.join("folder.yml");
+        if !folder_yml.exists() {
+            return Ok(vec![]);
+        }
+        let content = fs::read_to_string(&folder_yml)?;
+        let info: OcFolderInfo = serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::Internal(format!("Failed to parse folder.yml: {e}")))?;
+        let vars = info
+            .request
+            .and_then(|r| r.variables)
+            .unwrap_or_default()
+            .into_iter()
+            .map(oc_variable_to_collection_variable)
+            .collect();
+        Ok(vars)
+    }
+
     fn get_request_variables(
         &self,
         collection: &str,
