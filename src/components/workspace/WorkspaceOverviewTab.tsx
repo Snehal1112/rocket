@@ -15,6 +15,7 @@ import {
 } from '@/lib/tauri-api';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useEnvStore } from '@/stores/env-store';
 import type { CollectionTab } from '@/types/pane-types';
 
 interface WorkspaceOverviewTabProps {
@@ -25,6 +26,8 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === workspaceId));
   const updateDescription = useWorkspaceStore((s) => s.updateDescription);
   const openTab = usePaneStore((s) => s.openTab);
+  const globalEnvironments = useEnvStore((s) => s.globalEnvironments);
+  const loadGlobalEnvironments = useEnvStore((s) => s.loadGlobalEnvironments);
 
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -37,7 +40,8 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
 
   useEffect(() => {
     refresh().catch(console.error);
-  }, [refresh]);
+    loadGlobalEnvironments().catch(console.error);
+  }, [refresh, loadGlobalEnvironments]);
 
   function handleOpenCollection(collectionName: string) {
     const tab: CollectionTab = {
@@ -105,7 +109,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
             <p className="text-xs text-muted-foreground">Collections</p>
           </div>
           <div className="rounded-lg border border-border p-3">
-            <p className="text-2xl font-semibold">—</p>
+            <p className="text-2xl font-semibold">{globalEnvironments.length}</p>
             <p className="text-xs text-muted-foreground">Environments</p>
           </div>
           <div className="rounded-lg border border-border p-3">
