@@ -189,10 +189,13 @@ fn ahead_behind(repo: &Repository) -> (usize, usize) {
         .upstream()
         .ok()
         .and_then(|u| u.get().target())
-        // Fall back to refs/remotes/origin/<branch> when no upstream is configured.
+        // Fall back to refs/remotes/<remote>/<branch> for each configured remote.
         .or_else(|| {
-            let refname = format!("refs/remotes/origin/{}", branch_name);
-            repo.find_reference(&refname).ok().and_then(|r| r.target())
+            let remotes = repo.remotes().ok()?;
+            remotes.iter().flatten().find_map(|remote_name| {
+                let refname = format!("refs/remotes/{}/{}", remote_name, branch_name);
+                repo.find_reference(&refname).ok().and_then(|r| r.target())
+            })
         });
 
     match upstream_oid {

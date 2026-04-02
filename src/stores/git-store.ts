@@ -451,8 +451,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    const resolvedRemote = remote ?? get().remotes[0]?.name;
     try {
-      await gitPush(collectionPath, remote ?? 'origin', credentials);
+      await gitPush(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -464,8 +465,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    const resolvedRemote = remote ?? get().remotes[0]?.name;
     try {
-      await gitPull(collectionPath, remote ?? 'origin', credentials);
+      await gitPull(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
@@ -478,8 +480,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
     if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    const resolvedRemote = remote ?? get().remotes[0]?.name;
     try {
-      await gitFetch(collectionPath, remote ?? 'origin', credentials);
+      await gitFetch(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
