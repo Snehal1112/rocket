@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useGitStore } from '@/stores/git-store';
 
@@ -18,12 +18,14 @@ export function GitCommitForm() {
 
   return (
     <div className="space-y-2">
-      <Input
-        placeholder="Commit message..."
+      <Textarea
+        placeholder="Commit message... (Ctrl+Enter to commit)"
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') void handleCommit(); }}
-        className="text-sm h-8"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void handleCommit();
+        }}
+        className="text-sm min-h-[60px] resize-none"
       />
       <Button
         onClick={handleCommit}
