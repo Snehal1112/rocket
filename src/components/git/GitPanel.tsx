@@ -21,11 +21,12 @@ import { Separator } from "@/components/ui/separator";
 import { useGitStore } from "@/stores/git-store";
 import { gitInit, gitIsRepo } from "@/lib/tauri-api";
 import { Package, ChevronDown, ArrowLeft } from "lucide-react";
-import type { FileStatus } from "@/lib/tauri-api";
+import type { ConflictFile, FileStatus } from "@/lib/tauri-api";
 
 type RightPanelView =
   | { kind: "landing" }
   | { kind: "diff"; file: FileStatus }
+  | { kind: "conflict"; conflictFile: ConflictFile }
   | { kind: "commits" }
   | { kind: "stashes" };
 
@@ -150,6 +151,9 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           {/* File list */}
           <GitFileList
             onFileClick={(file) => setRightPanel({ kind: "diff", file })}
+            onConflictClick={(conflictFile) =>
+              setRightPanel({ kind: "conflict", conflictFile })
+            }
           />
 
           {/* Links section */}

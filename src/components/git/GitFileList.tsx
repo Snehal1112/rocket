@@ -1,4 +1,4 @@
-import { Plus, Minus, Trash2 } from "lucide-react";
+import { Plus, Minus, Trash2, AlertTriangle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -10,15 +10,19 @@ import {
 } from "@/components/ui/tooltip";
 import { useGitStore } from "@/stores/git-store";
 import { GIT_STATUS_CONFIG } from "@/lib/colors";
-import type { FileStatus } from "@/lib/tauri-api";
+import type { ConflictFile, FileStatus } from "@/lib/tauri-api";
 
 interface GitFileListProps {
   onFileClick: (file: FileStatus) => void;
+  onConflictClick: (conflictFile: ConflictFile) => void;
 }
 
-export function GitFileList({ onFileClick }: GitFileListProps) {
+export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) {
   const {
     status,
+    conflicts,
+    refreshConflicts,
+    refreshStatus,
     stageFiles,
     stageAll,
     unstageFiles,
@@ -32,7 +36,7 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
 
   const handleDiscardAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    discardFiles(unstaged.map((f) => f.path));
+    discardFiles(unstaged.filter((f) => f.status !== "conflicted").map((f) => f.path));
   };
 
   const handleStageAll = (e: React.MouseEvent) => {
@@ -43,6 +47,16 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
   const handleUnstageAll = (e: React.MouseEvent) => {
     e.stopPropagation();
     unstageAll();
+  };
+
+  const handleConflictClick = async (file: FileStatus) => {
+    await refreshConflicts();
+    const conflictFile = conflicts.find((c) => c.path === file.path);
+    if (conflictFile) {
+      onConflictClick(conflictFile);
+    } else {
+      await refreshStatus();
+    }
   };
 
   return (
@@ -154,56 +168,70 @@ export function GitFileList({ onFileClick }: GitFileListProps) {
           </div>
 
           {/* Unstaged file rows. */}
-          {unstaged.map((file) => (
-            <div
-              key={file.path}
-              className="group flex items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5"
-              onClick={() => onFileClick(file)}
-            >
-              <span className="text-sm truncate flex-1 min-w-0">
-                {file.path}
-              </span>
-              <span
-                className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}
+          {unstaged.map((file) => {
+            const isConflicted = file.status === "conflicted";
+            return (
+              <div
+                key={file.path}
+                className="group flex items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5"
+                onClick={() => {
+                  if (isConflicted) {
+                    void handleConflictClick(file);
+                  } else {
+                    onFileClick(file);
+                  }
+                }}
               >
-                {GIT_STATUS_CONFIG[file.status].label}
-              </span>
-              <div className="hidden gap-0.5 shrink-0 group-hover:flex">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        discardFiles([file.path]);
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Discard</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        stageFiles([file.path]);
-                      }}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Stage</TooltipContent>
-                </Tooltip>
+                {isConflicted && (
+                  <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                )}
+                <span className="text-sm truncate flex-1 min-w-0">
+                  {file.path}
+                </span>
+                <span
+                  className={`text-xs font-medium shrink-0 ${GIT_STATUS_CONFIG[file.status].className}`}
+                >
+                  {GIT_STATUS_CONFIG[file.status].label}
+                </span>
+                {!isConflicted && (
+                  <div className="hidden gap-0.5 shrink-0 group-hover:flex">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            discardFiles([file.path]);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Discard</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            stageFiles([file.path]);
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Stage</TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </ScrollArea>
     </TooltipProvider>

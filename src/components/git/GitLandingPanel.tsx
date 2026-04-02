@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useGitStore } from "@/stores/git-store";
+import { cn } from "@/lib/utils";
 
 export function GitLandingPanel() {
   const { status, push, pull, fetch, saveStash, popStash } = useGitStore();
@@ -153,37 +154,61 @@ export function GitLandingPanel() {
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
-      <Card className="w-full max-w-[320px] bg-background/90 shadow-md rounded-md">
-        <CardHeader className="flex flex-row items-center px-3 py-2 space-y-0">
-          <GitBranch className="h-3.5 w-3.5 text-muted-foreground mr-2" />
-          <span className="font-mono text-sm font-medium">
-            {status?.branch ?? "no branch"}
-          </span>
-          <div className="ml-auto flex gap-1.5">
-            <Badge
-              variant="outline"
-              className={ahead > 0 ? "text-amber-500" : "text-emerald-500"}
-            >
-              ↑{ahead}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={behind > 0 ? "text-amber-500" : "text-emerald-500"}
-            >
-              ↓{behind}
-            </Badge>
+      <Card className="w-full max-w-sm shadow-lg rounded-sm border bg-card/80 ">
+        {/* Header: branch name + ahead/behind sync counts */}
+        <CardHeader className="px-4 py-3 space-y-1 border-b border-border/70">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <GitBranch className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="font-mono text-sm font-semibold truncate">
+                {status?.branch ?? "no branch"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "text-xs tabular-nums",
+                  ahead > 0
+                    ? "text-amber-500 bg-amber-500/10"
+                    : "text-muted-foreground",
+                )}
+              >
+                ↑{ahead}
+              </Badge>
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "text-xs tabular-nums",
+                  behind > 0
+                    ? "text-amber-500 bg-amber-500/10"
+                    : "text-muted-foreground",
+                )}
+              >
+                ↓{behind}
+              </Badge>
+            </div>
           </div>
         </CardHeader>
 
-        <CardContent
-          className="text-center pb-5 pt-5"
-          style={{ backgroundImage: "url(/git-branch.svg)" }}
-        >
-          {/* Fetch / Pull / Push button group. */}
-          <div className="flex gap-2 mb-3">
+        <CardContent className="px-4 py-4 space-y-3">
+          {/* Hero icon + hint text */}
+          <div className="flex flex-col items-center justify-center gap-2 py-3">
+            <GitBranch
+              className="text-muted-foreground/80 green-600"
+              style={{ width: 100, height: 100 }}
+            />
+            <p className="text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-[200px]">
+              Perform git actions or open files from sidebar to view
+            </p>
+          </div>
+
+          {/* Fetch / Pull / Push actions — flex-1 so buttons fill evenly */}
+          <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="flex-1"
               onClick={handleFetch}
               disabled={fetching}
             >
@@ -197,6 +222,7 @@ export function GitLandingPanel() {
             <Button
               variant="outline"
               size="sm"
+              className="flex-1"
               onClick={handlePull}
               disabled={pulling}
             >
@@ -208,8 +234,9 @@ export function GitLandingPanel() {
               Pull{behind > 0 ? ` ↓${behind}` : ""}
             </Button>
             <Button
-              variant="outline"
+              variant={ahead > 0 ? "default" : "outline"}
               size="sm"
+              className="flex-1"
               onClick={handlePush}
               disabled={pushing}
             >
@@ -222,36 +249,39 @@ export function GitLandingPanel() {
             </Button>
           </div>
 
-          {/* Last fetched timestamp. */}
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-            Last fetched:{" "}
-            <span className="font-medium text-foreground">
-              {lastFetched ?? "Never"}
-            </span>
-          </p>
+          {/* Sync status + last fetched timestamp in a single footer row */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              {isUpToDate ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : behind > 0 ? (
+                <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+              ) : (
+                <GitCommit className="h-3.5 w-3.5" />
+              )}
+              <span
+                className={cn(
+                  isUpToDate
+                    ? "text-emerald-500"
+                    : behind > 0
+                      ? "text-amber-500"
+                      : "",
+                )}
+              >
+                {isUpToDate
+                  ? "Up to date"
+                  : behind > 0
+                    ? `${behind} commit${behind > 1 ? "s" : ""} behind`
+                    : `${ahead} commit${ahead > 1 ? "s" : ""} ahead`}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              <span>{lastFetched ?? "Never fetched"}</span>
+            </div>
+          </div>
         </CardContent>
       </Card>
-
-      {/* Branch status badge. */}
-      <div className="flex items-center gap-1.5 text-xs border rounded-md px-3 py-1.5 mt-3">
-        {isUpToDate ? (
-          <>
-            <Check className="h-3.5 w-3.5 text-emerald-500" />
-            Your branch is up to date
-          </>
-        ) : behind > 0 ? (
-          <>
-            <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
-            {behind} commits behind
-          </>
-        ) : (
-          <>
-            <GitCommit className="h-3.5 w-3.5 text-muted-foreground" />
-            {ahead} commits ahead
-          </>
-        )}
-      </div>
 
       {/* Auto-stash confirmation dialog. */}
       <AlertDialog open={showStashDialog} onOpenChange={setShowStashDialog}>
