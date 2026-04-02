@@ -196,7 +196,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
               </Button>
             </div>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-sm text-destructive break-words">{error}</p>}
         </div>
         <DialogFooter>
           <Button size="sm" disabled={!repoUrl.trim() || !destPath.trim()} onClick={handleClone}>
