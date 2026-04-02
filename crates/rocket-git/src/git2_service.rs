@@ -437,11 +437,23 @@ impl GitService for Git2Service {
         let tree_id = index.write_tree().map_err(|e| DomainError::Internal(e.to_string()))?;
         let tree = repo.find_tree(tree_id).map_err(|e| DomainError::Internal(e.to_string()))?;
 
-        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let merge_commit = repo
+            .find_reference("MERGE_HEAD")
+            .ok()
+            .and_then(|r| r.peel_to_commit().ok());
+
+        let parents: Vec<&git2::Commit> = head_commit.iter()
+            .chain(merge_commit.iter())
+            .collect();
 
         let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Remove merge state files after a successful merge commit.
+        if merge_commit.is_some() {
+            let _ = repo.cleanup_state();
+        }
 
         Ok(CommitInfo {
             id: oid.to_string()[..7].to_string(),
@@ -1407,6 +1419,63 @@ mod tests {
         let branches = svc.branches(&path).unwrap();
         let local = branches.local.iter().find(|b| b.name == "feature-x").unwrap();
         assert_eq!(local.upstream.as_deref(), Some("origin/feature-x"));
+    }
+
+    #[test]
+    fn commit_creates_merge_commit_when_merge_in_progress() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create a branch with a change to the same file (will conflict with main).
+        svc.create_branch(&path, "conflict-branch").unwrap();
+        svc.switch_branch(&path, "conflict-branch").unwrap();
+        fs::write(dir.path().join("test.bru"), "branch content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "branch commit").unwrap();
+
+        // Switch back to main and make a conflicting change.
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "main content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let main_tip = svc.commit(&path, "main commit").unwrap();
+
+        // Start the merge — this leaves the repo in conflict state (MERGE_HEAD set).
+        let _ = svc.merge_branch(&path, "conflict-branch");
+
+        // Verify we are actually in a merge-in-progress state before proceeding.
+        assert!(
+            dir.path().join(".git/MERGE_HEAD").exists(),
+            "MERGE_HEAD must exist to simulate merge-in-progress state"
+        );
+
+        // Resolve the conflict by staging a resolved version of the file.
+        fs::write(dir.path().join("test.bru"), "resolved content").unwrap();
+        let repo = Repository::open(&path).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.bru")).unwrap();
+        index.write().unwrap();
+
+        // Commit via the service — must produce a two-parent merge commit.
+        let info = svc.commit(&path, "merge: resolve conflicts").unwrap();
+
+        // The new commit must have exactly 2 parents.
+        let oid = git2::Oid::from_str(&info.full_id).unwrap();
+        let verify_repo = Repository::open(&path).unwrap();
+        let commit = verify_repo.find_commit(oid).unwrap();
+        assert_eq!(commit.parent_count(), 2, "merge commit must have 2 parents");
+
+        // First parent must be the main tip before the merge.
+        assert_eq!(
+            commit.parent(0).unwrap().id().to_string()[..7].to_string(),
+            main_tip.id,
+            "first parent must be the main branch tip"
+        );
+
+        // MERGE_HEAD must be cleaned up after the commit.
+        assert!(
+            !dir.path().join(".git/MERGE_HEAD").exists(),
+            "MERGE_HEAD must be removed after a successful merge commit"
+        );
     }
 
     #[test]
