@@ -71,7 +71,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
         </DialogHeader>
 
         <TooltipProvider delayDuration={300}>
-          <div className="space-y-3">
+          <div className="space-y-3 min-w-0">
             {remotes.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
                 No remotes configured.
