@@ -50,7 +50,7 @@ All types derive `Serialize`/`Deserialize` with `camelCase` field names (for Tau
 - **Status**: A file with both staged and unstaged changes emits two separate `FileStatus` entries (one with `staged: true`, one with `staged: false`).
 - **Diff**: Uses a simplistic all-removals-then-all-additions approach in a single hunk (`build_simple_diff`). Not a proper Myers diff.
 - **Commit signature**: Falls back to `"RocketAPI User" <user@rocketapi.local>` when git config has no user identity.
-- **Pull**: Implements fetch + fast-forward or merge commit. Returns `DomainError::Internal` on conflicts rather than leaving the repo in a conflicted state.
+- **Pull**: Implements fetch + fast-forward or merge commit. On conflicts, writes the index and returns `Ok(())`, leaving the repo in merge-in-progress state for the frontend to resolve.
 - **Conflict resolution**: `ConflictResolution` supports `Ours`, `Theirs`, or `Custom { content }`. Resolution writes the file, stages it, and clears the conflict marker in the index.
 
 ### Testing
