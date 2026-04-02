@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Pencil, Trash2, Check, X, Plus } from 'lucide-react';
 import { useGitStore } from '@/stores/git-store';
 
@@ -53,12 +54,13 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Manage Remotes</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <TooltipProvider delayDuration={300}>
+          <div className="space-y-3">
           {remotes.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
               No remotes configured.
@@ -94,12 +96,12 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
                 if (editingRemote === remote.name) {
                   return (
-                    <div key={remote.name} className="flex items-center gap-2 px-2 py-1">
-                      <span className="font-mono font-semibold text-sm shrink-0">{remote.name}</span>
+                    <div key={remote.name} className="flex items-center gap-2 px-2 py-1 min-w-0">
+                      <span className="font-mono font-semibold text-sm shrink-0 max-w-[100px] truncate">{remote.name}</span>
                       <Input
                         value={editUrl}
                         onChange={(e) => setEditUrl(e.target.value)}
-                        className="h-7 text-sm flex-1"
+                        className="h-7 text-sm flex-1 min-w-0"
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') handleSaveEdit();
@@ -128,8 +130,13 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
                 return (
                   <div key={remote.name} className="group flex items-center gap-2 px-2 py-1 rounded-md hover:bg-muted/50">
-                    <span className="font-mono font-semibold text-sm shrink-0">{remote.name}</span>
-                    <span className="text-sm text-muted-foreground truncate flex-1">{remote.url}</span>
+                    <span className="font-mono font-semibold text-sm shrink-0 max-w-[100px] truncate">{remote.name}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-sm text-muted-foreground truncate flex-1 min-w-0 cursor-default">{remote.url}</span>
+                      </TooltipTrigger>
+                      <TooltipContent><p>{remote.url}</p></TooltipContent>
+                    </Tooltip>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -162,14 +169,14 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
               placeholder="name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              className="h-8 text-sm flex-[2]"
+              className="h-8 text-sm flex-[2] min-w-0"
               onKeyDown={(e) => { if (e.key === 'Enter' && canAdd) handleAdd(); }}
             />
             <Input
               placeholder="https://github.com/..."
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
-              className="h-8 text-sm flex-[5]"
+              className="h-8 text-sm flex-[5] min-w-0"
               onKeyDown={(e) => { if (e.key === 'Enter' && canAdd) handleAdd(); }}
             />
             <Button
@@ -182,6 +189,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
             </Button>
           </div>
         </div>
+        </TooltipProvider>
       </DialogContent>
     </Dialog>
   );
