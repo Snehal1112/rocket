@@ -549,9 +549,12 @@ impl GitService for Git2Service {
             .index()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         if index.has_conflicts() {
-            return Err(DomainError::Internal(
-                "pull resulted in conflicts".to_string(),
-            ));
+            // Leave the repo in merge-in-progress state. The frontend detects
+            // conflicts via the next status refresh.
+            index
+                .write()
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            return Ok(());
         }
 
         let tree_id = index
