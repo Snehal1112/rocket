@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState } from "react";
 import {
   GitBranch,
   RefreshCw,
@@ -9,10 +9,10 @@ import {
   Check,
   AlertCircle,
   GitCommit,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,8 +22,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { useGitStore } from '@/stores/git-store';
+} from "@/components/ui/alert-dialog";
+import { useGitStore } from "@/stores/git-store";
 
 export function GitLandingPanel() {
   const { status, push, pull, fetch, saveStash, popStash } = useGitStore();
@@ -66,14 +66,18 @@ export function GitLandingPanel() {
     }
 
     setPulling(true);
-    try { await pull(); } finally { setPulling(false); }
+    try {
+      await pull();
+    } finally {
+      setPulling(false);
+    }
   };
 
   const handleStashAndPull = async () => {
     setShowStashDialog(false);
     setPulling(true);
     try {
-      await saveStash('Auto-stash before pull');
+      await saveStash("Auto-stash before pull");
       await pull();
       await popStash(0);
     } catch {
@@ -86,7 +90,11 @@ export function GitLandingPanel() {
   const handlePullAnyway = async () => {
     setShowStashDialog(false);
     setPulling(true);
-    try { await pull(); } finally { setPulling(false); }
+    try {
+      await pull();
+    } finally {
+      setPulling(false);
+    }
   };
 
   const handlePush = async () => {
@@ -104,7 +112,11 @@ export function GitLandingPanel() {
     }
 
     setPushing(true);
-    try { await push(); } finally { setPushing(false); }
+    try {
+      await push();
+    } finally {
+      setPushing(false);
+    }
   };
 
   const handleFetchAndPush = async () => {
@@ -128,7 +140,11 @@ export function GitLandingPanel() {
   const handlePushAnyway = async () => {
     setShowFetchFirstDialog(false);
     setPushing(true);
-    try { await push(); } finally { setPushing(false); }
+    try {
+      await push();
+    } finally {
+      setPushing(false);
+    }
   };
 
   const ahead = status?.ahead ?? 0;
@@ -137,32 +153,40 @@ export function GitLandingPanel() {
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
-      <Card className="w-full max-w-[320px]">
-        <CardHeader className="flex flex-row items-center px-4 py-3 space-y-0">
+      <Card className="w-full max-w-[320px] bg-background/90 shadow-md rounded-md">
+        <CardHeader className="flex flex-row items-center px-3 py-2 space-y-0">
           <GitBranch className="h-3.5 w-3.5 text-muted-foreground mr-2" />
           <span className="font-mono text-sm font-medium">
-            {status?.branch ?? 'no branch'}
+            {status?.branch ?? "no branch"}
           </span>
           <div className="ml-auto flex gap-1.5">
             <Badge
               variant="outline"
-              className={ahead > 0 ? 'text-amber-500' : 'text-emerald-500'}
+              className={ahead > 0 ? "text-amber-500" : "text-emerald-500"}
             >
               ↑{ahead}
             </Badge>
             <Badge
               variant="outline"
-              className={behind > 0 ? 'text-amber-500' : 'text-emerald-500'}
+              className={behind > 0 ? "text-amber-500" : "text-emerald-500"}
             >
               ↓{behind}
             </Badge>
           </div>
         </CardHeader>
 
-        <CardContent className="px-4 pb-4 pt-0">
+        <CardContent
+          className="text-center pb-5 pt-5"
+          style={{ backgroundImage: "url(/git-branch.svg)" }}
+        >
           {/* Fetch / Pull / Push button group. */}
           <div className="flex gap-2 mb-3">
-            <Button variant="outline" size="sm" onClick={handleFetch} disabled={fetching}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleFetch}
+              disabled={fetching}
+            >
               {fetching ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
@@ -170,29 +194,41 @@ export function GitLandingPanel() {
               )}
               Fetch
             </Button>
-            <Button variant="outline" size="sm" onClick={handlePull} disabled={pulling}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePull}
+              disabled={pulling}
+            >
               {pulling ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <ArrowDown className="h-3.5 w-3.5" />
               )}
-              Pull{behind > 0 ? ` ↓${behind}` : ''}
+              Pull{behind > 0 ? ` ↓${behind}` : ""}
             </Button>
-            <Button variant="outline" size="sm" onClick={handlePush} disabled={pushing}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePush}
+              disabled={pushing}
+            >
               {pushing ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <ArrowUp className="h-3.5 w-3.5" />
               )}
-              Push{ahead > 0 ? ` ↑${ahead}` : ''}
+              Push{ahead > 0 ? ` ↑${ahead}` : ""}
             </Button>
           </div>
 
           {/* Last fetched timestamp. */}
           <p className="text-xs text-muted-foreground flex items-center gap-1.5">
             <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-            Last fetched:{' '}
-            <span className="font-medium text-foreground">{lastFetched ?? 'Never'}</span>
+            Last fetched:{" "}
+            <span className="font-medium text-foreground">
+              {lastFetched ?? "Never"}
+            </span>
           </p>
         </CardContent>
       </Card>
@@ -223,32 +259,44 @@ export function GitLandingPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Uncommitted Changes</AlertDialogTitle>
             <AlertDialogDescription>
-              You have uncommitted changes. Pulling may cause conflicts or data loss. Would you like to stash your changes first?
+              You have uncommitted changes. Pulling may cause conflicts or data
+              loss. Would you like to stash your changes first?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-wrap gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePullAnyway}>Pull Anyway</AlertDialogAction>
-            <AlertDialogAction onClick={handleStashAndPull}>Stash & Pull</AlertDialogAction>
+            <AlertDialogAction onClick={handlePullAnyway}>
+              Pull Anyway
+            </AlertDialogAction>
+            <AlertDialogAction onClick={handleStashAndPull}>
+              Stash & Pull
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Fetch-before-push confirmation dialog. */}
-      <AlertDialog open={showFetchFirstDialog} onOpenChange={setShowFetchFirstDialog}>
+      <AlertDialog
+        open={showFetchFirstDialog}
+        onOpenChange={setShowFetchFirstDialog}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Fetch Before Push</AlertDialogTitle>
             <AlertDialogDescription>
               {(status?.behind ?? 0) > 0
                 ? `Your branch is ${status?.behind} commits behind the remote. Fetching first ensures you have the latest changes and reduces the risk of conflicts.`
-                : 'You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts.'}
+                : "You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-wrap gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePushAnyway}>Push Anyway</AlertDialogAction>
-            <AlertDialogAction onClick={handleFetchAndPush}>Fetch & Push</AlertDialogAction>
+            <AlertDialogAction onClick={handlePushAnyway}>
+              Push Anyway
+            </AlertDialogAction>
+            <AlertDialogAction onClick={handleFetchAndPush}>
+              Fetch & Push
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

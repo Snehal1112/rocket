@@ -54,7 +54,7 @@ export function CollectionDropdown() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           className="h-7 gap-1.5 px-2.5 text-sm font-medium"
         >
