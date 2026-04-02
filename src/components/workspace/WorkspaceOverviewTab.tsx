@@ -27,7 +27,7 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
-// @ts-ignore -- consumed in subsequent task; suppress noUnusedLocals
+// @ts-expect-error -- consumed in Task 4; suppress noUnusedLocals
 function renderMarkdown(raw: string): string {
   if (!raw.trim()) return '';
 
@@ -46,14 +46,15 @@ function renderMarkdown(raw: string): string {
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
     s = s.replace(/`(.+?)`/g, '<code>$1</code>');
-    // Links: [text](url) — URL already escaped by escapeHtml, restore the parens
-    s = s.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" rel="noopener noreferrer">$1</a>');
+    // Links: [text](url) — only allow safe URL schemes
+    s = s.replace(/\[(.+?)\]\((.+?)\)/g, (_, text, url) => {
+      const safe = /^https?:\/\//i.test(url) || /^#/.test(url) || /^\//.test(url);
+      return safe ? `<a href="${url}" rel="noopener noreferrer">${text}</a>` : text;
+    });
     return s;
   }
 
-  for (const rawLine of lines) {
-
-    const line = rawLine;
+  for (const line of lines) {
     if (/^### /.test(line)) { closeList(); html += `<h3>${inlineFormat(line.slice(4))}</h3>`; }
     else if (/^## /.test(line)) { closeList(); html += `<h2>${inlineFormat(line.slice(3))}</h2>`; }
     else if (/^# /.test(line)) { closeList(); html += `<h1>${inlineFormat(line.slice(2))}</h1>`; }
