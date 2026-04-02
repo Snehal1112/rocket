@@ -54,7 +54,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg overflow-x-hidden overflow-y-auto [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
+      <DialogContent className="w-fit [overflow-x:clip] overflow-y-auto [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
         <DialogHeader>
           <DialogTitle>Manage Remotes</DialogTitle>
         </DialogHeader>
