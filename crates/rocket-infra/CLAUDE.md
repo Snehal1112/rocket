@@ -1,6 +1,23 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # rocket-infra
 
 Provides all filesystem and network implementations for the repository and service traits defined in the domain crates. This is the only crate that does I/O; everything else operates on trait objects.
+
+## Commands
+
+```bash
+# Run all tests for this crate
+cargo test -p rocket-infra
+
+# Run a single test by name (substring match)
+cargo test -p rocket-infra settings_roundtrip
+
+# Fast compile check
+cargo check -p rocket-infra
+```
 
 ## Workspace role
 
@@ -21,10 +38,12 @@ Provides all filesystem and network implementations for the repository and servi
 | `ReqwestExecutor` | `HttpExecutor` | Executes HTTP requests via `reqwest`. Handles all auth schemes, body types, and AWS SigV4 signing. |
 | `NotifyFileWatcher` | — | Wraps the `notify` crate; publishes `DomainEvent::FileChanged` via `EventPublisher` when collection files change. |
 
-## Internal modules (not public API)
+## Internal modules
 
-- `opencollection` — serde structs mirroring the OpenCollection YAML schema (`OcCollection`, `OcHttpRequest`, `OcFolderInfo`, etc.). Used only for serialization; domain types are used everywhere else.
-- `oc_conversions` — bidirectional conversion between domain `Request` and `OcHttpRequest`.
+These are `pub` in `lib.rs` but are serialization-layer details — callers outside this crate should not depend on them directly.
+
+- `opencollection` — serde structs mirroring the OpenCollection YAML schema (`OcCollection`, `OcHttpRequest`, `OcFolderInfo`, etc.). Used only for serialization; domain types are used everywhere else. Also contains GraphQL, gRPC, and WebSocket structs for schema completeness, but the repo only round-trips `OcHttpRequest` for individual request files — other protocol types land as `OpaqueProtocolItem` in the domain layer.
+- `oc_conversions` — bidirectional `From` impls between domain types and `Oc*` serde structs. The boundary layer between persistence and domain.
 - `migration` — detects and converts legacy JSON collections to OpenCollection YAML on first access; idempotent.
 
 ## Key patterns
@@ -38,6 +57,10 @@ Provides all filesystem and network implementations for the repository and servi
 **`SharedPathCollectionRepo` pattern.** The active workspace path is held in `Arc<Mutex<PathBuf>>`. Each repository call creates a short-lived `FsCollectionRepo` pointing at `<workspace>/collections`, so switching workspaces only requires updating the shared path.
 
 **OAuth2 client credentials.** `ReqwestExecutor` fetches tokens synchronously as part of `execute()`. Other OAuth2 flows (authorization code, implicit) are not implemented and are silently skipped.
+
+**`OcAuth` serde design.** `OcAuth` is `#[serde(untagged)]`: the string `"inherit"` deserializes to `OcAuth::Inherit`; an object with a `type` field deserializes to `OcAuth::Typed`. New auth variants must go inside `OcAuthTyped` (tagged by `type`), not as new `OcAuth` variants.
+
+**`OcItem` variant ordering.** The `OcItem` enum uses `#[serde(untagged)]`, so serde tries variants top-to-bottom. More specific types (those with a unique required field) must come before less specific ones — `Http` before `Folder`, etc. Changing variant order breaks deserialization of existing YAML files.
 
 ## Testing
 

@@ -171,7 +171,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    margin: 0;
     font-family: "Inter", "Segoe UI", sans-serif;
+  }
+  #root {
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
   /* Standardize all Lucide icons to 1px stroke weight. */
   .lucide {

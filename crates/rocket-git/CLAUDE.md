@@ -41,6 +41,7 @@ Each module owns its types and re-exports them via `lib.rs`:
 | `stash` | `StashEntry` |
 | `conflict` | `ConflictFile`, `ConflictResolution` |
 | `credentials` | `GitCredentials` (enum: SshKey, SshAgent, UserPass, Token) |
+| `remote` | `RemoteInfo` |
 
 All types derive `Serialize`/`Deserialize` with `camelCase` field names (for Tauri IPC). Enums use `lowercase` variant names.
 

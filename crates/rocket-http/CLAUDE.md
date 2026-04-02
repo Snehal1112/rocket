@@ -1,30 +1,50 @@
-# rocket-http
+# CLAUDE.md
 
-Provides HTTP request/response abstractions, auth utilities, and cookie management. It defines the executor trait and all auth logic (OAuth 2.0/PKCE, AWS SigV4, Basic, Bearer, API Key); no I/O implementation lives here.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Key Public Types and Traits
+## What This Crate Does
 
-| Type / Trait | Description |
+`rocket-http` is a pure-domain crate: it defines HTTP request/response types, auth utilities, cookie management, and a load-testing harness. It contains **no I/O implementations** — the concrete `ReqwestExecutor` and `FsCookieRepository` live in `rocket-infra`.
+
+## Commands
+
+```bash
+# Validate (fast)
+cargo check -p rocket-http
+
+# Run all tests
+cargo test -p rocket-http
+
+# Run a single test
+cargo test -p rocket-http <test_name>
+```
+
+## Module Map
+
+| Module | Purpose |
 |---|---|
-| `HttpExecutor` | Async trait — implementations (e.g. `ReqwestExecutor` in `rocket-infra`) execute an `HttpRequest` and return an `HttpResponse`. |
-| `HttpRequest` | Fully-resolved request: method, URL, headers, query params, body, auth config, and `RequestOptions`. |
-| `HttpResponse` | Response with status, headers, body, and timing metrics. Helper methods: `is_success`, `is_redirect`, `is_client_error`, `is_server_error`. |
-| `RequestOptions` | Per-request flags: `follow_redirects`, `timeout_ms`, `verify_ssl`. |
-| `OAuthConfig` / `OAuthToken` | OAuth 2.0 configuration (client_credentials, password, authorization_code) and token response with expiry tracking (`is_expired()`). |
-| `PkcePair` | PKCE code-verifier/challenge pair for secure OAuth flows. |
-| `CookieRepository` | Trait for persistent cookie storage (`get_all`, `get_by_domain`, `save`, `clear`). |
-| `Cookie` / `CookieJar` | Domain-scoped in-memory cookie storage. |
-| `AwsCredentials` / `SignedHeaders` | AWS Signature v4 signing support. |
+| `executor` | `HttpExecutor` async trait — single method `execute(&HttpRequest) -> DomainResult<HttpResponse>` |
+| `request` | `HttpRequest` (fully-resolved, ready-to-send) and `RequestOptions` (timeout, SSL, redirect flags) |
+| `response` | `HttpResponse` with status helpers (`is_success`, `is_redirect`, etc.) and case-insensitive `header_value()` |
+| `oauth2` | `OAuthConfig`, `OAuthToken`, and `acquire_token()` — supports `client_credentials`, `password`, `authorization_code` grants |
+| `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
+| `aws_sig` | `sign_request()` → `SignedHeaders` — full AWS Signature Version 4 HMAC chain |
+| `cookie` | `Cookie` and `CookieJar` (in-memory, domain-scoped; `add` replaces by name) |
+| `cookie_repository` | `CookieRepository` trait for persistent cookie storage |
+| `load_test` | `run_load_test()` — fires N concurrent requests bounded by a semaphore, returns `LoadTestResult` with p50/p95/p99 latency stats |
 
-## Key Patterns
+## Key Design Rules
 
-- All traits are `Send + Sync` for `Box<dyn Trait>` use in service structs.
-- All fallible methods return `DomainResult<T>` from `rocket-shared`.
-- Auth is modular: `acquire_token`, `sign_request`, `generate_pkce` are standalone functions the service layer calls during request preparation.
-- All public types derive `serde::{Serialize, Deserialize}` for Tauri IPC.
+- `HttpRequest` is the **resolved** request (variables already substituted). It is distinct from `rocket-collection`'s `Request`, which is a saved template.
+- `RequestOptions` defaults: `follow_redirects = true`, `timeout_ms = 30_000`, `verify_ssl = true`. These are applied via `#[serde(default)]`, so missing fields in JSON deserialise correctly.
+- Auth is **stateless and functional**: `acquire_token`, `sign_request`, and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.
+- `AwsCredentials` and `SignedHeaders` do **not** derive `serde` (they are transient signing artefacts, never serialised for IPC).
+- All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
+- `CookieJar::add` silently replaces a cookie with the same name — upsert semantics.
+- `run_load_test` uses a `Semaphore` to cap concurrency; failed requests contribute to `failed` count but not to latency stats.
 
 ## Relationships
 
-- Depends on `rocket-shared` for error types and shared domain primitives.
-- `rocket-infra` provides the concrete `ReqwestExecutor` and `FsCookieRepository`.
+- Depends on `rocket-shared` for `DomainResult`, `DomainError`, and shared types (`Auth`, `Body`, `Header`, `HttpMethod`, `QueryParam`).
+- `rocket-infra` provides the concrete `ReqwestExecutor` (implements `HttpExecutor`) and `FsCookieRepository` (implements `CookieRepository`).
 - `rocket-app`'s `RequestExecutionService` receives `Box<dyn HttpExecutor>` via constructor injection.

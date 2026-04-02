@@ -1,6 +1,17 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # rocket-workspace
 
-Defines the workspace domain model and the repository trait for persisting workspace state. This crate is intentionally I/O-free — no filesystem or network access lives here.
+Defines the workspace domain model and the repository traits for persisting workspace state. This crate is intentionally I/O-free — no filesystem or network access lives here.
+
+## Running Tests
+
+```bash
+cargo test -p rocket-workspace
+cargo test -p rocket-workspace <test_name>   # single test
+```
 
 ## Key Public Types
 
@@ -33,8 +44,13 @@ Per-workspace portable configuration file stored as `workspace.yml` inside each 
 - `collections: Vec<CollectionReference>` — ordered list of collection references.
 - `environments: WorkspaceEnvironmentsConfig` — workspace-level environment settings (active environment name).
 
+Mutation methods: `add_embedded_collection`, `add_external_collection`, `remove_collection`, `has_collection`.
+
+### `WorkspaceEnvironmentsConfig`
+Holds `active_environment: Option<String>` — the name of the currently active environment for the workspace. Defaults to `None`. Serialized with `camelCase`.
+
 ### `CollectionReference`
-Represents a collection belonging to a workspace. `ref_type: CollectionRefType` is either `Embedded` (collection lives inside `workspace/collections/`) or `External` (referenced by absolute `path`). External collections can be shared across workspaces.
+Represents a collection belonging to a workspace. `ref_type: CollectionRefType` is either `Embedded` (collection lives inside `workspace/collections/`) or `External` (referenced by absolute `path`). External collections can be shared across workspaces. Note: `ref_type` serializes as `"type"` (serde rename).
 
 ### `WorkspaceConfigRepository` (trait)
 ```rust
@@ -43,7 +59,7 @@ pub trait WorkspaceConfigRepository: Send + Sync {
     fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()>;
 }
 ```
-Implemented by `FsWorkspaceConfigRepo` in `rocket-infra`.
+`load` returns a default config derived from the directory name if `workspace.yml` does not exist — callers must not assume the file is always present. Implemented by `FsWorkspaceConfigRepo` in `rocket-infra`.
 
 ## Patterns and Conventions
 

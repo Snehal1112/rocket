@@ -45,7 +45,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **`Request` builder pattern:** Use `Request::new(name, method, url).with_header(...).with_body(...).with_auth(...)` for construction in tests.
 - **Serde backward compat:** New optional fields on `Request` must have `#[serde(default)]` so old JSON files without those fields still deserialize correctly.
 - **`request_count()`** on `Folder` is recursive; on `Collection` it delegates to `root`.
-- **`find_request` / `find_folder`** on `Folder` are non-recursive — they search the current level only.
+- **`find_request` / `find_folder`** on `Folder` are non-recursive — they search the current level only. Use `subfolder_names()` to get all folder names at current level.
 - **`CollectionItem` serde tag:** Uses `#[serde(tag = "type")]` with values `"request"`, `"folder"`, `"opaque"`. The `type` field appears in serialized JSON.
 - **`OpaqueProtocolItem.raw`** holds a `serde_yaml::Value` for lossless roundtrip of GraphQL/gRPC/WebSocket items — do not parse or transform it.
 - **`CollectionSummary.ref_type`** defaults to `"embedded"`; `"external"` is set by the workspace layer for collections referenced by path rather than owned.
@@ -60,7 +60,20 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **`runtime_auth`**: An auth override applied at execution time (e.g. from `runtime.auth` in OC YAML). Not persisted as the primary auth; kept separate from `auth`.
 - **`variables`**: Request-level variables typed as `Vec<serde_json::Value>` because `rocket-environment` is not a dependency of this crate. Resolved upstream in `rocket-app`.
 - **Scripting/testing fields**: `pre_request_script`, `post_response_script`, `tests` (JS strings), `assertions` (`Vec<Assertion>`), `actions` (`Vec<ActionSetVariable>`), and `examples` (`Vec<HttpRequestExample>`) are all optional and default to empty/`None`. They are executed by `rocket-app`, not this crate.
+- **`settings`**: `Option<RequestSettings>` — per-request execution settings (timeout, encode URL, etc.).
+- **`docs`**: `Option<Documentation>` — structured documentation separate from the free-text `description`.
+- **`seq`**: `Option<u32>` — optional ordering hint used by the infra layer.
 
-## CollectionSettings Variable Scope
+## CollectionSettings
 
-`CollectionSettings` (stored as `collection.json`) includes a `variables: Vec<CollectionVariable>` field. These collection-scoped variables sit below environment variables in the resolution hierarchy — environment variables override them. Each `CollectionVariable` has a `secret: bool` field to suppress UI display.
+`CollectionSettings` (stored as `collection.json`) includes:
+
+- **`variables: Vec<CollectionVariable>`** — collection-scoped variables sit below environment variables in the resolution hierarchy. Each `CollectionVariable` has a `secret: bool` field to suppress UI display and an `initial_value` field for Postman export compatibility.
+- **`auth: Option<Auth>`** — default auth applied to all requests in the collection.
+- **`headers: Vec<Header>`** — default headers prepended to every request.
+- **`description: Option<String>`** — optional human-readable description.
+- **`readme: Option<String>`** — optional markdown readme.
+
+## CollectionRepository
+
+The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo.toml`, all methods return `DomainResult<T>` directly. The concrete implementation is `FsCollectionRepo` in `rocket-infra`.

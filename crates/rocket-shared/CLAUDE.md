@@ -1,6 +1,23 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # rocket-shared
 
 Foundational crate that provides the common domain types, error handling, and event infrastructure shared across all other crates in the workspace. No other crate in the workspace is a dependency of this one.
+
+## Commands
+
+```bash
+# Run all tests for this crate
+cargo test -p rocket-shared
+
+# Run a single test by name
+cargo test -p rocket-shared <test_name>
+
+# Fast validation (no full compile)
+cargo check -p rocket-shared
+```
 
 ## Key Public Types
 
@@ -45,6 +62,8 @@ Foundational crate that provides the common domain types, error handling, and ev
 - **Tagged enums** use `#[serde(tag = "...")]` consistently: `DomainEvent` uses `type`/`camelCase`, `Auth` uses `authType`/`kebab-case`, `OAuth2Flow` uses `flow`/`snake_case`, `ClientCertificate` uses `type` with literal strings.
 - All types derive `Debug`, `Clone`, and `Serialize`/`Deserialize`. Most derive `PartialEq` to support test assertions.
 - This crate has no dependencies on other workspace crates and no I/O. It is safe to use in unit tests without any setup.
+- **`Auth::OAuth2` wire name is `"o-auth2"`** — kebab-case of `OAuth2` produces `o-auth2`, not `oauth2`. This is load-bearing for OpenCollection compatibility.
+- **`Body` field usage by mode**: `content` for text-like modes (`json`, `xml`, `text`, `sparql`, `formurlencoded`); `form_data` for `formdata`; `file_path` for `binary`. Only the relevant field is populated — the others are `None`.
 
 ## Workspace Role
 
