@@ -137,54 +137,68 @@ export function GitLandingPanel() {
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
-      <GitBranch className="h-12 w-12 text-muted-foreground/30" />
+      <Card className="w-full max-w-[320px]">
+        <CardHeader className="flex flex-row items-center px-4 py-3 space-y-0">
+          <GitBranch className="h-3.5 w-3.5 text-muted-foreground mr-2" />
+          <span className="font-mono text-sm font-medium">
+            {status?.branch ?? 'no branch'}
+          </span>
+          <div className="ml-auto flex gap-1.5">
+            <Badge
+              variant="outline"
+              className={ahead > 0 ? 'text-amber-500' : 'text-emerald-500'}
+            >
+              ↑{ahead}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={behind > 0 ? 'text-amber-500' : 'text-emerald-500'}
+            >
+              ↓{behind}
+            </Badge>
+          </div>
+        </CardHeader>
 
-      <p className="text-sm text-muted-foreground text-center max-w-[280px] mt-4 mb-6">
-        Perform git actions or open files from sidebar to view
-      </p>
+        <CardContent className="px-4 pb-4 pt-0">
+          {/* Fetch / Pull / Push button group. */}
+          <div className="flex gap-2 mb-3">
+            <Button variant="outline" size="sm" onClick={handleFetch} disabled={fetching}>
+              {fetching ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              Fetch
+            </Button>
+            <Button variant="outline" size="sm" onClick={handlePull} disabled={pulling}>
+              {pulling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ArrowDown className="h-3.5 w-3.5" />
+              )}
+              Pull{behind > 0 ? ` ↓${behind}` : ''}
+            </Button>
+            <Button variant="outline" size="sm" onClick={handlePush} disabled={pushing}>
+              {pushing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ArrowUp className="h-3.5 w-3.5" />
+              )}
+              Push{ahead > 0 ? ` ↑${ahead}` : ''}
+            </Button>
+          </div>
 
-      {/* Fetch / Pull / Push button group. */}
-      <div className="flex gap-2 mb-6">
-        <Button variant="outline" size="sm" onClick={handleFetch} disabled={fetching}>
-          {fetching ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5" />
-          )}
-          Fetch
-        </Button>
-        <Button variant="outline" size="sm" onClick={handlePull} disabled={pulling}>
-          {pulling ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ArrowDown className="h-3.5 w-3.5" />
-          )}
-          Pull{behind > 0 ? ` ↓${behind}` : ''}
-        </Button>
-        <Button variant="outline" size="sm" onClick={handlePush} disabled={pushing}>
-          {pushing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ArrowUp className="h-3.5 w-3.5" />
-          )}
-          Push{ahead > 0 ? ` ↑${ahead}` : ''}
-        </Button>
-      </div>
-
-      {/* Last fetched timestamp. */}
-      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mb-1.5">
-        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-        Last fetched:{' '}
-        <span className="font-medium text-foreground">{lastFetched ?? 'Never'}</span>
-      </p>
-
-      {/* Ahead / behind counts. */}
-      <p className="text-xs text-muted-foreground mb-4">
-        ↑ {ahead} Ahead&nbsp; |&nbsp; ↓ {behind} Behind
-      </p>
+          {/* Last fetched timestamp. */}
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            Last fetched:{' '}
+            <span className="font-medium text-foreground">{lastFetched ?? 'Never'}</span>
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Branch status badge. */}
-      <div className="flex items-center gap-1.5 text-xs border rounded-md px-3 py-1.5">
+      <div className="flex items-center gap-1.5 text-xs border rounded-md px-3 py-1.5 mt-3">
         {isUpToDate ? (
           <>
             <Check className="h-3.5 w-3.5 text-emerald-500" />
