@@ -210,7 +210,7 @@ html.linux #root {
 .prose-doc li { line-height: 1.7; color: hsl(var(--muted-foreground)); }
 .prose-doc ul li { list-style: disc; }
 .prose-doc ol li { list-style: decimal; }
-.prose-doc code { font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 0.6875rem; background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); border-radius: 3px; padding: 1px 4px; }
+.prose-doc code { font-family: var(--font-mono); font-size: 0.6875rem; background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); border-radius: 3px; padding: 1px 4px; }
 .prose-doc strong { font-weight: 600; }
 .prose-doc hr { border: none; border-top: 1px solid hsl(var(--border)); margin: 0.75rem 0; }
 .prose-doc a { color: hsl(var(--primary)); text-decoration: underline; }
