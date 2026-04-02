@@ -43,7 +43,9 @@ import type {
 import { isRequestTab } from '@/types/pane-types';
 import { findTabInTree } from '@/lib/pane-utils';
 import type { ParsedCurl } from '@/lib/curl-parser';
-import { getCollectionSettings } from '@/lib/tauri-api';
+import { getCollectionSettings, type CollectionVariable } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
+import { useEnvStore } from '@/stores/env-store';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 
@@ -91,6 +93,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
+  const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
 
   // Resizable split: request height as percentage.
@@ -118,7 +121,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   // Fetch collection variables for URL input overlay.
   useEffect(() => {
-    if (!tab.source?.collection) { setCollectionVars({}); return; }
+    if (!tab.source?.collection) {
+      setCollectionVars({});
+      setCollectionVariables([]);
+      return;
+    }
     getCollectionSettings(tab.source.collection)
       .then((s) => {
         const vars: Record<string, string> = {};
@@ -126,8 +133,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           if (v.enabled) vars[v.key] = v.value || v.initialValue;
         }
         setCollectionVars(vars);
+        setCollectionVariables(s.variables);
       })
-      .catch(() => setCollectionVars({}));
+      .catch(() => { setCollectionVars({}); setCollectionVariables([]); });
   }, [tab.source?.collection]);
 
   // Drag handle for request/response split.
@@ -255,6 +263,26 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     }
     return map;
   }, [request.queryParams]);
+
+  const envStore = useEnvStore();
+  const envVars = envStore.getActiveVariables();
+  const activeEnvIdForScope = envStore.activeEnvId;
+  const globalVars = envStore.getGlobalVariables();
+  const processEnvVars = envStore.processEnvVars;
+
+  // Build the scope-aware variable context for the URL input overlay.
+  const scopedContext = useMemo(
+    () =>
+      buildScopedContext({
+        envVars,
+        envLabel: activeEnvIdForScope ?? undefined,
+        globalVars,
+        processEnvVars,
+        collectionVars: collectionVariables,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [envVars, activeEnvIdForScope, globalVars, processEnvVars, collectionVariables],
+  );
 
   const authTypeOptions = useMemo(
     () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),
@@ -444,6 +472,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             }}
             onSwitchToParams={() => setActiveSection('params')}
             placeholder="https://api.example.com/resource"
+            scopedContext={scopedContext}
           />
 
           <Button size="sm" className="h-8 px-3" disabled={sending} onClick={() => {

@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useMemo } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { parseUrlTokens, type UrlToken } from '@/lib/url-variables';
+import { parseUrlTokens, sourceBadgeClass, type UrlToken, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { parseCurl, type ParsedCurl } from '@/lib/curl-parser';
 
@@ -18,6 +18,7 @@ interface VariableAwareUrlInputProps {
   onSwitchToParams?: () => void;
   placeholder?: string;
   className?: string;
+  scopedContext?: Map<string, VariableScopeEntry>;
 }
 
 // Determines the type badge and label for the popover footer.
@@ -47,6 +48,7 @@ export function VariableAwareUrlInput({
   onSwitchToParams,
   placeholder,
   className,
+  scopedContext,
 }: VariableAwareUrlInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
@@ -109,8 +111,12 @@ export function VariableAwareUrlInput({
 
   // Renders the unified Postman-style popover for any editable token.
   function renderTokenPopover(token: UrlToken, i: number, displayText: string, tokenColorClass: string) {
-    const meta = tokenMeta(token, activeEnvId);
-    const isCollectionVar = token.type === 'variable' && token.source === 'Collection';
+    const scopeEntry = token.type === 'variable' ? scopedContext?.get(token.value) : undefined;
+    // Prefer scopedContext label/icon if available; fall back to legacy tokenMeta.
+    const meta = scopeEntry
+      ? { icon: scopeEntry.source.charAt(0).toUpperCase(), iconClass: cn('rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold', sourceBadgeClass(scopeEntry.source)), label: scopeEntry.label }
+      : tokenMeta(token, activeEnvId);
+    const isCollectionVar = token.type === 'variable' && (scopeEntry?.source === 'collection' || token.source === 'Collection');
 
     return (
       <Popover
@@ -135,8 +141,9 @@ export function VariableAwareUrlInput({
             <Input
               autoFocus
               className="h-7 text-xs font-mono"
-              value={editValue}
+              value={scopeEntry?.secret ? '●●●●' : editValue}
               onChange={(e) => {
+                if (scopeEntry?.secret) return;
                 setEditValue(e.target.value);
                 // Live update for path params.
                 if (token.type === 'pathParam' && onPathParamChange) {
@@ -149,7 +156,7 @@ export function VariableAwareUrlInput({
               }}
               onBlur={() => void handleCommit()}
               placeholder="Value"
-              readOnly={isCollectionVar}
+              readOnly={isCollectionVar || scopeEntry?.secret}
             />
           </div>
 
@@ -237,10 +244,13 @@ export function VariableAwareUrlInput({
             }
 
             // Variable token: unified popover.
-            const isResolved = token.resolved !== undefined;
+            const scopeEntry = scopedContext?.get(token.value);
+            const badgeClass = scopeEntry
+              ? sourceBadgeClass(scopeEntry.source)
+              : (token.resolved !== undefined ? 'bg-primary/15 text-primary' : 'bg-destructive/15 text-destructive');
             return renderTokenPopover(
               token, i, `{{${token.value}}}`,
-              isResolved ? 'bg-primary/15 text-primary' : 'bg-destructive/15 text-destructive',
+              badgeClass,
             );
           })
         ) : (
