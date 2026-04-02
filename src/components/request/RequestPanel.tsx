@@ -48,6 +48,7 @@ import { buildScopedContext } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
+import { RequestVariablesPanel } from './RequestVariablesPanel';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -73,7 +74,7 @@ const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
 
 const INHERIT_AUTH_OPTION = { label: 'Inherit from parent', value: 'inherit' as AuthState['authType'] };
 
-type SectionTab = 'params' | 'headers' | 'body' | 'auth';
+type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -95,6 +96,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
+  const [requestVarCount, setRequestVarCount] = useState(0);
 
   // Resizable split: request height as percentage.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -393,8 +395,23 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'auth',
         onClick: () => setActiveSection('auth'),
       },
+      {
+        value: 'variables',
+        label: (
+          <>
+            Variables
+            {requestVarCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+                {requestVarCount}
+              </span>
+            )}
+          </>
+        ),
+        isActive: activeSection === 'variables',
+        onClick: () => setActiveSection('variables'),
+      },
     ],
-    [activeSection, enabledParamCount, enabledHeaderCount, request.body.mode, request.auth.authType],
+    [activeSection, enabledParamCount, enabledHeaderCount, request.body.mode, request.auth.authType, requestVarCount],
   );
 
   const tabRightContent = useMemo(() => {
@@ -561,6 +578,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 auth={request.auth}
                 onChange={(auth) => updateRequest(tab.id, { auth })}
               />
+            )}
+            {activeSection === 'variables' && (
+              tab.source?.collection && tab.source?.path ? (
+                <RequestVariablesPanel
+                  collection={tab.source.collection}
+                  requestPath={tab.source.path}
+                  onVarCountChange={setRequestVarCount}
+                />
+              ) : (
+                <p className="p-4 text-sm text-muted-foreground">
+                  Save this request to a collection before adding request variables.
+                </p>
+              )
             )}
           </div>
         </div>
