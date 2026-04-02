@@ -165,8 +165,6 @@ export function VariableAwareUrlInput({
             <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
               {token.type === 'pathParam' ? (
                 <span className="text-violet-500 font-bold text-xs">:</span>
-              ) : meta.icon === 'E' ? (
-                <span className={meta.iconClass}>{meta.icon}</span>
               ) : (
                 <span className={meta.iconClass}>{meta.icon}</span>
               )}

@@ -264,25 +264,37 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return map;
   }, [request.queryParams]);
 
-  const envStore = useEnvStore();
-  const envVars = envStore.getActiveVariables();
-  const activeEnvIdForScope = envStore.activeEnvId;
-  const globalVars = envStore.getGlobalVariables();
-  const processEnvVars = envStore.processEnvVars;
+  // Select stable state slices instead of calling getter methods outside a memo,
+  // which would produce new object references on every render.
+  const activeEnvIdForScope = useEnvStore((s) => s.activeEnvId);
+  const environments = useEnvStore((s) => s.environments);
+  const globalEnv = useEnvStore((s) => s.globalEnv);
+  const processEnvVars = useEnvStore((s) => s.processEnvVars);
 
   // Build the scope-aware variable context for the URL input overlay.
-  const scopedContext = useMemo(
-    () =>
-      buildScopedContext({
-        envVars,
-        envLabel: activeEnvIdForScope ?? undefined,
-        globalVars,
-        processEnvVars,
-        collectionVars: collectionVariables,
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [envVars, activeEnvIdForScope, globalVars, processEnvVars, collectionVariables],
-  );
+  // folderVars and requestVars are intentionally omitted: the Tauri commands for
+  // reading per-folder and per-request variables at render time are not yet
+  // implemented (deferred per the variables spec). They will be wired in once
+  // the corresponding backend commands exist.
+  const scopedContext = useMemo(() => {
+    const envVars: Record<string, string> = {};
+    if (activeEnvIdForScope) {
+      const env = environments.find((e) => e.name === activeEnvIdForScope);
+      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
+    }
+    const globalVars: Record<string, string> = globalEnv
+      ? Object.fromEntries(
+          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
+        )
+      : {};
+    return buildScopedContext({
+      envVars,
+      envLabel: activeEnvIdForScope ?? undefined,
+      globalVars,
+      processEnvVars,
+      collectionVars: collectionVariables,
+    });
+  }, [activeEnvIdForScope, environments, globalEnv, processEnvVars, collectionVariables]);
 
   const authTypeOptions = useMemo(
     () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),
