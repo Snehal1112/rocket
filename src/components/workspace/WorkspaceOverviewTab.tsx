@@ -2,7 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Plus, FolderOpen, Layers, MoreHorizontal, Trash2, ExternalLink,
 } from 'lucide-react';
+// @ts-expect-error -- consumed in Task 4; suppress noUnusedLocals
+import { FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+// @ts-expect-error -- consumed in Task 4; suppress noUnusedLocals
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -88,6 +92,9 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  // @ts-expect-error -- consumed in Task 4; suppress noUnusedLocals
+  const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
+  const [docContent, setDocContent] = useState<string>(workspace?.description ?? '');
 
   const refresh = useCallback(async () => {
     const cols = await listCollections();
@@ -98,6 +105,10 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     refresh().catch(console.error);
     loadGlobalEnvironments().catch(console.error);
   }, [refresh, loadGlobalEnvironments]);
+
+  useEffect(() => {
+    setDocContent(workspace?.description ?? '');
+  }, [workspace?.description]);
 
   function handleOpenCollection(collectionName: string) {
     const tab: CollectionTab = {
@@ -130,6 +141,11 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     } catch (err) {
       console.error('[WorkspaceOverview] delete failed:', err);
     }
+  }
+
+  // @ts-expect-error -- consumed in Task 4; suppress noUnusedLocals
+  function handleSaveDoc() {
+    updateDescription(workspaceId, docContent.trim() || null);
   }
 
   async function handleLinkExternal() {
