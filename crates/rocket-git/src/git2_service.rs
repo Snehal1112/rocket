@@ -2584,4 +2584,88 @@ mod tests {
         let result = Git2Service::new().checkout_remote_branch(&path, "not-a-remote-branch");
         assert!(result.is_err(), "missing slash in name must return InvalidInput error");
     }
+
+    #[test]
+    fn diff_file_clean_returns_empty_hunks() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // test.bru is tracked and unmodified — diff must produce no hunks.
+        let diff = svc.diff_file(&path, "test.bru").unwrap();
+        assert!(diff.hunks.is_empty(), "clean tracked file must have no diff hunks");
+    }
+
+    #[test]
+    fn push_fails_with_non_fast_forward() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Shared bare remote.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        // Clone A: push initial commit.
+        let dir_a = TempDir::new().unwrap();
+        let path_a = dir_a.path().to_string_lossy().to_string();
+        let repo_a = Repository::init(&path_a).unwrap();
+        repo_a.set_head("refs/heads/main").ok();
+        fs::write(dir_a.path().join("base.txt"), "base").unwrap();
+        let mut idx = repo_a.index().unwrap();
+        idx.add_path(Path::new("base.txt")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        let tree = repo_a.find_tree(tid).unwrap();
+        repo_a.commit(Some("refs/heads/main"), &sig, &sig, "base", &tree, &[]).unwrap();
+        drop(tree);
+        repo_a.remote("origin", &remote_path).unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // Clone B: starts from the same base.
+        let dir_b = TempDir::new().unwrap();
+        let path_b = dir_b.path().to_string_lossy().to_string();
+        Repository::clone(&remote_path, &path_b).unwrap();
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Clone A pushes a second commit — remote is now 1 ahead of B's base.
+        let repo_a2 = Repository::open(&path_a).unwrap();
+        fs::write(dir_a.path().join("a_extra.txt"), "from A").unwrap();
+        let mut idx2 = repo_a2.index().unwrap();
+        idx2.add_path(Path::new("a_extra.txt")).unwrap();
+        idx2.write().unwrap();
+        let tid2 = idx2.write_tree().unwrap();
+        let tree2 = repo_a2.find_tree(tid2).unwrap();
+        let head2 = repo_a2.head().unwrap().peel_to_commit().unwrap();
+        repo_a2.commit(Some("refs/heads/main"), &sig, &sig, "A second", &tree2, &[&head2]).unwrap();
+        svc.push(&path_a, "origin", &creds).unwrap();
+
+        // Clone B makes a commit on its stale base and tries to push — must fail.
+        let svc2 = Git2Service::new();
+        fs::write(dir_b.path().join("b_extra.txt"), "from B").unwrap();
+        svc2.stage(&path_b, &["b_extra.txt"]).unwrap();
+        svc2.commit(&path_b, "B commit on stale base").unwrap();
+
+        let result = svc2.push(&path_b, "origin", &creds);
+        assert!(result.is_err(), "non-fast-forward push must return Err");
+    }
+
+    #[test]
+    fn stash_drop_out_of_range_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // No stashes — index 99 must error.
+        let result = svc.stash_drop(&path, 99);
+        assert!(result.is_err(), "stash_drop with out-of-range index must fail");
+    }
+
+    #[test]
+    fn delete_checked_out_branch_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "feature-x").unwrap();
+        svc.switch_branch(&path, "feature-x").unwrap();
+        // feature-x is the current branch — deleting it must fail.
+        let result = svc.delete_branch(&path, "feature-x");
+        assert!(result.is_err(), "deleting the currently checked-out branch must fail");
+    }
 }
