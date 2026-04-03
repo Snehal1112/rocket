@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Textarea } from '@/components/ui/textarea';
 
 interface MarkdownEditorProps {
@@ -48,7 +49,7 @@ export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps)
       ) : (
         <div className="prose prose-sm dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md">
           {value ? (
-            <ReactMarkdown>{value}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (
             <p className="text-muted-foreground text-sm italic">No readme yet.</p>
           )}

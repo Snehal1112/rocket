@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Plus,
   FolderOpen,
@@ -30,88 +32,6 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { usePaneStore } from "@/stores/pane-store";
 import { useEnvStore } from "@/stores/env-store";
 import type { CollectionTab } from "@/types/pane-types";
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function renderMarkdown(raw: string): string {
-  if (!raw.trim()) return "";
-
-  const lines = raw.split("\n");
-  let html = "";
-  let inList = false;
-  let listType = "";
-
-  function closeList() {
-    if (inList) {
-      html += `</${listType}>`;
-      inList = false;
-      listType = "";
-    }
-  }
-
-  function inlineFormat(line: string): string {
-    // Escape HTML first, then apply safe inline markdown
-    let s = escapeHtml(line);
-    s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    s = s.replace(/`(.+?)`/g, "<code>$1</code>");
-    // Links: [text](url) — only allow safe URL schemes
-    s = s.replace(/\[(.+?)\]\((.+?)\)/g, (_, text, url) => {
-      const safe =
-        /^https?:\/\//i.test(url) || /^#/.test(url) || /^\//.test(url);
-      return safe
-        ? `<a href="${url}" rel="noopener noreferrer">${text}</a>`
-        : text;
-    });
-    return s;
-  }
-
-  for (const line of lines) {
-    if (/^### /.test(line)) {
-      closeList();
-      html += `<h3>${inlineFormat(line.slice(4))}</h3>`;
-    } else if (/^## /.test(line)) {
-      closeList();
-      html += `<h2>${inlineFormat(line.slice(3))}</h2>`;
-    } else if (/^# /.test(line)) {
-      closeList();
-      html += `<h1>${inlineFormat(line.slice(2))}</h1>`;
-    } else if (/^---$/.test(line.trim())) {
-      closeList();
-      html += "<hr />";
-    } else if (/^- /.test(line)) {
-      if (!inList || listType !== "ul") {
-        closeList();
-        html += "<ul>";
-        inList = true;
-        listType = "ul";
-      }
-      html += `<li>${inlineFormat(line.slice(2))}</li>`;
-    } else if (/^\d+\. /.test(line)) {
-      if (!inList || listType !== "ol") {
-        closeList();
-        html += "<ol>";
-        inList = true;
-        listType = "ol";
-      }
-      html += `<li>${inlineFormat(line.replace(/^\d+\. /, ""))}</li>`;
-    } else if (line.trim() === "") {
-      closeList();
-    } else {
-      closeList();
-      html += `<p>${inlineFormat(line)}</p>`;
-    }
-  }
-  closeList();
-  return html;
-}
 
 interface WorkspaceOverviewTabProps {
   workspaceId: string;
@@ -452,12 +372,11 @@ export function WorkspaceOverviewTab({
             {docMode === "preview" && (
               <div className="flex-1 overflow-y-auto px-4 py-3.5">
                 {docContent.trim() ? (
-                  <div
-                    className="prose-doc text-xs leading-relaxed"
-                    dangerouslySetInnerHTML={{
-                      __html: renderMarkdown(docContent),
-                    }}
-                  />
+                  <div className="prose-doc text-xs leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {docContent}
+                    </ReactMarkdown>
+                  </div>
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center gap-3 text-center py-8">
                     <FileText className="h-9 w-9 text-muted-foreground/20" />
