@@ -15,28 +15,39 @@ use crate::stash::StashEntry;
 use crate::status::{FileStatus, GitStatus, RepoStatus};
 
 /// Build credential callbacks for remote operations.
+///
+/// The callback includes a one-shot guard: if libgit2 calls it more than once
+/// (which happens when credentials are rejected and it retries), we return an
+/// error on the second call so the operation fails fast instead of looping.
 fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'_> {
     let mut callbacks = git2::RemoteCallbacks::new();
     let creds = creds.clone();
-    callbacks.credentials(move |_url, username, _allowed| match &creds {
-        GitCredentials::SshKey {
-            private_key_path,
-            passphrase,
-        } => git2::Cred::ssh_key(
-            username.unwrap_or("git"),
-            None,
-            Path::new(private_key_path),
-            passphrase.as_deref(),
-        ),
-        GitCredentials::SshAgent => {
-            git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
+    let mut used = false;
+    callbacks.credentials(move |_url, username, _allowed| {
+        if used {
+            return Err(git2::Error::from_str("authentication failed: check credentials and remote URL"));
         }
-        GitCredentials::UserPass {
-            username: u,
-            password,
-        } => git2::Cred::userpass_plaintext(u, password),
-        GitCredentials::Token { token } => {
-            git2::Cred::userpass_plaintext("oauth2", token)
+        used = true;
+        match &creds {
+            GitCredentials::SshKey {
+                private_key_path,
+                passphrase,
+            } => git2::Cred::ssh_key(
+                username.unwrap_or("git"),
+                None,
+                Path::new(private_key_path),
+                passphrase.as_deref(),
+            ),
+            GitCredentials::SshAgent => {
+                git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
+            }
+            GitCredentials::UserPass {
+                username: u,
+                password,
+            } => git2::Cred::userpass_plaintext(u, password),
+            GitCredentials::Token { token } => {
+                git2::Cred::userpass_plaintext("oauth2", token)
+            }
         }
     });
     callbacks
@@ -272,6 +283,21 @@ impl GitService for Git2Service {
         let repo = open_repo(path)?;
         repo.remote_set_url(name, url)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
+        // Prune stale remote-tracking refs so that ahead/behind no longer
+        // reflects the old remote's history after the URL changes.
+        let prefix = format!("refs/remotes/{}/", name);
+        if let Ok(refs) = repo.references() {
+            let stale: Vec<String> = refs
+                .flatten()
+                .filter_map(|r| r.name().map(String::from))
+                .filter(|n| n.starts_with(&prefix))
+                .collect();
+            for refname in stale {
+                if let Ok(mut r) = repo.find_reference(&refname) {
+                    let _ = r.delete();
+                }
+            }
+        }
         Ok(())
     }
 
@@ -519,16 +545,27 @@ impl GitService for Git2Service {
     }
 
     fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
-        // Fetch first, then merge FETCH_HEAD.
+        // Fetch first.
         self.fetch(path, remote, creds)?;
 
         let repo = open_repo(path)?;
-        let fetch_head = repo
-            .find_reference("FETCH_HEAD")
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let current_branch = branch_name(&repo);
+
+        // Resolve the remote-tracking ref for the current branch directly
+        // (e.g. refs/remotes/origin/main).  This avoids the FETCH_HEAD
+        // pitfall: when the repo fetches multiple branches, FETCH_HEAD's first
+        // line may point to a different branch (e.g. feature/database-migration)
+        // causing the wrong branch to be merged into main.
+        let remote_ref_name = format!("refs/remotes/{remote}/{current_branch}");
         let fetch_commit = repo
-            .reference_to_annotated_commit(&fetch_head)
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+            .find_reference(&remote_ref_name)
+            .map_err(|e| DomainError::Internal(format!(
+                "remote tracking ref '{remote_ref_name}' not found after fetch: {e}"
+            )))
+            .and_then(|r| {
+                repo.reference_to_annotated_commit(&r)
+                    .map_err(|e| DomainError::Internal(e.to_string()))
+            })?;
 
         let (analysis, _) = repo
             .merge_analysis(&[&fetch_commit])
@@ -540,12 +577,25 @@ impl GitService for Git2Service {
 
         if analysis.is_fast_forward() {
             let ref_name = format!("refs/heads/{}", branch_name(&repo));
-            let mut reference = repo
-                .find_reference(&ref_name)
-                .map_err(|e| DomainError::Internal(e.to_string()))?;
-            reference
-                .set_target(fetch_commit.id(), "pull fast-forward")
-                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            // In an unborn repo (fresh `git init`, no commits yet) the local
+            // branch ref (`refs/heads/main`) does not exist — create it
+            // instead of trying to update a non-existent reference.
+            match repo.find_reference(&ref_name) {
+                Ok(mut reference) => {
+                    reference
+                        .set_target(fetch_commit.id(), "pull fast-forward")
+                        .map_err(|e| DomainError::Internal(e.to_string()))?;
+                }
+                Err(_) => {
+                    repo.reference(
+                        &ref_name,
+                        fetch_commit.id(),
+                        false,
+                        "pull: initial checkout into unborn branch",
+                    )
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+                }
+            }
             repo.set_head(&ref_name)
                 .map_err(|e| DomainError::Internal(e.to_string()))?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
@@ -561,12 +611,36 @@ impl GitService for Git2Service {
             .index()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         if index.has_conflicts() {
-            // Leave the repo in merge-in-progress state. The frontend detects
-            // conflicts via the next status refresh.
+            // Persist the conflicted index so the frontend can enumerate the
+            // conflict files.  Return an error so the caller knows it must
+            // surface the conflict UI rather than treating the pull as done.
+            // The merge-in-progress state (MERGE_HEAD) is intentionally left
+            // so the user can resolve conflicts and complete the merge via the
+            // conflict-resolution panel.
             index
                 .write()
                 .map_err(|e| DomainError::Internal(e.to_string()))?;
-            return Ok(());
+            let conflicted: Vec<String> = index
+                .conflicts()
+                .map(|iter| {
+                    iter.flatten()
+                        .filter_map(|c| {
+                            c.our
+                                .or(c.their)
+                                .or(c.ancestor)
+                                .and_then(|e| String::from_utf8(e.path).ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let file_list = if conflicted.is_empty() {
+                "unknown files".to_string()
+            } else {
+                conflicted.join(", ")
+            };
+            return Err(DomainError::Internal(format!(
+                "merge conflict: resolve conflicts in {file_list} and commit to complete the pull"
+            )));
         }
 
         let tree_id = index
@@ -1479,6 +1553,681 @@ mod tests {
     }
 
     #[test]
+    fn pull_fast_forward_updates_status() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Create bare remote with an initial commit.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        let _remote_repo = Repository::init_bare(&remote_path).unwrap();
+
+        // Create local repo, make initial commit, push to remote.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+        fs::write(local_dir.path().join("a.txt"), "a").unwrap();
+        let mut idx = local_repo.index().unwrap();
+        idx.add_path(Path::new("a.txt")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        let tree = local_repo.find_tree(tid).unwrap();
+        local_repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        drop(tree);
+        let mut r = local_repo.remote("origin", &remote_path).unwrap();
+        r.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        drop(r);
+        drop(local_repo);
+
+        // Push a new commit from a separate clone → remote is now 1 ahead of local.
+        let other_dir = TempDir::new().unwrap();
+        let other_repo = Repository::clone(&remote_path, other_dir.path()).unwrap();
+        fs::write(other_dir.path().join("b.txt"), "b").unwrap();
+        let mut oi = other_repo.index().unwrap();
+        oi.add_path(Path::new("b.txt")).unwrap();
+        oi.write().unwrap();
+        let otid = oi.write_tree().unwrap();
+        let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
+        {
+            let otree = other_repo.find_tree(otid).unwrap();
+            other_repo.commit(Some("refs/heads/main"), &sig, &sig, "remote commit", &otree, &[&ohead]).unwrap();
+        }
+        other_repo.find_remote("origin").unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Fetch so ahead_behind has fresh tracking data.
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+        let before = svc.status(&local_path).unwrap();
+        assert_eq!(before.behind, 1, "should be 1 behind before pull");
+
+        // Pull — should fast-forward local branch.
+        svc.pull(&local_path, "origin", &creds).unwrap();
+
+        let after = svc.status(&local_path).unwrap();
+        assert_eq!(after.behind, 0, "behind should be 0 after pull");
+        assert_eq!(after.ahead, 0, "ahead should be 0 after pull");
+    }
+
+    #[test]
+    fn pull_fast_forward_without_prior_fetch() {
+        // Simulates the user's scenario: behind:N shown, user clicks pull directly
+        // without having done an explicit fetch first.
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Build bare remote + local (in sync), then add remote commit.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        let _remote_repo = Repository::init_bare(&remote_path).unwrap();
+
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+        fs::write(local_dir.path().join("a.txt"), "a").unwrap();
+        let mut idx = local_repo.index().unwrap();
+        idx.add_path(Path::new("a.txt")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        {
+            let t = local_repo.find_tree(tid).unwrap();
+            local_repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &t, &[]).unwrap();
+        }
+        let mut r = local_repo.remote("origin", &remote_path).unwrap();
+        r.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        drop(r);
+        drop(local_repo);
+
+        // Push extra commit from another clone (local is now 1 behind).
+        let other_dir = TempDir::new().unwrap();
+        let other_repo = Repository::clone(&remote_path, other_dir.path()).unwrap();
+        fs::write(other_dir.path().join("b.txt"), "b").unwrap();
+        let mut oi = other_repo.index().unwrap();
+        oi.add_path(Path::new("b.txt")).unwrap();
+        oi.write().unwrap();
+        let otid = oi.write_tree().unwrap();
+        let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
+        {
+            let otree = other_repo.find_tree(otid).unwrap();
+            other_repo.commit(Some("refs/heads/main"), &sig, &sig, "remote commit", &otree, &[&ohead]).unwrap();
+        }
+        other_repo.find_remote("origin").unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // NOTE: no explicit svc.fetch call here — simulates user clicking pull directly.
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Pull should succeed without a prior explicit fetch.
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_ok(), "pull should succeed: {:?}", result.err());
+
+        let after = svc.status(&local_path).unwrap();
+        assert_eq!(after.behind, 0, "behind should be 0 after pull");
+        assert_eq!(after.ahead, 0, "ahead should be 0 after pull");
+    }
+
+    /// Regression test for the "Sage Network" bug:
+    /// Remote has multiple branches (main + feature/database-migration).
+    /// When fetch returns both, FETCH_HEAD's first line is the feature branch.
+    /// pull() must merge the CURRENT branch (main) not FETCH_HEAD's first entry.
+    #[test]
+    fn pull_uses_current_branch_not_fetch_head_first_line() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Build bare remote with TWO branches: main and feature.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        let seed_dir = TempDir::new().unwrap();
+        let base_oid = {
+            let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
+            seed_repo.set_head("refs/heads/main").ok();
+
+            // Shared base commit.
+            fs::write(seed_dir.path().join("base.txt"), "base").unwrap();
+            let mut si = seed_repo.index().unwrap();
+            si.add_path(Path::new("base.txt")).unwrap();
+            si.write().unwrap();
+            let base_oid = {
+                let tid = si.write_tree().unwrap();
+                let t = seed_repo.find_tree(tid).unwrap();
+                seed_repo.commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[]).unwrap()
+            };
+
+            // Push main's base to remote.
+            seed_repo.find_remote("origin").unwrap()
+                .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+            // Create feature branch from base and push it.
+            {
+                let base_commit = seed_repo.find_commit(base_oid).unwrap();
+                seed_repo.branch("feature/database-migration", &base_commit, false).unwrap();
+            }
+            fs::write(seed_dir.path().join("feature.txt"), "feature work").unwrap();
+            let mut fi = seed_repo.index().unwrap();
+            fi.add_path(Path::new("feature.txt")).unwrap();
+            fi.write().unwrap();
+            seed_repo.set_head("refs/heads/feature/database-migration").ok();
+            {
+                let tid = fi.write_tree().unwrap();
+                let t = seed_repo.find_tree(tid).unwrap();
+                let base_c = seed_repo.find_commit(base_oid).unwrap();
+                seed_repo.commit(
+                    Some("refs/heads/feature/database-migration"),
+                    &sig, &sig, "feature commit", &t, &[&base_c],
+                ).unwrap();
+            }
+            seed_repo.find_remote("origin").unwrap()
+                .push(&["refs/heads/feature/database-migration:refs/heads/feature/database-migration"], None).unwrap();
+
+            base_oid
+        }; // seed_repo dropped here
+
+        // Push 2 extra commits onto remote main via a FRESH clone so the index
+        // is clean (no feature.txt contamination from the seed_repo's index).
+        {
+            let other_dir = TempDir::new().unwrap();
+            let other_repo = Repository::clone(&remote_path, other_dir.path()).unwrap();
+            for i in 1..=2u32 {
+                fs::write(other_dir.path().join(format!("remote{i}.txt")), "remote").unwrap();
+                let mut ri = other_repo.index().unwrap();
+                ri.add_path(Path::new(&format!("remote{i}.txt"))).unwrap();
+                ri.write().unwrap();
+                let tid = ri.write_tree().unwrap();
+                let t = other_repo.find_tree(tid).unwrap();
+                let h = other_repo.head().unwrap().peel_to_commit().unwrap();
+                other_repo.commit(
+                    Some("refs/heads/main"), &sig, &sig,
+                    &format!("remote main {i}"), &t, &[&h],
+                ).unwrap();
+            }
+            other_repo.find_remote("origin").unwrap()
+                .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        }
+
+        // Local: clone, reset to base (1 behind main), add local commit (ahead).
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        {
+            let local_repo = Repository::clone(&remote_path, &local_path).unwrap();
+            local_repo.set_head("refs/heads/main").ok();
+            {
+                let base_c = local_repo.find_commit(base_oid).unwrap();
+                local_repo.reset(base_c.as_object(), git2::ResetType::Hard, None).unwrap();
+            }
+            fs::write(local_dir.path().join("local.txt"), "local").unwrap();
+            let mut li = local_repo.index().unwrap();
+            li.add_path(Path::new("local.txt")).unwrap();
+            li.write().unwrap();
+            {
+                let tid = li.write_tree().unwrap();
+                let t = local_repo.find_tree(tid).unwrap();
+                let h = local_repo.head().unwrap().peel_to_commit().unwrap();
+                local_repo.commit(Some("refs/heads/main"), &sig, &sig, "local commit", &t, &[&h]).unwrap();
+            }
+        } // local_repo dropped here
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Fetch — populates FETCH_HEAD with both branches.
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        let before = svc.status(&local_path).unwrap();
+        println!("before pull: ahead={} behind={}", before.ahead, before.behind);
+        assert!(before.behind > 0, "should be behind main before pull");
+
+        // Pull must merge origin/main, NOT origin/feature/database-migration.
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_ok(), "pull must succeed: {:?}", result.err());
+
+        let after = svc.status(&local_path).unwrap();
+        println!("after pull: ahead={} behind={}", after.ahead, after.behind);
+        assert_eq!(after.behind, 0, "behind must be 0 — pull must have merged origin/main");
+
+        // remote main files must be present; feature file must NOT be.
+        assert!(local_dir.path().join("remote1.txt").exists(), "remote1.txt from origin/main must be present");
+        assert!(!local_dir.path().join("feature.txt").exists(), "feature.txt from wrong branch must NOT be present");
+    }
+
+    #[test]
+    fn pull_with_diverged_history_merges_and_clears_behind() {
+        // Exact user scenario: ahead:2, behind:8 → pull → behind:0
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Create bare remote.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        let _remote = Repository::init_bare(&remote_path).unwrap();
+
+        // Local: 1 initial commit shared with remote.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+        fs::write(local_dir.path().join("base.txt"), "base").unwrap();
+        let mut idx = local_repo.index().unwrap();
+        idx.add_path(Path::new("base.txt")).unwrap();
+        idx.write().unwrap();
+        {
+            let tid = idx.write_tree().unwrap();
+            let t = local_repo.find_tree(tid).unwrap();
+            local_repo.commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[]).unwrap();
+        }
+        // Push base to remote.
+        let mut r = local_repo.remote("origin", &remote_path).unwrap();
+        r.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        drop(r);
+
+        // Add 2 LOCAL commits (ahead of remote).
+        for i in 1..=2 {
+            fs::write(local_dir.path().join(format!("local{i}.txt")), "local").unwrap();
+            let mut idx = local_repo.index().unwrap();
+            idx.add_path(Path::new(&format!("local{i}.txt"))).unwrap();
+            idx.write().unwrap();
+            let tid = idx.write_tree().unwrap();
+            let t = local_repo.find_tree(tid).unwrap();
+            let head = local_repo.head().unwrap().peel_to_commit().unwrap();
+            local_repo.commit(Some("refs/heads/main"), &sig, &sig, &format!("local {i}"), &t, &[&head]).unwrap();
+        }
+        drop(local_repo);
+
+        // Add 8 REMOTE commits via a separate clone (remote is now ahead of base by 8).
+        let other_dir = TempDir::new().unwrap();
+        let other_repo = Repository::clone(&remote_path, other_dir.path()).unwrap();
+        for i in 1..=8 {
+            fs::write(other_dir.path().join(format!("remote{i}.txt")), "remote").unwrap();
+            let mut oi = other_repo.index().unwrap();
+            oi.add_path(Path::new(&format!("remote{i}.txt"))).unwrap();
+            oi.write().unwrap();
+            let otid = oi.write_tree().unwrap();
+            let otree = other_repo.find_tree(otid).unwrap();
+            let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
+            other_repo.commit(Some("refs/heads/main"), &sig, &sig, &format!("remote {i}"), &otree, &[&ohead]).unwrap();
+        }
+        other_repo.find_remote("origin").unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // Fetch to establish refs/remotes/origin/main so status shows ahead:2, behind:8.
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        let before = svc.status(&local_path).unwrap();
+        assert_eq!(before.ahead, 2, "should be 2 ahead before pull");
+        assert_eq!(before.behind, 8, "should be 8 behind before pull");
+
+        // Pull should do a real merge (diverged history, no fast-forward).
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_ok(), "pull should succeed: {:?}", result.err());
+
+        let after = svc.status(&local_path).unwrap();
+        println!("after pull: ahead={}, behind={}", after.ahead, after.behind);
+        assert_eq!(after.behind, 0, "behind must be 0 after pull");
+    }
+
+    /// Reproduces the test-42 scenario: local repo has workspace.yml as its
+    /// initial commit (no common ancestor with remote), remote also has
+    /// workspace.yml. Pull must return a DomainError reporting the conflict,
+    /// and the repo must be left in merge-in-progress state so the conflict
+    /// resolution UI can show.
+    #[test]
+    fn pull_with_unrelated_histories_returns_conflict_error() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Bare remote with its own independent workspace.yml.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        let seed_dir = TempDir::new().unwrap();
+        let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
+        seed_repo.set_head("refs/heads/main").ok();
+        fs::write(seed_dir.path().join("workspace.yml"), "name: remote-workspace\n").unwrap();
+        let mut si = seed_repo.index().unwrap();
+        si.add_path(Path::new("workspace.yml")).unwrap();
+        si.write().unwrap();
+        let stid = si.write_tree().unwrap();
+        {
+            let t = seed_repo.find_tree(stid).unwrap();
+            seed_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "remote initial", &t, &[])
+                .unwrap();
+        }
+        seed_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+        drop(seed_repo);
+
+        // Local: independent initial commit with workspace.yml (different content, NO common ancestor).
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+        fs::write(local_dir.path().join("workspace.yml"), "name: local-workspace\n").unwrap();
+        let mut li = local_repo.index().unwrap();
+        li.add_path(Path::new("workspace.yml")).unwrap();
+        li.write().unwrap();
+        let ltid = li.write_tree().unwrap();
+        {
+            let t = local_repo.find_tree(ltid).unwrap();
+            local_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "local initial", &t, &[])
+                .unwrap();
+        }
+        drop(local_repo);
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        svc.add_remote(&local_path, "origin", &remote_path).unwrap();
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        let before = svc.status(&local_path).unwrap();
+        assert!(before.behind > 0, "should be behind before pull");
+
+        // Pull MUST return an error because workspace.yml has a merge conflict
+        // (both sides added it independently with no common ancestor).
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_err(), "pull must return error when there are merge conflicts");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("merge conflict"),
+            "error must mention 'merge conflict'; got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("workspace.yml"),
+            "error must name the conflicted file; got: {err_msg}"
+        );
+
+        // Repo must be in merge-in-progress state so conflict resolution UI can work.
+        assert!(
+            local_dir.path().join(".git/MERGE_HEAD").exists(),
+            "MERGE_HEAD must exist after a conflicting pull"
+        );
+    }
+
+    #[test]
+    fn remove_and_readd_remote_leaves_stale_tracking_refs() {
+        // Verify that remove_remote + add_remote does NOT clear refs/remotes/<name>/*.
+        // This identifies the leaked-refs bug in the remove→re-add workflow.
+        let (_dir, path) = setup_repo();
+        let repo = Repository::open(&path).unwrap();
+
+        // Manually plant a stale tracking ref (simulates what a prior fetch would do).
+        let head_oid = repo.head().unwrap().target().unwrap();
+        repo.reference("refs/remotes/origin/main", head_oid, false, "planted").unwrap();
+        assert!(repo.find_reference("refs/remotes/origin/main").is_ok());
+
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", "https://example.com/repo.git").unwrap();
+        svc.remove_remote(&path, "origin").unwrap();
+        svc.add_remote(&path, "origin", "https://example.com/new-repo.git").unwrap();
+
+        // The stale ref should be GONE after remove — currently it is NOT (bug).
+        let repo2 = Repository::open(&path).unwrap();
+        let ref_exists = repo2.find_reference("refs/remotes/origin/main").is_ok();
+        println!("stale tracking ref still exists after remove+readd: {ref_exists}");
+        // This assertion currently FAILS if remove_remote doesn't prune refs.
+        assert!(!ref_exists, "stale refs/remotes/origin/* must be deleted by remove_remote");
+    }
+
+    /// End-to-end integration test against the real GitHub remote used in bug
+    /// reports. Requires SSH agent with a key authorised for Snehal1112/test-42.
+    /// Marked `#[ignore]` so it does not run in CI; run explicitly with:
+    ///   cargo test -p rocket-git pull_unborn_real_github -- --ignored
+    #[test]
+    #[ignore]
+    fn pull_unborn_real_github_with_untracked_workspace_yml() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+
+        // Replicate exact user scenario:
+        // 1. git init
+        let local_repo = git2::Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+
+        // 2. workspace.yml is created by the app (shows as dirty in Git UI)
+        fs::write(local_dir.path().join("workspace.yml"), "name: test-workspace\n").unwrap();
+
+        // 3. User stages and commits workspace.yml (it's shown as dirty, they commit it)
+        let mut idx = local_repo.index().unwrap();
+        idx.add_path(Path::new("workspace.yml")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        let tree = local_repo.find_tree(tid).unwrap();
+        local_repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "initial: workspace.yml", &tree, &[])
+            .unwrap();
+        drop(tree);
+        drop(local_repo);
+
+        let svc = Git2Service::new();
+        // SSH agent credentials — no passphrase required.
+        let creds = GitCredentials::SshAgent;
+
+        // 4. Add remote and fetch.
+        svc.add_remote(&local_path, "origin", "git@github.com:Snehal1112/test-42.git")
+            .unwrap();
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        let before = svc.status(&local_path).unwrap();
+        println!("before pull: ahead={} behind={}", before.ahead, before.behind);
+        assert!(before.behind > 0, "should be behind before pull; got behind={}", before.behind);
+
+        // Pull will produce a merge conflict because local committed workspace.yml
+        // from an unrelated history (no common ancestor with remote).  The
+        // expected behavior is a DomainError naming the conflicted file.
+        let result = svc.pull(&local_path, "origin", &creds);
+        println!("pull result: {:?}", result);
+        match result {
+            Ok(()) => {
+                // Pull succeeded cleanly (remote's workspace.yml happened to be
+                // compatible).  Status must show behind=0.
+                let after = svc.status(&local_path).unwrap();
+                println!("clean pull: ahead={} behind={}", after.ahead, after.behind);
+                assert_eq!(after.behind, 0, "behind must be 0 after clean pull");
+            }
+            Err(ref e) => {
+                // Pull produced merge conflicts — the expected case for test-42
+                // (unrelated histories, same workspace.yml file).
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("merge conflict"),
+                    "error must mention 'merge conflict'; got: {msg}"
+                );
+                // Repo must be in MERGE_IN_PROGRESS state for conflict resolution UI.
+                assert!(
+                    local_dir.path().join(".git/MERGE_HEAD").exists(),
+                    "MERGE_HEAD must exist after a conflicting pull"
+                );
+                println!("conflict pull (expected for test-42): {msg}");
+            }
+        }
+        assert!(
+            local_dir.path().join("workspace.yml").exists(),
+            "workspace.yml must still exist after pull"
+        );
+    }
+
+    /// Reproduces the exact real-world scenario with test-42:
+    /// - Remote has workspace.yml as a committed file
+    /// - Local is a fresh `git init` (unborn HEAD) with an untracked workspace.yml
+    /// - Pull must succeed even though workspace.yml exists locally as untracked
+    #[test]
+    fn pull_into_unborn_repo_with_conflicting_untracked_file() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Bare remote.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        // Seed clone — commits workspace.yml (same as test-42 remote has it).
+        let seed_dir = TempDir::new().unwrap();
+        let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
+        seed_repo.set_head("refs/heads/main").ok();
+        fs::write(seed_dir.path().join("workspace.yml"), "name: test-workspace\nversion: 1\n").unwrap();
+        fs::write(seed_dir.path().join("request.bru"), "meta { name: Ping }").unwrap();
+        let mut idx = seed_repo.index().unwrap();
+        idx.add_path(Path::new("workspace.yml")).unwrap();
+        idx.add_path(Path::new("request.bru")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        {
+            let tree = seed_repo.find_tree(tid).unwrap();
+            seed_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+        }
+        seed_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+        drop(seed_repo);
+
+        // Local: fresh git init — NO commits, HEAD is unborn.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+
+        // workspace.yml exists locally as UNTRACKED — this is the rocket app file
+        // the user already has before initialising git.
+        fs::write(
+            local_dir.path().join("workspace.yml"),
+            "name: test-workspace\nversion: 1\n",
+        )
+        .unwrap();
+        drop(local_repo);
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        svc.add_remote(&local_path, "origin", &remote_path).unwrap();
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        // This is the key assertion: pull must NOT fail with
+        // "untracked file would be overwritten" or "reference not found".
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(
+            result.is_ok(),
+            "pull into unborn repo with untracked workspace.yml must succeed: {:?}",
+            result.err()
+        );
+
+        let after = svc.status(&local_path).unwrap();
+        assert_eq!(after.behind, 0, "behind must be 0 after pull");
+        assert_eq!(after.ahead, 0, "ahead must be 0 after pull");
+        // The remote workspace.yml should now be the tracked version.
+        assert!(
+            local_dir.path().join("workspace.yml").exists(),
+            "workspace.yml must exist after pull"
+        );
+        assert!(
+            local_dir.path().join("request.bru").exists(),
+            "request.bru from remote must be checked out"
+        );
+    }
+
+    /// Reproduces the exact real-world scenario with test-42:
+    /// fresh `git init` (no commits, unborn HEAD) → add remote → fetch → pull
+    /// should complete successfully and leave status.behind == 0.
+    #[test]
+    fn pull_into_unborn_repo_succeeds_and_clears_behind() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Build a bare remote repo with 3 commits (simulates test-42 with N commits).
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        let remote_repo = Repository::init_bare(&remote_path).unwrap();
+
+        // The bare repo needs an initial commit — work via a seed clone.
+        let seed_dir = TempDir::new().unwrap();
+        let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
+        seed_repo.set_head("refs/heads/main").ok();
+        for i in 1..=3u32 {
+            let file = seed_dir.path().join(format!("file{i}.txt"));
+            fs::write(&file, format!("content {i}")).unwrap();
+            let mut idx = seed_repo.index().unwrap();
+            idx.add_path(Path::new(&format!("file{i}.txt"))).unwrap();
+            idx.write().unwrap();
+            let tid = idx.write_tree().unwrap();
+            let tree = seed_repo.find_tree(tid).unwrap();
+            let parents: Vec<git2::Commit> = if i == 1 {
+                vec![]
+            } else {
+                vec![seed_repo.head().unwrap().peel_to_commit().unwrap()]
+            };
+            let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+            seed_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, &format!("commit {i}"), &tree, &parent_refs)
+                .unwrap();
+        }
+        seed_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+        drop(seed_repo);
+        drop(remote_repo);
+
+        // Fresh local repo: git init only — no commits, HEAD is unborn.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+
+        // workspace.yml is present but NOT committed (mimics the user's scenario).
+        fs::write(local_dir.path().join("workspace.yml"), "name: test-workspace\n").unwrap();
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Add remote and fetch.
+        svc.add_remote(&local_path, "origin", &remote_path).unwrap();
+        svc.fetch(&local_path, "origin", &creds).unwrap();
+
+        // Status after fetch: unborn HEAD means ahead_behind returns (0,0).
+        // Verify the repo is treated as a valid repo.
+        let status_before = svc.status(&local_path).unwrap();
+        assert_eq!(status_before.branch, "main");
+        // workspace.yml should appear as untracked.
+        assert!(
+            status_before.files.iter().any(|f| f.path == "workspace.yml"),
+            "workspace.yml should be listed as untracked"
+        );
+
+        // Pull must succeed even though HEAD is unborn (no local commits yet).
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_ok(), "pull into unborn repo must succeed: {:?}", result.err());
+
+        // After pull, status.behind must be 0 and the remote files must be checked out.
+        let status_after = svc.status(&local_path).unwrap();
+        assert_eq!(status_after.behind, 0, "behind must be 0 after pull into unborn repo");
+        assert_eq!(status_after.ahead, 0, "ahead must be 0 after pull into unborn repo");
+        assert!(
+            local_dir.path().join("file3.txt").exists(),
+            "remote files must be checked out after pull"
+        );
+
+        // workspace.yml (which was untracked) must still be present.
+        assert!(
+            local_dir.path().join("workspace.yml").exists(),
+            "untracked workspace.yml must survive the pull"
+        );
+    }
+
+    #[test]
     fn abort_merge_resets_to_head() {
         let (dir, path) = setup_repo();
         let svc = Git2Service::new();
@@ -1506,5 +2255,36 @@ mod tests {
         let status = svc.status(&path).unwrap();
         assert!(status.is_clean, "Repo should be clean after abort");
         assert_eq!(status.branch, "main");
+    }
+
+    #[test]
+    fn init_creates_git_repo() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let svc = Git2Service::new();
+        svc.init(&path).unwrap();
+        assert!(svc.is_repo(&path));
+        assert!(svc.status(&path).is_ok());
+    }
+
+    #[test]
+    fn init_on_existing_repo_succeeds() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // Calling init on an already-initialised repo must be idempotent.
+        assert!(svc.init(&path).is_ok());
+    }
+
+    #[test]
+    fn clone_fails_on_invalid_url() {
+        let dest_dir = TempDir::new().unwrap();
+        let dest_path = dest_dir.path().to_string_lossy().to_string();
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
+        let result = svc.clone_repo("not-a-valid-url", &dest_path, &creds);
+        assert!(result.is_err(), "clone with invalid url must fail");
     }
 }
