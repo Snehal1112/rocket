@@ -2264,6 +2264,7 @@ mod tests {
         let svc = Git2Service::new();
         svc.init(&path).unwrap();
         assert!(svc.is_repo(&path));
+        // No commits yet — status() must handle unborn HEAD without panicking.
         assert!(svc.status(&path).is_ok());
     }
 
