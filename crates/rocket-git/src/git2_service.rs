@@ -2271,8 +2271,12 @@ mod tests {
     fn init_on_existing_repo_succeeds() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        // Calling init on an already-initialised repo must be idempotent.
+        // Calling init on an already-initialised repo must be idempotent —
+        // it must succeed AND leave the repo state intact.
         assert!(svc.init(&path).is_ok());
+        let st = svc.status(&path).unwrap();
+        assert_eq!(st.branch, "main", "branch must be unchanged after re-init");
+        assert!(st.is_clean, "repo must still be clean after re-init");
     }
 
     #[test]
@@ -2286,5 +2290,298 @@ mod tests {
         };
         let result = svc.clone_repo("not-a-valid-url", &dest_path, &creds);
         assert!(result.is_err(), "clone with invalid url must fail");
+    }
+
+    // -----------------------------------------------------------------------
+    // push
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn push_to_bare_remote_succeeds() {
+        let (_dir, path) = setup_repo();
+        let repo = Repository::open(&path).unwrap();
+
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+        repo.remote("origin", &remote_path).unwrap();
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        svc.push(&path, "origin", &creds).unwrap();
+
+        // Verify the bare remote received main.
+        let bare = Repository::open(&remote_path).unwrap();
+        assert!(bare.find_reference("refs/heads/main").is_ok());
+    }
+
+    #[test]
+    fn push_nonexistent_remote_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let result = svc.push(&path, "doesnotexist", &creds);
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // diff_staged
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn diff_staged_shows_staged_changes() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "meta { name: Staged }").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let diff = svc.diff_staged(&path, "test.bru").unwrap();
+        assert_eq!(diff.path, "test.bru");
+        assert!(diff.old_content.is_some(), "old_content should be the HEAD version");
+        assert!(diff.new_content.is_some(), "new_content should be the staged version");
+        assert_ne!(diff.old_content, diff.new_content);
+    }
+
+    #[test]
+    fn diff_staged_new_file_has_no_old_content() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("brand_new.bru"), "meta { name: New }").unwrap();
+        svc.stage(&path, &["brand_new.bru"]).unwrap();
+        let diff = svc.diff_staged(&path, "brand_new.bru").unwrap();
+        assert!(diff.old_content.is_none(), "new file must have no old HEAD content");
+        assert!(diff.new_content.is_some());
+    }
+
+    #[test]
+    fn diff_file_new_untracked_has_no_old_content() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("new_file.bru"), "fresh content").unwrap();
+        let diff = svc.diff_file(&path, "new_file.bru").unwrap();
+        assert!(diff.old_content.is_none(), "untracked file has no HEAD content");
+        assert!(diff.new_content.is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // status — additional coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn status_clean_repo_reports_is_clean() {
+        let (_dir, path) = setup_repo();
+        let status = Git2Service::new().status(&path).unwrap();
+        assert!(status.is_clean, "freshly committed repo must be clean");
+        assert!(status.files.is_empty());
+    }
+
+    #[test]
+    fn status_staged_file_has_staged_true() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "staged change").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let status = svc.status(&path).unwrap();
+        assert!(
+            status.files.iter().any(|f| f.path == "test.bru" && f.staged),
+            "staged modification must appear with staged=true"
+        );
+        assert!(!status.is_clean);
+    }
+
+    #[test]
+    fn status_deleted_file_appears_as_deleted() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::remove_file(Path::new(&path).join("test.bru")).unwrap();
+        let status = svc.status(&path).unwrap();
+        assert!(
+            status.files.iter().any(|f| f.path == "test.bru" && f.status == GitStatus::Deleted),
+            "deleted tracked file must appear as Deleted"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // stash_drop
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stash_drop_removes_entry() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "stash me").unwrap();
+        svc.stash_save(&path, "to drop").unwrap();
+        assert_eq!(svc.stash_list(&path).unwrap().len(), 1);
+        svc.stash_drop(&path, 0).unwrap();
+        assert!(svc.stash_list(&path).unwrap().is_empty(), "stash must be empty after drop");
+    }
+
+    // -----------------------------------------------------------------------
+    // conflicts() + resolve_conflict
+    // -----------------------------------------------------------------------
+
+    /// Helper: create a repo in merge-conflict state and return (TempDir, path).
+    fn setup_conflicted_repo() -> (TempDir, String) {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Branch A: modify test.bru
+        svc.create_branch(&path, "branch-a").unwrap();
+        svc.switch_branch(&path, "branch-a").unwrap();
+        fs::write(dir.path().join("test.bru"), "branch-a content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "branch-a commit").unwrap();
+
+        // Main: independent modification of test.bru
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "main content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "main commit").unwrap();
+
+        // Start merge — leaves MERGE_HEAD + conflict
+        let _ = svc.merge_branch(&path, "branch-a");
+
+        assert!(
+            dir.path().join(".git/MERGE_HEAD").exists(),
+            "setup_conflicted_repo: MERGE_HEAD must exist"
+        );
+        (dir, path)
+    }
+
+    #[test]
+    fn conflicts_returns_conflicted_files() {
+        let (_dir, path) = setup_conflicted_repo();
+        let svc = Git2Service::new();
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(!conflicts.is_empty(), "conflicts() must return at least one file");
+        let c = conflicts.iter().find(|f| f.path == "test.bru").unwrap();
+        assert!(!c.ours.is_empty(), "ours must be non-empty");
+        assert!(!c.theirs.is_empty(), "theirs must be non-empty");
+    }
+
+    #[test]
+    fn resolve_conflict_ours_writes_our_content() {
+        let (dir, path) = setup_conflicted_repo();
+        let svc = Git2Service::new();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours).unwrap();
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "main content", "resolving Ours must write main (HEAD) content");
+        // Conflict marker must be gone — test.bru must not appear as Conflicted.
+        let status = svc.status(&path).unwrap();
+        assert!(
+            !status.files.iter().any(|f| f.path == "test.bru" && f.status == GitStatus::Conflicted),
+            "conflict must be cleared after Ours resolution"
+        );
+        // Note: when Ours == HEAD, no staged diff shows — that is correct git behaviour.
+    }
+
+    #[test]
+    fn resolve_conflict_theirs_writes_their_content() {
+        let (dir, path) = setup_conflicted_repo();
+        let svc = Git2Service::new();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs).unwrap();
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "branch-a content", "resolving Theirs must write the incoming content");
+        let status = svc.status(&path).unwrap();
+        assert!(
+            status.files.iter().any(|f| f.path == "test.bru" && f.staged),
+            "resolved file must be staged"
+        );
+    }
+
+    #[test]
+    fn resolve_conflict_custom_writes_custom_content() {
+        let (dir, path) = setup_conflicted_repo();
+        let svc = Git2Service::new();
+        let custom = "custom resolved content".to_string();
+        svc.resolve_conflict(
+            &path,
+            "test.bru",
+            &ConflictResolution::Custom { content: custom.clone() },
+        )
+        .unwrap();
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, custom);
+    }
+
+    // -----------------------------------------------------------------------
+    // merge_branch — non-fast-forward and conflict paths
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn merge_branch_normal_merge_creates_merge_commit() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create a branch with a unique file.
+        svc.create_branch(&path, "feature").unwrap();
+        svc.switch_branch(&path, "feature").unwrap();
+        fs::write(dir.path().join("feature.bru"), "feature").unwrap();
+        svc.stage(&path, &["feature.bru"]).unwrap();
+        svc.commit(&path, "feature commit").unwrap();
+
+        // Back to main: add a diverging commit so it's a true merge (not FF).
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("main_extra.bru"), "main extra").unwrap();
+        svc.stage(&path, &["main_extra.bru"]).unwrap();
+        svc.commit(&path, "main diverge commit").unwrap();
+
+        svc.merge_branch(&path, "feature").unwrap();
+
+        // The merge commit must have 2 parents.
+        let repo = Repository::open(&path).unwrap();
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_commit.parent_count(), 2, "non-FF merge must produce a 2-parent commit");
+        // Both files must exist.
+        assert!(dir.path().join("feature.bru").exists());
+        assert!(dir.path().join("main_extra.bru").exists());
+    }
+
+    #[test]
+    fn merge_branch_conflict_returns_error() {
+        let (_dir, path) = setup_conflicted_repo();
+        // setup_conflicted_repo already attempted merge_branch and left MERGE_HEAD.
+        // Abort, then try again cleanly to verify error is returned.
+        let svc = Git2Service::new();
+        svc.abort_merge(&path).unwrap();
+
+        // Re-introduce both diverging commits.
+        // (The repo is already in the right diverged state from setup_conflicted_repo;
+        // abort_merge reset to main. Just re-attempt the merge which must error.)
+        let result = svc.merge_branch(&path, "branch-a");
+        assert!(result.is_err(), "merge with conflict must return an error");
+    }
+
+    // -----------------------------------------------------------------------
+    // branch error paths
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn create_duplicate_branch_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "dup").unwrap();
+        let result = svc.create_branch(&path, "dup");
+        assert!(result.is_err(), "creating duplicate branch must fail");
+    }
+
+    #[test]
+    fn delete_nonexistent_branch_fails() {
+        let (_dir, path) = setup_repo();
+        let result = Git2Service::new().delete_branch(&path, "ghost");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn switch_to_nonexistent_branch_fails() {
+        let (_dir, path) = setup_repo();
+        let result = Git2Service::new().switch_branch(&path, "no-such-branch");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn checkout_remote_branch_invalid_name_fails() {
+        let (_dir, path) = setup_repo();
+        let result = Git2Service::new().checkout_remote_branch(&path, "not-a-remote-branch");
+        assert!(result.is_err(), "missing slash in name must return InvalidInput error");
     }
 }
