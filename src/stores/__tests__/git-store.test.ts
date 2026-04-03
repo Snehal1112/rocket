@@ -377,6 +377,16 @@ describe('branches', () => {
 
     expect(useGitStore.getState().error).toContain('branch not found');
   });
+
+  it('checkoutRemoteBranch calls api and refreshes status and branches', async () => {
+    const { gitCheckoutRemoteBranch, gitStatus, gitBranches } = await import('@/lib/tauri-api');
+
+    await useGitStore.getState().checkoutRemoteBranch('origin/feature');
+
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('/test/repo', 'origin/feature');
+    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
+    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+  });
 });
 
 describe('stash', () => {
@@ -515,6 +525,7 @@ describe('conflicts', () => {
 
 describe('reset', () => {
   beforeEach(() => {
+    useGitStore.getState().reset();
     vi.clearAllMocks();
   });
 
