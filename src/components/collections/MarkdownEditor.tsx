@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Textarea } from '@/components/ui/textarea';
+import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Textarea } from "@/components/ui/textarea";
 
 interface MarkdownEditorProps {
   value: string;
@@ -9,8 +9,12 @@ interface MarkdownEditorProps {
   onBlur?: () => void;
 }
 
-export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps) {
-  const [mode, setMode] = useState<'edit' | 'preview'>('preview');
+export function MarkdownEditor({
+  value,
+  onChange,
+  onBlur,
+}: MarkdownEditorProps) {
+  const [mode, setMode] = useState<"edit" | "preview">("preview");
 
   return (
     <div className="space-y-2">
@@ -18,27 +22,27 @@ export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps)
         <button
           type="button"
           className={`px-2 py-0.5 text-xs rounded ${
-            mode === 'edit'
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
+            mode === "edit"
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground"
           }`}
-          onClick={() => setMode('edit')}
+          onClick={() => setMode("edit")}
         >
           Edit
         </button>
         <button
           type="button"
           className={`px-2 py-0.5 text-xs rounded ${
-            mode === 'preview'
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
+            mode === "preview"
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground"
           }`}
-          onClick={() => setMode('preview')}
+          onClick={() => setMode("preview")}
         >
           Preview
         </button>
       </div>
-      {mode === 'edit' ? (
+      {mode === "edit" ? (
         <Textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -51,7 +55,9 @@ export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps)
           {value ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (
-            <p className="text-muted-foreground text-sm italic">No readme yet.</p>
+            <p className="text-muted-foreground text-sm italic">
+              No readme yet.
+            </p>
           )}
         </div>
       )}
