@@ -52,6 +52,8 @@ interface GitState {
   error: string | null;
   credentials: GitCredentials | null;
   showCredentialsDialog: boolean;
+  /** Operation that triggered the credentials dialog — auto-retried once credentials are saved. */
+  pendingNetworkOp: 'pull' | 'push' | 'fetch' | null;
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -82,6 +84,7 @@ interface GitState {
   setRemoteUrl: (name: string, url: string) => Promise<void>;
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
+  clearPendingNetworkOp: () => void;
   push: (remote?: string) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
@@ -102,6 +105,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   error: null,
   credentials: null,
   showCredentialsDialog: false,
+  pendingNetworkOp: null,
 
   // Set the active collection path and check if it is a git repo.
   setCollection: async (path: string) => {
@@ -441,17 +445,25 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  // Store credentials and close the dialog.
-  setCredentials: (creds) => set({ credentials: creds, showCredentialsDialog: false }),
+  // Store credentials, close the dialog, and auto-retry the operation that triggered it.
+  setCredentials: (creds) => {
+    const { pendingNetworkOp } = get();
+    set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
+    if (pendingNetworkOp) {
+      get()[pendingNetworkOp]();
+    }
+  },
 
   // Show or hide the credentials dialog.
-  setShowCredentialsDialog: (show) => set({ showCredentialsDialog: show }),
+  setShowCredentialsDialog: (show) => set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
+
+  clearPendingNetworkOp: () => set({ pendingNetworkOp: null }),
 
   // Push local commits to the remote, prompting for credentials if needed.
   push: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'push' }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
@@ -466,23 +478,27 @@ export const useGitStore = create<GitState>((set, get) => ({
   pull: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
       await gitPull(collectionPath, resolvedRemote, credentials);
-      await get().refreshStatus();
-      await get().refreshBranches();
     } catch (e) {
       set({ error: String(e) });
     }
+    // Always refresh status and conflicts after a pull attempt — whether it
+    // succeeded or produced merge conflicts — so the UI reflects the real
+    // repo state (behind count, conflict files, etc.).
+    await get().refreshStatus();
+    await get().refreshConflicts();
+    await get().refreshBranches();
   },
 
   // Fetch remote refs without merging, prompting for credentials if needed.
   fetch: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true }); return; }
+    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' }); return; }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
@@ -511,6 +527,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       error: null,
       credentials: null,
       showCredentialsDialog: false,
+      pendingNetworkOp: null,
     });
   },
 }));

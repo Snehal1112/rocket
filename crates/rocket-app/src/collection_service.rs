@@ -212,4 +212,41 @@ mod tests {
         let list = svc.list().unwrap();
         assert_eq!(list[0].name, "new");
     }
+
+    #[test]
+    fn delete_removes_collection() {
+        let svc = make_service();
+        svc.create("temp").unwrap();
+        svc.delete("temp").unwrap();
+        assert!(svc.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_existing_collection() {
+        let svc = make_service();
+        svc.create("my-col").unwrap();
+        let col = svc.get("my-col").unwrap();
+        assert_eq!(col.name, "my-col");
+    }
+
+    #[test]
+    fn get_nonexistent_collection_returns_error() {
+        let svc = make_service();
+        let result = svc.get("ghost");
+        assert!(result.is_err(), "getting a non-existent collection must fail");
+    }
+
+    #[test]
+    fn rename_validates_new_name() {
+        let svc = make_service();
+        svc.create("col").unwrap();
+        assert!(svc.rename("col", "").is_err(), "empty new name must be rejected");
+        assert!(svc.rename("col", "bad/name").is_err(), "slash in new name must be rejected");
+    }
+
+    #[test]
+    fn list_empty_initially() {
+        let svc = make_service();
+        assert!(svc.list().unwrap().is_empty());
+    }
 }

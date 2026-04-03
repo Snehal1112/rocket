@@ -1,18 +1,18 @@
-import { type as osType } from '@tauri-apps/plugin-os';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { TitleBar } from '@/components/title-bar';
-import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
-import { ConsolePanel } from '@/components/layout/ConsolePanel';
-import { StatusBar } from '@/components/layout/StatusBar';
-import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
-import { PaneRenderer } from '@/components/panes/PaneRenderer';
-import { SplashScreen } from '@/components/SplashScreen';
-import { usePaneStore } from '@/stores/pane-store';
-import { useWorkspaceStore } from '@/stores/workspace-store';
-import { useEnvStore } from '@/stores/env-store';
-import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
-import { useState, useEffect } from 'react';
+import { type as osType } from "@tauri-apps/plugin-os";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { TitleBar } from "@/components/title-bar";
+import { CollectionsSidebar } from "@/components/layout/CollectionsSidebar";
+import { ConsolePanel } from "@/components/layout/ConsolePanel";
+import { StatusBar } from "@/components/layout/StatusBar";
+import { WorkspaceToolbar } from "@/components/layout/WorkspaceToolbar";
+import { PaneRenderer } from "@/components/panes/PaneRenderer";
+import { SplashScreen } from "@/components/SplashScreen";
+import { usePaneStore } from "@/stores/pane-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useEnvStore } from "@/stores/env-store";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { restoreUiState, scheduleSaveUiState } from "@/lib/ui-state";
+import { useState, useEffect } from "react";
 
 function App() {
   const root = usePaneStore((s) => s.root);
@@ -26,21 +26,25 @@ function App() {
   const loadWorkspaces = useWorkspaceStore((s) => s.loadWorkspaces);
   useEffect(() => {
     const init = async () => {
-      await loadWorkspaces()
-      const uiState = await restoreUiState()
-      if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
-        const { workspaceId } = uiState.workspaceTabs
-        const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId)
+      await loadWorkspaces();
+      const uiState = await restoreUiState();
+      if (uiState?.activeMode === "workspace" && uiState.workspaceTabs) {
+        const { workspaceId } = uiState.workspaceTabs;
+        const ws = useWorkspaceStore
+          .getState()
+          .workspaces.find((w) => w.id === workspaceId);
         if (ws) {
-          usePaneStore.getState().openWorkspaceTabs(ws.id)
+          usePaneStore.getState().openWorkspaceTabs(ws.id);
         }
       }
       // Task 9: First-launch fallback
       if (!uiState) {
-        const store = useWorkspaceStore.getState()
-        const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId)
+        const store = useWorkspaceStore.getState();
+        const activeWs = store.workspaces.find(
+          (w) => w.id === store.activeWorkspaceId,
+        );
         if (activeWs) {
-          usePaneStore.getState().openWorkspaceTabs(activeWs.id)
+          usePaneStore.getState().openWorkspaceTabs(activeWs.id);
         }
       }
 
@@ -53,25 +57,27 @@ function App() {
         void useEnvStore.getState().loadEnvironments(initialCollection);
         void useEnvStore.getState().fetchGlobalEnv();
       }
-    }
-    void init()
+    };
+    void init();
   }, [loadWorkspaces]);
 
   useEffect(() => {
-    const unsub = usePaneStore.subscribe(scheduleSaveUiState)
-    return unsub
+    const unsub = usePaneStore.subscribe(scheduleSaveUiState);
+    return unsub;
   }, []);
 
   useEffect(() => {
-    if (osType() === 'linux') {
-      document.documentElement.classList.add('linux');
+    if (osType() === "linux") {
+      document.documentElement.classList.add("linux");
     }
   }, []);
 
   // Preload Monaco in the background after the app shell renders.
   // requestIdleCallback is Chrome-only; setTimeout works in all WebViews.
   useEffect(() => {
-    const id = setTimeout(() => { void import('@/components/editor/MonacoWrapper'); }, 200);
+    const id = setTimeout(() => {
+      void import("@/components/editor/MonacoWrapper");
+    }, 200);
     return () => clearTimeout(id);
   }, []);
 
@@ -81,7 +87,12 @@ function App() {
       <div className="flex-1 flex overflow-hidden">
         {!sidebarCollapsed && (
           <>
-            <div style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties} className="w-[var(--sidebar-w)] shrink-0">
+            <div
+              style={
+                { "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties
+              }
+              className="w-[var(--sidebar-w)] shrink-0"
+            >
               <ErrorBoundary>
                 <CollectionsSidebar />
               </ErrorBoundary>
@@ -94,28 +105,40 @@ function App() {
                 const startX = e.clientX;
                 const startWidth = sidebarWidth;
                 const onMove = (ev: PointerEvent) => {
-                  const newWidth = Math.min(500, Math.max(200, startWidth + ev.clientX - startX));
+                  const newWidth = Math.min(
+                    500,
+                    Math.max(200, startWidth + ev.clientX - startX),
+                  );
                   setSidebarWidth(newWidth);
                 };
                 const onUp = () => {
-                  window.removeEventListener('pointermove', onMove);
-                  window.removeEventListener('pointerup', onUp);
+                  window.removeEventListener("pointermove", onMove);
+                  window.removeEventListener("pointerup", onUp);
                 };
-                window.addEventListener('pointermove', onMove);
-                window.addEventListener('pointerup', onUp);
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp);
               }}
             />
           </>
         )}
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <WorkspaceToolbar />
-          <ErrorBoundary>
-            <PaneRenderer node={root} />
-          </ErrorBoundary>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ErrorBoundary>
+              <PaneRenderer node={root} />
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
-      <ConsolePanel isOpen={isConsoleOpen} height={consoleHeight} onHeightChange={setConsoleHeight} />
-      <StatusBar isConsoleOpen={isConsoleOpen} onConsoleToggle={() => setIsConsoleOpen((o) => !o)} />
+      <ConsolePanel
+        isOpen={isConsoleOpen}
+        height={consoleHeight}
+        onHeightChange={setConsoleHeight}
+      />
+      <StatusBar
+        isConsoleOpen={isConsoleOpen}
+        onConsoleToggle={() => setIsConsoleOpen((o) => !o)}
+      />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
     </div>
   );

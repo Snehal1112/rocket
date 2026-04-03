@@ -64,4 +64,41 @@ mod tests {
         assert_eq!(entry.collection, Some("my-api".into()));
         assert_eq!(entry.request_name, Some("Create User".into()));
     }
+
+    /// Verifies all five constructor parameters land in the correct fields.
+    /// A future refactor that swaps positional args (e.g. status ↔ duration_ms)
+    /// would be caught here.
+    #[test]
+    fn entry_fields_are_stored_correctly() {
+        let entry = HistoryEntry::new("DELETE", "https://api.example.com/users/1", 404, 75, 512);
+        assert_eq!(entry.method, "DELETE");
+        assert_eq!(entry.url, "https://api.example.com/users/1");
+        assert_eq!(entry.status, 404);
+        assert_eq!(entry.duration_ms, 75);
+        assert_eq!(entry.response_size, 512);
+    }
+
+    /// Verifies the generated id is a valid UUID v4 string (8-4-4-4-12 hex).
+    /// If the id generation changed from UUID to something else (e.g. a
+    /// monotonic counter), the frontend's id uniqueness contract would break.
+    #[test]
+    fn entry_id_is_valid_uuid_format() {
+        let entry = HistoryEntry::new("GET", "/", 200, 10, 0);
+        // UUID v4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+        let parts: Vec<&str> = entry.id.split('-').collect();
+        assert_eq!(parts.len(), 5, "UUID must have 5 hyphen-separated segments");
+        assert_eq!(parts[0].len(), 8);
+        assert_eq!(parts[1].len(), 4);
+        assert_eq!(parts[2].len(), 4);
+        assert_eq!(parts[3].len(), 4);
+        assert_eq!(parts[4].len(), 12);
+        assert_eq!(&parts[2][0..1], "4", "UUID version nibble must be '4'");
+    }
+
+    #[test]
+    fn two_entries_have_distinct_ids() {
+        let a = HistoryEntry::new("GET", "/", 200, 10, 0);
+        let b = HistoryEntry::new("GET", "/", 200, 10, 0);
+        assert_ne!(a.id, b.id, "each entry must get a unique UUID");
+    }
 }

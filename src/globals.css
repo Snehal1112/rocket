@@ -1,0 +1,143 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "tailwindcss";
+@import "tw-animate-css";
+@config "../tailwind.config.js";
+
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  :root {
+    --background: 214 44% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 213 88% 42%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 95%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 213 35% 94%;
+    --muted-foreground: 215 17% 40%;
+    --accent: 212 86% 94%;
+    --accent-foreground: 213 88% 30%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 31% 88%;
+    --input: 214 31% 88%;
+    --ring: 213 88% 42%;
+    --chart-1: 213 88% 42%;
+    --chart-2: 171 65% 35%;
+    --chart-3: 28 91% 52%;
+    --chart-4: 283 52% 49%;
+    --chart-5: 343 74% 52%;
+    --radius: 0.7rem;
+  }
+  .dark {
+    --background: 0 0% 12%;
+    --foreground: 0 0% 87%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 87%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 87%;
+    --primary: 207 100% 42%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 87%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 204 100% 18%;
+    --accent-foreground: 0 0% 90%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 19%;
+    --input: 0 0% 19%;
+    --ring: 207 100% 42%;
+    --chart-1: 207 100% 42%;
+    --chart-2: 160 63% 39%;
+    --chart-3: 30 94% 55%;
+    --chart-4: 282 60% 62%;
+    --chart-5: 340 78% 61%;
+  }
+  
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html, body {
+    @apply overflow-hidden h-full;
+  }
+  
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: "Inter Variable", "Inter", "Segoe UI", sans-serif;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+     /* Prevent font size from being too small on mobile devices. */
+  }
+
+  #root {
+    height: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    text-decoration: none;
+  }
+
+  /* Standardize all Lucide icons to 1px stroke weight. */
+  .lucide {
+    stroke-width: 1.5;
+  }
+}
+
+/* Modern thin scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+*:hover {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+}
+
+/* WebKit fallback for older Chrome/Safari. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Linux: transparent window with border and rounded corners.
+   Body padding creates a visible gap for the border to render against the desktop. */
+html.linux body {
+  background: transparent;
+  min-width: 500px;
+}
+
+html.linux #root {
+  background: var(--background);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 1px 2px 10px rgba(0,0,0,0.08);
+  height: 100%;
+  overflow: hidden;
+}

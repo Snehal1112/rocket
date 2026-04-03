@@ -174,4 +174,33 @@ mod tests {
     fn percentile_empty() {
         assert_eq!(percentile(&[], 50.0), 0.0);
     }
+
+    #[tokio::test]
+    async fn load_test_counts_failures() {
+        struct FailingExecutor;
+        #[async_trait::async_trait]
+        impl HttpExecutor for FailingExecutor {
+            async fn execute(&self, _: &HttpRequest) -> rocket_shared::error::DomainResult<HttpResponse> {
+                Err(rocket_shared::error::DomainError::Internal("simulated failure".into()))
+            }
+        }
+        let executor: Arc<dyn HttpExecutor> = Arc::new(FailingExecutor);
+        let config = LoadTestConfig { concurrency: 2, total_requests: 5 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.total_requests, 5);
+        assert_eq!(result.failed, 5);
+        assert_eq!(result.succeeded, 0);
+    }
+
+    #[tokio::test]
+    async fn load_test_single_request() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.total_requests, 1);
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.failed, 0);
+        // p50 == p99 == the single sample
+        assert_eq!(result.p50_latency_ms, result.p99_latency_ms);
+    }
 }

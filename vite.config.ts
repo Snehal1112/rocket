@@ -7,6 +7,25 @@ export const testConfig = {
   environment: 'jsdom',
   globals: true,
   setupFiles: [],
+  include: ['src/**/*.{test,spec}.{ts,tsx}'],
+  coverage: {
+    provider: 'v8' as const,
+    reporter: ['text', 'html', 'json-summary'],
+    reportsDirectory: './coverage/frontend',
+    include: ['src/**/*.{ts,tsx}'],
+    exclude: [
+      'src/main.tsx',
+      'src/vite-env.d.ts',
+      'src/**/*.d.ts',
+      'src/assets/**',
+    ],
+    thresholds: {
+      lines: 0,
+      functions: 0,
+      branches: 0,
+      statements: 0,
+    },
+  },
 };
 
 // @ts-expect-error process is a nodejs global

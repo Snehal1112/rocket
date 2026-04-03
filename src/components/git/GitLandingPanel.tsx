@@ -1,4 +1,5 @@
 import { useState } from "react";
+import gitIcon from "@/assets/git-icon.svg";
 import {
   GitBranch,
   RefreshCw,
@@ -27,7 +28,8 @@ import { useGitStore } from "@/stores/git-store";
 import { cn } from "@/lib/utils";
 
 export function GitLandingPanel() {
-  const { status, push, pull, fetch, saveStash, popStash, error, clearError } = useGitStore();
+  const { status, push, pull, fetch, saveStash, popStash, error, clearError } =
+    useGitStore();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -154,11 +156,12 @@ export function GitLandingPanel() {
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
-  const hasConflicts = (status?.files.some((f) => f.status === "conflicted")) ?? false;
+  const hasConflicts =
+    status?.files.some((f) => f.status === "conflicted") ?? false;
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
-      <Card className="w-full max-w-sm shadow-lg rounded-sm border bg-card/80 ">
+      <Card className="w-full max-w-md border-border/40 rounded-md bg-card/80 ">
         {/* Header: branch name + ahead/behind sync counts */}
         <CardHeader className="px-4 py-3 space-y-1 border-b border-border/70">
           <div className="flex items-center gap-2">
@@ -198,10 +201,7 @@ export function GitLandingPanel() {
         <CardContent className="px-4 py-4 space-y-3">
           {/* Hero icon + hint text */}
           <div className="flex flex-col items-center justify-center gap-2 py-3">
-            <GitBranch
-              className="text-muted-foreground/80 green-600"
-              style={{ width: 100, height: 100 }}
-            />
+            <img src={gitIcon} alt="Git" className="h-12 w-12 opacity-80" />
             <p className="text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-[200px]">
               Perform git actions or open files from sidebar to view
             </p>

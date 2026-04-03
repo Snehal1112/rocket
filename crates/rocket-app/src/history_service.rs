@@ -172,4 +172,63 @@ mod tests {
         let results = svc.search(&HistoryFilter::default()).unwrap();
         assert_eq!(results.len(), 2);
     }
+
+    #[test]
+    fn get_entry_by_id() {
+        let repo = MockHistoryRepo::new();
+        let entry = HistoryEntry::new("GET", "/ping", 200, 5, 0);
+        let id = entry.id.clone();
+        repo.entries.lock().unwrap().push(entry);
+        let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
+        let found = svc.get(&id).unwrap();
+        assert_eq!(found.url, "/ping");
+    }
+
+    #[test]
+    fn get_nonexistent_id_returns_error() {
+        let svc = make_service();
+        let result = svc.get("does-not-exist");
+        assert!(result.is_err(), "get with unknown id must return an error");
+    }
+
+    #[test]
+    fn search_by_url_contains() {
+        let repo = MockHistoryRepo::new();
+        {
+            let mut entries = repo.entries.lock().unwrap();
+            entries.push(HistoryEntry::new("GET", "/api/users", 200, 10, 0));
+            entries.push(HistoryEntry::new("GET", "/api/orders", 200, 10, 0));
+            entries.push(HistoryEntry::new("GET", "/health", 200, 10, 0));
+        }
+        let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
+        let filter = HistoryFilter { url_contains: Some("/api/".to_string()), ..Default::default() };
+        let results = svc.search(&filter).unwrap();
+        assert_eq!(results.len(), 2, "only /api/* entries should match");
+    }
+
+    #[test]
+    fn search_by_status_range() {
+        let repo = MockHistoryRepo::new();
+        {
+            let mut entries = repo.entries.lock().unwrap();
+            entries.push(HistoryEntry::new("GET", "/a", 200, 10, 0));
+            entries.push(HistoryEntry::new("GET", "/b", 404, 10, 0));
+            entries.push(HistoryEntry::new("GET", "/c", 500, 10, 0));
+        }
+        let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
+        let filter = HistoryFilter { status_min: Some(400), status_max: Some(499), ..Default::default() };
+        let results = svc.search(&filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, 404);
+    }
+
+    #[test]
+    fn search_method_is_case_insensitive() {
+        let repo = MockHistoryRepo::new();
+        repo.entries.lock().unwrap().push(HistoryEntry::new("GET", "/", 200, 10, 0));
+        let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
+        let filter = HistoryFilter { method: Some("get".to_string()), ..Default::default() };
+        let results = svc.search(&filter).unwrap();
+        assert_eq!(results.len(), 1, "method filter must be case-insensitive");
+    }
 }

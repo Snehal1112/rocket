@@ -205,8 +205,13 @@ mod tests {
         assert_eq!(result.x_amz_security_token, Some("TOKEN123".into()));
     }
 
+    /// AWS Signature V4 requires query parameters in the canonical request to
+    /// be sorted alphabetically by key.  The URL has `b=2&a=1` (wrong order)
+    /// and sign_request must normalise it to `a=1&b=2`.  We verify this by
+    /// checking that the resulting Authorization header is deterministic and
+    /// identical when the same params are given in either order.
     #[test]
-    fn test_sign_request_with_query_params() {
+    fn test_sign_request_query_params_are_sorted_canonically() {
         let creds = AwsCredentials {
             access_key: "AKID".into(),
             secret_key: "SECRET".into(),
@@ -214,15 +219,32 @@ mod tests {
             service: "s3".into(),
             session_token: None,
         };
-        let result = sign_request(
+        let headers = &[("host".to_string(), "example.com".to_string())];
+        // Params in reverse-alphabetical order — must produce same sig as sorted.
+        let reversed = sign_request(
             "GET",
             "https://example.com/path?b=2&a=1",
-            &[("host".to_string(), "example.com".to_string())],
+            headers,
             b"",
             &creds,
             "20240101T000000Z",
+        )
+        .unwrap();
+        // Params already in alphabetical order.
+        let sorted = sign_request(
+            "GET",
+            "https://example.com/path?a=1&b=2",
+            headers,
+            b"",
+            &creds,
+            "20240101T000000Z",
+        )
+        .unwrap();
+        assert_eq!(
+            reversed.authorization, sorted.authorization,
+            "query params in any order must produce identical Authorization — \
+             canonical form requires alphabetical key sort"
         );
-        assert!(result.is_ok());
     }
 
     #[test]

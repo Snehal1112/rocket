@@ -28,6 +28,9 @@ debug
 target
 **/*.rs.bk
 *.pdb
+
+# Generated coverage reports
+coverage/
 **/mutants.out*/
 
 .superpowers/

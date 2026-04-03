@@ -71,4 +71,56 @@ mod tests {
         assert_eq!(resp.content_type(), Some("application/json"));
         assert_eq!(resp.header_value("x-missing"), None);
     }
+
+    #[test]
+    fn status_boundaries() {
+        // 2xx: 200–299
+        assert!(!sample_response(199).is_success());
+        assert!(sample_response(200).is_success());
+        assert!(sample_response(299).is_success());
+        assert!(!sample_response(300).is_success());
+        // 3xx: 300–399
+        assert!(!sample_response(299).is_redirect());
+        assert!(sample_response(300).is_redirect());
+        assert!(sample_response(399).is_redirect());
+        assert!(!sample_response(400).is_redirect());
+        // 4xx: 400–499
+        assert!(!sample_response(399).is_client_error());
+        assert!(sample_response(400).is_client_error());
+        assert!(sample_response(499).is_client_error());
+        assert!(!sample_response(500).is_client_error());
+        // 5xx: 500–599
+        assert!(!sample_response(499).is_server_error());
+        assert!(sample_response(500).is_server_error());
+        assert!(sample_response(599).is_server_error());
+    }
+
+    #[test]
+    fn content_type_none_when_header_absent() {
+        let resp = HttpResponse {
+            status: 204,
+            status_text: "No Content".into(),
+            headers: vec![],
+            body: String::new(),
+            duration_ms: 5,
+            size_bytes: 0,
+        };
+        assert!(resp.content_type().is_none());
+    }
+
+    #[test]
+    fn header_value_first_match_returned() {
+        let resp = HttpResponse {
+            status: 200,
+            status_text: "OK".into(),
+            headers: vec![
+                Header::new("x-custom", "first"),
+                Header::new("x-custom", "second"),
+            ],
+            body: String::new(),
+            duration_ms: 1,
+            size_bytes: 0,
+        };
+        assert_eq!(resp.header_value("x-custom"), Some("first"));
+    }
 }
