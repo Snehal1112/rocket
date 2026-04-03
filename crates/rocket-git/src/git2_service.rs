@@ -2287,4 +2287,227 @@ mod tests {
         let result = svc.clone_repo("not-a-valid-url", &dest_path, &creds);
         assert!(result.is_err(), "clone with invalid url must fail");
     }
+
+    #[test]
+    fn diff_staged_shows_staged_changes() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "modified content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        let diff = svc.diff_staged(&path, "test.bru").unwrap();
+        assert_eq!(diff.path, "test.bru");
+        assert!(diff.old_content.is_some());
+        assert!(diff.new_content.is_some());
+        assert_ne!(diff.old_content, diff.new_content);
+    }
+
+    #[test]
+    fn diff_file_clean_returns_empty_hunks() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // test.bru is tracked and unmodified — diff must be empty.
+        let diff = svc.diff_file(&path, "test.bru").unwrap();
+        assert!(diff.hunks.is_empty(), "clean file must have no diff hunks");
+    }
+
+    #[test]
+    fn push_advances_remote_head() {
+        let (dir, path) = setup_repo();
+
+        // Set up a bare remote and push the initial commit.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+        let repo = Repository::open(&path).unwrap();
+        let mut origin = repo.remote("origin", &remote_path).unwrap();
+        origin.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        drop(origin);
+        drop(repo);
+
+        // Make a new local commit via the service.
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("new.bru"), "pushed content").unwrap();
+        svc.stage(&path, &["new.bru"]).unwrap();
+        let commit_info = svc.commit(&path, "new commit").unwrap();
+
+        // Push via the service.
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        svc.push(&path, "origin", &creds).unwrap();
+
+        // Verify the bare remote HEAD now matches the new local commit.
+        let remote_repo = Repository::open(&remote_path).unwrap();
+        let remote_head = remote_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            remote_head.id().to_string(),
+            commit_info.full_id,
+            "remote HEAD must match the pushed commit"
+        );
+    }
+
+    #[test]
+    fn push_fails_with_non_fast_forward() {
+        let sig = git2::Signature::now("Test", "test@test.com").unwrap();
+
+        // Shared bare remote.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        // Clone A: push initial commit.
+        let dir_a = TempDir::new().unwrap();
+        let path_a = dir_a.path().to_string_lossy().to_string();
+        let repo_a = Repository::init(&path_a).unwrap();
+        repo_a.set_head("refs/heads/main").ok();
+        fs::write(dir_a.path().join("base.txt"), "base").unwrap();
+        let mut idx = repo_a.index().unwrap();
+        idx.add_path(Path::new("base.txt")).unwrap();
+        idx.write().unwrap();
+        let tid = idx.write_tree().unwrap();
+        let tree = repo_a.find_tree(tid).unwrap();
+        repo_a.commit(Some("refs/heads/main"), &sig, &sig, "base", &tree, &[]).unwrap();
+        drop(tree);
+        repo_a.remote("origin", &remote_path).unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // Clone B: starts from the same base.
+        let dir_b = TempDir::new().unwrap();
+        let path_b = dir_b.path().to_string_lossy().to_string();
+        Repository::clone(&remote_path, &path_b).unwrap();
+
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+
+        // Clone A pushes a second commit — remote is now 1 ahead of B's base.
+        let repo_a2 = Repository::open(&path_a).unwrap();
+        fs::write(dir_a.path().join("a_extra.txt"), "from A").unwrap();
+        let mut idx2 = repo_a2.index().unwrap();
+        idx2.add_path(Path::new("a_extra.txt")).unwrap();
+        idx2.write().unwrap();
+        let tid2 = idx2.write_tree().unwrap();
+        let tree2 = repo_a2.find_tree(tid2).unwrap();
+        let head2 = repo_a2.head().unwrap().peel_to_commit().unwrap();
+        repo_a2.commit(Some("refs/heads/main"), &sig, &sig, "A second", &tree2, &[&head2]).unwrap();
+        svc.push(&path_a, "origin", &creds).unwrap();
+
+        // Clone B makes a commit on its stale base and tries to push — must fail.
+        fs::write(dir_b.path().join("b_extra.txt"), "from B").unwrap();
+        svc.stage(&path_b, &["b_extra.txt"]).unwrap();
+        svc.commit(&path_b, "B commit on stale base").unwrap();
+
+        let result = svc.push(&path_b, "origin", &creds);
+        assert!(result.is_err(), "non-fast-forward push must return Err");
+    }
+
+    #[test]
+    fn stash_drop_removes_entry_at_index() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "stash this").unwrap();
+        svc.stash_save(&path, "drop me").unwrap();
+        assert_eq!(svc.stash_list(&path).unwrap().len(), 1, "stash must exist before drop");
+        svc.stash_drop(&path, 0).unwrap();
+        assert!(
+            svc.stash_list(&path).unwrap().is_empty(),
+            "stash list must be empty after drop"
+        );
+    }
+
+    #[test]
+    fn stash_drop_out_of_range_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        // No stashes — index 99 must error.
+        let result = svc.stash_drop(&path, 99);
+        assert!(result.is_err(), "stash_drop with out-of-range index must fail");
+    }
+
+    #[test]
+    fn conflicts_listed_after_merge_conflict() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Branch writes "branch content" to test.bru.
+        svc.create_branch(&path, "conflict-branch").unwrap();
+        svc.switch_branch(&path, "conflict-branch").unwrap();
+        fs::write(dir.path().join("test.bru"), "branch content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "branch commit").unwrap();
+
+        // Main writes "main content" — guaranteed conflict.
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "main content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "main commit").unwrap();
+
+        // Start merge without aborting — leaves repo in conflict state.
+        let _ = svc.merge_branch(&path, "conflict-branch");
+
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(!conflicts.is_empty(), "conflicts must be non-empty after a conflicting merge");
+        assert!(
+            conflicts.iter().any(|c| c.path == "test.bru"),
+            "test.bru must appear in the conflict list"
+        );
+    }
+
+    #[test]
+    fn resolve_conflict_ours_writes_local_content() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Branch content = "theirs content"; main content = "ours content".
+        svc.create_branch(&path, "conflict-branch").unwrap();
+        svc.switch_branch(&path, "conflict-branch").unwrap();
+        fs::write(dir.path().join("test.bru"), "theirs content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "branch commit").unwrap();
+
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "ours content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "main commit").unwrap();
+
+        let _ = svc.merge_branch(&path, "conflict-branch");
+
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours).unwrap();
+
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "ours content", "Ours resolution must keep main branch content");
+    }
+
+    #[test]
+    fn resolve_conflict_theirs_writes_remote_content() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Branch content = "theirs content"; main content = "ours content".
+        svc.create_branch(&path, "conflict-branch").unwrap();
+        svc.switch_branch(&path, "conflict-branch").unwrap();
+        fs::write(dir.path().join("test.bru"), "theirs content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "branch commit").unwrap();
+
+        svc.switch_branch(&path, "main").unwrap();
+        fs::write(dir.path().join("test.bru"), "ours content").unwrap();
+        svc.stage(&path, &["test.bru"]).unwrap();
+        svc.commit(&path, "main commit").unwrap();
+
+        let _ = svc.merge_branch(&path, "conflict-branch");
+
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs).unwrap();
+
+        let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "theirs content", "Theirs resolution must keep incoming branch content");
+    }
+
+    #[test]
+    fn delete_checked_out_branch_fails() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "feature-x").unwrap();
+        svc.switch_branch(&path, "feature-x").unwrap();
+        // feature-x is now checked out — deleting it must fail.
+        let result = svc.delete_branch(&path, "feature-x");
+        assert!(result.is_err(), "deleting the currently checked-out branch must fail");
+    }
 }
