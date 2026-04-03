@@ -132,6 +132,11 @@ describe('setCollection', () => {
 
   it('non-repo path sets isRepo=false and status=null', async () => {
     const { gitIsRepo } = await import('@/lib/tauri-api');
+    // Seed non-default state so assertions are meaningful.
+    useGitStore.setState({
+      isRepo: true,
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
+    });
     vi.mocked(gitIsRepo).mockResolvedValueOnce(false);
 
     await useGitStore.getState().setCollection('/not/a/repo');
@@ -152,6 +157,9 @@ describe('setCollection', () => {
     expect(gitBranches).toHaveBeenCalledWith('/test/repo');
     expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
     expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    // Verify state was actually stored, not just that functions were called.
+    expect(useGitStore.getState().status).not.toBeNull();
+    expect(useGitStore.getState().loading).toBe(false);
   });
 
   it('gitIsRepo throwing sets error state', async () => {
