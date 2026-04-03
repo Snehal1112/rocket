@@ -204,7 +204,7 @@ describe('pendingNetworkOp and setCredentials', () => {
     useGitStore.getState().setCredentials({ type: 'sshAgent' });
 
     await vi.waitFor(() => {
-      expect(gitPull).toHaveBeenCalled();
+      expect(gitPull).toHaveBeenCalledWith('/test/repo', 'origin', { type: 'sshAgent' });
     });
 
     expect(useGitStore.getState().pendingNetworkOp).toBeNull();
@@ -514,6 +514,10 @@ describe('conflicts', () => {
 });
 
 describe('reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('reset clears all state to initial values including pendingNetworkOp', () => {
     useGitStore.setState({
       isRepo: true,
