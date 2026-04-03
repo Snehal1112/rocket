@@ -6,15 +6,13 @@
 @import "@fontsource/jetbrains-mono/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 /* Map CSS variables to Tailwind theme tokens. */
 @theme inline {
   --font-sans: "JetBrains Mono", "Inter", "Segoe UI", sans-serif;
-  --font-mono: 'JetBrains Mono Variable', monospace;
+  --font-mono: "JetBrains Mono", monospace;
   --font-size-2xs: 0.625rem;      /* 10px — micro text for badges, counts, kbd. */
   --line-height-2xs: 1.125rem;
 
@@ -56,50 +54,47 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
-  --font-heading: var(--font-mono);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 /* Theme from legacy rocket-api — blue primary, HSL-based. */
 :root {
-  --radius: 0.45rem;
+  --radius: 0.7rem;
 
-  --background: oklch(1 0 0);      /* #ffffff */
-  --foreground: oklch(0.145 0 0);       /* #3b3b3b — VS Code Default Light Modern neutral */
-  --border: oklch(0.922 0 0);           /* #e4e4e4 */
+  --background: hsl(0 0% 100%);      /* #ffffff */
+  --foreground: hsl(0 0% 23%);       /* #3b3b3b — VS Code Default Light Modern neutral */
+  --border: hsl(0 0% 89%);           /* #e4e4e4 */
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.508 0.118 165.612);
-  --primary-foreground: oklch(0.979 0.021 166.113);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(0 0% 23%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(0 0% 23%);
+  --primary: hsl(213 88% 42%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(0 0% 96%);
+  --secondary-foreground: hsl(0 0% 23%);
+  --muted: hsl(0 0% 95%);
+  --muted-foreground: hsl(0 0% 45%);
+  --accent: hsl(212 86% 94%);
+  --accent-foreground: hsl(213 88% 30%);
+  --destructive: hsl(0 84.2% 60.2%);
   --destructive-foreground: hsl(0 0% 98%);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --input: hsl(0 0% 89%);
+  --ring: hsl(213 88% 42%);
 
-  --chart-1: oklch(0.845 0.143 164.978);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.596 0.145 163.225);
-  --chart-4: oklch(0.508 0.118 165.612);
-  --chart-5: oklch(0.432 0.095 166.913);
+  --chart-1: hsl(213 88% 42%);
+  --chart-2: hsl(171 65% 35%);
+  --chart-3: hsl(28 91% 52%);
+  --chart-4: hsl(283 52% 49%);
+  --chart-5: hsl(343 74% 52%);
 
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.596 0.145 163.225);
-  --sidebar-primary-foreground: oklch(0.979 0.021 166.113);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: hsl(0 0% 97%);
+  --sidebar-foreground: hsl(0 0% 23%);
+  --sidebar-primary: hsl(213 88% 42%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(212 86% 94%);
+  --sidebar-accent-foreground: hsl(213 88% 30%);
+  --sidebar-border: hsl(0 0% 89%);
+  --sidebar-ring: hsl(213 88% 42%);
 
   /* Monaco editor — VS Code Default Light Modern syntax theme. */
   --monaco-bg: #ffffff;
@@ -114,40 +109,40 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);   /* #cccccc — VS Code Default Dark Modern */
-  --border: oklch(1 0 0 / 10%);       /* #454545 — VS Code border */
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.432 0.095 166.913);
-  --primary-foreground: oklch(0.979 0.021 166.113);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  --background: hsl(0 0% 12%);
+  --foreground: hsl(0 0% 80%);   /* #cccccc — VS Code Default Dark Modern */
+  --border: hsl(0 0% 27%);       /* #454545 — VS Code border */
+  --card: hsl(0 0% 10%);
+  --card-foreground: hsl(0 0% 80%);
+  --popover: hsl(0 0% 10%);
+  --popover-foreground: hsl(0 0% 80%);
+  --primary: hsl(207 100% 42%);
+  --primary-foreground: hsl(0 0% 98%);
+  --secondary: hsl(0 0% 15%);
+  --secondary-foreground: hsl(0 0% 80%);
+  --muted: hsl(0 0% 14%);
+  --muted-foreground: hsl(0 0% 53%);
+  --accent: hsl(204 100% 18%);
+  --accent-foreground: hsl(0 0% 90%);
+  --destructive: hsl(0 72% 45%);
   --destructive-foreground: hsl(0 0% 98%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --input: hsl(0 0% 27%);
+  --ring: hsl(207 100% 42%);
 
-  --chart-1: oklch(0.845 0.143 164.978);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.596 0.145 163.225);
-  --chart-4: oklch(0.508 0.118 165.612);
-  --chart-5: oklch(0.432 0.095 166.913);
+  --chart-1: hsl(207 100% 42%);
+  --chart-2: hsl(160 63% 39%);
+  --chart-3: hsl(30 94% 55%);
+  --chart-4: hsl(282 60% 62%);
+  --chart-5: hsl(340 78% 61%);
 
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.696 0.17 162.48);
-  --sidebar-primary-foreground: oklch(0.262 0.051 172.552);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar: hsl(0 0% 9%);
+  --sidebar-foreground: hsl(0 0% 87%);
+  --sidebar-primary: hsl(207 100% 42%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(204 100% 18%);
+  --sidebar-accent-foreground: hsl(0 0% 90%);
+  --sidebar-border: hsl(0 0% 27%);
+  --sidebar-ring: hsl(207 100% 42%);
 
   /* Monaco editor — VS Code Default Dark Modern syntax theme. */
   --monaco-bg: #1f1f1f;
@@ -189,11 +184,8 @@
   .lucide {
     stroke-width: 1.5;
   }
-  html {
-    @apply font-mono;
-  }
 }
-
+            
 /* Linux: transparent window with border and rounded corners.
    Body padding creates a visible gap for the border to render against the desktop. */
 html.linux body {
