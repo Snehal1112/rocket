@@ -10,9 +10,9 @@
  *   - coverage/index.html  (combined human-readable dashboard)
  */
 
-import { execSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const COVERAGE_DIR = join(ROOT, 'coverage');
@@ -147,9 +147,9 @@ function runCargoTests(): CrateResult[] {
       }
       const resultMatch = line.match(resultRe);
       if (resultMatch && currentCrate) {
-        const passed = parseInt(resultMatch[2]);
-        const failed = parseInt(resultMatch[3]);
-        const ignored = parseInt(resultMatch[4]);
+        const passed = parseInt(resultMatch[2], 10);
+        const failed = parseInt(resultMatch[3], 10);
+        const ignored = parseInt(resultMatch[4], 10);
         if (passed + failed + ignored > 0) {
           results.push({ crate: currentCrate, passed, failed, ignored });
         }

@@ -7,10 +7,10 @@
  * Usage: npx tsx scripts/capture-screenshots.ts
  */
 
-import { type ChildProcess, spawn } from 'child_process';
-import { dirname, resolve } from 'path';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type Browser, chromium, type Page } from 'playwright';
-import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

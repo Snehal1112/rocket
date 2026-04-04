@@ -5,10 +5,10 @@
  * Usage: npx tsx scripts/capture-illustrations.ts
  */
 
-import { readdirSync, readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,7 +57,7 @@ function convertClassName(className: string): string {
     const m = cls.match(/^(fill|stroke)-(.+?)(?:\/(\d+))?$/);
     if (!m) continue;
     const [, prop, color, opacity] = m;
-    const op = opacity ? parseInt(opacity) / 100 : 1;
+    const op = opacity ? parseInt(opacity, 10) / 100 : 1;
 
     // Map color names to CSS values.
     const colorMap: Record<string, string> = {
