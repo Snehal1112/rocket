@@ -8,6 +8,8 @@ pub struct ImportReport {
     pub skipped: Vec<SkippedItem>,
     pub created_workspace: Option<String>,
     pub created_collections: Vec<String>,
+    /// "collection" or "workspace" — set by the import methods before returning.
+    pub detected_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

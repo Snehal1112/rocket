@@ -9,6 +9,37 @@ use crate::converter::{environment as env_converter, request as req_converter};
 use crate::error::{ImportError, ImportResult};
 use crate::report::{ImportReport, SkipReason, SkippedItem};
 
+/// Which generation of Bruno format a directory uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrunoFormat {
+    /// Bruno 3.0+ — uses workspace.yml / opencollection.yml (OpenCollection-compatible).
+    Modern,
+    /// Bruno 2.x — uses bruno.json markers everywhere.
+    Legacy,
+}
+
+/// Returns the Bruno format if `path` is a workspace root, or `None`.
+pub(crate) fn detect_workspace(path: &Path) -> Option<BrunoFormat> {
+    if path.join("workspace.yml").exists() {
+        Some(BrunoFormat::Modern)
+    } else if path.join("bruno.json").exists() {
+        Some(BrunoFormat::Legacy)
+    } else {
+        None
+    }
+}
+
+/// Returns the Bruno format if `path` is a collection root, or `None`.
+pub(crate) fn detect_collection(path: &Path) -> Option<BrunoFormat> {
+    if path.join("opencollection.yml").exists() {
+        Some(BrunoFormat::Modern)
+    } else if path.join("bruno.json").exists() {
+        Some(BrunoFormat::Legacy)
+    } else {
+        None
+    }
+}
+
 /// Orchestrates the full Bruno import pipeline.
 pub struct ImportService {
     workspace_path: PathBuf,
@@ -240,4 +271,50 @@ fn default_workspace_path() -> PathBuf {
     PathBuf::from(
         std::env::var("ROCKET_WORKSPACE_PATH").unwrap_or_else(|_| ".".into()),
     )
+}
+
+#[cfg(test)]
+mod detection_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn detect_workspace_modern() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(d.path().join("workspace.yml"), "").unwrap();
+        assert!(matches!(detect_workspace(d.path()), Some(BrunoFormat::Modern)));
+    }
+
+    #[test]
+    fn detect_workspace_legacy() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
+        assert!(matches!(detect_workspace(d.path()), Some(BrunoFormat::Legacy)));
+    }
+
+    #[test]
+    fn detect_workspace_none() {
+        let d = TempDir::new().unwrap();
+        assert!(detect_workspace(d.path()).is_none());
+    }
+
+    #[test]
+    fn detect_collection_modern() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(d.path().join("opencollection.yml"), "").unwrap();
+        assert!(matches!(detect_collection(d.path()), Some(BrunoFormat::Modern)));
+    }
+
+    #[test]
+    fn detect_collection_legacy() {
+        let d = TempDir::new().unwrap();
+        std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
+        assert!(matches!(detect_collection(d.path()), Some(BrunoFormat::Legacy)));
+    }
+
+    #[test]
+    fn detect_collection_none() {
+        let d = TempDir::new().unwrap();
+        assert!(detect_collection(d.path()).is_none());
+    }
 }
