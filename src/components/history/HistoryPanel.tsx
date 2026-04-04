@@ -1,37 +1,44 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Search } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
-import { METHOD_TEXT_COLOR, statusTextColor } from '@/lib/colors';
-import { listHistory, searchHistory } from '@/lib/tauri-api';
-import type { HistoryEntry } from '@/lib/tauri-api';
-import { usePaneStore } from '@/stores/pane-store';
-import { createDefaultRequest } from '@/lib/pane-utils';
-import type { RequestTab } from '@/types/pane-types';
+import { Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { METHOD_TEXT_COLOR, statusTextColor } from "@/lib/colors";
+import { createDefaultRequest } from "@/lib/pane-utils";
+import type { HistoryEntry } from "@/lib/tauri-api";
+import { listHistory, searchHistory } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
+import { usePaneStore } from "@/stores/pane-store";
+import type { RequestTab } from "@/types/pane-types";
 
 // HTTP method filter options.
-const METHOD_OPTIONS = ['All', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+const METHOD_OPTIONS = [
+  "All",
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+] as const;
 type MethodOption = (typeof METHOD_OPTIONS)[number];
 
 // Status class filter options mapped to min/max HTTP status ranges.
 const STATUS_OPTIONS = [
-  { label: 'All', min: undefined, max: undefined },
-  { label: '2xx', min: 200, max: 299 },
-  { label: '3xx', min: 300, max: 399 },
-  { label: '4xx', min: 400, max: 499 },
-  { label: '5xx', min: 500, max: 599 },
+  { label: "All", min: undefined, max: undefined },
+  { label: "2xx", min: 200, max: 299 },
+  { label: "3xx", min: 300, max: 399 },
+  { label: "4xx", min: 400, max: 499 },
+  { label: "5xx", min: 500, max: 599 },
 ] as const;
-type StatusLabel = (typeof STATUS_OPTIONS)[number]['label'];
+type StatusLabel = (typeof STATUS_OPTIONS)[number]["label"];
 
 // Formats an ISO timestamp to a short local time string (e.g. "12:34 PM").
 function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
+      hour: "numeric",
+      minute: "2-digit",
     });
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -47,9 +54,9 @@ function displayUrl(raw: string): string {
 
 export function HistoryPanel() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  const [urlQuery, setUrlQuery] = useState('');
-  const [method, setMethod] = useState<MethodOption>('All');
-  const [statusLabel, setStatusLabel] = useState<StatusLabel>('All');
+  const [urlQuery, setUrlQuery] = useState("");
+  const [method, setMethod] = useState<MethodOption>("All");
+  const [statusLabel, setStatusLabel] = useState<StatusLabel>("All");
 
   // Debounce timer ref so we can clear it on each keystroke.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,20 +66,20 @@ export function HistoryPanel() {
     async (url: string, m: MethodOption, sl: StatusLabel) => {
       const statusRange = STATUS_OPTIONS.find((s) => s.label === sl);
       try {
-        if (!url && m === 'All' && sl === 'All') {
+        if (!url && m === "All" && sl === "All") {
           const results = await listHistory(200);
           setEntries(results);
         } else {
           const results = await searchHistory({
             urlContains: url || undefined,
-            method: m !== 'All' ? m : undefined,
+            method: m !== "All" ? m : undefined,
             statusMin: statusRange?.min,
             statusMax: statusRange?.max,
           });
           setEntries(results);
         }
       } catch (err) {
-        console.error('[HistoryPanel] fetch error', err);
+        console.error("[HistoryPanel] fetch error", err);
       }
     },
     [],
@@ -80,15 +87,15 @@ export function HistoryPanel() {
 
   // Load recent history on mount.
   useEffect(() => {
-    void fetchEntries('', 'All', 'All');
+    void fetchEntries("", "All", "All");
   }, [fetchEntries]);
 
   // Re-fetch when method or status filter changes immediately.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: urlQuery excluded intentionally, debounced in handleUrlChange
   useEffect(() => {
     void fetchEntries(urlQuery, method, statusLabel);
     // urlQuery intentionally excluded — debounced separately below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, statusLabel]);
+  }, [fetchEntries, method, statusLabel]);
 
   // Debounced URL search with 300 ms delay.
   function handleUrlChange(value: string) {
@@ -104,10 +111,10 @@ export function HistoryPanel() {
     const tab: RequestTab = {
       id: `history-${entry.id}`,
       title: `${entry.method} ${displayUrl(entry.url)}`,
-      tabType: 'history',
+      tabType: "history",
       request: {
         ...createDefaultRequest(),
-        method: entry.method as RequestTab['request']['method'],
+        method: entry.method as RequestTab["request"]["method"],
         url: entry.url,
       },
       response: null,
@@ -141,7 +148,7 @@ export function HistoryPanel() {
           >
             {METHOD_OPTIONS.map((m) => (
               <option key={m} value={m}>
-                {m === 'All' ? 'All methods' : m}
+                {m === "All" ? "All methods" : m}
               </option>
             ))}
           </select>
@@ -155,7 +162,7 @@ export function HistoryPanel() {
           >
             {STATUS_OPTIONS.map((s) => (
               <option key={s.label} value={s.label}>
-                {s.label === 'All' ? 'All statuses' : s.label}
+                {s.label === "All" ? "All statuses" : s.label}
               </option>
             ))}
           </select>
@@ -182,8 +189,9 @@ export function HistoryPanel() {
                   <div className="flex items-center gap-1">
                     <span
                       className={cn(
-                        'w-12 shrink-0 text-xs font-semibold',
-                        METHOD_TEXT_COLOR[entry.method.toUpperCase()] ?? 'text-muted-foreground',
+                        "w-12 shrink-0 text-xs font-semibold",
+                        METHOD_TEXT_COLOR[entry.method.toUpperCase()] ??
+                          "text-muted-foreground",
                       )}
                     >
                       {entry.method}
@@ -196,7 +204,10 @@ export function HistoryPanel() {
                   {/* Bottom row: status, duration, timestamp. */}
                   <div className="mt-0.5 flex items-center gap-1.5 pl-14">
                     <span
-                      className={cn('text-xs font-medium', statusTextColor(entry.status))}
+                      className={cn(
+                        "text-xs font-medium",
+                        statusTextColor(entry.status),
+                      )}
                     >
                       {entry.status}
                     </span>

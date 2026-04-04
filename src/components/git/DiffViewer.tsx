@@ -1,10 +1,10 @@
-import { useState, useCallback } from "react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
+import { useCallback, useState } from "react";
+import { useMonacoTheme } from "@/components/editor/useMonacoTheme";
+import { gitDiff, gitDiffStaged } from "@/lib/tauri-api";
+import type { DiffState } from "@/types/pane-types";
 import { DiffHeader } from "./DiffHeader";
 import { VisualDiffView } from "./VisualDiffView";
-import { gitDiff, gitDiffStaged } from "@/lib/tauri-api";
-import { useMonacoTheme } from "@/components/editor/useMonacoTheme";
-import type { DiffState } from "@/types/pane-types";
 
 interface DiffViewerProps {
   diffState: DiffState;
@@ -56,12 +56,12 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
         const diff = isStaged
           ? await gitDiffStaged(diffState.collectionPath, diffState.filePath)
           : await gitDiff(diffState.collectionPath, diffState.filePath);
-        setDiffState({
-          ...diffState,
+        setDiffState((prev) => ({
+          ...prev!,
           oldContent: diff.oldContent ?? "",
           newContent: diff.newContent ?? "",
           isStaged,
-        });
+        }));
       } catch {
         // Keep current state on error.
       }

@@ -1,20 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { useWorkspaceStore } from '@/stores/workspace-store'
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 
 interface Props {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  workspaceId: string
-  currentName: string
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workspaceId: string;
+  currentName: string;
 }
 
 export function RenameWorkspaceDialog({
@@ -23,41 +23,47 @@ export function RenameWorkspaceDialog({
   workspaceId,
   currentName,
 }: Props) {
-  const [name, setName] = useState(currentName)
-  const [error, setError] = useState('')
-  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace)
+  const [name, setName] = useState(currentName);
+  const [error, setError] = useState("");
+  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
 
   // Sync when currentName changes (e.g. re-opened for a different workspace).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open is intentionally included as a reset trigger
   useEffect(() => {
-    setName(currentName)
-    setError('')
-  }, [currentName, open])
+    setName(currentName);
+    setError("");
+  }, [currentName, open]);
 
   const handleClose = () => {
-    setError('')
-    onOpenChange(false)
-  }
+    setError("");
+    onOpenChange(false);
+  };
 
   const handleRename = async () => {
-    const trimmed = name.trim()
+    const trimmed = name.trim();
     if (!trimmed) {
-      setError('Name is required')
-      return
+      setError("Name is required");
+      return;
     }
     if (trimmed === currentName) {
-      handleClose()
-      return
+      handleClose();
+      return;
     }
     try {
-      await renameWorkspace(workspaceId, trimmed)
-      handleClose()
+      await renameWorkspace(workspaceId, trimmed);
+      handleClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to rename workspace')
+      setError(e instanceof Error ? e.message : "Failed to rename workspace");
     }
-  }
+  };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) handleClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Rename workspace</DialogTitle>
@@ -66,30 +72,28 @@ export function RenameWorkspaceDialog({
         <div className="py-2">
           <Input
             value={name}
-            onChange={(e) => { setName(e.target.value); setError('') }}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError("");
+            }}
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleRename()
-              if (e.key === 'Escape') handleClose()
+              if (e.key === "Enter") void handleRename();
+              if (e.key === "Escape") handleClose();
             }}
           />
-          {error && (
-            <p className="text-xs text-destructive mt-1.5">{error}</p>
-          )}
+          {error && <p className="text-xs text-destructive mt-1.5">{error}</p>}
         </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
-          <Button
-            onClick={() => void handleRename()}
-            disabled={!name.trim()}
-          >
+          <Button onClick={() => void handleRename()} disabled={!name.trim()}>
             Rename
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

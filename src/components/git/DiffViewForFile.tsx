@@ -1,16 +1,19 @@
-import { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
-import { DiffViewer } from './DiffViewer';
-import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
-import type { FileStatus } from '@/lib/tauri-api';
-import type { DiffState } from '@/types/pane-types';
+import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { FileStatus } from "@/lib/tauri-api";
+import { gitDiff, gitDiffStaged } from "@/lib/tauri-api";
+import type { DiffState } from "@/types/pane-types";
+import { DiffViewer } from "./DiffViewer";
 
 interface DiffViewForFileProps {
   file: FileStatus;
   collectionPath: string;
 }
 
-export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) {
+export function DiffViewForFile({
+  file,
+  collectionPath,
+}: DiffViewForFileProps) {
   const [diffState, setDiffState] = useState<DiffState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,8 +33,8 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
         setDiffState({
           filePath: file.path,
           collectionPath,
-          oldContent: diff.oldContent ?? '',
-          newContent: diff.newContent ?? '',
+          oldContent: diff.oldContent ?? "",
+          newContent: diff.newContent ?? "",
           status: file.status,
           isStaged: file.staged,
         });
@@ -46,7 +49,7 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
     return () => {
       cancelled = true;
     };
-  }, [file.path, file.staged, collectionPath]);
+  }, [file.path, file.staged, file.status, collectionPath]);
 
   if (loading) {
     return (
@@ -66,5 +69,10 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
 
   if (!diffState) return null;
 
-  return <DiffViewer key={`${diffState.filePath}:${diffState.isStaged}`} diffState={diffState} />;
+  return (
+    <DiffViewer
+      key={`${diffState.filePath}:${diffState.isStaged}`}
+      diffState={diffState}
+    />
+  );
 }

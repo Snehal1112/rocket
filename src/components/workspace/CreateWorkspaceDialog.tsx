@@ -1,87 +1,95 @@
-import { useState, useEffect } from 'react'
+import { FolderOpen } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { FolderOpen } from 'lucide-react'
-import { openFolderPicker, getAppDataDir } from '@/lib/tauri-api'
-import { useWorkspaceStore } from '@/stores/workspace-store'
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { getAppDataDir, openFolderPicker } from "@/lib/tauri-api";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 
 interface Props {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [error, setError] = useState('')
-  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace)
-  const workspaces = useWorkspaceStore((s) => s.workspaces)
+  const [name, setName] = useState("");
+  const [path, setPath] = useState("");
+  const [error, setError] = useState("");
+  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
 
   // Pre-fill path with the default data directory when the dialog opens.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: path is an intentional guard condition, not a trigger
   useEffect(() => {
     if (open && !path) {
-      getAppDataDir().then(setPath).catch(() => {});
+      getAppDataDir()
+        .then(setPath)
+        .catch(() => {});
     }
   }, [open]);
 
   const handleClose = () => {
-    setName('')
-    setPath('')
-    setError('')
-    onOpenChange(false)
-  }
+    setName("");
+    setPath("");
+    setError("");
+    onOpenChange(false);
+  };
 
   const handlePickFolder = async () => {
-    const picked = await openFolderPicker()
-    if (!picked) return
-    setPath(picked)
+    const picked = await openFolderPicker();
+    if (!picked) return;
+    setPath(picked);
     // Auto-fill name from the last path segment if name is still empty.
     if (!name.trim()) {
-      const folderName = picked.split(/[\\/]/).pop() ?? picked
-      setName(folderName)
+      const folderName = picked.split(/[\\/]/).pop() ?? picked;
+      setName(folderName);
     }
-  }
+  };
 
   const handleCreate = async () => {
-    const trimmedName = name.trim()
+    const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Name is required')
-      return
+      setError("Name is required");
+      return;
     }
     if (!path) {
-      setError('Please choose a folder')
-      return
+      setError("Please choose a folder");
+      return;
     }
     if (
-      workspaces.some(
-        (w) => w.name.toLowerCase() === trimmedName.toLowerCase(),
-      )
+      workspaces.some((w) => w.name.toLowerCase() === trimmedName.toLowerCase())
     ) {
-      setError('A workspace with this name already exists')
-      return
+      setError("A workspace with this name already exists");
+      return;
     }
     try {
       // Append workspace name to the chosen directory so each workspace
       // lives in its own subfolder and can be deleted safely.
-      const sep = path.includes('\\') ? '\\' : '/';
-      const fullPath = path.endsWith(sep) ? path + trimmedName : path + sep + trimmedName;
-      await createWorkspace(trimmedName, fullPath)
-      handleClose()
+      const sep = path.includes("\\") ? "\\" : "/";
+      const fullPath = path.endsWith(sep)
+        ? path + trimmedName
+        : path + sep + trimmedName;
+      await createWorkspace(trimmedName, fullPath);
+      handleClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create workspace')
+      setError(e instanceof Error ? e.message : "Failed to create workspace");
     }
-  }
+  };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) handleClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New workspace</DialogTitle>
@@ -93,10 +101,15 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
             <Input
               id="ws-name"
               value={name}
-              onChange={(e) => { setName(e.target.value); setError('') }}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError("");
+              }}
               placeholder="My Workspace"
               autoFocus
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleCreate() }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleCreate();
+              }}
             />
           </div>
 
@@ -121,9 +134,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
             </div>
           </div>
 
-          {error && (
-            <p className="text-xs text-destructive">{error}</p>
-          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>
@@ -139,5 +150,5 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
