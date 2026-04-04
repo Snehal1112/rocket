@@ -77,6 +77,8 @@ pub enum BruAuth {
     ApiKey { key: String, value: String, placement: String },
     Digest { username: String, password: String },
     /// Any auth type not listed above — lands in unknown_blocks instead.
+    /// The parser never constructs this; it is kept for completeness.
+    #[allow(dead_code)]
     Unknown(String),
 }
 

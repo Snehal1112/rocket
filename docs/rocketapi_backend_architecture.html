@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RocketAPI Backend Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #fafaf8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 18px; font-weight: 500; color: #2c2c2a; margin-bottom: 6px; }
+  .meta { font-size: 13px; color: #5f5e5a; margin-bottom: 32px; }
+  .card {
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 780px;
+    width: 100%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+
+  /* ── color ramps (light) ──────────────────────────── */
+  .c-blue   > rect, .c-blue   > circle, .c-blue   > ellipse { fill: #E6F1FB; stroke: #185FA5; }
+  .c-purple > rect, .c-purple > circle, .c-purple > ellipse { fill: #EEEDFE; stroke: #534AB7; }
+  .c-teal   > rect, .c-teal   > circle, .c-teal   > ellipse { fill: #E1F5EE; stroke: #0F6E56; }
+  .c-coral  > rect, .c-coral  > circle, .c-coral  > ellipse { fill: #FAECE7; stroke: #993C1D; }
+  .c-amber  > rect, .c-amber  > circle, .c-amber  > ellipse { fill: #FAEEDA; stroke: #854F0B; }
+  .c-gray   > rect, .c-gray   > circle, .c-gray   > ellipse { fill: #F1EFE8; stroke: #5F5E5A; }
+
+  .box { fill: #F5F4F0; stroke: rgba(0,0,0,0.13); }
+
+  /* ── text on colored fills (light) ───────────────── */
+  .c-blue   > text.th { fill: #0C447C; } .c-blue   > text.ts { fill: #185FA5; }
+  .c-purple > text.th { fill: #3C3489; } .c-purple > text.ts { fill: #534AB7; }
+  .c-teal   > text.th { fill: #085041; } .c-teal   > text.ts { fill: #0F6E56; }
+  .c-coral  > text.th { fill: #712B13; } .c-coral  > text.ts { fill: #993C1D; }
+  .c-amber  > text.th { fill: #633806; } .c-amber  > text.ts { fill: #854F0B; }
+  .c-gray   > text.th { fill: #2C2C2A; } .c-gray   > text.ts { fill: #5F5E5A; }
+
+  /* ── base text ────────────────────────────────────── */
+  text.th {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px; font-weight: 500; fill: #2c2c2a;
+  }
+  text.ts {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 12px; font-weight: 400; fill: #5f5e5a;
+  }
+
+  line.arr-line { stroke: #888780; stroke-width: 1.5; }
+  line.sep      { stroke: rgba(0,0,0,0.12); stroke-width: 0.5; }
+
+  /* ── dark mode ────────────────────────────────────── */
+  @media (prefers-color-scheme: dark) {
+    body  { background: #1a1a18; }
+    h1    { color: #e5e4dc; }
+    .meta { color: #9c9a92; }
+    .card { background: #242422; border-color: rgba(255,255,255,0.1); box-shadow: none; }
+
+    .c-blue   > rect, .c-blue   > circle, .c-blue   > ellipse { fill: #042C53; stroke: #85B7EB; }
+    .c-purple > rect, .c-purple > circle, .c-purple > ellipse { fill: #26215C; stroke: #AFA9EC; }
+    .c-teal   > rect, .c-teal   > circle, .c-teal   > ellipse { fill: #04342C; stroke: #5DCAA5; }
+    .c-coral  > rect, .c-coral  > circle, .c-coral  > ellipse { fill: #4A1B0C; stroke: #F0997B; }
+    .c-amber  > rect, .c-amber  > circle, .c-amber  > ellipse { fill: #412402; stroke: #EF9F27; }
+    .c-gray   > rect, .c-gray   > circle, .c-gray   > ellipse { fill: #2C2C2A; stroke: #B4B2A9; }
+
+    .box { fill: #2e2e2c; stroke: rgba(255,255,255,0.12); }
+
+    .c-blue   > text.th { fill: #B5D4F4; } .c-blue   > text.ts { fill: #85B7EB; }
+    .c-purple > text.th { fill: #CECBF6; } .c-purple > text.ts { fill: #AFA9EC; }
+    .c-teal   > text.th { fill: #9FE1CB; } .c-teal   > text.ts { fill: #5DCAA5; }
+    .c-coral  > text.th { fill: #F5C4B3; } .c-coral  > text.ts { fill: #F0997B; }
+    .c-amber  > text.th { fill: #FAC775; } .c-amber  > text.ts { fill: #EF9F27; }
+    .c-gray   > text.th { fill: #D3D1C7; } .c-gray   > text.ts { fill: #B4B2A9; }
+
+    text.th { fill: #e5e4dc; }
+    text.ts { fill: #9c9a92; }
+    line.arr-line { stroke: #9c9a92; }
+    line.sep      { stroke: rgba(255,255,255,0.12); }
+  }
+</style>
+</head>
+<body>
+<h1>RocketAPI — Backend Architecture</h1>
+<p class="meta">Tauri v2 + Rust · DDD bounded contexts · Cargo workspace · v2 (OODA reviewed)</p>
+<div class="card">
+<svg width="100%" viewBox="0 0 680 808" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+  <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</marker>
+</defs>
+
+<!-- ── FRONTEND ──────────────────────────────────────────── -->
+<g class="c-blue">
+<rect x="20" y="18" width="640" height="60" rx="10" stroke-width="0.5"/>
+<text class="th" x="340" y="38" text-anchor="middle" dominant-baseline="central">Frontend  —  React 18 / TypeScript</text>
+<text class="ts" x="340" y="60" text-anchor="middle" dominant-baseline="central">Zustand · shadcn/ui · Lucide icons · tauri-api.ts bridge · Vite</text>
+</g>
+
+<!-- Arrow 1 — bidirectional Tauri IPC -->
+<line class="arr-line" x1="340" y1="78" x2="340" y2="99" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text class="ts" x="350" y="89" dominant-baseline="central">Tauri IPC  ·  invoke() ↓  /  events ↑</text>
+
+<!-- ── SRC-TAURI ─────────────────────────────────────────── -->
+<g class="c-purple">
+<rect x="20" y="100" width="640" height="52" rx="10" stroke-width="0.5"/>
+<text class="th" x="340" y="120" text-anchor="middle" dominant-baseline="central">src-tauri  —  binary entry point</text>
+<text class="ts" x="340" y="139" text-anchor="middle" dominant-baseline="central">Tauri command handlers · managed state graph · TauriEventBus wiring · DI at startup</text>
+</g>
+
+<!-- Arrow 2a → rocket-app, 2b → rocket-infra -->
+<line class="arr-line" x1="216" y1="152" x2="216" y2="179" marker-end="url(#arr)"/>
+<text class="ts" x="224" y="166" dominant-baseline="central">delegates to</text>
+<line class="arr-line" x1="558" y1="152" x2="558" y2="179" marker-end="url(#arr)"/>
+<text class="ts" x="566" y="166" dominant-baseline="central">injects</text>
+
+<!-- ── ROCKET-APP container (3 rows — 8 services) ────────── -->
+<rect class="box" x="20" y="180" width="410" height="212" rx="10" stroke-width="0.5"/>
+<text class="th" x="225" y="200" text-anchor="middle" dominant-baseline="central">rocket-app  —  Application Services</text>
+
+<!-- Row 1 -->
+<g class="c-purple">
+<rect x="34" y="216" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="94" y="233" text-anchor="middle" dominant-baseline="central" font-size="12">CollectionService</text>
+<text class="ts" x="94" y="250" text-anchor="middle" dominant-baseline="central">CRUD · move · reorder</text>
+</g>
+<g class="c-purple">
+<rect x="166" y="216" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="226" y="233" text-anchor="middle" dominant-baseline="central" font-size="12">EnvironmentService</text>
+<text class="ts" x="226" y="250" text-anchor="middle" dominant-baseline="central">CRUD · publish events</text>
+</g>
+<g class="c-purple">
+<rect x="298" y="216" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="358" y="233" text-anchor="middle" dominant-baseline="central" font-size="12">RequestExecService</text>
+<text class="ts" x="358" y="250" text-anchor="middle" dominant-baseline="central">vars → HTTP → history</text>
+</g>
+
+<!-- Row 2 -->
+<g class="c-purple">
+<rect x="34" y="274" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="94" y="291" text-anchor="middle" dominant-baseline="central" font-size="12">GitAppService</text>
+<text class="ts" x="94" y="308" text-anchor="middle" dominant-baseline="central">commit · push · pull</text>
+</g>
+<g class="c-purple">
+<rect x="166" y="274" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="226" y="291" text-anchor="middle" dominant-baseline="central" font-size="12">HistoryService</text>
+<text class="ts" x="226" y="308" text-anchor="middle" dominant-baseline="central">list · search · clear</text>
+</g>
+<g class="c-purple">
+<rect x="298" y="274" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="358" y="291" text-anchor="middle" dominant-baseline="central" font-size="12">WorkspaceService</text>
+<text class="ts" x="358" y="308" text-anchor="middle" dominant-baseline="central">create · switch · delete</text>
+</g>
+
+<!-- Row 3 — TemplateService + CookieService (previously missing) -->
+<g class="c-purple">
+<rect x="34" y="333" width="190" height="40" rx="6" stroke-width="0.5"/>
+<text class="th" x="129" y="350" text-anchor="middle" dominant-baseline="central" font-size="12">TemplateService</text>
+<text class="ts" x="129" y="364" text-anchor="middle" dominant-baseline="central">saved request templates</text>
+</g>
+<g class="c-purple">
+<rect x="236" y="333" width="182" height="40" rx="6" stroke-width="0.5"/>
+<text class="th" x="327" y="350" text-anchor="middle" dominant-baseline="central" font-size="12">CookieService</text>
+<text class="ts" x="327" y="364" text-anchor="middle" dominant-baseline="central">per-domain cookie jars</text>
+</g>
+
+<!-- ── ROCKET-INFRA (right column, spans app + domain) ───── -->
+<g class="c-coral">
+<rect x="448" y="180" width="212" height="418" rx="10" stroke-width="0.5"/>
+<text class="th" x="554" y="202" text-anchor="middle" dominant-baseline="central">rocket-infra</text>
+<text class="ts" x="554" y="220" text-anchor="middle" dominant-baseline="central">filesystem + network I/O</text>
+<line class="sep" x1="460" y1="232" x2="648" y2="232"/>
+
+<text class="ts" x="462" y="250" dominant-baseline="central" font-style="italic">File repositories</text>
+<text class="ts" x="462" y="270" dominant-baseline="central">SharedPathCollectionRepo</text>
+<text class="ts" x="470" y="286" dominant-baseline="central" font-style="italic">↳ runtime hot-swap</text>
+<text class="ts" x="462" y="306" dominant-baseline="central">FsCollectionRepo</text>
+<text class="ts" x="462" y="324" dominant-baseline="central">FsEnvironmentRepo</text>
+<text class="ts" x="462" y="342" dominant-baseline="central">FsWorkspaceRepo</text>
+<text class="ts" x="462" y="360" dominant-baseline="central">FsWorkspaceConfigRepo</text>
+<text class="ts" x="462" y="378" dominant-baseline="central">FsHistoryRepo</text>
+<text class="ts" x="462" y="396" dominant-baseline="central">FsTemplateRepo · FsCookieRepo</text>
+<line class="sep" x1="460" y1="410" x2="648" y2="410"/>
+
+<text class="ts" x="462" y="426" dominant-baseline="central" font-style="italic">Network + Events</text>
+<text class="ts" x="462" y="446" dominant-baseline="central">ReqwestExecutor</text>
+<text class="ts" x="462" y="466" dominant-baseline="central">NotifyFileWatcher</text>
+<text class="ts" x="462" y="486" dominant-baseline="central">TauriEventBus</text>
+<line class="sep" x1="460" y1="500" x2="648" y2="500"/>
+
+<text class="ts" x="462" y="516" dominant-baseline="central" font-style="italic">Serialization</text>
+<text class="ts" x="462" y="536" dominant-baseline="central">opencollection.rs</text>
+<text class="ts" x="462" y="556" dominant-baseline="central">oc_conversions.rs</text>
+<text class="ts" x="462" y="576" dominant-baseline="central">migration.rs · validate_path()</text>
+</g>
+
+<!-- Arrow 3: rocket-app → domain -->
+<line class="arr-line" x1="225" y1="392" x2="225" y2="415" marker-end="url(#arr)"/>
+<text class="ts" x="234" y="404" dominant-baseline="central">Box&lt;dyn Trait&gt;</text>
+
+<!-- implements arrow: infra → domain -->
+<line class="arr-line" x1="448" y1="492" x2="432" y2="492" marker-end="url(#arr)"/>
+<text class="ts" x="440" y="481" text-anchor="middle" dominant-baseline="central">impl.</text>
+
+<!-- ── DOMAIN CRATES container ──────────────────────────── -->
+<rect class="box" x="20" y="416" width="410" height="182" rx="10" stroke-width="0.5"/>
+<text class="th" x="225" y="435" text-anchor="middle" dominant-baseline="central">Domain crates  —  pure Rust, zero I/O</text>
+
+<!-- Domain row 1 -->
+<g class="c-teal">
+<rect x="34" y="448" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="94" y="465" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-collection</text>
+<text class="ts" x="94" y="482" text-anchor="middle" dominant-baseline="central">Collection · Request</text>
+</g>
+<g class="c-teal">
+<rect x="166" y="448" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="226" y="465" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-environment</text>
+<text class="ts" x="226" y="482" text-anchor="middle" dominant-baseline="central">Env · Variable · Resolver</text>
+</g>
+<g class="c-teal">
+<rect x="298" y="448" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="358" y="465" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-http</text>
+<text class="ts" x="358" y="482" text-anchor="middle" dominant-baseline="central">HTTP · Auth · Executor</text>
+</g>
+
+<!-- Domain row 2 -->
+<g class="c-teal">
+<rect x="34" y="506" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="94" y="523" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-history</text>
+<text class="ts" x="94" y="540" text-anchor="middle" dominant-baseline="central">HistoryEntry · Template</text>
+</g>
+<g class="c-teal">
+<rect x="166" y="506" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="226" y="523" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-git</text>
+<text class="ts" x="226" y="540" text-anchor="middle" dominant-baseline="central">Status · Branch · GitSvc</text>
+</g>
+<g class="c-teal">
+<rect x="298" y="506" width="120" height="46" rx="6" stroke-width="0.5"/>
+<text class="th" x="358" y="523" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-workspace</text>
+<text class="ts" x="358" y="540" text-anchor="middle" dominant-baseline="central">Workspace · Registry</text>
+</g>
+
+<!-- rocket-import banner -->
+<g class="c-teal">
+<rect x="34" y="563" width="376" height="24" rx="6" stroke-width="0.5"/>
+<text class="th" x="222" y="575" text-anchor="middle" dominant-baseline="central" font-size="12">rocket-import (new)  ·  Bruno .bru / .yml → OpenCollection .yml</text>
+</g>
+
+<!-- Arrows → rocket-shared -->
+<line class="arr-line" x1="225" y1="598" x2="225" y2="624" marker-end="url(#arr)"/>
+<line class="arr-line" x1="554" y1="598" x2="554" y2="624" marker-end="url(#arr)"/>
+<text class="ts" x="234" y="611" dominant-baseline="central">all depend on</text>
+
+<!-- ── ROCKET-SHARED ─────────────────────────────────────── -->
+<g class="c-amber">
+<rect x="20" y="625" width="640" height="88" rx="10" stroke-width="0.5"/>
+<text class="th" x="340" y="645" text-anchor="middle" dominant-baseline="central">rocket-shared  —  shared kernel  (zero external dependencies)</text>
+<text class="ts" x="340" y="665" text-anchor="middle" dominant-baseline="central">DomainError · DomainResult · DomainEvent enum · EventPublisher trait</text>
+<text class="ts" x="340" y="683" text-anchor="middle" dominant-baseline="central">HttpMethod · Header · Body · Auth · VariableValue · Assertion</text>
+<text class="ts" x="340" y="701" text-anchor="middle" dominant-baseline="central">Description · RequestSettings · Tag · Sequence · Serialization helpers</text>
+</g>
+
+<!-- Arrow → filesystem -->
+<line class="arr-line" x1="340" y1="713" x2="340" y2="736" marker-end="url(#arr)"/>
+<text class="ts" x="350" y="725" dominant-baseline="central">serialized to disk</text>
+
+<!-- ── FILESYSTEM ────────────────────────────────────────── -->
+<g class="c-gray">
+<rect x="20" y="737" width="640" height="52" rx="10" stroke-width="0.5"/>
+<text class="th" x="340" y="757" text-anchor="middle" dominant-baseline="central">~/.rocket-api/  —  filesystem storage</text>
+<text class="ts" x="340" y="776" text-anchor="middle" dominant-baseline="central">workspace.yml · workspaces.yml · collections/ · environments/ · history/ · cookies/</text>
+</g>
+</svg>
+</div>
+</body>
+</html>

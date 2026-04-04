@@ -104,7 +104,10 @@ fn bru_body_to_domain(body: &BruBody) -> Body {
             file_path: None,
         },
         BruBody::FormUrlEncoded(kvs) => {
-            // Encode as `key=value&key2=value2` string.
+            // Encode as `key=value&key2=value2` string. Note: the FormUrlEncoded
+            // BodyMode stores the body as a flat string, so disabled fields cannot
+            // be represented — they are included here regardless of kv.disabled.
+            // Multipart avoids this because FormDataEntry carries an `enabled` flag.
             let encoded = kvs.iter()
                 .map(|kv| format!("{}={}", kv.key, kv.value))
                 .collect::<Vec<_>>()

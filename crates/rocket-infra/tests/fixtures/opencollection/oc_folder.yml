@@ -1,0 +1,10 @@
+info:
+  name: Subfolder
+  type: folder
+items:
+  - info:
+      name: Nested Request
+      type: http
+    http:
+      method: POST
+      url: https://example.com/submit

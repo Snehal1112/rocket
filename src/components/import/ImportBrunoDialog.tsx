@@ -186,9 +186,10 @@ export function ImportBrunoDialog({
               {report.skipped.length > 0 && (
                 <Collapsible open={skippedOpen} onOpenChange={setSkippedOpen}>
                   <CollapsibleTrigger asChild>
-                    <button
-                      type='button'
-                      className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className='h-auto p-0 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-transparent'
                     >
                       {skippedOpen ? (
                         <ChevronDown className='h-3 w-3' />
@@ -196,7 +197,7 @@ export function ImportBrunoDialog({
                         <ChevronRight className='h-3 w-3' />
                       )}
                       {report.skipped.length} item{report.skipped.length !== 1 ? 's' : ''} skipped
-                    </button>
+                    </Button>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <ul className='mt-1.5 space-y-1 max-h-40 overflow-y-auto'>
@@ -205,7 +206,10 @@ export function ImportBrunoDialog({
                         <li key={i} className='text-xs text-muted-foreground'>
                           <span className='font-mono'>{item.path}</span>
                           {' — '}
-                          <span className='text-amber-500'>{item.reason.type}</span>
+                          <span className='text-amber-500'>
+                            {item.reason.type}
+                            {item.reason.detail ? `: ${item.reason.detail}` : ''}
+                          </span>
                         </li>
                       ))}
                     </ul>

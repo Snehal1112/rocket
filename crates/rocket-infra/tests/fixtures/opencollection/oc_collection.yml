@@ -1,0 +1,11 @@
+opencollection: "0.1"
+info:
+  name: Sample Collection
+  version: "1.0.0"
+items:
+  - info:
+      name: Sample Request
+      type: http
+    http:
+      method: GET
+      url: https://example.com/api

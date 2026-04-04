@@ -3,6 +3,8 @@ use rocket_collection::CollectionVariable;
 use crate::bru::ast::BruKeyValue;
 
 /// Convert Bruno collection-level key-value pairs into domain CollectionVariables.
+/// Deferred: not yet called from ImportService; wired once workspace-level bruno.json parsing lands.
+#[allow(dead_code)]
 pub fn convert_variables(vars: &[BruKeyValue]) -> Vec<CollectionVariable> {
     vars.iter().map(|kv| CollectionVariable {
         key: kv.key.clone(),

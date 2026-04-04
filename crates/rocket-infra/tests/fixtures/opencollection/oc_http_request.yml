@@ -1,0 +1,6 @@
+info:
+  name: Simple GET
+  type: http
+http:
+  method: GET
+  url: https://example.com/status
