@@ -240,8 +240,8 @@ pub fn run() {
             commands::workspaces::link_external_collection,
             commands::ui_state::load_ui_state,
             commands::ui_state::save_ui_state,
-            commands::import::import_bruno_collection,
-            commands::import::import_bruno_workspace,
+            commands::import::import_bruno,
+            commands::import::import_bruno_zip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
