@@ -5,8 +5,6 @@ edition.workspace = true
 
 [dependencies]
 rocket-shared.workspace = true
-rocket-import.workspace = true
-tauri = { version = "2" }
 rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-git.workspace = true
