@@ -7,7 +7,7 @@ edition.workspace = true
 rocket-shared.workspace = true
 rocket-collection.workspace = true
 rocket-environment.workspace = true
-rocket-workspace = { path = "../rocket-workspace" }
+rocket-workspace.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
