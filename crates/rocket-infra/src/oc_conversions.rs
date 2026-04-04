@@ -807,6 +807,8 @@ impl From<OcWorkspaceCollectionRef> for CollectionReference {
                 ref_type: CollectionRefType::External,
                 path: Some(p),
             },
+            // Any non-absolute path (relative or absent) is treated as Embedded.
+            // External collections in the spec use absolute paths, matching Bruno's convention.
             _ => CollectionReference {
                 name: r.name,
                 ref_type: CollectionRefType::Embedded,

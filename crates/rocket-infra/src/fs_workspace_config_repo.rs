@@ -151,6 +151,22 @@ mod tests {
         assert_eq!(loaded.description.as_deref(), Some("My desc"));
         assert_eq!(loaded.collections.len(), 1);
         assert_eq!(loaded.collections[0].name, "my-api");
+        assert_eq!(loaded.collections[0].ref_type, rocket_workspace::CollectionRefType::Embedded);
+    }
+
+    #[test]
+    fn load_new_format_external_collection_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let ws_path = tmp.path().join("ext-ws");
+        let repo = FsWorkspaceConfigRepo::new();
+        let mut cfg = WorkspaceConfig::new("Ext WS");
+        cfg.add_external_collection("shared", std::path::PathBuf::from("/abs/path/to/shared"));
+        repo.save(&ws_path, &cfg).unwrap();
+
+        let loaded = repo.load(&ws_path).unwrap();
+        assert_eq!(loaded.collections.len(), 1);
+        assert_eq!(loaded.collections[0].ref_type, rocket_workspace::CollectionRefType::External);
+        assert_eq!(loaded.collections[0].path, Some(std::path::PathBuf::from("/abs/path/to/shared")));
     }
 
     #[test]
