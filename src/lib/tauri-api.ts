@@ -758,21 +758,14 @@ export interface ImportReport {
   skipped: SkippedItem[];
   createdWorkspace: string | null;
   createdCollections: string[];
+  detectedType: 'collection' | 'workspace';
 }
 
-export const importBrunoCollection = (path: string, targetWorkspaceId: string) =>
-  invoke<ImportReport>('import_bruno_collection', { path, targetWorkspaceId });
+export const importBruno = (path: string, targetWorkspaceId: string) =>
+  invoke<ImportReport>('import_bruno', { path, targetWorkspaceId });
 
-export const importBrunoWorkspace = (
-  path: string,
-  createNewWorkspace: boolean,
-  targetWorkspaceId?: string,
-) =>
-  invoke<ImportReport>('import_bruno_workspace', {
-    path,
-    createNewWorkspace,
-    targetWorkspaceId: targetWorkspaceId ?? null,
-  });
+export const importBrunoZip = (zipPath: string, targetWorkspaceId: string) =>
+  invoke<ImportReport>('import_bruno_zip', { zipPath, targetWorkspaceId });
 
 // ============================================================
 // UI state persistence
