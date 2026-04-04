@@ -78,6 +78,7 @@ describe('pane-store', () => {
         headers: [],
         body: { mode: 'none' as const, content: '', formData: [] },
         auth: { authType: 'none' as const },
+        docs: null,
       },
       response: null,
       isDirty: false,

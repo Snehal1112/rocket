@@ -161,6 +161,7 @@ pub fn run() {
             commands::collections::save_folder_variables,
             commands::collections::get_request_variables,
             commands::collections::save_request_variables,
+            commands::collections::update_request_docs,
             commands::environments::list_environments,
             commands::environments::get_environment,
             commands::environments::save_environment,

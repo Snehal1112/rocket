@@ -111,6 +111,7 @@ export interface RequestState {
   headers: KeyValueEntry[];
   body: BodyState;
   auth: AuthState;
+  docs: string | null;
 }
 
 export interface KeyValueEntry {

@@ -1,4 +1,5 @@
 use rocket_collection::{Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request};
+use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
 
 pub struct CollectionService {
@@ -43,6 +44,13 @@ impl CollectionService {
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
         self.repo.save_request(collection, old_path, &request)?;
+        Ok(())
+    }
+
+    pub fn update_request_docs(&self, collection: &str, path: &str, docs: Option<String>) -> DomainResult<()> {
+        let mut request = self.repo.get_request(collection, path)?;
+        request.docs = docs.map(Documentation::text);
+        self.repo.save_request(collection, path, &request)?;
         Ok(())
     }
 

@@ -90,6 +90,7 @@ export interface Request {
   auth: Auth;
   fileName?: string;
   tags?: string[];
+  docs?: string | null;
 }
 
 export interface Folder {
@@ -745,6 +746,10 @@ export const getRequestVariables = (collection: string, requestPath: string) =>
   invoke<CollectionVariable[]>('get_request_variables', { collection, requestPath });
 export const saveRequestVariables = (collection: string, requestPath: string, variables: CollectionVariable[]) =>
   invoke<void>('save_request_variables', { collection, requestPath, vars: variables });
+
+// Request docs
+export const updateRequestDocs = (collection: string, path: string, docs: string | null): Promise<void> =>
+  invoke<void>('update_request_docs', { collection, path, docs });
 
 // ============================================================
 // UI state persistence

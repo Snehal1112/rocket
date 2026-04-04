@@ -51,7 +51,7 @@ export function MarkdownEditor({
           className="min-h-[200px] font-mono text-sm"
         />
       ) : (
-        <div className="prose prose-sm dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md">
+        <div className="prose dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md">
           {value ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (

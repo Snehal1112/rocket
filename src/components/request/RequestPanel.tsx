@@ -43,12 +43,14 @@ import type {
 import { isRequestTab } from '@/types/pane-types';
 import { findTabInTree } from '@/lib/pane-utils';
 import type { ParsedCurl } from '@/lib/curl-parser';
-import { getCollectionSettings, type CollectionVariable } from '@/lib/tauri-api';
+import { getCollectionSettings, updateRequestDocs, type CollectionVariable } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
+import { RequestDocsPanel } from './RequestDocsPanel';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const METHODS: HttpMethod[] = [
   'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD',
@@ -74,7 +76,7 @@ const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
 
 const INHERIT_AUTH_OPTION = { label: 'Inherit from parent', value: 'inherit' as AuthState['authType'] };
 
-type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables';
+type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables' | 'docs';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -89,6 +91,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { send, sending } = useExecuteRequest(tab.id);
 
   const [activeSection, setActiveSection] = useState<SectionTab>('params');
+  const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
@@ -337,6 +340,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, updateRequest],
   );
 
+  const handleSaveDocs = useCallback(
+    async (docs: string | null) => {
+      if (!tab.source) return;
+      try {
+        await updateRequestDocs(tab.source.collection, tab.source.path, docs);
+        updateRequest(tab.id, { docs });
+      } catch (err) {
+        console.error('[RequestPanel] save docs failed:', err);
+      }
+    },
+    [tab.id, tab.source, updateRequest],
+  );
+
   const tabDefs = useMemo(
     () => [
       {
@@ -410,8 +426,21 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'variables',
         onClick: () => setActiveSection('variables'),
       },
+      {
+        value: 'docs',
+        label: (
+          <>
+            Docs
+            {request.docs && (
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'docs',
+        onClick: () => setActiveSection('docs'),
+      },
     ],
-    [activeSection, enabledParamCount, enabledHeaderCount, request.body.mode, request.auth.authType, requestVarCount],
+    [activeSection, enabledParamCount, enabledHeaderCount, request.body.mode, request.auth.authType, requestVarCount, request.docs],
   );
 
   const tabRightContent = useMemo(() => {
@@ -455,8 +484,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </Select>
       );
     }
+    if (activeSection === 'docs') {
+      return (
+        <Tabs value={docMode} onValueChange={(v) => setDocMode(v as 'edit' | 'preview')}>
+          <TabsList className="h-6">
+            <TabsTrigger value="edit" className="text-[10px] px-2.5 py-0.5">Edit</TabsTrigger>
+            <TabsTrigger value="preview" className="text-[10px] px-2.5 py-0.5">Preview</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      );
+    }
     return undefined;
-  }, [activeSection, request.body, request.auth.authType, tab.id, updateRequest, handleAuthTypeChange, authTypeOptions]);
+  }, [activeSection, request.body, request.auth.authType, tab.id, updateRequest, handleAuthTypeChange, authTypeOptions, docMode]);
 
   return (
     <div ref={containerRef} className="flex h-full flex-col overflow-hidden bg-transparent">
@@ -591,6 +630,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                   Save this request to a collection before adding request variables.
                 </p>
               )
+            )}
+            {activeSection === 'docs' && (
+              <RequestDocsPanel
+                docs={request.docs}
+                mode={docMode}
+                hasSource={!!(tab.source?.collection && tab.source?.path)}
+                onSave={(docs) => { void handleSaveDocs(docs); }}
+                onSwitchToEdit={() => setDocMode('edit')}
+              />
             )}
           </div>
         </div>

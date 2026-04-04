@@ -214,3 +214,13 @@ pub fn save_request_variables(
 ) -> Result<(), DomainError> {
     svc.save_request_variables(&collection, &request_path, vars)
 }
+
+#[tauri::command]
+pub fn update_request_docs(
+    collection: String,
+    path: String,
+    docs: Option<String>,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.update_request_docs(&collection, &path, docs)
+}

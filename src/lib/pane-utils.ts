@@ -100,6 +100,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     })),
     body,
     auth,
+    docs: req.docs ?? null,
   };
 }
 
@@ -120,6 +121,7 @@ export function createDefaultRequest(): RequestState {
     auth: {
       authType: 'none',
     },
+    docs: null,
   };
 }
 

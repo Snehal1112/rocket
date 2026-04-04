@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -315,31 +316,29 @@ export function WorkspaceOverviewTab({
       {/* ── RIGHT COLUMN — Documentation ── */}
       <div className="flex-1 p-4 flex flex-col overflow-hidden">
         <Card className="flex-1 flex flex-col overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between py-2.5 px-4 border-b border-border shrink-0">
+          <CardHeader className="flex flex-row items-center justify-between py-2.5 px-4 shrink-0">
             <div className="flex items-center gap-2">
               <FileText className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-xs font-semibold text-muted-foreground">
                 Documentation
               </span>
             </div>
-            <div className="flex gap-0.5 bg-muted/30 border border-border rounded-md p-0.5">
-              <button
-                type="button"
-                aria-pressed={docMode === "edit"}
-                onClick={() => setDocMode("edit")}
-                className={`px-2.5 py-0.5 rounded text-[10px] transition-colors ${docMode === "edit" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                aria-pressed={docMode === "preview"}
-                onClick={() => setDocMode("preview")}
-                className={`px-2.5 py-0.5 rounded text-[10px] transition-colors ${docMode === "preview" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                Preview
-              </button>
-            </div>
+            <Tabs
+              value={docMode}
+              onValueChange={(v) => setDocMode(v as "edit" | "preview")}
+            >
+              <TabsList className="h-6">
+                <TabsTrigger value="edit" className="text-[10px] px-2.5 py-0.5">
+                  Edit
+                </TabsTrigger>
+                <TabsTrigger
+                  value="preview"
+                  className="text-[10px] px-2.5 py-0.5"
+                >
+                  Preview
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </CardHeader>
 
           <CardContent className="flex-1 p-0 overflow-hidden flex flex-col">
