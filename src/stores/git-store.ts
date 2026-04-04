@@ -90,6 +90,7 @@ interface GitState {
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
+  hasConflicts: () => boolean;
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
