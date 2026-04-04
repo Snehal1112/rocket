@@ -28,16 +28,19 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
             continue;
         }
 
-        // Block opening: `name {` or `name:subtype {`
-        if trimmed.ends_with('{') {
-            let header = trimmed.trim_end_matches('{').trim();
+        // Block opening: `name {`, `name:subtype {`, or `name:subtype [` (list blocks)
+        if trimmed.ends_with('{') || trimmed.ends_with('[') {
+            let is_list = trimmed.ends_with('[');
+            let closer = if is_list { "]" } else { "}" };
+            let header = trimmed.trim_end_matches(|c| c == '{' || c == '[').trim();
             let (name, subtype) = if let Some((n, s)) = header.split_once(':') {
                 (n.trim().to_string(), Some(s.trim().to_string()))
             } else {
                 (header.to_string(), None)
             };
 
-            let is_raw = RAW_TEXT_BLOCK_NAMES.contains(&name.as_str());
+            // List blocks and raw-text blocks both capture content verbatim.
+            let is_raw = is_list || RAW_TEXT_BLOCK_NAMES.contains(&name.as_str());
             tokens.push(Token::BlockOpen { name: name.clone(), subtype });
 
             // Collect block body.
@@ -47,7 +50,7 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                     None => break,
                     Some(inner) => {
                         let inner_trimmed = inner.trim();
-                        if inner_trimmed == "}" {
+                        if inner_trimmed == closer {
                             if is_raw && !raw_lines.is_empty() {
                                 // Trim one leading indent level from raw lines.
                                 let content = raw_lines
