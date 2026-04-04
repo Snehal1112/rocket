@@ -215,7 +215,7 @@ impl CollectionRepository for FsCollectionRepo {
 
         // Write opencollection.yml with basic info.
         let oc = OcCollection {
-            opencollection: Some("0.1".into()),
+            opencollection: Some("1.0.0".into()),
             uid: Some(uuid::Uuid::new_v4().to_string()),
             info: Some(OcInfo {
                 name: name.into(),
@@ -490,7 +490,7 @@ impl CollectionRepository for FsCollectionRepo {
                 .map_err(|e| DomainError::Internal(format!("Failed to parse opencollection.yml: {e}")))?
         } else {
             OcCollection {
-                opencollection: Some("0.1".into()),
+                opencollection: Some("1.0.0".into()),
                 uid: Some(uuid::Uuid::new_v4().to_string()),
                 info: Some(OcInfo {
                     name: name.into(),
