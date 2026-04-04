@@ -148,8 +148,17 @@ impl WorkspaceService {
         let workspace = registry
             .find_by_id_mut(id)
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
+        let workspace_path = workspace.path.clone();
+
+        // Write to workspace.yml — the portable source of truth.
+        let mut config = self.config_repo.load(&workspace_path)?;
+        config.description = description.map(|s| s.to_string());
+        self.config_repo.save(&workspace_path, &config)?;
+
+        // Keep the registry cache in sync so the workspace list reflects the change.
         workspace.description = description.map(|s| s.to_string());
         self.repo.save(&registry)?;
+
         self.publisher.publish(DomainEvent::WorkspaceDescriptionUpdated {
             id: id.to_string(),
             description: description.map(|s| s.to_string()),
@@ -507,6 +516,27 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
         assert!(svc.update_description("nope", Some("x")).is_err());
+    }
+
+    #[test]
+    fn update_description_writes_workspace_yml() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let default_path = tmp.path().join("default");
+        svc.update_description("default", Some("Backend APIs")).unwrap();
+        let content = std::fs::read_to_string(default_path.join("workspace.yml")).unwrap();
+        assert!(content.contains("Backend APIs"), "workspace.yml should contain the description");
+    }
+
+    #[test]
+    fn update_description_clears_workspace_yml() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+        let default_path = tmp.path().join("default");
+        svc.update_description("default", Some("Initial")).unwrap();
+        svc.update_description("default", None).unwrap();
+        let content = std::fs::read_to_string(default_path.join("workspace.yml")).unwrap();
+        assert!(!content.contains("description"), "workspace.yml should not contain description when cleared");
     }
 
     #[test]
