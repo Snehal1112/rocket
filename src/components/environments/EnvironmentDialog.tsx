@@ -109,9 +109,9 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
         <DialogHeader className='p-4 pb-2'>
           <DialogTitle>Manage Environments</DialogTitle>
         </DialogHeader>
-        <div className='flex border-t border-border min-h-[350px]'>
+        <div className='flex border-t border-border min-h-87.5'>
           {/* Left panel: environment list. */}
-          <div className='w-[200px] border-r border-border flex flex-col'>
+          <div className='w-50 border-r border-border flex flex-col'>
             <ScrollArea className='flex-1'>
               <div className='p-2 space-y-0.5'>
                 {environments.map((env) => (

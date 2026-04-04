@@ -85,7 +85,7 @@ function App() {
           <>
             <div
               style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
-              className='w-[var(--sidebar-w)] shrink-0'
+              className='w-(--sidebar-w) shrink-0'
             >
               <ErrorBoundary>
                 <CollectionsSidebar />

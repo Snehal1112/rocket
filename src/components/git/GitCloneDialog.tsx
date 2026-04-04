@@ -110,7 +110,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
           <DialogHeader>
             <DialogTitle>Clone Repository</DialogTitle>
           </DialogHeader>
-          <div className='flex flex-col items-center justify-center gap-3 min-h-[120px]'>
+          <div className='flex flex-col items-center justify-center gap-3 min-h-30'>
             <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
             <p className='text-sm text-muted-foreground'>Cloning repository...</p>
           </div>
@@ -215,7 +215,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
               </Button>
             </div>
           </div>
-          {error && <p className='text-sm text-destructive break-words'>{error}</p>}
+          {error && <p className='text-sm text-destructive wrap-break-word'>{error}</p>}
         </div>
         <DialogFooter>
           <Button size='sm' disabled={!repoUrl.trim() || !destPath.trim()} onClick={handleClone}>

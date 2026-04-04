@@ -37,7 +37,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           onSelect();
         }
       }}
-      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 max-w-[190px] transition-all ${
+      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 max-w-47.5 transition-all ${
         isActive
           ? 'bg-background/95 border-b-2 border-b-primary -mb-px text-foreground'
           : 'hover:bg-accent/50 text-muted-foreground'

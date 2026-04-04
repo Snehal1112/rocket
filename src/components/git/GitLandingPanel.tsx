@@ -196,7 +196,7 @@ export function GitLandingPanel() {
           {/* Hero icon + hint text */}
           <div className='flex flex-col items-center justify-center gap-2 py-3'>
             <img src={gitIcon} alt='Git' className='h-12 w-12 opacity-80' />
-            <p className='text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-[200px]'>
+            <p className='text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-50'>
               Perform git actions or open files from sidebar to view
             </p>
           </div>
@@ -251,7 +251,7 @@ export function GitLandingPanel() {
           {error && (
             <div className='flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
               <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
-              <span className='flex-1 break-words'>{error}</span>
+              <span className='flex-1 wrap-break-word'>{error}</span>
               <button
                 type='button'
                 className='shrink-0 hover:opacity-70 leading-none'

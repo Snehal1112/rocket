@@ -44,10 +44,10 @@ export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps)
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder='Write markdown here...'
-          className='min-h-[200px] font-mono text-sm'
+          className='min-h-50 font-mono text-sm'
         />
       ) : (
-        <div className='prose dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md'>
+        <div className='prose dark:prose-invert max-w-none min-h-50 p-3 border rounded-md'>
           {value ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (

@@ -44,7 +44,7 @@ export function GitCommitLog() {
         {commitLog.map((commit) => (
           <div
             key={commit.fullId}
-            className='flex items-start gap-2 px-2 py-[5px] hover:bg-muted/50'
+            className='flex items-start gap-2 px-2 py-1.25 hover:bg-muted/50'
           >
             <TooltipProvider delayDuration={300}>
               <Tooltip>

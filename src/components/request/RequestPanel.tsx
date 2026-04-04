@@ -385,7 +385,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <>
             Params
             {enabledParamCount > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
+              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {enabledParamCount}
               </span>
             )}
@@ -400,7 +400,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <>
             Headers
             {enabledHeaderCount > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
+              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {enabledHeaderCount}
               </span>
             )}
@@ -441,7 +441,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <>
             Variables
             {requestVarCount > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
+              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {requestVarCount}
               </span>
             )}
@@ -486,7 +486,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             })
           }
         >
-          <SelectTrigger className='h-7 w-[120px] text-xs'>
+          <SelectTrigger className='h-7 w-30 text-xs'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -505,7 +505,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           value={request.auth.authType}
           onValueChange={(val) => handleAuthTypeChange(val as AuthState['authType'])}
         >
-          <SelectTrigger className='h-7 w-[160px] text-xs'>
+          <SelectTrigger className='h-7 w-40 text-xs'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -548,7 +548,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
       {/* ── Request area ── */}
       <div
-        className='flex flex-col overflow-hidden bg-card/80 h-[var(--req-h)] min-h-[20%] max-h-[80%]'
+        className='flex flex-col overflow-hidden bg-card/80 h-(--req-h) min-h-[20%] max-h-[80%]'
         style={{ '--req-h': `${requestHeight}%` } as React.CSSProperties}
       >
         {/* URL bar. */}
@@ -558,10 +558,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
           >
             <SelectTrigger
-              className={cn(
-                'h-8 w-[7rem] text-sm font-semibold',
-                METHOD_TEXT_COLOR[request.method],
-              )}
+              className={cn('h-8 w-28 text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
             >
               <SelectValue />
             </SelectTrigger>

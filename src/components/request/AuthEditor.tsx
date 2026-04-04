@@ -328,7 +328,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               })
             }
           >
-            <SelectTrigger className='w-[120px] text-sm'>
+            <SelectTrigger className='w-30 text-sm'>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -357,7 +357,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                   value={o.grantType}
                   onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}
                 >
-                  <SelectTrigger className='w-[200px] text-sm'>
+                  <SelectTrigger className='w-50 text-sm'>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
