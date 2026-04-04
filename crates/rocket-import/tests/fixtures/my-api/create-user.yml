@@ -1,0 +1,10 @@
+meta:
+  name: Create User
+  type: http
+  seq: 2
+http:
+  method: POST
+  url: "{{baseUrl}}/users"
+  body:
+    mode: json
+    json: '{"name": "Alice"}'
