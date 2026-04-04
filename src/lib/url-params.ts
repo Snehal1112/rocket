@@ -67,14 +67,13 @@ export function extractPathParams(url: string): string[] {
 
   // Match :paramName — stops at / ? & # or end of string.
   const colonPattern = /:([A-Za-z_][A-Za-z0-9_]*)/g;
-  let match: RegExpExecArray | null;
-  while ((match = colonPattern.exec(stripped)) !== null) {
+  for (const match of stripped.matchAll(colonPattern)) {
     results.push(match[1]);
   }
 
   // Match {paramName} (single-brace, not double-brace).
   const bracePattern = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
-  while ((match = bracePattern.exec(stripped)) !== null) {
+  for (const match of stripped.matchAll(bracePattern)) {
     results.push(match[1]);
   }
 

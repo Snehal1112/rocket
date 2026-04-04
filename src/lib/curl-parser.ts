@@ -11,16 +11,16 @@ function tokenize(input: string): string[] {
   const tokens: string[] = [];
   let current = '';
   let quote: string | null = null;
-  let escape = false;
+  let isEscaped = false;
 
   for (const ch of input) {
-    if (escape) {
+    if (isEscaped) {
       current += ch;
-      escape = false;
+      isEscaped = false;
       continue;
     }
     if (ch === '\\' && quote !== "'") {
-      escape = true;
+      isEscaped = true;
       continue;
     }
     if (ch === quote) {
@@ -49,7 +49,10 @@ function detectBodyMode(content: string, contentType?: string): 'json' | 'xml' |
     if (contentType.includes('xml')) return 'xml';
   }
   const trimmed = content.trim();
-  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
     return 'json';
   }
   if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
@@ -95,13 +98,22 @@ export function parseCurl(input: string): ParsedCurl | null {
           value: headerStr.slice(colonIdx + 1).trim(),
         });
       }
-    } else if (token === '-d' || token === '--data' || token === '--data-raw' || token === '--data-binary') {
+    } else if (
+      token === '-d' ||
+      token === '--data' ||
+      token === '--data-raw' ||
+      token === '--data-binary'
+    ) {
       bodyContent = tokens[++i] ?? '';
     } else if (token === '-u' || token === '--user') {
       const creds = tokens[++i] ?? '';
       const colonIdx = creds.indexOf(':');
       if (colonIdx > 0) {
-        auth = { type: 'basic', username: creds.slice(0, colonIdx), password: creds.slice(colonIdx + 1) };
+        auth = {
+          type: 'basic',
+          username: creds.slice(0, colonIdx),
+          password: creds.slice(colonIdx + 1),
+        };
       }
     } else if (token === '-A' || token === '--user-agent') {
       headers.push({ key: 'User-Agent', value: tokens[++i] ?? '' });
