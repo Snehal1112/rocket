@@ -10,6 +10,7 @@ members = [
     "crates/rocket-infra",
     "crates/rocket-git",
     "crates/rocket-workspace",
+    "crates/rocket-import",
     "src-tauri",
 ]
 
@@ -48,3 +49,4 @@ rocket-app = { path = "crates/rocket-app" }
 rocket-infra = { path = "crates/rocket-infra" }
 rocket-git = { path = "crates/rocket-git" }
 rocket-workspace = { path = "crates/rocket-workspace" }
+rocket-import = { path = "crates/rocket-import" }
