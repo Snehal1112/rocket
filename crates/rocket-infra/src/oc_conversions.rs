@@ -1297,7 +1297,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
     };
 
     OcCollection {
-        opencollection: Some("0.1".into()),
+        opencollection: Some("1.0.0".into()),
         uid: None,
         info: Some(OcInfo {
             name: col.name,
@@ -2175,5 +2175,19 @@ items:
         };
         let oc: OcHttpRequestBody = body.into();
         assert!(matches!(oc, OcHttpRequestBody::MultipartForm { .. }));
+    }
+
+    #[test]
+    fn collection_to_oc_has_correct_version() {
+        use rocket_collection::Collection;
+        use rocket_collection::CollectionSettings;
+        use rocket_collection::Folder;
+        let col = Collection {
+            name: "Test".into(),
+            root: Folder { uid: "uid".into(), name: "Test".into(), items: vec![] },
+            settings: CollectionSettings::default(),
+        };
+        let oc = super::collection_to_oc_collection(col);
+        assert_eq!(oc.opencollection.as_deref(), Some("1.0.0"));
     }
 }
