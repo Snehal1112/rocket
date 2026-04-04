@@ -169,4 +169,14 @@ mod tests {
         let env = repo.get("legacy").unwrap();
         assert_eq!(env.get_value("OLD_VAR"), Some("hello"));
     }
+
+    #[test]
+    fn list_old_format_with_key_field_still_works() {
+        let (dir, repo) = setup();
+        let old_yaml = "name: legacy\nvariables:\n- key: OLD_VAR\n  value: hello\n  enabled: true\n";
+        std::fs::write(dir.path().join("legacy.yml"), old_yaml).unwrap();
+        let list = repo.list().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].get_value("OLD_VAR"), Some("hello"));
+    }
 }
