@@ -1748,6 +1748,11 @@ globalEnvironment: Production
         // Roundtrip
         let back: OcWorkspaceConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(cfg, back);
+        // Verify camelCase output for Bruno interop
+        let yaml_out = serde_yaml::to_string(&cfg).unwrap();
+        assert!(yaml_out.contains("globalEnvironment:"), "spec requires camelCase, got:\n{yaml_out}");
+        assert!(yaml_out.contains("activeEnvironment:"), "spec requires camelCase, got:\n{yaml_out}");
+        assert!(!yaml_out.contains("global_environment:"), "snake_case is not spec-compliant");
     }
 
     #[test]
