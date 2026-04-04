@@ -66,6 +66,7 @@ cargo test          # Rust tests
 | `rocket-git` | `GitService` trait + `Git2Service` (libgit2) |
 | `rocket-app` | Orchestration services — wires domain traits, no I/O |
 | `rocket-infra` | Filesystem implementations of all repository/service traits |
+| `rocket-import` | Bruno API client importer — parses `.bru`/`.yml`, converts to domain types, writes via `rocket-infra` |
 | `src-tauri` | Tauri IPC commands, app initialization, managed state |
 
 ### Data Flow
@@ -105,3 +106,4 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 - [`crates/rocket-git/CLAUDE.md`](crates/rocket-git/CLAUDE.md) — `GitService` trait, `Git2Service`
 - [`crates/rocket-history/CLAUDE.md`](crates/rocket-history/CLAUDE.md) — History storage and filtering
 - [`crates/rocket-http/CLAUDE.md`](crates/rocket-http/CLAUDE.md) — `HttpExecutor`, auth schemes, cookie handling
+- [`crates/rocket-import/CLAUDE.md`](crates/rocket-import/CLAUDE.md) — Bruno importer: `.bru`/`.yml` parsing pipeline, converters, `ImportService`, fixture layout
