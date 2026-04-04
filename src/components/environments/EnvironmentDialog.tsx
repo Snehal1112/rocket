@@ -1,14 +1,15 @@
 // src/components/environments/EnvironmentDialog.tsx
-import { useState, useCallback, useRef } from 'react';
-import { Plus, Trash2, Eye, EyeOff, X } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+import { Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { Environment, Variable } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
-import type { Variable, Environment } from '@/lib/tauri-api';
 
 interface EnvironmentDialogProps {
   open: boolean;
@@ -21,9 +22,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
   const deleteEnvironment = useEnvStore((s) => s.deleteEnvironment);
 
-  const [selectedName, setSelectedName] = useState<string | null>(
-    environments[0]?.name ?? null,
-  );
+  const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
   const [newEnvName, setNewEnvName] = useState('');
 
@@ -33,7 +32,10 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const handleAddEnv = useCallback(async () => {
     const trimmed = newEnvName.trim();
-    if (!trimmed) { setIsAddingEnv(false); return; }
+    if (!trimmed) {
+      setIsAddingEnv(false);
+      return;
+    }
     await createEnvironment(trimmed);
     setSelectedName(trimmed);
     setIsAddingEnv(false);
@@ -63,9 +65,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       variables[idx] = { ...variables[idx], ...patch };
       const updated = { ...selectedEnv, variables };
       useEnvStore.setState((s) => ({
-        environments: s.environments.map((e) =>
-          e.name === updated.name ? updated : e,
-        ),
+        environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
       }));
       saveEnv(updated);
     },
@@ -77,9 +77,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     const variable: Variable = { key: '', value: '', enabled: true, secret: false };
     const updated = { ...selectedEnv, variables: [...selectedEnv.variables, variable] };
     useEnvStore.setState((s) => ({
-      environments: s.environments.map((e) =>
-        e.name === updated.name ? updated : e,
-      ),
+      environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
     }));
     saveEnv(updated);
   }, [selectedEnv, saveEnv]);
@@ -90,9 +88,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       const variables = selectedEnv.variables.filter((_, i) => i !== idx);
       const updated = { ...selectedEnv, variables };
       useEnvStore.setState((s) => ({
-        environments: s.environments.map((e) =>
-          e.name === updated.name ? updated : e,
-        ),
+        environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
       }));
       saveEnv(updated);
     },
@@ -101,19 +97,19 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0">
-        <DialogHeader className="p-4 pb-2">
+      <DialogContent className='max-w-2xl p-0 gap-0'>
+        <DialogHeader className='p-4 pb-2'>
           <DialogTitle>Manage Environments</DialogTitle>
         </DialogHeader>
-        <div className="flex border-t border-border min-h-[350px]">
+        <div className='flex border-t border-border min-h-[350px]'>
           {/* Left panel: environment list. */}
-          <div className="w-[200px] border-r border-border flex flex-col">
-            <ScrollArea className="flex-1">
-              <div className="p-2 space-y-0.5">
+          <div className='w-[200px] border-r border-border flex flex-col'>
+            <ScrollArea className='flex-1'>
+              <div className='p-2 space-y-0.5'>
                 {environments.map((env) => (
                   <button
                     key={env.name}
-                    type="button"
+                    type='button'
                     onClick={() => setSelectedName(env.name)}
                     className={cn(
                       'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
@@ -128,102 +124,108 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 {isAddingEnv && (
                   <Input
                     autoFocus
-                    className="h-7 text-sm"
-                    placeholder="Environment name"
+                    className='h-7 text-sm'
+                    placeholder='Environment name'
                     value={newEnvName}
                     onChange={(e) => setNewEnvName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleAddEnv();
-                      if (e.key === 'Escape') { setIsAddingEnv(false); setNewEnvName(''); }
+                      if (e.key === 'Escape') {
+                        setIsAddingEnv(false);
+                        setNewEnvName('');
+                      }
                     }}
-                    onBlur={() => { setIsAddingEnv(false); setNewEnvName(''); }}
+                    onBlur={() => {
+                      setIsAddingEnv(false);
+                      setNewEnvName('');
+                    }}
                   />
                 )}
               </div>
             </ScrollArea>
-            <div className="p-2 border-t border-border flex gap-1">
+            <div className='p-2 border-t border-border flex gap-1'>
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
+                variant='ghost'
+                size='icon'
+                className='h-7 w-7'
                 onClick={() => setIsAddingEnv(true)}
-                title="Add environment"
+                title='Add environment'
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className='h-3.5 w-3.5' />
               </Button>
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-destructive"
+                variant='ghost'
+                size='icon'
+                className='h-7 w-7 text-destructive'
                 onClick={handleDeleteEnv}
                 disabled={!selectedName}
-                title="Delete environment"
+                title='Delete environment'
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className='h-3.5 w-3.5' />
               </Button>
             </div>
           </div>
 
           {/* Right panel: variable editor. */}
-          <div className="flex-1 flex flex-col">
+          <div className='flex-1 flex flex-col'>
             {selectedEnv ? (
               <>
-                <ScrollArea className="flex-1 p-3">
-                  <div className="space-y-1.5">
+                <ScrollArea className='flex-1 p-3'>
+                  <div className='space-y-1.5'>
                     {selectedEnv.variables.map((variable, idx) => (
-                      <div key={idx} className="flex gap-1.5 items-center">
+                      <div key={variable.key} className='flex gap-1.5 items-center'>
                         <Checkbox
                           checked={variable.enabled}
                           onCheckedChange={(checked) => updateVariable(idx, { enabled: !!checked })}
                           aria-label={`${variable.enabled ? 'Disable' : 'Enable'} variable`}
                         />
                         <Input
-                          placeholder="Key"
+                          placeholder='Key'
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
-                          className="flex-1 text-sm"
+                          className='flex-1 text-sm'
                         />
                         <Input
-                          placeholder="Value"
+                          placeholder='Value'
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
-                          className="flex-1 text-sm"
+                          className='flex-1 text-sm'
                         />
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 shrink-0"
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 shrink-0'
                           onClick={() => updateVariable(idx, { secret: !variable.secret })}
                           title={variable.secret ? 'Show value' : 'Hide value'}
                         >
                           {variable.secret ? (
-                            <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                            <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
                           ) : (
-                            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                            <Eye className='h-3.5 w-3.5 text-muted-foreground' />
                           )}
                         </Button>
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 shrink-0"
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 shrink-0'
                           onClick={() => removeVariable(idx)}
                         >
-                          <X className="h-3.5 w-3.5" />
+                          <X className='h-3.5 w-3.5' />
                         </Button>
                       </div>
                     ))}
                   </div>
                 </ScrollArea>
-                <div className="p-3 pt-0">
-                  <Button variant="ghost" size="sm" onClick={addVariable} className="text-sm">
-                    <Plus className="h-3.5 w-3.5 mr-1" />
+                <div className='p-3 pt-0'>
+                  <Button variant='ghost' size='sm' onClick={addVariable} className='text-sm'>
+                    <Plus className='h-3.5 w-3.5 mr-1' />
                     Add Variable
                   </Button>
                 </div>
               </>
             ) : (
-              <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+              <div className='flex-1 flex items-center justify-center text-sm text-muted-foreground'>
                 Select or create an environment.
               </div>
             )}

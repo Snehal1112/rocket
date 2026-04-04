@@ -161,7 +161,6 @@ export function VariableAwareUrlInput({
   // Renders the unified Postman-style popover for any editable token.
   function renderTokenPopover(
     token: UrlToken,
-    i: number,
     displayText: string,
     tokenColorClass: string,
   ) {
@@ -184,7 +183,7 @@ export function VariableAwareUrlInput({
 
     return (
       <Popover
-        key={i}
+        key={token.start}
         open={editingToken?.start === token.start}
         onOpenChange={(open) => {
           if (!open) setEditingToken(null);
@@ -276,9 +275,9 @@ export function VariableAwareUrlInput({
         aria-hidden="true"
       >
         {tokens.length > 0 ? (
-          tokens.map((token, i) => {
+          tokens.map((token) => {
             if (token.type === "text") {
-              return <span key={i}>{token.value}</span>;
+              return <span key={token.start}>{token.value}</span>;
             }
 
             // Path param: unified popover.
@@ -286,7 +285,6 @@ export function VariableAwareUrlInput({
               const isResolved = token.resolved !== undefined;
               return renderTokenPopover(
                 token,
-                i,
                 `:${token.value}`,
                 isResolved
                   ? "bg-violet-500/15 text-violet-500"
@@ -299,7 +297,7 @@ export function VariableAwareUrlInput({
               const isResolved = token.resolved !== undefined;
               return (
                 <span
-                  key={i}
+                  key={token.start}
                   className={cn(
                     "rounded-sm px-0.5 pointer-events-auto",
                     isResolved
@@ -320,7 +318,7 @@ export function VariableAwareUrlInput({
             // Query value: plain muted text.
             if (token.type === "queryValue") {
               return (
-                <span key={i} className="text-muted-foreground">
+                <span key={token.start} className="text-muted-foreground">
                   {token.value}
                 </span>
               );
@@ -333,12 +331,7 @@ export function VariableAwareUrlInput({
               : token.resolved !== undefined
                 ? "bg-primary/15 text-primary"
                 : "bg-destructive/15 text-destructive";
-            return renderTokenPopover(
-              token,
-              i,
-              `{{${token.value}}}`,
-              badgeClass,
-            );
+            return renderTokenPopover(token, `{{${token.value}}}`, badgeClass);
           })
         ) : (
           <span className="text-muted-foreground">{placeholder}</span>

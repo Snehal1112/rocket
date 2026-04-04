@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
-import { Copy, Check, Search } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Check, Copy, Search } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -9,7 +9,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
+} from "@/components/ui/table";
 
 export interface ResponseHeadersTableProps {
   headers: { key: string; value: string; enabled: boolean }[];
@@ -17,7 +17,7 @@ export interface ResponseHeadersTableProps {
 
 // Displays response headers with search filtering and clipboard copy.
 export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const filtered = headers.filter((h) => {
@@ -26,18 +26,18 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
     return h.key.toLowerCase().includes(q) || h.value.toLowerCase().includes(q);
   });
 
-  const handleCopy = useCallback(
-    async (key: string, value: string) => {
-      try {
-        await navigator.clipboard.writeText(value);
-        setCopiedKey(key);
-        setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 1000);
-      } catch {
-        // Clipboard API not available -- silently ignore.
-      }
-    },
-    [],
-  );
+  const handleCopy = useCallback(async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setTimeout(
+        () => setCopiedKey((prev) => (prev === key ? null : prev)),
+        1000,
+      );
+    } catch {
+      // Clipboard API not available -- silently ignore.
+    }
+  }, []);
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -56,7 +56,7 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
       {/* Headers table using shadcn Table. */}
       {filtered.length === 0 ? (
         <p className="py-4 text-center text-xs text-muted-foreground">
-          No headers{query ? ' match your filter' : ''}.
+          No headers{query ? " match your filter" : ""}.
         </p>
       ) : (
         <Table>
@@ -68,8 +68,10 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((h, i) => (
-              <TableRow key={`${h.key}-${i}`}>
+            {filtered.map((h, i) => {
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: headers may share names so index is needed for uniqueness
+                <TableRow key={`${h.key}-${i}`}>
                 <TableCell className="px-2 py-1.5 text-xs font-semibold text-foreground">
                   {h.key}
                 </TableCell>
@@ -93,7 +95,8 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
                   </Button>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       )}

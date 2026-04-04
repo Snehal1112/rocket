@@ -1,12 +1,13 @@
 // src/components/workspace/WorkspaceEnvironmentsTab.tsx
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Check, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
-import { useEnvStore } from '@/stores/env-store';
-import type { Variable, Environment } from '@/lib/tauri-api';
+
+import { Check, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import type { Environment, Variable } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
+import { useEnvStore } from "@/stores/env-store";
 
 export function WorkspaceEnvironmentsTab() {
   const environments = useEnvStore((s) => s.globalEnvironments);
@@ -18,12 +19,14 @@ export function WorkspaceEnvironmentsTab() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
-  const [newEnvName, setNewEnvName] = useState('');
+  const [newEnvName, setNewEnvName] = useState("");
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load workspace-level environments when the tab mounts.
-  useEffect(() => { void loadGlobalEnvironments(); }, [loadGlobalEnvironments]);
+  useEffect(() => {
+    void loadGlobalEnvironments();
+  }, [loadGlobalEnvironments]);
 
   // Select first env when list changes (e.g. after collection switch).
   useEffect(() => {
@@ -40,14 +43,20 @@ export function WorkspaceEnvironmentsTab() {
   }, [selectedName, environments]);
 
   // Persist env to backend with debounce.
-  const persistEnv = useCallback((env: Environment) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      void updateEnvironment(env).catch((err) => {
-        console.error('[WorkspaceEnvironmentsTab] failed to save environment', err);
-      });
-    }, 400);
-  }, [updateEnvironment]);
+  const persistEnv = useCallback(
+    (env: Environment) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        void updateEnvironment(env).catch((err) => {
+          console.error(
+            "[WorkspaceEnvironmentsTab] failed to save environment",
+            err,
+          );
+        });
+      }, 400);
+    },
+    [updateEnvironment],
+  );
 
   // Apply a variable update at index and persist.
   const updateVar = useCallback(
@@ -67,7 +76,12 @@ export function WorkspaceEnvironmentsTab() {
   // Add an empty variable row.
   const addVar = useCallback(() => {
     if (!selectedName) return;
-    const newVar: Variable = { key: '', value: '', enabled: true, secret: false };
+    const newVar: Variable = {
+      key: "",
+      value: "",
+      enabled: true,
+      secret: false,
+    };
     const updated = [...editingVars, newVar];
     setEditingVars(updated);
     const env = environments.find((e) => e.name === selectedName);
@@ -95,17 +109,20 @@ export function WorkspaceEnvironmentsTab() {
     const trimmed = newEnvName.trim();
     if (!trimmed) {
       setIsAddingEnv(false);
-      setNewEnvName('');
+      setNewEnvName("");
       return;
     }
     try {
       await createEnvironment(trimmed);
       setSelectedName(trimmed);
     } catch (err) {
-      console.error('[WorkspaceEnvironmentsTab] failed to create environment', err);
+      console.error(
+        "[WorkspaceEnvironmentsTab] failed to create environment",
+        err,
+      );
     }
     setIsAddingEnv(false);
-    setNewEnvName('');
+    setNewEnvName("");
   }, [newEnvName, createEnvironment]);
 
   // Delete the selected environment.
@@ -113,9 +130,14 @@ export function WorkspaceEnvironmentsTab() {
     if (!selectedName) return;
     try {
       await deleteEnv(selectedName);
-      setSelectedName(environments.find((e) => e.name !== selectedName)?.name ?? null);
+      setSelectedName(
+        environments.find((e) => e.name !== selectedName)?.name ?? null,
+      );
     } catch (err) {
-      console.error('[WorkspaceEnvironmentsTab] failed to delete environment', err);
+      console.error(
+        "[WorkspaceEnvironmentsTab] failed to delete environment",
+        err,
+      );
     }
   }, [selectedName, environments, deleteEnv]);
 
@@ -131,10 +153,10 @@ export function WorkspaceEnvironmentsTab() {
                 type="button"
                 onClick={() => setSelectedName(env.name)}
                 className={cn(
-                  'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
+                  "w-full text-left px-2 py-1.5 text-sm rounded-sm truncate",
                   selectedName === env.name
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-foreground hover:bg-muted/60',
+                    ? "bg-accent text-accent-foreground"
+                    : "text-foreground hover:bg-muted/60",
                 )}
               >
                 {env.name}
@@ -148,10 +170,10 @@ export function WorkspaceEnvironmentsTab() {
                 value={newEnvName}
                 onChange={(e) => setNewEnvName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleAddEnv();
-                  if (e.key === 'Escape') {
+                  if (e.key === "Enter") void handleAddEnv();
+                  if (e.key === "Escape") {
                     setIsAddingEnv(false);
-                    setNewEnvName('');
+                    setNewEnvName("");
                   }
                 }}
                 onBlur={() => void handleAddEnv()}
@@ -188,20 +210,28 @@ export function WorkspaceEnvironmentsTab() {
           <>
             <ScrollArea className="flex-1 p-3">
               <div className="space-y-1.5">
-                {editingVars.map((variable, idx) => (
-                  <div key={idx} className="flex gap-1.5 items-center">
+                {editingVars.map((variable, idx) => {
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
+                    <div key={idx} className="flex gap-1.5 items-center">
                     {/* Enabled toggle. */}
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => updateVar(idx, { enabled: !variable.enabled })}
+                      onClick={() =>
+                        updateVar(idx, { enabled: !variable.enabled })
+                      }
                       className={cn(
-                        'w-4 h-4 rounded border p-0 shrink-0',
+                        "w-4 h-4 rounded border p-0 shrink-0",
                         variable.enabled
-                          ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                          : 'border-gray-300 hover:bg-muted',
+                          ? "bg-primary border-primary text-primary-foreground hover:bg-primary/90"
+                          : "border-gray-300 hover:bg-muted",
                       )}
-                      title={variable.enabled ? 'Disable variable' : 'Enable variable'}
+                      title={
+                        variable.enabled
+                          ? "Disable variable"
+                          : "Enable variable"
+                      }
                     >
                       {variable.enabled && <Check className="h-3.5 w-3.5" />}
                     </Button>
@@ -217,9 +247,11 @@ export function WorkspaceEnvironmentsTab() {
                     {/* Value input, masked when secret. */}
                     <Input
                       placeholder="Value"
-                      type={variable.secret ? 'password' : 'text'}
+                      type={variable.secret ? "password" : "text"}
                       value={variable.value}
-                      onChange={(e) => updateVar(idx, { value: e.target.value })}
+                      onChange={(e) =>
+                        updateVar(idx, { value: e.target.value })
+                      }
                       className="flex-1 text-sm h-7"
                     />
 
@@ -228,8 +260,10 @@ export function WorkspaceEnvironmentsTab() {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 shrink-0"
-                      onClick={() => updateVar(idx, { secret: !variable.secret })}
-                      title={variable.secret ? 'Show value' : 'Hide value'}
+                      onClick={() =>
+                        updateVar(idx, { secret: !variable.secret })
+                      }
+                      title={variable.secret ? "Show value" : "Hide value"}
                     >
                       {variable.secret ? (
                         <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
@@ -249,12 +283,18 @@ export function WorkspaceEnvironmentsTab() {
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
 
             <div className="p-3 pt-0">
-              <Button variant="ghost" size="sm" onClick={addVar} className="text-sm">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={addVar}
+                className="text-sm"
+              >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Variable
               </Button>
