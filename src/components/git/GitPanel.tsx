@@ -1,35 +1,31 @@
-import { useState, useEffect, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { GitCommitForm } from "@/components/git/GitCommitForm";
-import { GitCommitLog } from "@/components/git/GitCommitLog";
-import { GitStashSection } from "@/components/git/GitStashSection";
-import { GitCredentialsDialog } from "@/components/git/GitCredentialsDialog";
-import { GitRemotesDialog } from "@/components/git/GitRemotesDialog";
-import { GitCloneDialog } from "@/components/git/GitCloneDialog";
-import { GitLandingPanel } from "@/components/git/GitLandingPanel";
-import { GitLinksSection } from "@/components/git/GitLinksSection";
-import { GitFileList } from "@/components/git/GitFileList";
-import { DiffViewForFile } from "@/components/git/DiffViewForFile";
-import { ConflictResolver } from "@/components/git/ConflictResolver";
-import { BranchSelector } from "@/components/git/BranchSelector";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@/components/ui/collapsible";
-import { Separator } from "@/components/ui/separator";
-import { useGitStore } from "@/stores/git-store";
-import { gitInit, gitIsRepo } from "@/lib/tauri-api";
-import { Package, ChevronDown, ArrowLeft, AlertTriangle } from "lucide-react";
-import type { ConflictFile, FileStatus } from "@/lib/tauri-api";
+import { AlertTriangle, ArrowLeft, ChevronDown, Package } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { BranchSelector } from '@/components/git/BranchSelector';
+import { ConflictResolver } from '@/components/git/ConflictResolver';
+import { DiffViewForFile } from '@/components/git/DiffViewForFile';
+import { GitCloneDialog } from '@/components/git/GitCloneDialog';
+import { GitCommitForm } from '@/components/git/GitCommitForm';
+import { GitCommitLog } from '@/components/git/GitCommitLog';
+import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
+import { GitFileList } from '@/components/git/GitFileList';
+import { GitLandingPanel } from '@/components/git/GitLandingPanel';
+import { GitLinksSection } from '@/components/git/GitLinksSection';
+import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
+import { GitStashSection } from '@/components/git/GitStashSection';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
+import { gitInit, gitIsRepo } from '@/lib/tauri-api';
+import { useGitStore } from '@/stores/git-store';
 
 type RightPanelView =
-  | { kind: "landing" }
-  | { kind: "diff"; file: FileStatus }
-  | { kind: "conflict"; conflictFile: ConflictFile }
-  | { kind: "commits" }
-  | { kind: "stashes" };
+  | { kind: 'landing' }
+  | { kind: 'diff'; file: FileStatus }
+  | { kind: 'conflict'; conflictFile: ConflictFile }
+  | { kind: 'commits' }
+  | { kind: 'stashes' };
 
 interface GitPanelProps {
   collectionPath: string;
@@ -41,15 +37,15 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightPanel, setRightPanel] = useState<RightPanelView>({
-    kind: "landing",
+    kind: 'landing',
   });
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [changesOpen, setChangesOpen] = useState(true);
 
   const { showCredentialsDialog, setCollection, refreshLog, status } = useGitStore();
-  const hasConflicts = (status?.files.some((f) => f.status === "conflicted")) ?? false;
-  const conflictCount = status?.files.filter((f) => f.status === "conflicted").length ?? 0;
+  const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
+  const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
   // Check git repo status and initialize the git store when the path is known.
   const checkAndLoad = useCallback(
@@ -74,12 +70,12 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
-    if (rightPanel.kind === "commits") void refreshLog();
+    if (rightPanel.kind === 'commits') void refreshLog();
   }, [rightPanel.kind, refreshLog]);
 
   if (isRepo === null) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
         Loading...
       </div>
     );
@@ -87,14 +83,12 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
   if (!isRepo) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 h-full px-4 text-center">
-        <p className="text-sm text-muted-foreground">
-          This collection is not a Git repository.
-        </p>
-        <div className="flex gap-2">
+      <div className='flex flex-col items-center justify-center gap-3 h-full px-4 text-center'>
+        <p className='text-sm text-muted-foreground'>This collection is not a Git repository.</p>
+        <div className='flex gap-2'>
           <Button
-            variant="outline"
-            size="sm"
+            variant='outline'
+            size='sm'
             onClick={async () => {
               await gitInit(collectionPath);
               await checkAndLoad(collectionPath);
@@ -102,60 +96,51 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           >
             Initialize Git
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowCloneDialog(true)}
-          >
+          <Button variant='outline' size='sm' onClick={() => setShowCloneDialog(true)}>
             Clone Repository
           </Button>
         </div>
         {showCredentialsDialog && <GitCredentialsDialog />}
-        <GitCloneDialog
-          open={showCloneDialog}
-          onOpenChange={setShowCloneDialog}
-        />
+        <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 flex overflow-hidden">
+    <div className='flex flex-col h-full'>
+      <div className='flex-1 flex overflow-hidden'>
         {/* LEFT PANEL */}
         <div
           style={{ width: `${leftWidth}px` }}
-          className="shrink-0 border-r border-border/70 flex flex-col overflow-hidden"
+          className='shrink-0 border-r border-border/70 flex flex-col overflow-hidden'
         >
           {/* Collection name header with branch selector. */}
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0">
-            <Package className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-medium truncate flex-1">
-              {collectionName}
-            </span>
+          <div className='flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0'>
+            <Package className='h-3.5 w-3.5 text-muted-foreground' />
+            <span className='text-sm font-medium truncate flex-1'>{collectionName}</span>
             <BranchSelector />
           </div>
 
           {/* In-merge banner — shown when there are conflicted files. */}
           {hasConflicts && (
-            <div className="px-3 py-2 bg-destructive/10 border-b border-border/70 flex items-center gap-2 shrink-0">
-              <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
-              <span className="text-xs text-destructive flex-1">
+            <div className='px-3 py-2 bg-destructive/10 border-b border-border/70 flex items-center gap-2 shrink-0'>
+              <AlertTriangle className='h-3.5 w-3.5 text-destructive shrink-0' />
+              <span className='text-xs text-destructive flex-1'>
                 Merge in progress — {conflictCount} conflicted
               </span>
             </div>
           )}
 
           {/* Changes section with commit form */}
-          <div className="shrink-0 px-3 pt-2.5 pb-2 space-y-2 border-b border-border/70">
+          <div className='shrink-0 px-3 pt-2.5 pb-2 space-y-2 border-b border-border/70'>
             <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
-              <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium text-primary">
+              <CollapsibleTrigger className='flex items-center gap-1 text-sm font-medium text-primary'>
                 <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? "-rotate-90" : ""}`}
+                  className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? '-rotate-90' : ''}`}
                 />
                 Changes
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2 space-y-2">
+              <CollapsibleContent className='pt-2 space-y-2'>
                 <GitCommitForm />
               </CollapsibleContent>
             </Collapsible>
@@ -163,14 +148,12 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
           {/* File list */}
           <GitFileList
-            onFileClick={(file) => setRightPanel({ kind: "diff", file })}
-            onConflictClick={(conflictFile) =>
-              setRightPanel({ kind: "conflict", conflictFile })
-            }
+            onFileClick={(file) => setRightPanel({ kind: 'diff', file })}
+            onConflictClick={(conflictFile) => setRightPanel({ kind: 'conflict', conflictFile })}
           />
 
           {/* Links section */}
-          <div className="shrink-0 border-t border-border/70">
+          <div className='shrink-0 border-t border-border/70'>
             <GitLinksSection
               onNavigate={(view) => setRightPanel({ kind: view })}
               onOpenRemotes={() => setShowRemotesDialog(true)}
@@ -179,9 +162,15 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
         </div>
 
         {/* Resize handle. */}
+        {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
         <div
-          role="separator"
-          className="w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35"
+          role='separator'
+          tabIndex={0}
+          aria-orientation='vertical'
+          aria-valuemin={200}
+          aria-valuemax={500}
+          aria-valuenow={leftWidth}
+          className='w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35'
           onPointerDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -199,39 +188,36 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
         />
 
         {/* RIGHT PANEL */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className='flex-1 overflow-hidden flex flex-col'>
           {/* Breadcrumb header — visible when not on landing/overview. */}
-          {rightPanel.kind !== "landing" && (
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0">
+          {rightPanel.kind !== 'landing' && (
+            <div className='flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0'>
               <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 text-xs"
-                onClick={() => setRightPanel({ kind: "landing" })}
+                variant='ghost'
+                size='sm'
+                className='h-7 gap-1.5 text-xs'
+                onClick={() => setRightPanel({ kind: 'landing' })}
               >
-                <ArrowLeft className="h-3.5 w-3.5" />
+                <ArrowLeft className='h-3.5 w-3.5' />
                 Overview
               </Button>
-              <Separator orientation="vertical" className="h-4" />
-              <span className="text-xs text-muted-foreground truncate">
-                {rightPanel.kind === "diff" && rightPanel.file.path}
-                {rightPanel.kind === "conflict" && rightPanel.conflictFile.path}
-                {rightPanel.kind === "commits" && "Commit History"}
-                {rightPanel.kind === "stashes" && "Stashes"}
+              <Separator orientation='vertical' className='h-4' />
+              <span className='text-xs text-muted-foreground truncate'>
+                {rightPanel.kind === 'diff' && rightPanel.file.path}
+                {rightPanel.kind === 'conflict' && rightPanel.conflictFile.path}
+                {rightPanel.kind === 'commits' && 'Commit History'}
+                {rightPanel.kind === 'stashes' && 'Stashes'}
               </span>
             </div>
           )}
 
           {/* Right panel content. */}
-          <div className="flex-1 overflow-hidden">
-            {rightPanel.kind === "landing" && <GitLandingPanel />}
-            {rightPanel.kind === "diff" && (
-              <DiffViewForFile
-                file={rightPanel.file}
-                collectionPath={collectionPath}
-              />
+          <div className='flex-1 overflow-hidden'>
+            {rightPanel.kind === 'landing' && <GitLandingPanel />}
+            {rightPanel.kind === 'diff' && (
+              <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
             )}
-            {rightPanel.kind === "conflict" && (
+            {rightPanel.kind === 'conflict' && (
               <ConflictResolver
                 conflictState={{
                   filePath: rightPanel.conflictFile.path,
@@ -242,10 +228,10 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
                 }}
               />
             )}
-            {rightPanel.kind === "commits" && <GitCommitLog />}
-            {rightPanel.kind === "stashes" && (
-              <ScrollArea className="h-full">
-                <div className="p-4">
+            {rightPanel.kind === 'commits' && <GitCommitLog />}
+            {rightPanel.kind === 'stashes' && (
+              <ScrollArea className='h-full'>
+                <div className='p-4'>
                   <GitStashSection />
                 </div>
               </ScrollArea>
@@ -256,14 +242,8 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
       {/* Dialogs */}
       {showCredentialsDialog && <GitCredentialsDialog />}
-      <GitRemotesDialog
-        open={showRemotesDialog}
-        onOpenChange={setShowRemotesDialog}
-      />
-      <GitCloneDialog
-        open={showCloneDialog}
-        onOpenChange={setShowCloneDialog}
-      />
+      <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
+      <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
     </div>
   );
 }

@@ -1,19 +1,16 @@
-import { useState } from "react";
-import gitIcon from "@/assets/git-icon.svg";
 import {
-  GitBranch,
-  RefreshCw,
+  AlertCircle,
   ArrowDown,
   ArrowUp,
-  Loader2,
-  Clock,
   Check,
-  AlertCircle,
+  Clock,
+  GitBranch,
   GitCommit,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+  Loader2,
+  RefreshCw,
+} from 'lucide-react';
+import { useState } from 'react';
+import gitIcon from '@/assets/git-icon.svg';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,13 +20,15 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useGitStore } from "@/stores/git-store";
-import { cn } from "@/lib/utils";
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { useGitStore } from '@/stores/git-store';
 
 export function GitLandingPanel() {
-  const { status, push, pull, fetch, saveStash, popStash, error, clearError } =
-    useGitStore();
+  const { status, push, pull, fetch, saveStash, popStash, error, clearError } = useGitStore();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -81,7 +80,7 @@ export function GitLandingPanel() {
     setShowStashDialog(false);
     setPulling(true);
     try {
-      await saveStash("Auto-stash before pull");
+      await saveStash('Auto-stash before pull');
       await pull();
       setLastFetched(new Date().toLocaleTimeString());
       await popStash(0);
@@ -156,39 +155,35 @@ export function GitLandingPanel() {
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
-  const hasConflicts = useGitStore(state => state.hasConflicts?.()) ?? false;
+  const hasConflicts = useGitStore((state) => state.hasConflicts?.()) ?? false;
 
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6">
-      <Card className="w-full max-w-md border-border/40 rounded-md bg-card/80 ">
+    <div className='flex flex-col items-center justify-center h-full px-6'>
+      <Card className='w-full max-w-md border-border/40 rounded-md bg-card/80 '>
         {/* Header: branch name + ahead/behind sync counts */}
-        <CardHeader className="px-4 py-3 space-y-1 border-b border-border/70">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <GitBranch className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="font-mono text-sm font-semibold truncate">
-                {status?.branch ?? "no branch"}
+        <CardHeader className='px-4 py-3 space-y-1 border-b border-border/70'>
+          <div className='flex items-center gap-2'>
+            <div className='flex items-center gap-1.5 min-w-0 flex-1'>
+              <GitBranch className='h-4 w-4 text-muted-foreground shrink-0' />
+              <span className='font-mono text-sm font-semibold truncate'>
+                {status?.branch ?? 'no branch'}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className='flex items-center gap-1.5 shrink-0'>
               <Badge
-                variant="secondary"
+                variant='secondary'
                 className={cn(
-                  "text-xs tabular-nums",
-                  ahead > 0
-                    ? "text-amber-500 bg-amber-500/10"
-                    : "text-muted-foreground",
+                  'text-xs tabular-nums',
+                  ahead > 0 ? 'text-amber-500 bg-amber-500/10' : 'text-muted-foreground',
                 )}
               >
                 ↑{ahead}
               </Badge>
               <Badge
-                variant="secondary"
+                variant='secondary'
                 className={cn(
-                  "text-xs tabular-nums",
-                  behind > 0
-                    ? "text-amber-500 bg-amber-500/10"
-                    : "text-muted-foreground",
+                  'text-xs tabular-nums',
+                  behind > 0 ? 'text-amber-500 bg-amber-500/10' : 'text-muted-foreground',
                 )}
               >
                 ↓{behind}
@@ -197,105 +192,100 @@ export function GitLandingPanel() {
           </div>
         </CardHeader>
 
-        <CardContent className="px-4 py-4 space-y-3">
+        <CardContent className='px-4 py-4 space-y-3'>
           {/* Hero icon + hint text */}
-          <div className="flex flex-col items-center justify-center gap-2 py-3">
-            <img src={gitIcon} alt="Git" className="h-12 w-12 opacity-80" />
-            <p className="text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-[200px]">
+          <div className='flex flex-col items-center justify-center gap-2 py-3'>
+            <img src={gitIcon} alt='Git' className='h-12 w-12 opacity-80' />
+            <p className='text-xs text-muted-foreground/60 items-center text-center leading-relaxed max-w-[200px]'>
               Perform git actions or open files from sidebar to view
             </p>
           </div>
 
           {/* Fetch / Pull / Push actions — flex-1 so buttons fill evenly */}
-          <div className="flex gap-2">
+          <div className='flex gap-2'>
             <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
+              variant='outline'
+              size='sm'
+              className='flex-1'
               onClick={handleFetch}
               disabled={fetching}
             >
               {fetching ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className='h-3.5 w-3.5 animate-spin' />
               ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
+                <RefreshCw className='h-3.5 w-3.5' />
               )}
               Fetch
             </Button>
             <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
+              variant='outline'
+              size='sm'
+              className='flex-1'
               onClick={handlePull}
               disabled={pulling}
             >
               {pulling ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className='h-3.5 w-3.5 animate-spin' />
               ) : (
-                <ArrowDown className="h-3.5 w-3.5" />
+                <ArrowDown className='h-3.5 w-3.5' />
               )}
-              Pull{behind > 0 ? ` ↓${behind}` : ""}
+              Pull{behind > 0 ? ` ↓${behind}` : ''}
             </Button>
             <Button
-              variant={ahead > 0 ? "default" : "outline"}
-              size="sm"
-              className="flex-1"
+              variant={ahead > 0 ? 'default' : 'outline'}
+              size='sm'
+              className='flex-1'
               onClick={handlePush}
               disabled={pushing || hasConflicts}
             >
               {pushing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className='h-3.5 w-3.5 animate-spin' />
               ) : (
-                <ArrowUp className="h-3.5 w-3.5" />
+                <ArrowUp className='h-3.5 w-3.5' />
               )}
-              Push{ahead > 0 ? ` ↑${ahead}` : ""}
+              Push{ahead > 0 ? ` ↑${ahead}` : ''}
             </Button>
           </div>
 
           {/* Inline error alert for failed push/pull/fetch operations. */}
           {error && (
-            <div className="flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span className="flex-1 break-words">{error}</span>
+            <div className='flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
+              <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
+              <span className='flex-1 break-words'>{error}</span>
               <button
-  className="shrink-0 hover:opacity-70 leading-none"
-  onClick={clearError}
-  aria-label="Dismiss error"
->
-  ×
-</button>
+                type='button'
+                className='shrink-0 hover:opacity-70 leading-none'
+                onClick={clearError}
+                aria-label='Dismiss error'
+              >
+                ×
+              </button>
             </div>
           )}
 
           {/* Sync status + last fetched timestamp in a single footer row */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
+          <div className='flex items-center justify-between text-xs text-muted-foreground'>
+            <div className='flex items-center gap-1.5'>
               {isUpToDate ? (
-                <Check className="h-3.5 w-3.5 text-emerald-500" />
+                <Check className='h-3.5 w-3.5 text-emerald-500' />
               ) : behind > 0 ? (
-                <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                <AlertCircle className='h-3.5 w-3.5 text-amber-500' />
               ) : (
-                <GitCommit className="h-3.5 w-3.5" />
+                <GitCommit className='h-3.5 w-3.5' />
               )}
               <span
-                className={cn(
-                  isUpToDate
-                    ? "text-emerald-500"
-                    : behind > 0
-                      ? "text-amber-500"
-                      : "",
-                )}
+                className={cn(isUpToDate ? 'text-emerald-500' : behind > 0 ? 'text-amber-500' : '')}
               >
                 {isUpToDate
-                  ? "Up to date"
+                  ? 'Up to date'
                   : behind > 0
-                    ? `${behind} commit${behind > 1 ? "s" : ""} behind`
-                    : `${ahead} commit${ahead > 1 ? "s" : ""} ahead`}
+                    ? `${behind} commit${behind > 1 ? 's' : ''} behind`
+                    : `${ahead} commit${ahead > 1 ? 's' : ''} ahead`}
               </span>
             </div>
-            <div className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              <span>{lastFetched ?? "Never fetched"}</span>
+            <div className='flex items-center gap-1'>
+              <Clock className='h-3 w-3' />
+              <span>{lastFetched ?? 'Never fetched'}</span>
             </div>
           </div>
         </CardContent>
@@ -307,44 +297,33 @@ export function GitLandingPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Uncommitted Changes</AlertDialogTitle>
             <AlertDialogDescription>
-              You have uncommitted changes. Pulling may cause conflicts or data
-              loss. Would you like to stash your changes first?
+              You have uncommitted changes. Pulling may cause conflicts or data loss. Would you like
+              to stash your changes first?
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-wrap gap-2">
+          <AlertDialogFooter className='flex-wrap gap-2'>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePullAnyway}>
-              Pull Anyway
-            </AlertDialogAction>
-            <AlertDialogAction onClick={handleStashAndPull}>
-              Stash & Pull
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handlePullAnyway}>Pull Anyway</AlertDialogAction>
+            <AlertDialogAction onClick={handleStashAndPull}>Stash & Pull</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Fetch-before-push confirmation dialog. */}
-      <AlertDialog
-        open={showFetchFirstDialog}
-        onOpenChange={setShowFetchFirstDialog}
-      >
+      <AlertDialog open={showFetchFirstDialog} onOpenChange={setShowFetchFirstDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Fetch Before Push</AlertDialogTitle>
             <AlertDialogDescription>
               {(status?.behind ?? 0) > 0
                 ? `Your branch is ${status?.behind} commits behind the remote. Fetching first ensures you have the latest changes and reduces the risk of conflicts.`
-                : "You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts."}
+                : 'You have not fetched from the remote yet. Fetching first ensures you have the latest changes and reduces the risk of conflicts.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-wrap gap-2">
+          <AlertDialogFooter className='flex-wrap gap-2'>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePushAnyway}>
-              Push Anyway
-            </AlertDialogAction>
-            <AlertDialogAction onClick={handleFetchAndPush}>
-              Fetch & Push
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handlePushAnyway}>Push Anyway</AlertDialogAction>
+            <AlertDialogAction onClick={handleFetchAndPush}>Fetch & Push</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

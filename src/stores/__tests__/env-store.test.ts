@@ -1,6 +1,6 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { useEnvStore } from '../env-store';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Environment } from '@/lib/tauri-api';
+import { useEnvStore } from '../env-store';
 
 // Mock tauri-api so tests don't touch the Tauri IPC layer.
 vi.mock('@/lib/tauri-api', () => ({
@@ -17,7 +17,7 @@ vi.mock('@/lib/tauri-api', () => ({
   deleteGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { listEnvironments, getGlobalEnvironmentName } from '@/lib/tauri-api';
+import { getGlobalEnvironmentName, listEnvironments } from '@/lib/tauri-api';
 
 const mockListEnvironments = vi.mocked(listEnvironments);
 const mockGetGlobalEnvironmentName = vi.mocked(getGlobalEnvironmentName);
@@ -71,7 +71,11 @@ describe('env-store', () => {
 
   it('loadEnvironments clears environments and activeEnvId on error', async () => {
     // Seed some prior state.
-    useEnvStore.setState({ environments: [makeEnv('old')], activeEnvId: 'old', activeCollection: 'col-a' });
+    useEnvStore.setState({
+      environments: [makeEnv('old')],
+      activeEnvId: 'old',
+      activeCollection: 'col-a',
+    });
     mockListEnvironments.mockRejectedValueOnce(new Error('network'));
 
     await useEnvStore.getState().loadEnvironments('col-a');
@@ -86,7 +90,12 @@ describe('env-store', () => {
 
     // First call resolves after a microtask delay.
     let resolveFirst!: (v: Environment[]) => void;
-    mock.mockImplementationOnce(() => new Promise(r => { resolveFirst = r; }));
+    mock.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolveFirst = r;
+        }),
+    );
     // Second call resolves immediately.
     mock.mockResolvedValueOnce([makeEnv('staging')]);
 
@@ -133,7 +142,10 @@ describe('env-store', () => {
     const { saveEnvironment: mockSave } = await import('@/lib/tauri-api');
     vi.mocked(mockSave).mockResolvedValueOnce(undefined);
 
-    const updated: Environment = { name: 'dev', variables: [{ key: 'X', value: '1', enabled: true, secret: false }] };
+    const updated: Environment = {
+      name: 'dev',
+      variables: [{ key: 'X', value: '1', enabled: true, secret: false }],
+    };
     useEnvStore.setState({
       activeCollection: 'col-a',
       environments: [makeEnv('dev'), makeEnv('staging')],
@@ -156,10 +168,10 @@ describe('getGlobalVariables', () => {
       globalEnv: {
         name: 'shared',
         variables: [
-          { key: 'A', value: 'a', enabled: true },
-          { key: 'B', value: 'b', enabled: false },
+          { key: 'A', value: 'a', enabled: true, secret: false },
+          { key: 'B', value: 'b', enabled: false, secret: false },
         ],
-      } as any,
+      } satisfies Environment,
     });
     const vars = useEnvStore.getState().getGlobalVariables();
     expect(vars['A']).toBe('a');

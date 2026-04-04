@@ -213,72 +213,73 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               <p className='text-[11px] font-medium text-muted-foreground mb-2'>Collections</p>
               {summaries.length > 0 ? (
                 summaries.map((col) => (
-                    <Card
-                      key={col.name}
-                      className='mb-2 last:mb-0 bg-card/20 border rounded-md cursor-pointer hover:bg-card transition-colors'
-                    >
-                      <CardContent className='p-0'>
+                  <Card
+                    key={col.name}
+                    className='mb-2 last:mb-0 bg-card/20 border rounded-md cursor-pointer hover:bg-card transition-colors'
+                  >
+                    <CardContent className='p-0'>
+                      {/* biome-ignore lint/a11y/useSemanticElements: contains nested interactive elements (dropdown button), cannot be a <button> */}
+                      <div
+                        key={col.name}
+                        role='button'
+                        tabIndex={0}
+                        onClick={() => handleOpenCollection(col.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleOpenCollection(col.name);
+                          }
+                        }}
+                        className='group flex items-center gap-2.5 px-3 py-2.5 border-b border-border last:border-b-0 hover:bg-muted/50 cursor-pointer transition-colors'
+                      >
                         <div
-                          key={col.name}
-                          role='button'
-                          tabIndex={0}
-                          onClick={() => handleOpenCollection(col.name)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              handleOpenCollection(col.name);
-                            }
-                          }}
-                          className='group flex items-center gap-2.5 px-3 py-2.5 border-b border-border last:border-b-0 hover:bg-muted/50 cursor-pointer transition-colors'
+                          className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${col.refType === 'external' ? 'bg-orange-950/40 border border-orange-900/40' : 'bg-primary/10 border border-primary/20'}`}
                         >
-                          <div
-                            className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${col.refType === 'external' ? 'bg-orange-950/40 border border-orange-900/40' : 'bg-primary/10 border border-primary/20'}`}
-                          >
-                            <Layers className='h-3.5 w-3.5 text-primary' />
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <span className='text-sm font-medium truncate block'>{col.name}</span>
-                            {col.path && (
-                              <span className='text-[10px] text-muted-foreground truncate block'>
-                                {col.path}
-                              </span>
-                            )}
-                          </div>
-                          <span className='text-[10px] text-muted-foreground shrink-0'>
-                            {col.requestCount} req
-                          </span>
-                          {col.refType === 'external' && (
-                            <span className='shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'>
-                              external
+                          <Layers className='h-3.5 w-3.5 text-primary' />
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <span className='text-sm font-medium truncate block'>{col.name}</span>
+                          {col.path && (
+                            <span className='text-[10px] text-muted-foreground truncate block'>
+                              {col.path}
                             </span>
                           )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type='button'
-                                aria-label='Collection options'
-                                className='h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted text-muted-foreground'
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreHorizontal className='h-3 w-3' />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
-                              <DropdownMenuItem onClick={() => handleOpenCollection(col.name)}>
-                                <ExternalLink className='h-3.5 w-3.5 mr-2' /> Open
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className='text-destructive'
-                                onClick={() => handleDeleteCollection(col.name)}
-                              >
-                                <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
                         </div>
-                      </CardContent>
-                    </Card>
+                        <span className='text-[10px] text-muted-foreground shrink-0'>
+                          {col.requestCount} req
+                        </span>
+                        {col.refType === 'external' && (
+                          <span className='shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'>
+                            external
+                          </span>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type='button'
+                              aria-label='Collection options'
+                              className='h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted text-muted-foreground'
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreHorizontal className='h-3 w-3' />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenuItem onClick={() => handleOpenCollection(col.name)}>
+                              <ExternalLink className='h-3.5 w-3.5 mr-2' /> Open
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className='text-destructive'
+                              onClick={() => handleDeleteCollection(col.name)}
+                            >
+                              <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))
               ) : (
                 <p className='text-sm text-muted-foreground'>No collections yet.</p>

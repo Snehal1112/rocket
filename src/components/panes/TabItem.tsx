@@ -1,12 +1,16 @@
-import { X, Folder, GitBranch, LayoutDashboard, Globe } from 'lucide-react';
-import type { Tab } from '@/types/pane-types';
-import { isRequestTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
+import { Folder, GitBranch, Globe, LayoutDashboard, X } from 'lucide-react';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
+import type { Tab } from '@/types/pane-types';
+import { isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
   if (isRequestTab(tab) && tab.request.url) {
-    try { return new URL(tab.request.url).hostname; } catch { return tab.request.url; }
+    try {
+      return new URL(tab.request.url).hostname;
+    } catch {
+      return tab.request.url;
+    }
   }
   return 'New request';
 }
@@ -22,7 +26,7 @@ interface TabItemProps {
 export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: TabItemProps) {
   return (
     <div
-      role="tab"
+      role='tab'
       tabIndex={0}
       aria-selected={isActive}
       onClick={onSelect}
@@ -40,35 +44,47 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
       }`}
     >
       {isRequestTab(tab) ? (
-        <span className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLOR[tab.request.method] ?? ''}`}>
+        <span
+          className={`font-semibold text-2xs shrink-0 ${METHOD_TEXT_COLOR[tab.request.method] ?? ''}`}
+        >
           {tab.request.method}
         </span>
       ) : isGitTab(tab) ? (
-        <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
       ) : isWorkspaceTab(tab) ? (
         <>
-          {tab.activeSection === 'overview' && <LayoutDashboard className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-          {tab.activeSection === 'environments' && <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-          {tab.activeSection === 'git' && <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+          {tab.activeSection === 'overview' && (
+            <LayoutDashboard className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          )}
+          {tab.activeSection === 'environments' && (
+            <Globe className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          )}
+          {tab.activeSection === 'git' && (
+            <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          )}
         </>
       ) : (
-        <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <Folder className='h-3.5 w-3.5 shrink-0 text-primary' />
       )}
-      <span className="truncate">{getTabTitle(tab)}</span>
+      <span className='truncate'>{getTabTitle(tab)}</span>
       {tab.isDirty && (
         <span
-          className="shrink-0 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400"
-          aria-label="Unsaved changes"
+          role='img'
+          className='shrink-0 h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-400'
+          aria-label='Unsaved changes'
         />
       )}
       {!isWorkspaceTab(tab) && (
         <button
-          type="button"
-          aria-label="Close tab"
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity"
+          type='button'
+          aria-label='Close tab'
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className='shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity'
         >
-          <X className="h-3.5 w-3.5" />
+          <X className='h-3.5 w-3.5' />
         </button>
       )}
     </div>

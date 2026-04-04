@@ -287,7 +287,9 @@ export function CollectionsSidebar() {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
       if (envDebounce.current) clearTimeout(envDebounce.current);
-      unlisteners.forEach((fn) => { fn(); });
+      unlisteners.forEach((fn) => {
+        fn();
+      });
     };
   }, [fetchCollections]);
 
@@ -420,7 +422,6 @@ export function CollectionsSidebar() {
           id='panel-collections'
           role='tabpanel'
           aria-labelledby='tab-collections'
-          tabIndex={0}
           className={cn('flex-1 flex flex-col overflow-hidden', view !== 'collections' && 'hidden')}
         >
           {/* Workspace home button. */}
@@ -555,7 +556,6 @@ export function CollectionsSidebar() {
           id='panel-history'
           role='tabpanel'
           aria-labelledby='tab-history'
-          tabIndex={0}
           className={cn('flex-1 overflow-hidden', view !== 'history' && 'hidden')}
         >
           <HistoryPanel />

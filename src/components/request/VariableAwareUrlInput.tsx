@@ -1,19 +1,15 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { type ParsedCurl, parseCurl } from "@/lib/curl-parser";
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { type ParsedCurl, parseCurl } from '@/lib/curl-parser';
 import {
   parseUrlTokens,
   sourceBadgeClass,
   type UrlToken,
   type VariableScopeEntry,
-} from "@/lib/url-variables";
-import { cn } from "@/lib/utils";
-import { useEnvStore } from "@/stores/env-store";
+} from '@/lib/url-variables';
+import { cn } from '@/lib/utils';
+import { useEnvStore } from '@/stores/env-store';
 
 interface VariableAwareUrlInputProps {
   value: string;
@@ -33,29 +29,29 @@ interface VariableAwareUrlInputProps {
 // Determines the type badge and label for the popover footer.
 function tokenMeta(token: UrlToken, _activeEnvId: string | null) {
   switch (token.type) {
-    case "pathParam":
+    case 'pathParam':
       return {
-        icon: ":",
-        iconClass: "text-violet-500",
-        label: "Path Variable",
+        icon: ':',
+        iconClass: 'text-violet-500',
+        label: 'Path Variable',
       };
-    case "variable":
-      if (token.source === "Collection") {
+    case 'variable':
+      if (token.source === 'Collection') {
         return {
-          icon: "C",
+          icon: 'C',
           iconClass:
-            "bg-muted-foreground text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold",
-          label: "Collection",
+            'bg-muted-foreground text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
+          label: 'Collection',
         };
       }
       return {
-        icon: "E",
+        icon: 'E',
         iconClass:
-          "bg-amber-500 text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold",
-        label: "Environments",
+          'bg-amber-500 text-background rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
+        label: 'Environments',
       };
     default:
-      return { icon: "?", iconClass: "text-muted-foreground", label: "" };
+      return { icon: '?', iconClass: 'text-muted-foreground', label: '' };
   }
 }
 
@@ -90,7 +86,7 @@ export function VariableAwareUrlInput({
   }, [activeEnvId, environments]);
 
   const [editingToken, setEditingToken] = useState<UrlToken | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValue, setEditValue] = useState('');
 
   const tokens = parseUrlTokens(
     value,
@@ -103,18 +99,18 @@ export function VariableAwareUrlInput({
 
   const handleTokenClick = useCallback((token: UrlToken) => {
     setEditingToken(token);
-    setEditValue(token.resolved ?? "");
+    setEditValue(token.resolved ?? '');
   }, []);
 
   // Save the edited value based on token type.
   const handleCommit = useCallback(async () => {
     if (!editingToken) return;
 
-    if (editingToken.type === "pathParam" && onPathParamChange) {
+    if (editingToken.type === 'pathParam' && onPathParamChange) {
       onPathParamChange(editingToken.value, editValue);
     } else if (
-      editingToken.type === "variable" &&
-      editingToken.source !== "Collection" &&
+      editingToken.type === 'variable' &&
+      editingToken.source !== 'Collection' &&
       activeEnvId
     ) {
       const env = environments.find((e) => e.name === activeEnvId);
@@ -135,19 +131,12 @@ export function VariableAwareUrlInput({
     }
 
     setEditingToken(null);
-  }, [
-    editingToken,
-    editValue,
-    activeEnvId,
-    environments,
-    updateEnvironment,
-    onPathParamChange,
-  ]);
+  }, [editingToken, editValue, activeEnvId, environments, updateEnvironment, onPathParamChange]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
       if (!onCurlImport) return;
-      const text = e.clipboardData.getData("text/plain").trim();
+      const text = e.clipboardData.getData('text/plain').trim();
       if (!/^curl\s/i.test(text)) return;
       e.preventDefault();
       const parsed = parseCurl(text);
@@ -159,27 +148,22 @@ export function VariableAwareUrlInput({
   );
 
   // Renders the unified Postman-style popover for any editable token.
-  function renderTokenPopover(
-    token: UrlToken,
-    displayText: string,
-    tokenColorClass: string,
-  ) {
-    const scopeEntry =
-      token.type === "variable" ? scopedContext?.get(token.value) : undefined;
+  function renderTokenPopover(token: UrlToken, displayText: string, tokenColorClass: string) {
+    const scopeEntry = token.type === 'variable' ? scopedContext?.get(token.value) : undefined;
     // Prefer scopedContext label/icon if available; fall back to legacy tokenMeta.
     const meta = scopeEntry
       ? {
           icon: scopeEntry.source.charAt(0).toUpperCase(),
           iconClass: cn(
-            "rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold",
+            'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
             sourceBadgeClass(scopeEntry.source),
           ),
           label: scopeEntry.label,
         }
       : tokenMeta(token, activeEnvId);
     const isCollectionVar =
-      token.type === "variable" &&
-      (scopeEntry?.source === "collection" || token.source === "Collection");
+      token.type === 'variable' &&
+      (scopeEntry?.source === 'collection' || token.source === 'Collection');
 
     return (
       <Popover
@@ -190,48 +174,47 @@ export function VariableAwareUrlInput({
         }}
       >
         <PopoverTrigger asChild>
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type='button'
             className={cn(
-              "rounded-sm px-0.5 cursor-pointer pointer-events-auto",
+              'rounded-sm px-0.5 cursor-pointer pointer-events-auto bg-transparent border-0',
               tokenColorClass,
             )}
             onMouseEnter={() => handleTokenClick(token)}
           >
             {displayText}
-          </span>
+          </button>
         </PopoverTrigger>
-        <PopoverContent className="w-80 p-0" side="bottom" align="start">
+        <PopoverContent className='w-80 p-0' side='bottom' align='start'>
           {/* Value input. */}
-          <div className="p-2">
+          <div className='p-2'>
             <Input
               autoFocus
-              className="h-7 text-xs font-mono"
-              value={scopeEntry?.secret ? "●●●●" : editValue}
+              className='h-7 text-xs font-mono'
+              value={scopeEntry?.secret ? '●●●●' : editValue}
               onChange={(e) => {
                 if (scopeEntry?.secret) return;
                 setEditValue(e.target.value);
                 // Live update for path params.
-                if (token.type === "pathParam" && onPathParamChange) {
+                if (token.type === 'pathParam' && onPathParamChange) {
                   onPathParamChange(token.value, e.target.value);
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void handleCommit();
-                if (e.key === "Escape") setEditingToken(null);
+                if (e.key === 'Enter') void handleCommit();
+                if (e.key === 'Escape') setEditingToken(null);
               }}
               onBlur={() => void handleCommit()}
-              placeholder="Value"
+              placeholder='Value'
               readOnly={isCollectionVar || scopeEntry?.secret}
             />
           </div>
 
           {/* Footer: type badge (left) + "Variables in request →" link (right). */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30">
-            <div className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-              {token.type === "pathParam" ? (
-                <span className="text-violet-500 font-bold text-xs">:</span>
+          <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
+            <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
+              {token.type === 'pathParam' ? (
+                <span className='text-violet-500 font-bold text-xs'>:</span>
               ) : (
                 <span className={meta.iconClass}>{meta.icon}</span>
               )}
@@ -239,8 +222,8 @@ export function VariableAwareUrlInput({
             </div>
             {onSwitchToParams && (
               <button
-                type="button"
-                className="text-2xs text-primary hover:underline cursor-pointer"
+                type='button'
+                className='text-2xs text-primary hover:underline cursor-pointer'
                 onClick={() => {
                   setEditingToken(null);
                   onSwitchToParams();
@@ -256,59 +239,53 @@ export function VariableAwareUrlInput({
   }
 
   return (
-    <div className={cn("relative flex-1", className)}>
+    <div className={cn('relative flex-1', className)}>
       {/* Real input for keyboard interaction. */}
       <input
         ref={inputRef}
-        type="text"
+        type='text'
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={handlePaste}
         placeholder={placeholder}
-        className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 font-mono text-xs text-transparent caret-foreground outline-none ring-ring/50 focus-visible:ring-[3px] focus-visible:border-ring"
+        className='h-8 w-full rounded-md border border-input bg-background px-3 py-1 font-mono text-xs text-transparent caret-foreground outline-none ring-ring/50 focus-visible:ring-[3px] focus-visible:border-ring'
       />
 
       {/* Overlay with token highlights. */}
       <div
-        className="absolute inset-0 flex items-center px-3 py-1 font-mono text-xs pointer-events-none overflow-hidden whitespace-nowrap"
-        aria-hidden="true"
+        className='absolute inset-0 flex items-center px-3 py-1 font-mono text-xs pointer-events-none overflow-hidden whitespace-nowrap'
+        aria-hidden='true'
       >
         {tokens.length > 0 ? (
           tokens.map((token) => {
-            if (token.type === "text") {
+            if (token.type === 'text') {
               return <span key={token.start}>{token.value}</span>;
             }
 
             // Path param: unified popover.
-            if (token.type === "pathParam") {
+            if (token.type === 'pathParam') {
               const isResolved = token.resolved !== undefined;
               return renderTokenPopover(
                 token,
                 `:${token.value}`,
                 isResolved
-                  ? "bg-violet-500/15 text-violet-500"
-                  : "bg-destructive/15 text-destructive",
+                  ? 'bg-violet-500/15 text-violet-500'
+                  : 'bg-destructive/15 text-destructive',
               );
             }
 
             // Query key: styled span (no popover — edit in Params tab).
-            if (token.type === "queryKey") {
+            if (token.type === 'queryKey') {
               const isResolved = token.resolved !== undefined;
               return (
                 <span
                   key={token.start}
                   className={cn(
-                    "rounded-sm px-0.5 pointer-events-auto",
-                    isResolved
-                      ? "bg-amber-500/15 text-amber-500"
-                      : "text-muted-foreground",
+                    'rounded-sm px-0.5 pointer-events-auto',
+                    isResolved ? 'bg-amber-500/15 text-amber-500' : 'text-muted-foreground',
                   )}
-                  title={
-                    isResolved
-                      ? `${token.value} = ${token.resolved}`
-                      : token.value
-                  }
+                  title={isResolved ? `${token.value} = ${token.resolved}` : token.value}
                 >
                   {token.value}
                 </span>
@@ -316,9 +293,9 @@ export function VariableAwareUrlInput({
             }
 
             // Query value: plain muted text.
-            if (token.type === "queryValue") {
+            if (token.type === 'queryValue') {
               return (
-                <span key={token.start} className="text-muted-foreground">
+                <span key={token.start} className='text-muted-foreground'>
                   {token.value}
                 </span>
               );
@@ -329,12 +306,12 @@ export function VariableAwareUrlInput({
             const badgeClass = scopeEntry
               ? sourceBadgeClass(scopeEntry.source)
               : token.resolved !== undefined
-                ? "bg-primary/15 text-primary"
-                : "bg-destructive/15 text-destructive";
+                ? 'bg-primary/15 text-primary'
+                : 'bg-destructive/15 text-destructive';
             return renderTokenPopover(token, `{{${token.value}}}`, badgeClass);
           })
         ) : (
-          <span className="text-muted-foreground">{placeholder}</span>
+          <span className='text-muted-foreground'>{placeholder}</span>
         )}
       </div>
     </div>
