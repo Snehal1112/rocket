@@ -62,15 +62,26 @@ impl ImportService {
     pub fn import_collection(
         &self,
         path: &Path,
+        workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        match detect_collection(path) {
+            None => Err(ImportError::NotABrunoDirectory(path.to_path_buf())),
+            Some(BrunoFormat::Modern) => self.import_modern_collection(path, workspace_id),
+            Some(BrunoFormat::Legacy) => self.import_legacy_collection(path, workspace_id),
+        }
+    }
+
+    /// Import a legacy (Bruno 2.x) collection directory.
+    fn import_legacy_collection(
+        &self,
+        path: &Path,
         _workspace_id: &str,
     ) -> ImportResult<ImportReport> {
-        if !path.join("bruno.json").exists() {
-            return Err(ImportError::NotABrunoDirectory(path.to_path_buf()));
-        }
-
         let mut report = ImportReport::default();
+        report.detected_type = "collection".to_string();
 
-        let col_name = path.file_name()
+        let col_name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "imported".into());
 
@@ -99,14 +110,16 @@ impl ImportService {
         create_new_workspace: bool,
         target_workspace_id: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        if !path.join("bruno.json").exists() {
+        if detect_workspace(path).is_none() {
             return Err(ImportError::NotABrunoDirectory(path.to_path_buf()));
         }
 
         let mut combined = ImportReport::default();
+        combined.detected_type = "workspace".to_string();
 
         if create_new_workspace {
-            let ws_name = path.file_name()
+            let ws_name = path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "imported-workspace".into());
             combined.created_workspace = Some(ws_name);
@@ -115,7 +128,7 @@ impl ImportService {
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let p = entry.path();
-            if p.is_dir() && p.join("bruno.json").exists() {
+            if p.is_dir() && detect_collection(&p).is_some() {
                 let id = target_workspace_id.unwrap_or("default");
                 match self.import_collection(&p, id) {
                     Ok(r) => {
