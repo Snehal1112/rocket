@@ -1,10 +1,10 @@
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
 import { FilePlus, Folder, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
+import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,15 +59,7 @@ export function CollectionsSidebar() {
   const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
-  const handleImport = useCallback(async () => {
-    const file = await open({
-      multiple: false,
-      filters: [{ name: 'Collection', extensions: ['json'] }],
-    });
-    if (file) {
-      console.log('Import file selected:', file);
-    }
-  }, []);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -376,7 +368,7 @@ export function CollectionsSidebar() {
                 variant='ghost'
                 size='icon'
                 className='h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground'
-                onClick={() => void handleImport()}
+                onClick={() => setImportDialogOpen(true)}
                 aria-label='Import Collection'
                 title='Import Collection'
               >
@@ -561,6 +553,15 @@ export function CollectionsSidebar() {
           <HistoryPanel />
         </div>
       </div>
+
+      {activeWorkspaceId && (
+        <ImportBrunoDialog
+          open={importDialogOpen}
+          onOpenChange={setImportDialogOpen}
+          workspaceId={activeWorkspaceId}
+          onImportComplete={() => void fetchCollections()}
+        />
+      )}
 
       <AlertDialog
         open={!!deleteTarget}

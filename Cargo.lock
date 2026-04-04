@@ -3976,6 +3976,7 @@ dependencies = [
  "rocket-git",
  "rocket-history",
  "rocket-http",
+ "rocket-import",
  "rocket-infra",
  "rocket-shared",
  "rocket-workspace",
@@ -4080,6 +4081,21 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+]
+
+[[package]]
+name = "rocket-import"
+version = "0.1.0"
+dependencies = [
+ "rocket-collection",
+ "rocket-environment",
+ "rocket-infra",
+ "rocket-shared",
+ "rocket-workspace",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

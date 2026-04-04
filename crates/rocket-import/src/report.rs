@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportReport {
     pub total_files: usize,
     pub imported: usize,
@@ -10,6 +11,7 @@ pub struct ImportReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SkippedItem {
     pub path: String,
     pub reason: SkipReason,

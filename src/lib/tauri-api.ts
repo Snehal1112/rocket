@@ -739,6 +739,42 @@ export const updateRequestDocs = (
 ): Promise<void> => invoke<void>('update_request_docs', { collection, path, docs });
 
 // ============================================================
+// Bruno import
+// ============================================================
+
+export type SkipReason =
+  | { type: 'unsupportedRequestType'; detail: string }
+  | { type: 'unsupportedAuthType'; detail: string }
+  | { type: 'parseError'; detail: string };
+
+export interface SkippedItem {
+  path: string;
+  reason: SkipReason;
+}
+
+export interface ImportReport {
+  totalFiles: number;
+  imported: number;
+  skipped: SkippedItem[];
+  createdWorkspace: string | null;
+  createdCollections: string[];
+}
+
+export const importBrunoCollection = (path: string, targetWorkspaceId: string) =>
+  invoke<ImportReport>('import_bruno_collection', { path, targetWorkspaceId });
+
+export const importBrunoWorkspace = (
+  path: string,
+  createNewWorkspace: boolean,
+  targetWorkspaceId?: string,
+) =>
+  invoke<ImportReport>('import_bruno_workspace', {
+    path,
+    createNewWorkspace,
+    targetWorkspaceId: targetWorkspaceId ?? null,
+  });
+
+// ============================================================
 // UI state persistence
 // ============================================================
 

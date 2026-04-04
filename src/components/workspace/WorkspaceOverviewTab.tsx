@@ -6,10 +6,12 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
@@ -48,6 +50,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [docContent, setDocContent] = useState<string>(workspace?.description ?? '');
 
@@ -204,6 +207,15 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     <FolderOpen className='h-3 w-3 mr-1.5' />
                     Open Collection
                   </Button>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='text-xs h-7'
+                    onClick={() => setImportDialogOpen(true)}
+                  >
+                    <Upload className='h-3 w-3 mr-1.5' />
+                    Import from Bruno
+                  </Button>
                 </div>
               )}
             </div>
@@ -288,6 +300,13 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
           </div>
         </ScrollArea>
       </div>
+
+      <ImportBrunoDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        workspaceId={workspaceId}
+        onImportComplete={() => void refresh()}
+      />
 
       {/* ── RIGHT COLUMN — Documentation ── */}
       <div className='flex-1 p-4 flex flex-col overflow-hidden'>
