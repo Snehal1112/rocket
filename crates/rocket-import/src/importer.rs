@@ -150,6 +150,40 @@ impl ImportService {
         Ok(combined)
     }
 
+    /// Auto-detect whether `path` is a workspace or collection and import accordingly.
+    ///
+    /// Modern markers are unambiguous (`opencollection.yml` vs `workspace.yml`).
+    /// For legacy Bruno 2.x, both workspace and collection roots use `bruno.json`, so
+    /// collection detection runs first — a dir with `.bru` request files is treated as
+    /// a collection before trying workspace detection.
+    /// Returns `NotABrunoDirectory` if neither marker is found.
+    pub fn import_auto(
+        &self,
+        path: &Path,
+        workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        if detect_collection(path).is_some() {
+            self.import_collection(path, workspace_id)
+        } else if detect_workspace(path).is_some() {
+            self.import_workspace(path, false, Some(workspace_id))
+        } else {
+            Err(ImportError::NotABrunoDirectory(path.to_path_buf()))
+        }
+    }
+
+    /// Extract a Bruno ZIP to a temp directory and call `import_auto` on the inner path.
+    ///
+    /// The `TempDir` is held for the duration of the import and cleaned up automatically
+    /// when this method returns.
+    pub fn import_auto_from_zip(
+        &self,
+        zip_path: &Path,
+        workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        let (_temp, inner) = crate::bru::zip_extractor::extract_to_temp(zip_path)?;
+        self.import_auto(&inner, workspace_id)
+    }
+
     fn walk_requests(
         &self,
         root: &Path,
@@ -425,6 +459,45 @@ mod modern_tests {
 
         let oc_path = ws_dir.path().join("collections/col/opencollection.yml");
         assert!(oc_path.exists());
+    }
+}
+
+#[cfg(test)]
+mod auto_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn import_auto_detects_legacy_collection() {
+        // Use a named subdirectory so the collection name doesn't start with a dot.
+        let root = TempDir::new().unwrap();
+        let src = root.path().join("my-collection");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("bruno.json"), "{}").unwrap();
+        std::fs::write(
+            src.join("req.bru"),
+            "meta {\n  name: R\n  type: http\n  seq: 1\n}\nget {\n  url: https://ex.com\n}\n",
+        )
+        .unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service.import_auto(&src, "default").unwrap();
+
+        assert_eq!(report.detected_type, "collection");
+        assert_eq!(report.imported, 1);
+    }
+
+    #[test]
+    fn import_auto_returns_error_for_invalid_dir() {
+        let dir = TempDir::new().unwrap();
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service.import_auto(dir.path(), "default");
+        assert!(
+            matches!(result, Err(ImportError::NotABrunoDirectory(_))),
+            "expected NotABrunoDirectory"
+        );
     }
 }
 
