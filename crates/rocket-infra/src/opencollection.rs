@@ -967,6 +967,57 @@ pub struct OcCollection {
     pub extensions: Option<serde_yaml::Value>,
 }
 
+// ============================================================
+// Workspace file format (workspace.yml) — Bruno-compatible extension
+// ============================================================
+
+/// workspace.yml — info block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWorkspaceInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
+    pub workspace_type: Option<String>,
+}
+
+/// workspace.yml — single collection entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcWorkspaceCollectionRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<std::path::PathBuf>,
+}
+
+/// workspace.yml — environments block (Rocket extension).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcWorkspaceEnvironments {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_environment: Option<String>,
+}
+
+/// Top-level workspace.yml document.
+/// Follows Bruno's OpenCollection workspace extension.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcWorkspaceConfig {
+    /// Spec version — always "1.0.0" when written by Rocket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencollection: Option<String>,
+    /// Required: workspace name and type.
+    pub info: OcWorkspaceInfo,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<OcWorkspaceCollectionRef>,
+    /// Human-readable description (spec field name is `docs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+    /// Active environment selection (Rocket extension).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environments: Option<OcWorkspaceEnvironments>,
+    /// Global environment override (Rocket extension).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_environment: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1668,5 +1719,42 @@ dotEnvFilePath: .env.prod
         let yaml = "name: auth\nuid: abcd-1234\ntype: folder";
         let info: OcFolderInfo = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(info.uid, Some("abcd-1234".into()));
+    }
+
+    #[test]
+    fn oc_workspace_config_roundtrip() {
+        let yaml = r#"
+opencollection: "1.0.0"
+info:
+  name: Acme API
+  type: workspace
+collections:
+- name: main-api
+  path: collections/main-api
+- name: external
+  path: /abs/path/to/ext
+docs: Project description
+environments:
+  activeEnvironment: Staging
+globalEnvironment: Production
+"#;
+        let cfg: OcWorkspaceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.info.name, "Acme API");
+        assert_eq!(cfg.collections.len(), 2);
+        assert_eq!(cfg.collections[0].name, "main-api");
+        assert_eq!(cfg.docs.as_deref(), Some("Project description"));
+        assert_eq!(cfg.environments.as_ref().unwrap().active_environment.as_deref(), Some("Staging"));
+        assert_eq!(cfg.global_environment.as_deref(), Some("Production"));
+        // Roundtrip
+        let back: OcWorkspaceConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn oc_workspace_config_requires_info_field() {
+        // Old format (no `info:` key) must fail to parse as OcWorkspaceConfig
+        let old_yaml = "name: My Workspace\ncollections: []\n";
+        let result = serde_yaml::from_str::<OcWorkspaceConfig>(old_yaml);
+        assert!(result.is_err(), "old format should not parse as OcWorkspaceConfig");
     }
 }
