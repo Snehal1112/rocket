@@ -93,6 +93,11 @@ interface GitState {
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
+  // Selector to determine if any file is in a conflicted state
+  hasConflicts: () => {
+    const { status } = get();
+    return status?.files.some((f) => f.status === "conflicted") ?? false;
+  },
   isRepo: false,
   collectionPath: null,
   status: null,

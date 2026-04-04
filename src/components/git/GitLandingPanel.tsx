@@ -156,8 +156,7 @@ export function GitLandingPanel() {
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
-  const hasConflicts =
-    status?.files.some((f) => f.status === "conflicted") ?? false;
+  const hasConflicts = useGitStore(state => state.hasConflicts?.()) ?? false;
 
   return (
     <div className="flex flex-col items-center justify-center h-full px-6">
@@ -259,11 +258,12 @@ export function GitLandingPanel() {
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span className="flex-1 break-words">{error}</span>
               <button
-                className="shrink-0 hover:opacity-70 leading-none"
-                onClick={clearError}
-              >
-                ×
-              </button>
+  className="shrink-0 hover:opacity-70 leading-none"
+  onClick={clearError}
+  aria-label="Dismiss error"
+>
+  ×
+</button>
             </div>
           )}
 
