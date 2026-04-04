@@ -1,5 +1,6 @@
 // Application services — orchestration layer
 
+pub mod import_commands;
 pub mod collection_service;
 pub mod cookie_service;
 pub mod environment_service;
