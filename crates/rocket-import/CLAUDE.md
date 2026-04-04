@@ -75,11 +75,11 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 | `meta` | `meta {}` block / YAML `meta:` | `name`, `request_type`, `seq` |
 | `method` | method block name (`get {`, `post {`) / YAML `http.method` | `HttpMethod` |
 | `url` | `url:` in method block / YAML `http.url` | request URL |
-| `headers` | `headers {}` block / YAML `http.headers` | `Vec<BruKeyValue>` — `disabled: true` when key starts with `~` |
+| `headers` | `headers {}` block / YAML `http.headers` | `Vec<BruKeyValue>` — `~` prefix is **stripped** from the key and `disabled` is set to `true` |
 | `body` | `body:json {}`, `body:text {}`, etc. | `BruBody` enum variant |
 | `auth` | `auth:bearer {}`, `auth:basic {}`, etc. | `BruAuth` enum variant |
 | `vars` | `vars {}` block (env files) | plain environment variables |
-| `secret_vars` | `vars:secret []` block (env files) | secret variable names only |
+| `secret_vars` | `vars:secret []` block (env files) | secret variable names only — this block uses `[...]` list syntax (not `{}`); the lexer captures it as `RawText` and the parser splits on lines |
 | `pre_request_script` | `script:pre-request {}` / YAML `http.script.req` | JS string |
 | `post_response_script` | `script:post-response {}` / YAML `http.script.res` | JS string |
 | `unknown_blocks` | unrecognised or non-HTTP request types | feeds `ImportReport.skipped` |
@@ -92,8 +92,9 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 - `BruBody::FormUrlEncoded(kvs)` → `Body { mode: FormUrlEncoded, content: "k=v&k2=v2" }` (simple join)
 - `BruBody::Multipart(kvs)` → `Body { mode: FormData, form_data: Vec<FormDataEntry> }`
 - `BruAuth::Bearer/Basic/Digest/ApiKey/AwsV4` → matching `Auth::*` variants
-- `BruAuth::Unknown` / `unknown_blocks[auth]` → `Auth::None` + `SkipReason::UnsupportedAuthType`
+- `BruAuth::Unknown` / `unknown_blocks[auth]` → `Auth::None` + `SkipReason::UnsupportedAuthType` (note: `BruAuth::Unknown` is never constructed by the parser — unsupported auth modes go to `unknown_blocks` instead)
 - `meta.seq` → `req.seq`; `disabled` headers use `Header::disabled()` not `Header::new()`
+- `~` stripping also applies to `vars {}` keys and `body:form-urlencoded` / `body:multipart-form` keys — same rule everywhere
 
 **environment.rs** — `BruDocument` → `rocket_environment::Environment`:
 - `doc.vars` → `Variable::new(key, value)`, `enabled = !kv.disabled`
@@ -138,7 +139,13 @@ import_bruno_workspace(path: String, create_new_workspace: bool, target_workspac
 - `thiserror` — `ImportError` derive
 - `tempfile` (dev) — integration test fixtures
 
+### Non-Obvious Gotchas
+
+- **`_workspace_id` is currently ignored.** `import_collection` accepts a `_workspace_id` parameter for future use but does not route writes by it — all writes go to `self.workspace_path`. The parameter exists for API compatibility with the planned workspace-aware path.
+- **Environment name comes from file stem, not YAML.** `BruYmlEnv.name` is parsed but never used. The environment name is derived from the file stem (`local.yml` → `"local"`). This mirrors how `FsEnvironmentRepo` stores environments.
+- **`~` prefix is stripped by the parser.** In `.bru` files, a leading `~` marks a disabled header/var. The parser strips the `~` from the key and sets `disabled = true`. The stored `BruKeyValue.key` never contains `~`.
+- **Do not add `#[derive(Default)]` to `ImportService`.** `PathBuf::default()` is an empty path (`""`), which would cause silent failures when the service tries to write files. Always construct via `new()` or `new_with_workspace_path()`.
+
 ### Known Deferred Work
 
-- `ImportService` currently does not implement `Default`. When future work replaces `new()` with real workspace-path resolution from `WorkspaceService`, add `#[derive(Default)]` at that point.
 - `converter/collection.rs::convert_variables` is implemented but not yet called from `ImportService`. Bruno's `bruno.json` at the workspace level may carry collection-level variables; wiring this up is deferred.
