@@ -134,3 +134,150 @@ fn workspace_fixture_dir_setup() {
     }
     // No fixture yet — that is fine; this test documents intent.
 }
+
+// ──────────────────────────────────────────────────────────
+// Bruno Import v2 — modern format and ZIP tests
+// ──────────────────────────────────────────────────────────
+
+fn make_modern_collection_dir(col_dir: &std::path::Path, name: &str, req_count: usize) {
+    std::fs::create_dir_all(col_dir).unwrap();
+    std::fs::write(
+        col_dir.join("opencollection.yml"),
+        format!("opencollection: \"1.0.0\"\ninfo:\n  name: {name}\n"),
+    )
+    .unwrap();
+    for i in 0..req_count {
+        std::fs::write(
+            col_dir.join(format!("req-{i}.yml")),
+            format!("name: Req {i}\nmethod: GET\nurl: https://api.example.com/{i}\n"),
+        )
+        .unwrap();
+    }
+    let env_dir = col_dir.join("environments");
+    std::fs::create_dir_all(&env_dir).unwrap();
+    std::fs::write(env_dir.join("local.yml"), "name: local\nvars: []\n").unwrap();
+}
+
+#[test]
+fn import_auto_modern_collection_directory() {
+    let src = TempDir::new().unwrap();
+    let col_src = src.path().join("my-col");
+    make_modern_collection_dir(&col_src, "my-col", 3);
+
+    let ws = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws.path());
+    let report = service.import_auto(&col_src, "default").unwrap();
+
+    assert_eq!(report.detected_type, "collection");
+    assert_eq!(report.imported, 3);
+    assert!(report.created_collections.contains(&"my-col".to_string()));
+    assert!(ws.path().join("collections/my-col/opencollection.yml").exists());
+    assert!(ws.path().join("collections/my-col/req-0.yml").exists());
+    assert!(ws.path().join("collections/my-col/environments/local.yml").exists());
+}
+
+#[test]
+fn import_auto_modern_workspace_directory() {
+    let src = TempDir::new().unwrap();
+    let ws_src = src.path().join("my-workspace");
+    std::fs::create_dir_all(&ws_src).unwrap();
+    std::fs::write(ws_src.join("workspace.yml"), "name: my-workspace\n").unwrap();
+
+    let col_a = ws_src.join("col-a");
+    make_modern_collection_dir(&col_a, "col-a", 2);
+    let col_b = ws_src.join("col-b");
+    make_modern_collection_dir(&col_b, "col-b", 1);
+
+    let ws_dir = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let report = service.import_auto(&ws_src, "default").unwrap();
+
+    assert_eq!(report.detected_type, "workspace");
+    assert_eq!(report.imported, 3, "2 from col-a + 1 from col-b");
+    assert_eq!(report.created_collections.len(), 2);
+    assert!(ws_dir.path().join("collections/col-a").exists());
+    assert!(ws_dir.path().join("collections/col-b").exists());
+}
+
+#[test]
+fn import_auto_legacy_collection_still_works() {
+    let workspace_dir = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+
+    let report = service
+        .import_auto(&fixture_path(), "default")
+        .expect("legacy collection import via import_auto should succeed");
+
+    assert_eq!(report.detected_type, "collection");
+    assert!(report.imported >= 3);
+    assert!(report.created_collections.contains(&"my-api".to_string()));
+}
+
+#[test]
+fn import_auto_returns_error_for_non_bruno_dir() {
+    let dir = TempDir::new().unwrap();
+    let ws = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws.path());
+    let result = service.import_auto(dir.path(), "default");
+    assert!(result.is_err(), "expected error for non-Bruno directory");
+}
+
+#[test]
+fn import_auto_from_zip_modern_collection() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let src = TempDir::new().unwrap();
+    let zip_path = src.path().join("my-col.zip");
+    let file = std::fs::File::create(&zip_path).unwrap();
+    let mut w = zip::ZipWriter::new(file);
+    let opts = SimpleFileOptions::default();
+
+    w.add_directory("my-col/", opts).unwrap();
+    w.start_file("my-col/opencollection.yml", opts).unwrap();
+    w.write_all(b"opencollection: \"1.0.0\"\ninfo:\n  name: my-col\n").unwrap();
+    w.start_file("my-col/get-users.yml", opts).unwrap();
+    w.write_all(b"name: Get Users\nmethod: GET\nurl: https://api.example.com/users\n").unwrap();
+    w.finish().unwrap();
+
+    let ws_dir = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let report = service.import_auto_from_zip(&zip_path, "default").unwrap();
+
+    assert_eq!(report.detected_type, "collection");
+    assert_eq!(report.imported, 1);
+    assert!(ws_dir.path().join("collections/my-col/get-users.yml").exists());
+}
+
+#[test]
+fn import_workspace_mixed_modern_and_legacy_collections() {
+    let src = TempDir::new().unwrap();
+    let ws_src = src.path();
+
+    // Workspace root with workspace.yml (modern marker).
+    std::fs::write(ws_src.join("workspace.yml"), "name: mixed-ws\n").unwrap();
+
+    // Modern sub-collection.
+    let modern_col = ws_src.join("modern-col");
+    make_modern_collection_dir(&modern_col, "modern-col", 2);
+
+    // Legacy sub-collection.
+    let legacy_col = ws_src.join("legacy-col");
+    std::fs::create_dir_all(&legacy_col).unwrap();
+    std::fs::write(legacy_col.join("bruno.json"), r#"{"name":"legacy-col","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        legacy_col.join("req.bru"),
+        "meta {\n  name: Req\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n",
+    )
+    .unwrap();
+
+    let ws_dir = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let report = service.import_workspace(ws_src, false, Some("default")).unwrap();
+
+    assert_eq!(report.detected_type, "workspace");
+    assert_eq!(report.imported, 3, "2 modern + 1 legacy");
+    assert_eq!(report.created_collections.len(), 2);
+    assert!(ws_dir.path().join("collections/modern-col").exists());
+    assert!(ws_dir.path().join("collections/legacy-col").exists());
+}
