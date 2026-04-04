@@ -10,6 +10,7 @@ use rocket_collection::settings::{CollectionSettings, CollectionVariable};
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
+use rocket_workspace::{CollectionReference, CollectionRefType, WorkspaceConfig, WorkspaceEnvironmentsConfig};
 use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
 use rocket_shared::description::Documentation;
 use rocket_shared::oauth2::{
@@ -790,6 +791,78 @@ impl From<Environment> for OcEnvironment {
                 .collect(),
             extends: env.extends,
             dot_env_file_path: env.dot_env_file_path,
+        }
+    }
+}
+
+// ============================================================
+// WorkspaceConfig ↔ OcWorkspaceConfig conversions
+// ============================================================
+
+impl From<OcWorkspaceCollectionRef> for CollectionReference {
+    fn from(r: OcWorkspaceCollectionRef) -> Self {
+        match r.path {
+            Some(p) if p.is_absolute() => CollectionReference {
+                name: r.name,
+                ref_type: CollectionRefType::External,
+                path: Some(p),
+            },
+            _ => CollectionReference {
+                name: r.name,
+                ref_type: CollectionRefType::Embedded,
+                path: None,
+            },
+        }
+    }
+}
+
+impl From<CollectionReference> for OcWorkspaceCollectionRef {
+    fn from(r: CollectionReference) -> Self {
+        OcWorkspaceCollectionRef {
+            path: match r.ref_type {
+                CollectionRefType::Embedded => {
+                    Some(std::path::PathBuf::from(format!("collections/{}", r.name)))
+                }
+                CollectionRefType::External => r.path,
+            },
+            name: r.name,
+        }
+    }
+}
+
+impl From<OcWorkspaceConfig> for WorkspaceConfig {
+    fn from(oc: OcWorkspaceConfig) -> Self {
+        WorkspaceConfig {
+            name: oc.info.name,
+            description: oc.docs,
+            collections: oc.collections.into_iter().map(CollectionReference::from).collect(),
+            environments: WorkspaceEnvironmentsConfig {
+                active_environment: oc.environments.and_then(|e| e.active_environment),
+            },
+            global_environment: oc.global_environment,
+        }
+    }
+}
+
+impl From<WorkspaceConfig> for OcWorkspaceConfig {
+    fn from(w: WorkspaceConfig) -> Self {
+        let has_active_env = w.environments.active_environment.is_some();
+        OcWorkspaceConfig {
+            opencollection: Some("1.0.0".into()),
+            info: OcWorkspaceInfo {
+                name: w.name,
+                workspace_type: Some("workspace".into()),
+            },
+            collections: w.collections.into_iter().map(OcWorkspaceCollectionRef::from).collect(),
+            docs: w.description,
+            environments: if has_active_env {
+                Some(OcWorkspaceEnvironments {
+                    active_environment: w.environments.active_environment,
+                })
+            } else {
+                None
+            },
+            global_environment: w.global_environment,
         }
     }
 }
@@ -2189,5 +2262,60 @@ items:
         };
         let oc = super::collection_to_oc_collection(col);
         assert_eq!(oc.opencollection.as_deref(), Some("1.0.0"));
+    }
+}
+
+#[cfg(test)]
+mod workspace_conversion_tests {
+    use super::*;
+    use rocket_workspace::{CollectionRefType, WorkspaceConfig};
+    use std::path::PathBuf;
+
+    #[test]
+    fn workspace_config_to_oc_workspace_config() {
+        let mut cfg = WorkspaceConfig::new("My API");
+        cfg.description = Some("A great API".into());
+        cfg.add_embedded_collection("users");
+        cfg.add_external_collection("shared", PathBuf::from("/abs/path/shared"));
+        cfg.environments.active_environment = Some("Production".into());
+        cfg.global_environment = Some("Prod Global".into());
+
+        let oc = OcWorkspaceConfig::from(cfg);
+        assert_eq!(oc.opencollection.as_deref(), Some("1.0.0"));
+        assert_eq!(oc.info.name, "My API");
+        assert_eq!(oc.info.workspace_type.as_deref(), Some("workspace"));
+        assert_eq!(oc.docs.as_deref(), Some("A great API"));
+        assert_eq!(oc.collections.len(), 2);
+        // Embedded → relative path collections/<name>
+        assert_eq!(oc.collections[0].path, Some(PathBuf::from("collections/users")));
+        // External → absolute path preserved
+        assert_eq!(oc.collections[1].path, Some(PathBuf::from("/abs/path/shared")));
+        assert_eq!(oc.environments.as_ref().unwrap().active_environment.as_deref(), Some("Production"));
+        assert_eq!(oc.global_environment.as_deref(), Some("Prod Global"));
+    }
+
+    #[test]
+    fn oc_workspace_config_to_workspace_config() {
+        let oc = OcWorkspaceConfig {
+            opencollection: Some("1.0.0".into()),
+            info: OcWorkspaceInfo { name: "Acme".into(), workspace_type: Some("workspace".into()) },
+            collections: vec![
+                OcWorkspaceCollectionRef { name: "api".into(), path: Some(PathBuf::from("collections/api")) },
+                OcWorkspaceCollectionRef { name: "ext".into(), path: Some(PathBuf::from("/abs/ext")) },
+            ],
+            docs: Some("Docs here".into()),
+            environments: Some(OcWorkspaceEnvironments { active_environment: Some("Staging".into()) }),
+            global_environment: Some("Global".into()),
+        };
+        let cfg = WorkspaceConfig::from(oc);
+        assert_eq!(cfg.name, "Acme");
+        assert_eq!(cfg.description.as_deref(), Some("Docs here"));
+        assert_eq!(cfg.collections.len(), 2);
+        // Relative path → Embedded
+        assert_eq!(cfg.collections[0].ref_type, CollectionRefType::Embedded);
+        // Absolute path → External
+        assert_eq!(cfg.collections[1].ref_type, CollectionRefType::External);
+        assert_eq!(cfg.environments.active_environment.as_deref(), Some("Staging"));
+        assert_eq!(cfg.global_environment.as_deref(), Some("Global"));
     }
 }
