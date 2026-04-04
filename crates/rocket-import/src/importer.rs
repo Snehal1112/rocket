@@ -265,12 +265,154 @@ impl ImportService {
                 .join("environments"),
         )
     }
+
+    /// Import a Bruno 3.0+ (OpenCollection-compatible) collection by direct file copy.
+    ///
+    /// Skips parsing — modern Bruno files are already OpenCollection YAML.
+    pub(crate) fn import_modern_collection(
+        &self,
+        src: &Path,
+        _workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        let mut report = ImportReport::default();
+        report.detected_type = "collection".to_string();
+
+        let col_name = src
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "imported".into());
+
+        let resolved_name = self.resolve_collection_name(&col_name);
+        let repo = self.make_collection_repo();
+
+        repo.create(&resolved_name).map_err(ImportError::DomainError)?;
+        report.created_collections.push(resolved_name.clone());
+
+        let dest_root = self.workspace_path.join("collections").join(&resolved_name);
+        self.copy_collection_files(src, src, &dest_root, &mut report)?;
+
+        Ok(report)
+    }
+
+    /// Recursively copy `.yml` files from `src_dir` into `dest_root`, preserving structure.
+    ///
+    /// Skips:
+    ///   - `opencollection.yml` at the collection root (written by `repo.create`).
+    ///   - `workspace.yml` anywhere (workspace marker, not a request).
+    ///   - `_order.yml` (Bruno internal ordering file).
+    /// Files inside `environments/` are counted separately and not added to `report.imported`.
+    fn copy_collection_files(
+        &self,
+        src_root: &Path,
+        src_dir: &Path,
+        dest_root: &Path,
+        report: &mut ImportReport,
+    ) -> ImportResult<()> {
+        for entry in std::fs::read_dir(src_dir)? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let rel = src_path.strip_prefix(src_root).unwrap_or(&src_path);
+            let dest_path = dest_root.join(rel);
+
+            if src_path.is_dir() {
+                std::fs::create_dir_all(&dest_path)?;
+                self.copy_collection_files(src_root, &src_path, dest_root, report)?;
+                continue;
+            }
+
+            let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "yml" | "yaml") {
+                continue;
+            }
+
+            let name = src_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+            // Root opencollection.yml is already written by repo.create().
+            if src_path == src_root.join("opencollection.yml") {
+                continue;
+            }
+            if name == "workspace.yml" || name == "_order.yml" {
+                continue;
+            }
+
+            if let Some(parent) = dest_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&src_path, &dest_path)?;
+
+            // Count only request files (not environment entries).
+            let in_environments = rel.components().any(|c| c.as_os_str() == "environments");
+            if !in_environments {
+                report.imported += 1;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn default_workspace_path() -> PathBuf {
     PathBuf::from(
         std::env::var("ROCKET_WORKSPACE_PATH").unwrap_or_else(|_| ".".into()),
     )
+}
+
+#[cfg(test)]
+mod modern_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn make_modern_collection(src: &std::path::Path) {
+        std::fs::write(
+            src.join("opencollection.yml"),
+            "opencollection: \"1.0.0\"\ninfo:\n  name: my-col\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("get-users.yml"),
+            "name: Get Users\nmethod: GET\nurl: https://api.example.com/users\n",
+        )
+        .unwrap();
+        let env_dir = src.join("environments");
+        std::fs::create_dir_all(&env_dir).unwrap();
+        std::fs::write(env_dir.join("local.yml"), "name: local\nvars: []\n").unwrap();
+    }
+
+    #[test]
+    fn modern_collection_copies_files_without_parsing() {
+        let src_dir = TempDir::new().unwrap();
+        let col_src = src_dir.path().join("my-col");
+        std::fs::create_dir_all(&col_src).unwrap();
+        make_modern_collection(&col_src);
+
+        let ws_dir = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws_dir.path());
+
+        let report = service
+            .import_modern_collection(&col_src, "default")
+            .expect("modern import should succeed");
+
+        assert_eq!(report.detected_type, "collection");
+        assert!(report.created_collections.contains(&"my-col".to_string()));
+        assert!(ws_dir.path().join("collections/my-col/opencollection.yml").exists());
+        assert!(ws_dir.path().join("collections/my-col/get-users.yml").exists());
+        assert!(ws_dir.path().join("collections/my-col/environments/local.yml").exists());
+        assert_eq!(report.imported, 1);
+    }
+
+    #[test]
+    fn modern_collection_skips_root_opencollection_yml() {
+        let src_dir = TempDir::new().unwrap();
+        let col_src = src_dir.path().join("col");
+        std::fs::create_dir_all(&col_src).unwrap();
+        make_modern_collection(&col_src);
+
+        let ws_dir = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws_dir.path());
+        service.import_modern_collection(&col_src, "default").unwrap();
+
+        let oc_path = ws_dir.path().join("collections/col/opencollection.yml");
+        assert!(oc_path.exists());
+    }
 }
 
 #[cfg(test)]
