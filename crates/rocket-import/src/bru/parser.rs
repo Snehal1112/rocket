@@ -103,6 +103,7 @@ fn parse_method_block(doc: &mut BruDocument, tokens: &[Token]) {
 fn parse_headers(doc: &mut BruDocument, tokens: &[Token]) {
     for (key, value) in kv_map(tokens) {
         let disabled = key.starts_with('~');
+        let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
         doc.headers.push(BruKeyValue { key, value, disabled });
     }
 }
@@ -110,6 +111,7 @@ fn parse_headers(doc: &mut BruDocument, tokens: &[Token]) {
 fn parse_vars(doc: &mut BruDocument, tokens: &[Token]) {
     for (key, value) in kv_map(tokens) {
         let disabled = key.starts_with('~');
+        let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
         doc.vars.push(BruKeyValue { key, value, disabled });
     }
 }
@@ -133,13 +135,17 @@ fn parse_body(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
         "text" => BruBody::Text(raw),
         "xml"  => BruBody::Xml(raw),
         "form-urlencoded" => BruBody::FormUrlEncoded(
-            kv_map(tokens).into_iter().map(|(key, value)| BruKeyValue {
-                disabled: key.starts_with('~'), key, value,
+            kv_map(tokens).into_iter().map(|(key, value)| {
+                let disabled = key.starts_with('~');
+                let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
+                BruKeyValue { key, value, disabled }
             }).collect()
         ),
         "multipart-form" => BruBody::Multipart(
-            kv_map(tokens).into_iter().map(|(key, value)| BruKeyValue {
-                disabled: key.starts_with('~'), key, value,
+            kv_map(tokens).into_iter().map(|(key, value)| {
+                let disabled = key.starts_with('~');
+                let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
+                BruKeyValue { key, value, disabled }
             }).collect()
         ),
         other => {
@@ -189,7 +195,6 @@ fn parse_auth(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bru::ast::*;
 
     fn parse(s: &str) -> BruDocument {
         super::parse(s).unwrap()
@@ -217,7 +222,7 @@ mod tests {
         assert_eq!(doc.headers.len(), 2);
         assert_eq!(doc.headers[0].key, "Content-Type");
         assert!(!doc.headers[0].disabled);
-        assert_eq!(doc.headers[1].key, "~X-Debug");
+        assert_eq!(doc.headers[1].key, "X-Debug");
         assert!(doc.headers[1].disabled);
     }
 

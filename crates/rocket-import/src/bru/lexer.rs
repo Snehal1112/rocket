@@ -52,10 +52,16 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                         let inner_trimmed = inner.trim();
                         if inner_trimmed == closer {
                             if is_raw && !raw_lines.is_empty() {
-                                // Trim one leading indent level from raw lines.
+                                // Detect indent width from the first non-empty raw line
+                                // so 2-space, 4-space, and tab-indented files all work.
+                                let indent_len = raw_lines
+                                    .iter()
+                                    .find(|l| !l.trim().is_empty())
+                                    .map(|l| l.len() - l.trim_start().len())
+                                    .unwrap_or(0);
                                 let content = raw_lines
                                     .iter()
-                                    .map(|l| l.trim_start_matches("  "))
+                                    .map(|l| if l.len() >= indent_len { &l[indent_len..] } else { l.trim_start() })
                                     .collect::<Vec<_>>()
                                     .join("\n");
                                 tokens.push(Token::RawText(content.trim().to_string()));
@@ -138,6 +144,14 @@ mod tests {
             key: "url".into(),
             value: "https://example.com".into(),
         }));
+    }
+
+    #[test]
+    fn raw_text_strips_indent_regardless_of_width() {
+        // 4-space indented body — should produce the same RawText as 2-space.
+        let input = "body:json {\n    {\"a\": 1}\n}\n";
+        let tokens = tokenise(input).unwrap();
+        assert_eq!(tokens[1], Token::RawText("{\"a\": 1}".into()));
     }
 
     #[test]
