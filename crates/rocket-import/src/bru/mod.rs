@@ -3,6 +3,7 @@ pub(crate) mod ast;
 pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod yml_adapter;
+pub(crate) mod zip_extractor;
 
 use std::path::Path;
 use crate::error::ImportResult;
