@@ -10,7 +10,6 @@ use rocket_collection::settings::{CollectionSettings, CollectionVariable};
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
-use rocket_workspace::{CollectionReference, CollectionRefType, WorkspaceConfig, WorkspaceEnvironmentsConfig};
 use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
 use rocket_shared::description::Documentation;
 use rocket_shared::oauth2::{
@@ -19,6 +18,7 @@ use rocket_shared::oauth2::{
 };
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam, RequestSettings, RequestSettingValue};
 use rocket_shared::variable_value::VariableValue;
+use rocket_workspace::{CollectionReference, CollectionRefType, WorkspaceConfig, WorkspaceEnvironmentsConfig};
 
 // ============================================================
 // Header conversions
