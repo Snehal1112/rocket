@@ -5,10 +5,10 @@
  * Usage: npx tsx scripts/capture-illustrations.ts
  */
 
+import { readdirSync, readFileSync } from 'fs';
+import { dirname, resolve } from 'path';
 import { chromium } from 'playwright';
-import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync, readdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,20 +61,20 @@ function convertClassName(className: string): string {
 
     // Map color names to CSS values.
     const colorMap: Record<string, string> = {
-      'primary': 'var(--color-primary)',
+      primary: 'var(--color-primary)',
       'primary-foreground': 'var(--color-primary-foreground)',
-      'background': 'var(--color-background)',
-      'foreground': 'var(--color-foreground)',
-      'muted': 'var(--color-muted)',
+      background: 'var(--color-background)',
+      foreground: 'var(--color-foreground)',
+      muted: 'var(--color-muted)',
       'muted-foreground': 'var(--color-muted-foreground)',
-      'accent': 'var(--color-accent)',
-      'destructive': 'var(--color-destructive)',
+      accent: 'var(--color-accent)',
+      destructive: 'var(--color-destructive)',
       'destructive-foreground': 'var(--color-destructive-foreground)',
-      'border': 'var(--color-border)',
+      border: 'var(--color-border)',
     };
 
     const rgbaMap: Record<string, string> = {
-      'white': '255,255,255',
+      white: '255,255,255',
       'orange-400': '251,146,60',
       'yellow-400': '250,204,21',
       'emerald-400': '52,211,153',
@@ -86,7 +86,9 @@ function convertClassName(className: string): string {
 
     if (colorMap[color]) {
       if (op < 1) {
-        attrs.push(`${prop}="color-mix(in srgb, ${colorMap[color]} ${Math.round(op * 100)}%, transparent)"`);
+        attrs.push(
+          `${prop}="color-mix(in srgb, ${colorMap[color]} ${Math.round(op * 100)}%, transparent)"`,
+        );
       } else {
         attrs.push(`${prop}="${colorMap[color]}"`);
       }
@@ -124,13 +126,19 @@ function extractSvg(tsxContent: string): string {
   if (svg.includes('{[0, 45, 90')) {
     // Big gear teeth.
     const bigTeeth = [0, 45, 90, 135, 180, 225, 270, 315]
-      .map(a => `<rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(${a})" fill="color-mix(in srgb, var(--color-muted-foreground) 20%, transparent)"/>`)
+      .map(
+        (a) =>
+          `<rect x="-3" y="-15" width="6" height="6" rx="1" transform="rotate(${a})" fill="color-mix(in srgb, var(--color-muted-foreground) 20%, transparent)"/>`,
+      )
       .join('\n          ');
     svg = svg.replace(/\{[^}]*\[0,\s*45,\s*90[^}]*\.map\(\(angle\)[^}]*\)\}/s, bigTeeth);
 
     // Small gear teeth.
     const smallTeeth = [0, 60, 120, 180, 240, 300]
-      .map(a => `<rect x="-2.5" y="-10" width="5" height="4" rx="1" transform="rotate(${a})" fill="color-mix(in srgb, var(--color-muted-foreground) 15%, transparent)"/>`)
+      .map(
+        (a) =>
+          `<rect x="-2.5" y="-10" width="5" height="4" rx="1" transform="rotate(${a})" fill="color-mix(in srgb, var(--color-muted-foreground) 15%, transparent)"/>`,
+      )
       .join('\n          ');
     svg = svg.replace(/\{[^}]*\[0,\s*60,\s*120[^}]*\.map\(\(angle\)[^}]*\)\}/s, smallTeeth);
   }
@@ -138,7 +146,10 @@ function extractSvg(tsxContent: string): string {
   // Expand .map() clock marks for RocketClock (12 marks at 30 degree intervals).
   if (svg.includes('{[0, 30, 60')) {
     const marks = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
-      .map(a => `<line x1="0" y1="-19" x2="0" y2="-17" transform="rotate(${a})" stroke="color-mix(in srgb, var(--color-muted-foreground) 25%, transparent)" stroke-width="1.5" stroke-linecap="round"/>`)
+      .map(
+        (a) =>
+          `<line x1="0" y1="-19" x2="0" y2="-17" transform="rotate(${a})" stroke="color-mix(in srgb, var(--color-muted-foreground) 25%, transparent)" stroke-width="1.5" stroke-linecap="round"/>`,
+      )
       .join('\n          ');
     svg = svg.replace(/\{[^}]*\[0,\s*30,\s*60[^}]*\.map\(\(angle\)[^}]*\)\}/s, marks);
   }
@@ -152,7 +163,7 @@ function extractSvg(tsxContent: string): string {
 async function main(): Promise<void> {
   // Find all Rocket*.tsx files.
   const files = readdirSync(ILLUST_DIR)
-    .filter(f => f.startsWith('Rocket') && f.endsWith('.tsx'))
+    .filter((f) => f.startsWith('Rocket') && f.endsWith('.tsx'))
     .sort();
 
   console.log(`Found ${files.length} illustrations.\n`);
@@ -170,7 +181,9 @@ async function main(): Promise<void> {
     }
 
     for (const [theme, config] of Object.entries(THEMES)) {
-      const cssVars = Object.entries(config.vars).map(([k, v]) => `${k}: ${v};`).join(' ');
+      const cssVars = Object.entries(config.vars)
+        .map(([k, v]) => `${k}: ${v};`)
+        .join(' ');
 
       const html = `<!DOCTYPE html><html><head><style>
         :root { ${cssVars} }

@@ -1,16 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { LeafNode, PaneNode, RequestTab } from '@/types/pane-types';
 import {
-  findLeaf,
-  findTabInTree,
-  updateLeaf,
-  removeLeaf,
-  splitLeaf,
   createDefaultLeaf,
   createDefaultRequest,
-  findFirstLeaf,
   findActiveLeaf,
+  findFirstLeaf,
+  findLeaf,
+  findTabInTree,
+  removeLeaf,
+  splitLeaf,
+  updateLeaf,
 } from '../pane-utils';
-import type { PaneNode, LeafNode, RequestTab } from '@/types/pane-types';
 
 describe('pane-utils', () => {
   const leaf1 = createDefaultLeaf('g1');
@@ -185,5 +185,4 @@ describe('pane-utils', () => {
     const active = findActiveLeaf(splitTree, 'ghost');
     expect(active.groupId).toBe('g1');
   });
-
 });

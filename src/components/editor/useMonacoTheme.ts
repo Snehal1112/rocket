@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react';
 import type { Monaco } from '@monaco-editor/react';
 import { loader } from '@monaco-editor/react';
+import { useEffect, useState } from 'react';
 
 export function useMonacoTheme() {
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains('dark'),
-  );
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');

@@ -3,9 +3,7 @@ import { cn } from '@/lib/utils';
 
 // Tracks dark mode by observing the html element class changes.
 function useIsDark(): boolean {
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains('dark'),
-  );
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -34,7 +32,7 @@ export function EditorSkeleton() {
         'flex h-full w-full overflow-hidden font-mono text-xs',
         isDark ? 'bg-[#1f1f1f]' : 'bg-white',
       )}
-      aria-hidden="true"
+      aria-hidden='true'
     >
       {/* Line numbers column. */}
       <div
@@ -46,17 +44,17 @@ export function EditorSkeleton() {
         {[0, 1, 2, 3].map((n) => (
           <div
             key={n}
-            className="h-2 w-6 animate-pulse rounded-sm"
+            className='h-2 w-6 animate-pulse rounded-sm'
             style={{ background: isDark ? '#444' : '#ddd' }}
           />
         ))}
       </div>
 
       {/* Code content area with shimmer lines. */}
-      <div className="flex flex-1 animate-pulse flex-col gap-3 p-3">
-        {LINE_WIDTHS.map((width, i) => (
+      <div className='flex flex-1 animate-pulse flex-col gap-3 p-3'>
+        {LINE_WIDTHS.map((width) => (
           <div
-            key={i}
+            key={width}
             className={cn('h-2 rounded-sm', width)}
             style={{ background: isDark ? '#2d2d2d' : '#ececec' }}
           />

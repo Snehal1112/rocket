@@ -1,10 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  parseQueryParams,
-  buildUrl,
-  extractPathParams,
-  splitUrl,
-} from '../url-params';
+import { describe, expect, it } from 'vitest';
+import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '../url-params';
 
 // ─── splitUrl ────────────────────────────────────────────────────────────────
 
@@ -61,9 +56,7 @@ describe('parseQueryParams', () => {
   });
 
   it('decodes percent-encoded characters in keys and values', () => {
-    const entries = parseQueryParams(
-      'https://example.com?q=hello%20world&tag=foo%2Bbar'
-    );
+    const entries = parseQueryParams('https://example.com?q=hello%20world&tag=foo%2Bbar');
     expect(entries[0]).toMatchObject({ key: 'q', value: 'hello world' });
     expect(entries[1]).toMatchObject({ key: 'tag', value: 'foo+bar' });
   });
@@ -112,9 +105,7 @@ describe('buildUrl', () => {
   });
 
   it('returns the base URL unchanged when params array is empty', () => {
-    expect(buildUrl('https://api.example.com/users', [])).toBe(
-      'https://api.example.com/users'
-    );
+    expect(buildUrl('https://api.example.com/users', [])).toBe('https://api.example.com/users');
   });
 
   it('returns the base URL when all params are disabled', () => {
@@ -144,21 +135,15 @@ describe('buildUrl', () => {
 
 describe('extractPathParams', () => {
   it('extracts colon-style params', () => {
-    expect(
-      extractPathParams('https://api.example.com/users/:userId')
-    ).toEqual(['userId']);
+    expect(extractPathParams('https://api.example.com/users/:userId')).toEqual(['userId']);
   });
 
   it('extracts brace-style params', () => {
-    expect(
-      extractPathParams('https://api.example.com/users/{userId}')
-    ).toEqual(['userId']);
+    expect(extractPathParams('https://api.example.com/users/{userId}')).toEqual(['userId']);
   });
 
   it('extracts multiple mixed-style params', () => {
-    const result = extractPathParams(
-      'https://api.example.com/users/:userId/posts/{postId}'
-    );
+    const result = extractPathParams('https://api.example.com/users/:userId/posts/{postId}');
     expect(result).toEqual(['userId', 'postId']);
   });
 
@@ -168,16 +153,12 @@ describe('extractPathParams', () => {
 
   it('does not extract params from the query string', () => {
     // Query string contains :fake and {also_fake} — should be ignored.
-    const result = extractPathParams(
-      'https://api.example.com/path?q=:fake&other={also_fake}'
-    );
+    const result = extractPathParams('https://api.example.com/path?q=:fake&other={also_fake}');
     expect(result).toEqual([]);
   });
 
   it('extracts multiple colon-style params from the same path', () => {
-    const result = extractPathParams(
-      'https://api.example.com/:org/:repo/issues/:number'
-    );
+    const result = extractPathParams('https://api.example.com/:org/:repo/issues/:number');
     expect(result).toEqual(['org', 'repo', 'number']);
   });
 });

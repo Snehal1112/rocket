@@ -1,10 +1,14 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGitStore } from '../git-store';
 
 vi.mock('@/lib/tauri-api', () => ({
   gitIsRepo: vi.fn(),
   gitStatus: vi.fn().mockResolvedValue({
-    branch: 'main', files: [], ahead: 0, behind: 0, isClean: true,
+    branch: 'main',
+    files: [],
+    ahead: 0,
+    behind: 0,
+    isClean: true,
   }),
   gitBranches: vi.fn().mockResolvedValue({ current: 'main', local: [], remote: [] }),
   gitListRemotes: vi.fn().mockResolvedValue([]),
@@ -17,7 +21,15 @@ vi.mock('@/lib/tauri-api', () => ({
   gitStage: vi.fn().mockResolvedValue(undefined),
   gitUnstage: vi.fn().mockResolvedValue(undefined),
   gitDiscard: vi.fn().mockResolvedValue(undefined),
-  gitCommit: vi.fn().mockResolvedValue({ id: 'abc1234', fullId: 'abc1234abc1234', message: 'test commit', author: 'Test', authorEmail: 'test@test.com', timestamp: '2026-01-01', filesChanged: 1 }),
+  gitCommit: vi.fn().mockResolvedValue({
+    id: 'abc1234',
+    fullId: 'abc1234abc1234',
+    message: 'test commit',
+    author: 'Test',
+    authorEmail: 'test@test.com',
+    timestamp: '2026-01-01',
+    filesChanged: 1,
+  }),
   gitStashSave: vi.fn().mockResolvedValue(undefined),
   gitStashPop: vi.fn().mockResolvedValue(undefined),
   gitStashApply: vi.fn().mockResolvedValue(undefined),
@@ -146,8 +158,9 @@ describe('setCollection', () => {
   });
 
   it('valid repo path loads status, branches, remotes, and stashes', async () => {
-    const { gitIsRepo, gitStatus, gitBranches, gitListRemotes, gitStashList } =
-      await import('@/lib/tauri-api');
+    const { gitIsRepo, gitStatus, gitBranches, gitListRemotes, gitStashList } = await import(
+      '@/lib/tauri-api'
+    );
     vi.mocked(gitIsRepo).mockResolvedValueOnce(true);
 
     await useGitStore.getState().setCollection('/test/repo');
@@ -277,7 +290,10 @@ describe('staging', () => {
     const { gitStage } = await import('@/lib/tauri-api');
     useGitStore.setState({
       status: {
-        branch: 'main', ahead: 0, behind: 0, isClean: false,
+        branch: 'main',
+        ahead: 0,
+        behind: 0,
+        isClean: false,
         files: [
           { path: 'already-staged.bru', status: 'modified', staged: true },
           { path: 'unstaged-modified.bru', status: 'modified', staged: false },
@@ -458,7 +474,11 @@ describe('remotes', () => {
 
     await useGitStore.getState().addRemote('upstream', 'https://github.com/org/repo.git');
 
-    expect(gitAddRemote).toHaveBeenCalledWith('/test/repo', 'upstream', 'https://github.com/org/repo.git');
+    expect(gitAddRemote).toHaveBeenCalledWith(
+      '/test/repo',
+      'upstream',
+      'https://github.com/org/repo.git',
+    );
     expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
   });
 
@@ -476,7 +496,11 @@ describe('remotes', () => {
 
     await useGitStore.getState().setRemoteUrl('origin', 'https://github.com/org/new.git');
 
-    expect(gitSetRemoteUrl).toHaveBeenCalledWith('/test/repo', 'origin', 'https://github.com/org/new.git');
+    expect(gitSetRemoteUrl).toHaveBeenCalledWith(
+      '/test/repo',
+      'origin',
+      'https://github.com/org/new.git',
+    );
     expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
   });
 
@@ -507,7 +531,9 @@ describe('conflicts', () => {
 
     await useGitStore.getState().resolveConflict('foo.bru', { resolution: 'ours' });
 
-    expect(gitResolveConflict).toHaveBeenCalledWith('/test/repo', 'foo.bru', { resolution: 'ours' });
+    expect(gitResolveConflict).toHaveBeenCalledWith('/test/repo', 'foo.bru', {
+      resolution: 'ours',
+    });
     expect(gitStatus).toHaveBeenCalledWith('/test/repo');
     expect(gitConflicts).toHaveBeenCalledWith('/test/repo');
   });

@@ -1,11 +1,17 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { useGitStore } from '@/stores/git-store';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { GitCredentials } from '@/lib/tauri-api';
+import { useGitStore } from '@/stores/git-store';
 
 type AuthType = 'sshKey' | 'sshAgent' | 'userPass' | 'token';
 
@@ -39,22 +45,22 @@ export function GitCredentialsDialog() {
 
   return (
     <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className='sm:max-w-sm'>
         <DialogHeader>
           <DialogTitle>Git Credentials</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className='space-y-3'>
           <div>
-            <Label className="text-sm">Authentication Type</Label>
+            <Label className='text-sm'>Authentication Type</Label>
             <Select value={authType} onValueChange={(v) => setAuthType(v as AuthType)}>
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className='h-8 text-sm'>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="sshAgent">SSH Agent</SelectItem>
-                <SelectItem value="sshKey">SSH Key</SelectItem>
-                <SelectItem value="userPass">Username / Password</SelectItem>
-                <SelectItem value="token">Token</SelectItem>
+                <SelectItem value='sshAgent'>SSH Agent</SelectItem>
+                <SelectItem value='sshKey'>SSH Key</SelectItem>
+                <SelectItem value='userPass'>Username / Password</SelectItem>
+                <SelectItem value='token'>Token</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -62,12 +68,21 @@ export function GitCredentialsDialog() {
           {authType === 'sshKey' && (
             <>
               <div>
-                <Label className="text-sm">Private Key Path</Label>
-                <Input value={privateKeyPath} onChange={(e) => setPrivateKeyPath(e.target.value)} className="h-8 text-sm" />
+                <Label className='text-sm'>Private Key Path</Label>
+                <Input
+                  value={privateKeyPath}
+                  onChange={(e) => setPrivateKeyPath(e.target.value)}
+                  className='h-8 text-sm'
+                />
               </div>
               <div>
-                <Label className="text-sm">Passphrase (optional)</Label>
-                <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className="h-8 text-sm" />
+                <Label className='text-sm'>Passphrase (optional)</Label>
+                <Input
+                  type='password'
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  className='h-8 text-sm'
+                />
               </div>
             </>
           )}
@@ -75,24 +90,40 @@ export function GitCredentialsDialog() {
           {authType === 'userPass' && (
             <>
               <div>
-                <Label className="text-sm">Username</Label>
-                <Input value={username} onChange={(e) => setUsername(e.target.value)} className="h-8 text-sm" />
+                <Label className='text-sm'>Username</Label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className='h-8 text-sm'
+                />
               </div>
               <div>
-                <Label className="text-sm">Password</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-sm" />
+                <Label className='text-sm'>Password</Label>
+                <Input
+                  type='password'
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className='h-8 text-sm'
+                />
               </div>
             </>
           )}
 
           {authType === 'token' && (
             <div>
-              <Label className="text-sm">Token</Label>
-              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} className="h-8 text-sm" />
+              <Label className='text-sm'>Token</Label>
+              <Input
+                type='password'
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                className='h-8 text-sm'
+              />
             </div>
           )}
 
-          <Button onClick={handleConnect} className="w-full" size="sm">Connect</Button>
+          <Button onClick={handleConnect} className='w-full' size='sm'>
+            Connect
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

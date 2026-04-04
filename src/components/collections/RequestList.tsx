@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Folder, Search } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
-import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
+import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
 
 interface RequestListProps {
@@ -88,45 +88,50 @@ export function RequestList({ items, collectionName }: RequestListProps) {
   const totalCount = groups.reduce((sum, g) => sum + g.requests.length, 0);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className='flex flex-col gap-3'>
       {/* Filter input. */}
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+      <div className='relative'>
+        <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground' />
         <Input
-          placeholder="Filter by name or URL…"
+          placeholder='Filter by name or URL…'
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="pl-8 h-8 text-sm"
+          className='pl-8 h-8 text-sm'
         />
       </div>
 
       {/* Request count summary. */}
-      <p className="text-xs text-muted-foreground">
+      <p className='text-xs text-muted-foreground'>
         {totalCount} {totalCount === 1 ? 'request' : 'requests'}
       </p>
 
       {filteredGroups.length === 0 ? (
-        <p className="text-xs text-muted-foreground py-4 text-center">No requests match your filter.</p>
+        <p className='text-xs text-muted-foreground py-4 text-center'>
+          No requests match your filter.
+        </p>
       ) : (
-        <div className="flex flex-col gap-4">
-          {filteredGroups.map((group, gi) => (
-            <div key={gi}>
+        <div className='flex flex-col gap-4'>
+          {filteredGroups.map((group) => (
+            <div key={group.folderName ?? 'root'}>
               {/* Folder header — only shown for folder groups. */}
               {group.folderName !== null && (
-                <div className="flex items-center gap-1.5 mb-1.5 px-1">
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">{group.folderName}</span>
+                <div className='flex items-center gap-1.5 mb-1.5 px-1'>
+                  <Folder className='h-3.5 w-3.5 text-muted-foreground' />
+                  <span className='text-xs font-medium text-muted-foreground'>
+                    {group.folderName}
+                  </span>
                 </div>
               )}
 
               {/* Request rows. */}
-              <div className="rounded-md border overflow-hidden">
+              <div className='rounded-md border overflow-hidden'>
                 {group.requests.map((req, ri) => {
-                  const methodClass = METHOD_BADGE_COLOR[req.method] ?? 'text-foreground border-border bg-muted';
+                  const methodClass =
+                    METHOD_BADGE_COLOR[req.method] ?? 'text-foreground border-border bg-muted';
                   return (
                     <button
                       key={req.uid}
-                      type="button"
+                      type='button'
                       onClick={() => openRequest(req, req.name)}
                       className={cn(
                         'w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors',
@@ -134,15 +139,18 @@ export function RequestList({ items, collectionName }: RequestListProps) {
                       )}
                     >
                       <Badge
-                        variant="outline"
-                        className={cn('text-2xs font-semibold w-14 justify-center shrink-0', methodClass)}
+                        variant='outline'
+                        className={cn(
+                          'text-2xs font-semibold w-14 justify-center shrink-0',
+                          methodClass,
+                        )}
                       >
                         {req.method}
                       </Badge>
-                      <span className="text-sm font-medium truncate min-w-0 flex-shrink-0 max-w-[30%]">
+                      <span className='text-sm font-medium truncate min-w-0 flex-shrink-0 max-w-[30%]'>
                         {req.name}
                       </span>
-                      <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
+                      <span className='text-xs text-muted-foreground truncate min-w-0 flex-1'>
                         {req.url}
                       </span>
                     </button>

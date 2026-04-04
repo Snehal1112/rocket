@@ -1,14 +1,8 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Send, Loader2, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { RocketLiftOff } from "@/components/illustrations";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Loader2, Send, Zap } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RocketLiftOff } from '@/components/illustrations';
+import { LoadTestDialog } from '@/components/request/LoadTestDialog';
+import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,83 +12,72 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { cn } from "@/lib/utils";
-import { usePaneStore } from "@/stores/pane-store";
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import {
-  parseQueryParams,
-  buildUrl,
-  splitUrl,
-  extractPathParams,
-} from "@/lib/url-params";
-import { useExecuteRequest } from "@/hooks/useExecuteRequest";
-import { QueryParamsEditor } from "./QueryParamsEditor";
-import { PathParamsPanel } from "./PathParamsPanel";
-import { HeadersEditor } from "./HeadersEditor";
-import { BodyEditor } from "./BodyEditor";
-import { AuthEditor } from "./AuthEditor";
-import { ResponseBodyViewer } from "@/components/response/ResponseBodyViewer";
-import { SaveRequestButton } from "./SaveRequestButton";
-import { VariableAwareUrlInput } from "./VariableAwareUrlInput";
-import { BrunoTabBar } from "./BrunoTabBar";
-import { METHOD_TEXT_COLOR } from "@/lib/colors";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useExecuteRequest } from '@/hooks/useExecuteRequest';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
+import type { ParsedCurl } from '@/lib/curl-parser';
+import { findTabInTree } from '@/lib/pane-utils';
+import { type CollectionVariable, getCollectionSettings, updateRequestDocs } from '@/lib/tauri-api';
+import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
+import { buildScopedContext } from '@/lib/url-variables';
+import { cn } from '@/lib/utils';
+import { useEnvStore } from '@/stores/env-store';
+import { usePaneStore } from '@/stores/pane-store';
 import type {
-  RequestTab,
+  AuthState,
+  BodyState,
   HttpMethod,
   KeyValueEntry,
-  BodyState,
-  AuthState,
-} from "@/types/pane-types";
-import { isRequestTab } from "@/types/pane-types";
-import { findTabInTree } from "@/lib/pane-utils";
-import type { ParsedCurl } from "@/lib/curl-parser";
-import {
-  getCollectionSettings,
-  updateRequestDocs,
-  type CollectionVariable,
-} from "@/lib/tauri-api";
-import { buildScopedContext } from "@/lib/url-variables";
-import { useEnvStore } from "@/stores/env-store";
-import { LoadTestDialog } from "@/components/request/LoadTestDialog";
-import { SaveToCollectionDialog } from "./SaveToCollectionDialog";
-import { RequestVariablesPanel } from "./RequestVariablesPanel";
-import { RequestDocsPanel } from "./RequestDocsPanel";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  RequestTab,
+} from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
+import { AuthEditor } from './AuthEditor';
+import { BodyEditor } from './BodyEditor';
+import { BrunoTabBar } from './BrunoTabBar';
+import { HeadersEditor } from './HeadersEditor';
+import { PathParamsPanel } from './PathParamsPanel';
+import { QueryParamsEditor } from './QueryParamsEditor';
+import { RequestDocsPanel } from './RequestDocsPanel';
+import { RequestVariablesPanel } from './RequestVariablesPanel';
+import { SaveRequestButton } from './SaveRequestButton';
+import { SaveToCollectionDialog } from './SaveToCollectionDialog';
+import { VariableAwareUrlInput } from './VariableAwareUrlInput';
 
-const METHODS: HttpMethod[] = [
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "OPTIONS",
-  "HEAD",
+const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
+
+const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
+  { label: 'None', value: 'none' },
+  { label: 'JSON', value: 'json' },
+  { label: 'XML', value: 'xml' },
+  { label: 'Text', value: 'text' },
+  { label: 'Form Data', value: 'formdata' },
+  { label: 'Binary', value: 'binary' },
 ];
 
-const BODY_MODES: { label: string; value: BodyState["mode"] }[] = [
-  { label: "None", value: "none" },
-  { label: "JSON", value: "json" },
-  { label: "XML", value: "xml" },
-  { label: "Text", value: "text" },
-  { label: "Form Data", value: "formdata" },
-  { label: "Binary", value: "binary" },
-];
-
-const BASE_AUTH_TYPES: { label: string; value: AuthState["authType"] }[] = [
-  { label: "None", value: "none" },
-  { label: "Basic", value: "basic" },
-  { label: "Bearer", value: "bearer" },
-  { label: "API Key", value: "api-key" },
-  { label: "OAuth 2.0", value: "oauth2" },
-  { label: "AWS Sig v4", value: "aws-sig-v4" },
+const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
+  { label: 'None', value: 'none' },
+  { label: 'Basic', value: 'basic' },
+  { label: 'Bearer', value: 'bearer' },
+  { label: 'API Key', value: 'api-key' },
+  { label: 'OAuth 2.0', value: 'oauth2' },
+  { label: 'AWS Sig v4', value: 'aws-sig-v4' },
 ];
 
 const INHERIT_AUTH_OPTION = {
-  label: "Inherit from parent",
-  value: "inherit" as AuthState["authType"],
+  label: 'Inherit from parent',
+  value: 'inherit' as AuthState['authType'],
 };
 
-type SectionTab = "params" | "headers" | "body" | "auth" | "variables" | "docs";
+type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables' | 'docs';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -107,18 +90,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const { send, sending } = useExecuteRequest(tab.id);
 
-  const [activeSection, setActiveSection] = useState<SectionTab>("params");
-  const [docMode, setDocMode] = useState<"edit" | "preview">("preview");
+  const [activeSection, setActiveSection] = useState<SectionTab>('params');
+  const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
-  const [urlError, setUrlError] = useState("");
-  const [collectionVars, setCollectionVars] = useState<Record<string, string>>(
-    {},
-  );
-  const [collectionVariables, setCollectionVariables] = useState<
-    CollectionVariable[]
-  >([]);
+  const [urlError, setUrlError] = useState('');
+  const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
+  const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
   const [requestVarCount, setRequestVarCount] = useState(0);
 
@@ -141,9 +120,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       const detail = (e as CustomEvent<{ tabId: string }>).detail;
       if (detail?.tabId === tab.id) setSaveToCollectionOpen(true);
     };
-    window.addEventListener("rocket:save-to-collection", handler);
-    return () =>
-      window.removeEventListener("rocket:save-to-collection", handler);
+    window.addEventListener('rocket:save-to-collection', handler);
+    return () => window.removeEventListener('rocket:save-to-collection', handler);
   }, [tab.id]);
 
   // Fetch collection variables for URL input overlay.
@@ -187,11 +165,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       };
       const onUp = () => {
         setIsDragging(false);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
       };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
     },
     [requestHeight],
   );
@@ -216,7 +194,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           return {
             id: crypto.randomUUID(),
             key: name,
-            value: "",
+            value: '',
             enabled: true,
           };
         });
@@ -242,7 +220,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const handleCurlImport = useCallback(
     (parsed: ParsedCurl) => {
       const patch: Partial<typeof request> = {
-        method: (parsed.method as HttpMethod) || "GET",
+        method: (parsed.method as HttpMethod) || 'GET',
         url: parsed.url,
         headers: parsed.headers.map((h) => ({
           id: crypto.randomUUID(),
@@ -260,9 +238,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         };
       }
 
-      if (parsed.auth?.type === "basic") {
+      if (parsed.auth?.type === 'basic') {
         patch.auth = {
-          authType: "basic",
+          authType: 'basic',
           basic: {
             username: parsed.auth.username,
             password: parsed.auth.password,
@@ -274,17 +252,17 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       patch.queryParams = parseQueryParams(parsed.url);
 
       updateRequest(tab.id, patch);
-      setUrlError("");
+      setUrlError('');
       setCurlImported(true);
       setTimeout(() => setCurlImported(false), 3000);
 
       // Auto-switch to the most relevant tab for the imported data.
       if (parsed.body) {
-        setActiveSection("body");
+        setActiveSection('body');
       } else if (parsed.auth) {
-        setActiveSection("auth");
+        setActiveSection('auth');
       } else if (parsed.headers.length > 0) {
-        setActiveSection("headers");
+        setActiveSection('headers');
       }
     },
     [tab.id, updateRequest],
@@ -325,14 +303,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     const envVars: Record<string, string> = {};
     if (activeEnvIdForScope) {
       const env = environments.find((e) => e.name === activeEnvIdForScope);
-      if (env)
-        for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
+      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
     }
     const globalVars: Record<string, string> = globalEnv
       ? Object.fromEntries(
-          globalEnv.variables
-            .filter((v) => v.enabled)
-            .map((v) => [v.key, v.value]),
+          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
         )
       : {};
     return buildScopedContext({
@@ -342,55 +317,47 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       processEnvVars,
       collectionVars: collectionVariables,
     });
-  }, [
-    activeEnvIdForScope,
-    environments,
-    globalEnv,
-    processEnvVars,
-    collectionVariables,
-  ]);
+  }, [activeEnvIdForScope, environments, globalEnv, processEnvVars, collectionVariables]);
 
   const authTypeOptions = useMemo(
-    () =>
-      tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES,
+    () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),
     [tab.source],
   );
 
   const handleAuthTypeChange = useCallback(
-    (authType: AuthState["authType"]) => {
+    (authType: AuthState['authType']) => {
       const next: AuthState = { authType };
-      if (authType === "basic") next.basic = { username: "", password: "" };
-      if (authType === "bearer") next.bearer = { token: "" };
-      if (authType === "api-key")
-        next.apiKey = { key: "", value: "", addTo: "header" };
-      if (authType === "oauth2")
+      if (authType === 'basic') next.basic = { username: '', password: '' };
+      if (authType === 'bearer') next.bearer = { token: '' };
+      if (authType === 'api-key') next.apiKey = { key: '', value: '', addTo: 'header' };
+      if (authType === 'oauth2')
         next.oauth2 = {
-          grantType: "client_credentials",
-          authorizationUrl: "",
-          tokenUrl: "",
-          callbackUrl: "https://exchange4all.local/webapp/#oidc-callback",
-          clientId: "",
-          clientSecret: "",
-          scope: "",
-          state: "",
-          username: "",
-          password: "",
-          clientAuthentication: "body",
-          headerPrefix: "Bearer",
-          addTokenTo: "header",
+          grantType: 'client_credentials',
+          authorizationUrl: '',
+          tokenUrl: '',
+          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
+          clientId: '',
+          clientSecret: '',
+          scope: '',
+          state: '',
+          username: '',
+          password: '',
+          clientAuthentication: 'body',
+          headerPrefix: 'Bearer',
+          addTokenTo: 'header',
           verifySsl: true,
-          accessToken: "",
-          refreshToken: "",
+          accessToken: '',
+          refreshToken: '',
           expiresIn: null,
           tokenAcquiredAt: null,
         };
-      if (authType === "aws-sig-v4")
+      if (authType === 'aws-sig-v4')
         next.awsSigV4 = {
-          accessKey: "",
-          secretKey: "",
-          region: "",
-          service: "",
-          sessionToken: "",
+          accessKey: '',
+          secretKey: '',
+          region: '',
+          service: '',
+          sessionToken: '',
         };
       updateRequest(tab.id, { auth: next });
     },
@@ -404,7 +371,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         await updateRequestDocs(tab.source.collection, tab.source.path, docs);
         updateRequest(tab.id, { docs });
       } catch (err) {
-        console.error("[RequestPanel] save docs failed:", err);
+        console.error('[RequestPanel] save docs failed:', err);
       }
     },
     [tab.id, tab.source, updateRequest],
@@ -413,88 +380,88 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const tabDefs = useMemo(
     () => [
       {
-        value: "params",
+        value: 'params',
         label: (
           <>
             Params
             {enabledParamCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {enabledParamCount}
               </span>
             )}
           </>
         ),
-        isActive: activeSection === "params",
-        onClick: () => setActiveSection("params"),
+        isActive: activeSection === 'params',
+        onClick: () => setActiveSection('params'),
       },
       {
-        value: "headers",
+        value: 'headers',
         label: (
           <>
             Headers
             {enabledHeaderCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {enabledHeaderCount}
               </span>
             )}
           </>
         ),
-        isActive: activeSection === "headers",
-        onClick: () => setActiveSection("headers"),
+        isActive: activeSection === 'headers',
+        onClick: () => setActiveSection('headers'),
       },
       {
-        value: "body",
+        value: 'body',
         label: (
           <>
             Body
-            {request.body.mode !== "none" && (
-              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+            {request.body.mode !== 'none' && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
             )}
           </>
         ),
-        isActive: activeSection === "body",
-        onClick: () => setActiveSection("body"),
+        isActive: activeSection === 'body',
+        onClick: () => setActiveSection('body'),
       },
       {
-        value: "auth",
+        value: 'auth',
         label: (
           <>
             Auth
-            {request.auth.authType !== "none" && (
-              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+            {request.auth.authType !== 'none' && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
             )}
           </>
         ),
-        isActive: activeSection === "auth",
-        onClick: () => setActiveSection("auth"),
+        isActive: activeSection === 'auth',
+        onClick: () => setActiveSection('auth'),
       },
       {
-        value: "variables",
+        value: 'variables',
         label: (
           <>
             Variables
             {requestVarCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold">
+              <span className='ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-muted px-1.5 text-xs font-semibold'>
                 {requestVarCount}
               </span>
             )}
           </>
         ),
-        isActive: activeSection === "variables",
-        onClick: () => setActiveSection("variables"),
+        isActive: activeSection === 'variables',
+        onClick: () => setActiveSection('variables'),
       },
       {
-        value: "docs",
+        value: 'docs',
         label: (
           <>
             Docs
             {request.docs && (
-              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary" />
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
             )}
           </>
         ),
-        isActive: activeSection === "docs",
-        onClick: () => setActiveSection("docs"),
+        isActive: activeSection === 'docs',
+        onClick: () => setActiveSection('docs'),
       },
     ],
     [
@@ -509,22 +476,22 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   );
 
   const tabRightContent = useMemo(() => {
-    if (activeSection === "body") {
+    if (activeSection === 'body') {
       return (
         <Select
           value={request.body.mode}
           onValueChange={(val) =>
             updateRequest(tab.id, {
-              body: { ...request.body, mode: val as BodyState["mode"] },
+              body: { ...request.body, mode: val as BodyState['mode'] },
             })
           }
         >
-          <SelectTrigger className="h-7 w-[120px] text-xs">
+          <SelectTrigger className='h-7 w-[120px] text-xs'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {BODY_MODES.map((m) => (
-              <SelectItem key={m.value} value={m.value} className="text-xs">
+              <SelectItem key={m.value} value={m.value} className='text-xs'>
                 {m.label}
               </SelectItem>
             ))}
@@ -532,20 +499,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </Select>
       );
     }
-    if (activeSection === "auth") {
+    if (activeSection === 'auth') {
       return (
         <Select
           value={request.auth.authType}
-          onValueChange={(val) =>
-            handleAuthTypeChange(val as AuthState["authType"])
-          }
+          onValueChange={(val) => handleAuthTypeChange(val as AuthState['authType'])}
         >
-          <SelectTrigger className="h-7 w-[160px] text-xs">
+          <SelectTrigger className='h-7 w-[160px] text-xs'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {authTypeOptions.map((t) => (
-              <SelectItem key={t.value} value={t.value} className="text-xs">
+              <SelectItem key={t.value} value={t.value} className='text-xs'>
                 {t.label}
               </SelectItem>
             ))}
@@ -553,17 +518,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </Select>
       );
     }
-    if (activeSection === "docs") {
+    if (activeSection === 'docs') {
       return (
-        <Tabs
-          value={docMode}
-          onValueChange={(v) => setDocMode(v as "edit" | "preview")}
-        >
-          <TabsList className="h-6">
-            <TabsTrigger value="edit" className="text-[10px] px-2.5 py-0.5">
+        <Tabs value={docMode} onValueChange={(v) => setDocMode(v as 'edit' | 'preview')}>
+          <TabsList className='h-6'>
+            <TabsTrigger value='edit' className='text-[10px] px-2.5 py-0.5'>
               Edit
             </TabsTrigger>
-            <TabsTrigger value="preview" className="text-[10px] px-2.5 py-0.5">
+            <TabsTrigger value='preview' className='text-[10px] px-2.5 py-0.5'>
               Preview
             </TabsTrigger>
           </TabsList>
@@ -583,26 +545,21 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   ]);
 
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full flex-col overflow-hidden bg-transparent"
-    >
+    <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
       {/* ── Request area ── */}
       <div
-        className="flex flex-col overflow-hidden bg-card/80 h-[var(--req-h)] min-h-[20%] max-h-[80%]"
-        style={{ "--req-h": `${requestHeight}%` } as React.CSSProperties}
+        className='flex flex-col overflow-hidden bg-card/80 h-[var(--req-h)] min-h-[20%] max-h-[80%]'
+        style={{ '--req-h': `${requestHeight}%` } as React.CSSProperties}
       >
         {/* URL bar. */}
-        <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm">
+        <div className='flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm'>
           <Select
             value={request.method}
-            onValueChange={(val) =>
-              updateRequest(tab.id, { method: val as HttpMethod })
-            }
+            onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
           >
             <SelectTrigger
               className={cn(
-                "h-8 w-[7rem] text-sm font-semibold",
+                'h-8 w-[7rem] text-sm font-semibold',
                 METHOD_TEXT_COLOR[request.method],
               )}
             >
@@ -613,7 +570,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 <SelectItem
                   key={m}
                   value={m}
-                  className={cn("text-sm font-semibold", METHOD_TEXT_COLOR[m])}
+                  className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}
                 >
                   {m}
                 </SelectItem>
@@ -624,11 +581,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <VariableAwareUrlInput
             value={request.url}
             onChange={(val) => {
-              setUrlError("");
+              setUrlError('');
               handleUrlChange(val);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") send(request);
+              if (e.key === 'Enter') send(request);
             }}
             onCurlImport={handleCurlImport}
             collectionVariables={collectionVars}
@@ -640,51 +597,51 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               );
               updateRequest(tab.id, { pathParams: updated });
             }}
-            onSwitchToParams={() => setActiveSection("params")}
-            placeholder="https://api.example.com/resource"
+            onSwitchToParams={() => setActiveSection('params')}
+            placeholder='https://api.example.com/resource'
             scopedContext={scopedContext}
           />
 
           <Button
-            size="sm"
-            className="h-8 px-3"
+            size='sm'
+            className='h-8 px-3'
             disabled={sending}
             onClick={() => {
               const url = request.url.trim();
               if (!url) {
-                setUrlError("URL is required");
+                setUrlError('URL is required');
                 return;
               }
               try {
                 new URL(url);
               } catch {
-                setUrlError("Invalid URL — include http:// or https://");
+                setUrlError('Invalid URL — include http:// or https://');
                 return;
               }
-              setUrlError("");
+              setUrlError('');
               send(request);
             }}
           >
-            <Send className="mr-1 h-3.5 w-3.5" />
-            {sending ? "Sending..." : "Send"}
+            <Send className='mr-1 h-3.5 w-3.5' />
+            {sending ? 'Sending...' : 'Send'}
           </Button>
 
           <Button
-            variant="outline"
-            size="sm"
-            className="h-7"
+            variant='outline'
+            size='sm'
+            className='h-7'
             onClick={() => setShowLoadTest(true)}
-            title="Load test"
+            title='Load test'
           >
-            <Zap className="h-3.5 w-3.5" />
+            <Zap className='h-3.5 w-3.5' />
           </Button>
 
           {!tab.source && (
             <>
               <Button
-                size="sm"
-                variant="outline"
-                className="h-7"
+                size='sm'
+                variant='outline'
+                className='h-7'
                 onClick={() => setSaveToCollectionOpen(true)}
               >
                 Save to Collection
@@ -699,52 +656,43 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
           <SaveRequestButton tab={tab} groupId={_groupId} />
         </div>
-        {urlError && (
-          <p className="text-xs text-destructive px-3 py-1">{urlError}</p>
-        )}
+        {urlError && <p className='text-xs text-destructive px-3 py-1'>{urlError}</p>}
         {curlImported && (
-          <p className="text-xs text-green-600 dark:text-green-400 px-3 py-1">
-            Imported from cURL
-          </p>
+          <p className='text-xs text-green-600 dark:text-green-400 px-3 py-1'>Imported from cURL</p>
         )}
 
         {/* Section tabs. */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className='flex-1 flex flex-col min-h-0'>
           <BrunoTabBar tabs={tabDefs} rightContent={tabRightContent} />
-          <div className="flex-1 overflow-auto p-3">
-            {activeSection === "params" && (
-              <div className="space-y-2">
+          <div className='flex-1 overflow-auto p-3'>
+            {activeSection === 'params' && (
+              <div className='space-y-2'>
                 <PathParamsPanel
                   params={request.pathParams}
-                  onChange={(pathParams) =>
-                    updateRequest(tab.id, { pathParams })
-                  }
+                  onChange={(pathParams) => updateRequest(tab.id, { pathParams })}
                 />
-                <QueryParamsEditor
-                  params={request.queryParams}
-                  onChange={handleParamsChange}
-                />
+                <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
             )}
-            {activeSection === "headers" && (
+            {activeSection === 'headers' && (
               <HeadersEditor
                 headers={request.headers}
                 onChange={(headers) => updateRequest(tab.id, { headers })}
               />
             )}
-            {activeSection === "body" && (
+            {activeSection === 'body' && (
               <BodyEditor
                 body={request.body}
                 onChange={(body) => updateRequest(tab.id, { body })}
               />
             )}
-            {activeSection === "auth" && (
+            {activeSection === 'auth' && (
               <AuthEditor
                 auth={request.auth}
                 onChange={(auth) => updateRequest(tab.id, { auth })}
               />
             )}
-            {activeSection === "variables" &&
+            {activeSection === 'variables' &&
               (tab.source?.collection && tab.source?.path ? (
                 <RequestVariablesPanel
                   collection={tab.source.collection}
@@ -752,12 +700,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                   onVarCountChange={setRequestVarCount}
                 />
               ) : (
-                <p className="p-4 text-sm text-muted-foreground">
-                  Save this request to a collection before adding request
-                  variables.
+                <p className='p-4 text-sm text-muted-foreground'>
+                  Save this request to a collection before adding request variables.
                 </p>
               ))}
-            {activeSection === "docs" && (
+            {activeSection === 'docs' && (
               <RequestDocsPanel
                 docs={request.docs}
                 mode={docMode}
@@ -765,7 +712,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 onSave={(docs) => {
                   void handleSaveDocs(docs);
                 }}
-                onSwitchToEdit={() => setDocMode("edit")}
+                onSwitchToEdit={() => setDocMode('edit')}
               />
             )}
           </div>
@@ -776,56 +723,46 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       <div
         onPointerDown={handleSeparatorDown}
         className={cn(
-          "h-3 flex items-center justify-center cursor-row-resize select-none border-y transition-colors",
+          'h-3 flex items-center justify-center cursor-row-resize select-none border-y transition-colors',
           isDragging
-            ? "bg-primary/15 border-primary/50"
-            : "bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40",
+            ? 'bg-primary/15 border-primary/50'
+            : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
         )}
       >
         <div
           className={cn(
-            "rounded-full transition-all",
-            isDragging
-              ? "w-24 h-1.5 bg-primary"
-              : "w-16 h-1 bg-muted-foreground/40",
+            'rounded-full transition-all',
+            isDragging ? 'w-24 h-1.5 bg-primary' : 'w-16 h-1 bg-muted-foreground/40',
           )}
         />
       </div>
 
       {/* ── Response area ── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0">
+      <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0'>
         {sending ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Sending request...</p>
+          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+            <Loader2 className='h-5 w-5 animate-spin text-primary' />
+            <p className='text-sm text-muted-foreground'>Sending request...</p>
           </div>
         ) : response ? (
           <ResponseBodyViewer response={response} />
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3">
-            <RocketLiftOff className="w-24 h-24" />
-            <p className="text-sm font-medium text-foreground">
-              Ready for liftoff
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Send a request to see the response here
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Press{" "}
-              <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs">
+          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+            <RocketLiftOff className='w-24 h-24' />
+            <p className='text-sm font-medium text-foreground'>Ready for liftoff</p>
+            <p className='text-xs text-muted-foreground'>Send a request to see the response here</p>
+            <p className='text-xs text-muted-foreground mt-1'>
+              Press{' '}
+              <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
                 Ctrl+Enter
-              </kbd>{" "}
+              </kbd>{' '}
               to send
             </p>
           </div>
         )}
       </div>
 
-      <LoadTestDialog
-        open={showLoadTest}
-        onOpenChange={setShowLoadTest}
-        request={request}
-      />
+      <LoadTestDialog open={showLoadTest} onOpenChange={setShowLoadTest} request={request} />
 
       {/* Unsaved changes dialog. */}
       <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>

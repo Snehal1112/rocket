@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { sendRequest } from '@/lib/execute-request';
 import type { RequestState } from '@/types/pane-types';
 
@@ -6,14 +6,17 @@ import type { RequestState } from '@/types/pane-types';
 export function useExecuteRequest(tabId: string) {
   const [sending, setSending] = useState(false);
 
-  const send = useCallback(async (request: RequestState) => {
-    setSending(true);
-    try {
-      await sendRequest(tabId, request);
-    } finally {
-      setSending(false);
-    }
-  }, [tabId]);
+  const send = useCallback(
+    async (request: RequestState) => {
+      setSending(true);
+      try {
+        await sendRequest(tabId, request);
+      } finally {
+        setSending(false);
+      }
+    },
+    [tabId],
+  );
 
   return { send, sending };
 }

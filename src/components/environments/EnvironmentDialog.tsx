@@ -74,8 +74,16 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const addVariable = useCallback(() => {
     if (!selectedEnv) return;
-    const variable: Variable = { key: '', value: '', enabled: true, secret: false };
-    const updated = { ...selectedEnv, variables: [...selectedEnv.variables, variable] };
+    const variable: Variable = {
+      key: '',
+      value: '',
+      enabled: true,
+      secret: false,
+    };
+    const updated = {
+      ...selectedEnv,
+      variables: [...selectedEnv.variables, variable],
+    };
     useEnvStore.setState((s) => ({
       environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
     }));

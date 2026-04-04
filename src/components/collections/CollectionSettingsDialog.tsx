@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
+import { Button } from '@/components/ui/button';
+import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
-import { saveCollectionSettings, type Auth } from '@/lib/tauri-api';
 
 interface CollectionSettingsDialogProps {
   collectionName: string;
@@ -33,17 +33,31 @@ export function CollectionSettingsDialog({
     try {
       // Convert nested AuthState to flat API Auth for Rust.
       let apiAuth: Auth | undefined;
-      if (auth.authType === 'basic') apiAuth = { authType: 'basic', username: auth.basic?.username ?? '', password: auth.basic?.password ?? '' };
-      else if (auth.authType === 'bearer') apiAuth = { authType: 'bearer', token: auth.bearer?.token ?? '' };
-      else if (auth.authType === 'api-key') apiAuth = { authType: 'api-key', key: auth.apiKey?.key ?? '', value: auth.apiKey?.value ?? '', addTo: auth.apiKey?.addTo ?? 'header' };
+      if (auth.authType === 'basic')
+        apiAuth = {
+          authType: 'basic',
+          username: auth.basic?.username ?? '',
+          password: auth.basic?.password ?? '',
+        };
+      else if (auth.authType === 'bearer')
+        apiAuth = { authType: 'bearer', token: auth.bearer?.token ?? '' };
+      else if (auth.authType === 'api-key')
+        apiAuth = {
+          authType: 'api-key',
+          key: auth.apiKey?.key ?? '',
+          value: auth.apiKey?.value ?? '',
+          addTo: auth.apiKey?.addTo ?? 'header',
+        };
       else apiAuth = undefined;
       await saveCollectionSettings(collectionName, {
         auth: apiAuth,
-        headers: headers.filter((h) => h.key).map((h) => ({
-          key: h.key,
-          value: h.value,
-          enabled: h.enabled,
-        })),
+        headers: headers
+          .filter((h) => h.key)
+          .map((h) => ({
+            key: h.key,
+            value: h.value,
+            enabled: h.enabled,
+          })),
         variables: [],
       });
       onClose();
@@ -53,19 +67,19 @@ export function CollectionSettingsDialog({
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className='flex flex-col gap-4 p-4'>
       {/* Dialog header. */}
       <div>
-        <h2 className="text-sm font-semibold">{collectionName}</h2>
-        <p className="text-xs text-muted-foreground">Collection settings</p>
+        <h2 className='text-sm font-semibold'>{collectionName}</h2>
+        <p className='text-xs text-muted-foreground'>Collection settings</p>
       </div>
 
       {/* Tab bar. */}
-      <div className="flex gap-1 border-b border-border pb-0">
+      <div className='flex gap-1 border-b border-border pb-0'>
         {TABS.map((tab) => (
           <button
             key={tab.value}
-            type="button"
+            type='button'
             onClick={() => setActiveTab(tab.value)}
             className={cn(
               'px-3 pb-2 text-xs font-medium transition-colors',
@@ -80,21 +94,17 @@ export function CollectionSettingsDialog({
       </div>
 
       {/* Tab content. */}
-      <div className="min-h-[12rem]">
-        {activeTab === 'auth' && (
-          <AuthEditor auth={auth} onChange={setAuth} />
-        )}
-        {activeTab === 'headers' && (
-          <HeadersEditor headers={headers} onChange={setHeaders} />
-        )}
+      <div className='min-h-[12rem]'>
+        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} />}
+        {activeTab === 'headers' && <HeadersEditor headers={headers} onChange={setHeaders} />}
       </div>
 
       {/* Footer actions. */}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onClose}>
+      <div className='flex justify-end gap-2'>
+        <Button variant='ghost' size='sm' onClick={onClose}>
           Cancel
         </Button>
-        <Button size="sm" onClick={handleSave}>
+        <Button size='sm' onClick={handleSave}>
           Save
         </Button>
       </div>

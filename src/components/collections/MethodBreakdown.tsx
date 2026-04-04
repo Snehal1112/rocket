@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 import { METHOD_CHART_COLOR } from '@/lib/colors';
 import type { CollectionItem } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 
 interface MethodBreakdownProps {
   items: CollectionItem[];
@@ -32,26 +32,29 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Method Breakdown</CardTitle>
+      <CardHeader className='pb-3'>
+        <CardTitle className='text-sm font-medium'>Method Breakdown</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className='space-y-3'>
         {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No requests in this collection.</p>
+          <p className='text-xs text-muted-foreground'>No requests in this collection.</p>
         ) : (
           rows.map(([method, count]) => {
-            const color = METHOD_CHART_COLOR[method] ?? { text: 'text-foreground', bg: 'bg-foreground' };
+            const color = METHOD_CHART_COLOR[method] ?? {
+              text: 'text-foreground',
+              bg: 'bg-foreground',
+            };
             const pct = total > 0 ? Math.round((count / total) * 100) : 0;
             return (
-              <div key={method} className="flex items-center gap-3">
+              <div key={method} className='flex items-center gap-3'>
                 <span className={cn('w-16 text-xs font-semibold', color.text)}>{method}</span>
-                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                <div className='flex-1 h-2 bg-muted rounded-full overflow-hidden'>
                   <div
                     className={cn('h-full rounded-full w-[var(--bar-w)]', color.bg)}
                     style={{ '--bar-w': `${pct}%` } as React.CSSProperties}
                   />
                 </div>
-                <span className="text-xs text-muted-foreground w-16 text-right">
+                <span className='text-xs text-muted-foreground w-16 text-right'>
                   {count} ({pct}%)
                 </span>
               </div>

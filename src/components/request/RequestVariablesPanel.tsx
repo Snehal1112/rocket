@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Button } from '@/components/ui/button';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
-import { getRequestVariables, saveRequestVariables } from '@/lib/tauri-api';
+import { Button } from '@/components/ui/button';
 import type { CollectionVariable } from '@/lib/tauri-api';
+import { getRequestVariables, saveRequestVariables } from '@/lib/tauri-api';
 
 interface RequestVariablesPanelProps {
   collection: string;
@@ -30,7 +30,9 @@ export function RequestVariablesPanel({
         onVarCountChange?.(loaded.length);
       })
       .catch((err) => console.error('[RequestVariablesPanel] load failed:', err));
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [collection, requestPath, onVarCountChange]);
 
   // Clear the "Saved" timer on unmount.
@@ -59,28 +61,22 @@ export function RequestVariablesPanel({
   }, [collection, requestPath, vars]);
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-        <p className="text-xs text-muted-foreground">
-          Request variables are available to this request only. They have higher priority
-          than folder, environment, and collection variables.
+    <div className='space-y-4'>
+      <div className='rounded-md border border-border bg-muted/30 px-3 py-2'>
+        <p className='text-xs text-muted-foreground'>
+          Request variables are available to this request only. They have higher priority than
+          folder, environment, and collection variables.
         </p>
       </div>
 
       {/* showDescription=false avoids duplicating the built-in info banner. */}
-      <CollectionVariablesEditor
-        variables={vars}
-        onChange={handleChange}
-        showDescription={false}
-      />
+      <CollectionVariablesEditor variables={vars} onChange={handleChange} showDescription={false} />
 
-      <div className="flex items-center gap-3">
-        <Button size="sm" onClick={handleSave}>
+      <div className='flex items-center gap-3'>
+        <Button size='sm' onClick={handleSave}>
           Save
         </Button>
-        {saved && (
-          <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
-        )}
+        {saved && <span className='text-xs text-green-600 dark:text-green-400'>Saved</span>}
       </div>
     </div>
   );

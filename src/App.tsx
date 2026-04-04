@@ -1,18 +1,18 @@
-import { type as osType } from "@tauri-apps/plugin-os";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { TitleBar } from "@/components/title-bar";
-import { CollectionsSidebar } from "@/components/layout/CollectionsSidebar";
-import { ConsolePanel } from "@/components/layout/ConsolePanel";
-import { StatusBar } from "@/components/layout/StatusBar";
-import { WorkspaceToolbar } from "@/components/layout/WorkspaceToolbar";
-import { PaneRenderer } from "@/components/panes/PaneRenderer";
-import { SplashScreen } from "@/components/SplashScreen";
-import { usePaneStore } from "@/stores/pane-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useEnvStore } from "@/stores/env-store";
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { restoreUiState, scheduleSaveUiState } from "@/lib/ui-state";
-import { useState, useEffect } from "react";
+import { type as osType } from '@tauri-apps/plugin-os';
+import { useEffect, useState } from 'react';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
+import { ConsolePanel } from '@/components/layout/ConsolePanel';
+import { StatusBar } from '@/components/layout/StatusBar';
+import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
+import { PaneRenderer } from '@/components/panes/PaneRenderer';
+import { SplashScreen } from '@/components/SplashScreen';
+import { TitleBar } from '@/components/title-bar';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
+import { useEnvStore } from '@/stores/env-store';
+import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 function App() {
   const root = usePaneStore((s) => s.root);
@@ -28,11 +28,9 @@ function App() {
     const init = async () => {
       await loadWorkspaces();
       const uiState = await restoreUiState();
-      if (uiState?.activeMode === "workspace" && uiState.workspaceTabs) {
+      if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
         const { workspaceId } = uiState.workspaceTabs;
-        const ws = useWorkspaceStore
-          .getState()
-          .workspaces.find((w) => w.id === workspaceId);
+        const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId);
         if (ws) {
           usePaneStore.getState().openWorkspaceTabs(ws.id);
         }
@@ -40,9 +38,7 @@ function App() {
       // Task 9: First-launch fallback
       if (!uiState) {
         const store = useWorkspaceStore.getState();
-        const activeWs = store.workspaces.find(
-          (w) => w.id === store.activeWorkspaceId,
-        );
+        const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId);
         if (activeWs) {
           usePaneStore.getState().openWorkspaceTabs(activeWs.id);
         }
@@ -67,8 +63,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (osType() === "linux") {
-      document.documentElement.classList.add("linux");
+    if (osType() === 'linux') {
+      document.documentElement.classList.add('linux');
     }
   }, []);
 
@@ -76,54 +72,49 @@ function App() {
   // requestIdleCallback is Chrome-only; setTimeout works in all WebViews.
   useEffect(() => {
     const id = setTimeout(() => {
-      void import("@/components/editor/MonacoWrapper");
+      void import('@/components/editor/MonacoWrapper');
     }, 200);
     return () => clearTimeout(id);
   }, []);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-background text-sm">
+    <div className='h-full flex flex-col overflow-hidden bg-background text-sm'>
       <TitleBar />
-      <div className="flex-1 flex overflow-hidden">
+      <div className='flex-1 flex overflow-hidden'>
         {!sidebarCollapsed && (
           <>
             <div
-              style={
-                { "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties
-              }
-              className="w-[var(--sidebar-w)] shrink-0"
+              style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
+              className='w-[var(--sidebar-w)] shrink-0'
             >
               <ErrorBoundary>
                 <CollectionsSidebar />
               </ErrorBoundary>
             </div>
-            <div
-              role="separator"
-              className="w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35"
+            <hr
+              className='w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35 border-0'
+              aria-orientation='vertical'
               onPointerDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
                 const startWidth = sidebarWidth;
                 const onMove = (ev: PointerEvent) => {
-                  const newWidth = Math.min(
-                    500,
-                    Math.max(200, startWidth + ev.clientX - startX),
-                  );
+                  const newWidth = Math.min(500, Math.max(200, startWidth + ev.clientX - startX));
                   setSidebarWidth(newWidth);
                 };
                 const onUp = () => {
-                  window.removeEventListener("pointermove", onMove);
-                  window.removeEventListener("pointerup", onUp);
+                  window.removeEventListener('pointermove', onMove);
+                  window.removeEventListener('pointerup', onUp);
                 };
-                window.addEventListener("pointermove", onMove);
-                window.addEventListener("pointerup", onUp);
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
               }}
             />
           </>
         )}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <main className='flex-1 flex flex-col min-w-0 overflow-hidden'>
           <WorkspaceToolbar />
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className='flex-1 min-h-0 overflow-hidden'>
             <ErrorBoundary>
               <PaneRenderer node={root} />
             </ErrorBoundary>

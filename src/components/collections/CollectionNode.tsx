@@ -1,43 +1,38 @@
-import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  FolderPlus,
-  Layers,
-  Plus,
-  Trash2,
-  MoreHorizontal,
   ChevronDown,
   ChevronRight,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  FolderPlus,
+  Layers,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Input } from "@/components/ui/input";
-import { TreeItem, TreeItemContent } from "@/components/ui/tree";
+} from '@/components/ui/context-menu';
 import {
-  getCollection,
-  onCollectionChanged,
-  renameCollection,
-  saveRequest,
-} from "@/lib/tauri-api";
-import { usePaneStore } from "@/stores/pane-store";
-import { createDefaultRequest } from "@/lib/pane-utils";
-import { FolderNode } from "./FolderNode";
-import { RequestNode } from "./RequestNode";
-import { CreateRequestDialog } from "@/components/request/CreateRequestDialog";
-import type { CollectionSummary, Collection } from "@/lib/tauri-api";
-import type { CollectionTab } from "@/types/pane-types";
-import type { DeleteTarget } from "./tree-utils";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { createDefaultRequest } from '@/lib/pane-utils';
+import type { Collection, CollectionSummary } from '@/lib/tauri-api';
+import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
+import type { CollectionTab } from '@/types/pane-types';
+import { FolderNode } from './FolderNode';
+import { RequestNode } from './RequestNode';
+import type { DeleteTarget } from './tree-utils';
 
 interface CollectionNodeProps {
   summary: CollectionSummary;
@@ -51,11 +46,7 @@ interface CollectionNodeProps {
     dstPath: string,
   ) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (
-    collection: string,
-    path: string,
-    name: string,
-  ) => Promise<void>;
+  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }
 
 export function CollectionNode({
@@ -74,13 +65,13 @@ export function CollectionNode({
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [creatingRequest, setCreatingRequest] = useState(false);
-  const [newRequestName, setNewRequestName] = useState("");
+  const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
       .then(setCollection)
-      .catch((err) => console.error("[CollectionNode] fetch error", err));
+      .catch((err) => console.error('[CollectionNode] fetch error', err));
   }, [summary.name]);
 
   // Fetch when first expanded.
@@ -133,7 +124,7 @@ export function CollectionNode({
       await renameCollection(summary.name, trimmed);
       setIsRenaming(false);
     } catch (err) {
-      console.error("Rename collection failed:", err);
+      console.error('Rename collection failed:', err);
     }
   };
 
@@ -160,7 +151,7 @@ export function CollectionNode({
     const tab: CollectionTab = {
       id: summary.uid,
       title: summary.name,
-      tabType: "collection",
+      tabType: 'collection',
       collectionName: summary.name,
       isDirty: false,
     };
@@ -179,16 +170,16 @@ export function CollectionNode({
       const payload = {
         uid,
         name,
-        method: "GET" as const,
-        url: "",
+        method: 'GET' as const,
+        url: '',
         headers: [],
-        auth: { authType: "none" as const },
+        auth: { authType: 'none' as const },
       };
       const saved = await saveRequest(summary.name, name, payload);
       usePaneStore.getState().openTab({
         id: uid,
         title: saved.name,
-        tabType: "request",
+        tabType: 'request',
         request: createDefaultRequest(),
         response: null,
         isDirty: false,
@@ -198,67 +189,58 @@ export function CollectionNode({
         },
       });
     } catch (err) {
-      console.error("[CollectionNode] Failed to create request:", err);
+      console.error('[CollectionNode] Failed to create request:', err);
     }
   };
 
   const rawItems = collection?.root.items ?? [];
   const filteredItems = filter
     ? rawItems.filter(
-        (item) =>
-          item.type !== "request" ||
-          item.name.toLowerCase().includes(filter.toLowerCase()),
+        (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
       )
     : rawItems;
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="group relative flex items-center">
-          <TreeItem
-            value={summary.uid}
-            open={open}
-            onOpenChange={setOpen}
-            className="flex-1"
-          >
+        <div className='group relative flex items-center'>
+          <TreeItem value={summary.uid} open={open} onOpenChange={setOpen} className='flex-1'>
             <TreeItemContent
-              className="flex gap-3 w-full px-2 py-1 cursor-pointer"
+              className='flex gap-3 w-full px-2 py-1 cursor-pointer'
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
-              aria-label={`${open ? "Collapse" : "Expand"} collection ${summary.name}`}
+              aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               {open ? (
                 <ChevronDown
-                  className="h-3.5 w-3.5 flex-none text-muted-foreground"
+                  className='h-3.5 w-3.5 flex-none text-muted-foreground'
                   strokeWidth={1.5}
                 />
               ) : (
                 <ChevronRight
-                  className="h-3.5 w-3.5 flex-none text-muted-foreground"
+                  className='h-3.5 w-3.5 flex-none text-muted-foreground'
                   strokeWidth={1.5}
                 />
               )}
-              <Layers className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <Layers className='h-3.5 w-3.5 shrink-0 text-primary' />
               {isRenaming ? (
                 <Input
                   autoFocus
-                  className="h-6 text-sm flex-1"
+                  className='h-6 text-sm flex-1'
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleRename();
-                    if (e.key === "Escape") setIsRenaming(false);
+                    if (e.key === 'Enter') void handleRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
                   }}
                   onBlur={() => void handleRename()}
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
                 <>
-                  <span className="truncate font-medium text-foreground">
-                    {summary.name}
-                  </span>
-                  {summary.refType === "external" && (
-                    <span className="ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                  <span className='truncate font-medium text-foreground'>{summary.name}</span>
+                  {summary.refType === 'external' && (
+                    <span className='ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
                       ext
                     </span>
                   )}
@@ -270,36 +252,31 @@ export function CollectionNode({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                type="button"
+                type='button'
                 aria-label={`Actions for ${summary.name}`}
-                className="absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground"
+                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
-                <MoreHorizontal className="h-3 w-3" />
+                <MoreHorizontal className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="w-48"
-              onClick={(e) => e.stopPropagation()}
-            >
+            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem
-                onClick={(e) =>
-                  handleDoubleClick(e as unknown as React.MouseEvent)
-                }
+                onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}
               >
                 Overview
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setCreateRequestOpen(true)}>
-                <Plus className="h-3.5 w-3.5 mr-2" /> New Request
+                <Plus className='h-3.5 w-3.5 mr-2' /> New Request
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={async () => {
-                  await onNewFolder(summary.name, "");
+                  await onNewFolder(summary.name, '');
                   setOpen(true);
                 }}
               >
-                <FolderPlus className="h-3.5 w-3.5 mr-2" /> New Folder
+                <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -312,29 +289,29 @@ export function CollectionNode({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="text-destructive"
+                className='text-destructive'
                 onClick={() =>
                   onDelete({
-                    type: "collection",
+                    type: 'collection',
                     collection: summary.name,
                     name: summary.name,
                   })
                 }
               >
-                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </ContextMenuTrigger>
 
-      <ContextMenuContent className="w-48">
+      <ContextMenuContent className='w-48'>
         <ContextMenuItem
           onClick={() => {
             const tab: CollectionTab = {
               id: summary.uid,
               title: summary.name,
-              tabType: "collection",
+              tabType: 'collection',
               collectionName: summary.name,
               isDirty: false,
             };
@@ -344,10 +321,8 @@ export function CollectionNode({
           Overview
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => setCreateRequestOpen(true)}>
-          New Request
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => void onNewFolder(summary.name, "")}>
+        <ContextMenuItem onClick={() => setCreateRequestOpen(true)}>New Request</ContextMenuItem>
+        <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>
           New Folder
         </ContextMenuItem>
         <ContextMenuSeparator />
@@ -361,10 +336,10 @@ export function CollectionNode({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          className="text-destructive"
+          className='text-destructive'
           onClick={() =>
             onDelete({
-              type: "collection",
+              type: 'collection',
               collection: summary.name,
               name: summary.name,
             })
@@ -375,9 +350,9 @@ export function CollectionNode({
       </ContextMenuContent>
 
       {open && collection && (
-        <div className="pl-1.5 border-l border-border/70 ml-2">
+        <div className='pl-1.5 border-l border-border/70 ml-2'>
           {filteredItems.map((item) => {
-            if (item.type === "folder") {
+            if (item.type === 'folder') {
               return (
                 <FolderNode
                   key={`folder-${item.name}`}
@@ -412,16 +387,16 @@ export function CollectionNode({
             );
           })}
           {creatingRequest && (
-            <div className="flex items-center gap-1 px-2 py-1 text-sm">
+            <div className='flex items-center gap-1 px-2 py-1 text-sm'>
               <Input
                 autoFocus
-                className="h-5 text-sm flex-1"
-                placeholder="Request name"
+                className='h-5 text-sm flex-1'
+                placeholder='Request name'
                 value={newRequestName}
                 onChange={(e) => setNewRequestName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleNewRequestCreate();
-                  if (e.key === "Escape") setCreatingRequest(false);
+                  if (e.key === 'Enter') void handleNewRequestCreate();
+                  if (e.key === 'Escape') setCreatingRequest(false);
                 }}
                 onBlur={() => setCreatingRequest(false)}
                 onClick={(e) => e.stopPropagation()}

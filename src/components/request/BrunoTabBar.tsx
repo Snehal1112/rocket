@@ -14,11 +14,11 @@ interface BrunoTabBarProps {
 
 export function BrunoTabBar({ tabs, rightContent }: BrunoTabBarProps) {
   return (
-    <div className="flex items-center border-b border-border px-3 shrink-0">
+    <div className='flex items-center border-b border-border px-3 shrink-0'>
       {tabs.map((tab) => (
         <button
           key={tab.value}
-          type="button"
+          type='button'
           onClick={tab.onClick}
           className={cn(
             'py-2 mr-4 text-sm border-b-2 -mb-px transition-colors',
@@ -30,11 +30,7 @@ export function BrunoTabBar({ tabs, rightContent }: BrunoTabBarProps) {
           {tab.label}
         </button>
       ))}
-      {rightContent && (
-        <div className="ml-auto flex items-center gap-2">
-          {rightContent}
-        </div>
-      )}
+      {rightContent && <div className='ml-auto flex items-center gap-2'>{rightContent}</div>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import { KeyValueEditor } from './KeyValueEditor';
 import type { KeyValueEntry } from '@/types/pane-types';
+import { KeyValueEditor } from './KeyValueEditor';
 
 interface HeadersEditorProps {
   headers: KeyValueEntry[];
@@ -11,9 +11,9 @@ export function HeadersEditor({ headers, onChange }: HeadersEditorProps) {
     <KeyValueEditor
       entries={headers}
       onChange={onChange}
-      keyPlaceholder="Header name"
-      valuePlaceholder="Value"
-      addLabel="Add Header"
+      keyPlaceholder='Header name'
+      valuePlaceholder='Value'
+      addLabel='Add Header'
     />
   );
 }

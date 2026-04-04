@@ -1,7 +1,7 @@
 import { GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { usePaneStore } from '@/stores/pane-store';
 import { useGitStore } from '@/stores/git-store';
+import { usePaneStore } from '@/stores/pane-store';
 import type { GitTab } from '@/types/pane-types';
 
 export function GitToolbarButton() {
@@ -24,14 +24,14 @@ export function GitToolbarButton() {
 
   return (
     <Button
-      variant="ghost"
-      size="icon"
-      className="h-7 w-7"
+      variant='ghost'
+      size='icon'
+      className='h-7 w-7'
       onClick={handleClick}
       disabled={!activeCollection}
-      title="Open Git panel"
+      title='Open Git panel'
     >
-      <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+      <GitBranch className='h-3.5 w-3.5 text-muted-foreground' />
     </Button>
   );
 }

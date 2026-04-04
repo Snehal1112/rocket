@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useGitStore } from '@/stores/git-store';
 
@@ -32,41 +32,47 @@ export function GitCommitLog() {
 
   if (commitLog.length === 0) {
     return (
-      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+      <div className='flex items-center justify-center h-20 text-xs text-muted-foreground'>
         No commits yet.
       </div>
     );
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="p-1">
+    <ScrollArea className='h-full'>
+      <div className='p-1'>
         {commitLog.map((commit) => (
-          <div key={commit.fullId} className="flex items-start gap-2 px-2 py-[5px] hover:bg-muted/50">
+          <div
+            key={commit.fullId}
+            className='flex items-start gap-2 px-2 py-[5px] hover:bg-muted/50'
+          >
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span
-                    className="shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+                  <button
+                    type='button'
+                    className='shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors'
                     onClick={() => navigator.clipboard.writeText(commit.fullId)}
                   >
                     {commit.id}
-                  </span>
+                  </button>
                 </TooltipTrigger>
-                <TooltipContent><p>{commit.fullId} (click to copy)</p></TooltipContent>
+                <TooltipContent>
+                  <p>{commit.fullId} (click to copy)</p>
+                </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium leading-snug">{commit.message}</p>
-              <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+            <div className='min-w-0 flex-1'>
+              <p className='truncate text-[13px] font-medium leading-snug'>{commit.message}</p>
+              <p className='text-[10px] text-muted-foreground/70 mt-0.5'>
                 {commit.author} · {relativeTime(commit.timestamp)}
               </p>
             </div>
           </div>
         ))}
         {commitLog.length >= limit && (
-          <div className="p-2">
-            <Button variant="outline" size="sm" className="w-full text-sm" onClick={handleLoadMore}>
+          <div className='p-2'>
+            <Button variant='outline' size='sm' className='w-full text-sm' onClick={handleLoadMore}>
               Load more
             </Button>
           </div>

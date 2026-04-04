@@ -40,22 +40,22 @@ export function TagsList({ collection }: TagsListProps) {
 
   if (tags.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground italic py-4 text-center">
+      <p className='text-sm text-muted-foreground italic py-4 text-center'>
         No tags found. Add tags to requests to see them here.
       </p>
     );
   }
 
   return (
-    <div className="flex flex-wrap gap-2 py-2">
+    <div className='flex flex-wrap gap-2 py-2'>
       {tags.map(({ tag, count }) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-sm"
+          className='inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-sm'
         >
-          <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+          <Tag className='h-3.5 w-3.5 text-muted-foreground' />
           {tag}
-          <span className="text-xs text-muted-foreground">({count})</span>
+          <span className='text-xs text-muted-foreground'>({count})</span>
         </span>
       ))}
     </div>

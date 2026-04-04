@@ -1,7 +1,7 @@
-import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Textarea } from "@/components/ui/textarea";
+import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Textarea } from '@/components/ui/textarea';
 
 interface MarkdownEditorProps {
   value: string;
@@ -9,55 +9,49 @@ interface MarkdownEditorProps {
   onBlur?: () => void;
 }
 
-export function MarkdownEditor({
-  value,
-  onChange,
-  onBlur,
-}: MarkdownEditorProps) {
-  const [mode, setMode] = useState<"edit" | "preview">("preview");
+export function MarkdownEditor({ value, onChange, onBlur }: MarkdownEditorProps) {
+  const [mode, setMode] = useState<'edit' | 'preview'>('preview');
 
   return (
-    <div className="space-y-2">
-      <div className="flex gap-1">
+    <div className='space-y-2'>
+      <div className='flex gap-1'>
         <button
-          type="button"
+          type='button'
           className={`px-2 py-0.5 text-xs rounded ${
-            mode === "edit"
-              ? "bg-muted text-foreground"
-              : "text-muted-foreground hover:text-foreground"
+            mode === 'edit'
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
-          onClick={() => setMode("edit")}
+          onClick={() => setMode('edit')}
         >
           Edit
         </button>
         <button
-          type="button"
+          type='button'
           className={`px-2 py-0.5 text-xs rounded ${
-            mode === "preview"
-              ? "bg-muted text-foreground"
-              : "text-muted-foreground hover:text-foreground"
+            mode === 'preview'
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
-          onClick={() => setMode("preview")}
+          onClick={() => setMode('preview')}
         >
           Preview
         </button>
       </div>
-      {mode === "edit" ? (
+      {mode === 'edit' ? (
         <Textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
-          placeholder="Write markdown here..."
-          className="min-h-[200px] font-mono text-sm"
+          placeholder='Write markdown here...'
+          className='min-h-[200px] font-mono text-sm'
         />
       ) : (
-        <div className="prose dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md">
+        <div className='prose dark:prose-invert max-w-none min-h-[200px] p-3 border rounded-md'>
           {value ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (
-            <p className="text-muted-foreground text-sm italic">
-              No readme yet.
-            </p>
+            <p className='text-muted-foreground text-sm italic'>No readme yet.</p>
           )}
         </div>
       )}

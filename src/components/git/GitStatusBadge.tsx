@@ -10,7 +10,9 @@ export function GitStatusBadge({ status }: GitStatusBadgeProps) {
   if (status === 'unchanged') return null;
   const config = GIT_STATUS_CONFIG[status];
   return (
-    <span className={`shrink-0 w-3.5 text-center font-mono text-[11px] font-bold leading-none ${config.className}`}>
+    <span
+      className={`shrink-0 w-3.5 text-center font-mono text-[11px] font-bold leading-none ${config.className}`}
+    >
       {config.label}
     </span>
   );

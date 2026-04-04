@@ -1,16 +1,16 @@
 import { create } from 'zustand';
 import {
-  listEnvironments,
-  saveEnvironment,
   deleteEnvironment as deleteEnvApi,
-  getGlobalEnvironmentName,
-  setGlobalEnvironment,
-  getProcessEnvVars,
-  listGlobalEnvironments,
-  getGlobalEnvironment,
-  saveGlobalEnvironment as saveGlobalEnvironmentApi,
   deleteGlobalEnvironment as deleteGlobalEnvironmentApi,
   type Environment,
+  getGlobalEnvironment,
+  getGlobalEnvironmentName,
+  getProcessEnvVars,
+  listEnvironments,
+  listGlobalEnvironments,
+  saveEnvironment,
+  saveGlobalEnvironment as saveGlobalEnvironmentApi,
+  setGlobalEnvironment,
 } from '@/lib/tauri-api';
 
 // Matches {{variable.name}} style placeholders.
@@ -139,7 +139,10 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   async fetchGlobalEnv() {
     try {
       const name = await getGlobalEnvironmentName();
-      if (!name) { set({ globalEnvName: null, globalEnv: null }); return; }
+      if (!name) {
+        set({ globalEnvName: null, globalEnv: null });
+        return;
+      }
       try {
         const env = await getGlobalEnvironment(name);
         set({ globalEnvName: name, globalEnv: env });
@@ -169,7 +172,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
     const { globalEnv } = get();
     if (!globalEnv) return {};
     return Object.fromEntries(
-      globalEnv.variables.filter(v => v.enabled).map(v => [v.key, v.value])
+      globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
     );
   },
 
@@ -191,9 +194,7 @@ export const useEnvStore = create<EnvState>((set, get) => ({
   async updateGlobalEnvironment(env) {
     await saveGlobalEnvironmentApi(env);
     set((state) => ({
-      globalEnvironments: state.globalEnvironments.map((e) =>
-        e.name === env.name ? env : e,
-      ),
+      globalEnvironments: state.globalEnvironments.map((e) => (e.name === env.name ? env : e)),
     }));
     // If this is the active global env, refresh it.
     if (get().globalEnvName === env.name) {

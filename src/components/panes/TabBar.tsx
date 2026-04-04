@@ -79,7 +79,9 @@ export function TabBar({
               disabled={!tab.isDirty && !!tab.source}
               onClick={() => {
                 window.dispatchEvent(
-                  new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }),
+                  new CustomEvent('rocket:save-draft', {
+                    detail: { tabId: tab.id },
+                  }),
                 );
               }}
             >

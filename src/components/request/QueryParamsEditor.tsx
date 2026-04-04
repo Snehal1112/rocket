@@ -1,5 +1,5 @@
-import { KeyValueEditor } from './KeyValueEditor';
 import type { KeyValueEntry } from '@/types/pane-types';
+import { KeyValueEditor } from './KeyValueEditor';
 
 interface QueryParamsEditorProps {
   params: KeyValueEntry[];
@@ -11,10 +11,10 @@ export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) 
     <KeyValueEditor
       entries={params}
       onChange={onChange}
-      keyPlaceholder="Param name"
-      valuePlaceholder="Value"
-      addLabel="Add Query Param"
-      label="Query"
+      keyPlaceholder='Param name'
+      valuePlaceholder='Value'
+      addLabel='Add Query Param'
+      label='Query'
     />
   );
 }

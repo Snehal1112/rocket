@@ -1,4 +1,4 @@
-import type { FieldChange, RowChange, RequestDiff } from '@/types/visual-diff-types';
+import type { FieldChange, RequestDiff, RowChange } from '@/types/visual-diff-types';
 
 interface KVRow {
   key: string;
@@ -65,9 +65,19 @@ function diffRows(oldRows: KVRow[], newRows: KVRow[]): RowChange[] {
     const o = oldMap.get(key);
     const n = newMap.get(key);
     if (!o) {
-      result.push({ key, oldRow: undefined, newRow: { value: n!.value, enabled: n!.enabled }, status: 'added' });
+      result.push({
+        key,
+        oldRow: undefined,
+        newRow: { value: n!.value, enabled: n!.enabled },
+        status: 'added',
+      });
     } else if (!n) {
-      result.push({ key, oldRow: { value: o.value, enabled: o.enabled }, newRow: undefined, status: 'removed' });
+      result.push({
+        key,
+        oldRow: { value: o.value, enabled: o.enabled },
+        newRow: undefined,
+        status: 'removed',
+      });
     } else {
       const changed = o.value !== n.value || o.enabled !== n.enabled;
       result.push({
@@ -108,8 +118,16 @@ export function parseRequestDiff(
   const body = field('Body', oldBody, newBody);
 
   const auth = field('Auth', old?.auth?.type ?? 'none', nw?.auth?.type ?? 'none');
-  const preRequestScript = field('Pre-request Script', norm(old?.preRequestScript), norm(nw?.preRequestScript));
-  const postResponseScript = field('Post-response Script', norm(old?.postResponseScript), norm(nw?.postResponseScript));
+  const preRequestScript = field(
+    'Pre-request Script',
+    norm(old?.preRequestScript),
+    norm(nw?.preRequestScript),
+  );
+  const postResponseScript = field(
+    'Post-response Script',
+    norm(old?.postResponseScript),
+    norm(nw?.postResponseScript),
+  );
 
   const rowsChanged = [...headers, ...queryParams, ...pathParams].some(
     (r) => r.status !== 'unchanged',

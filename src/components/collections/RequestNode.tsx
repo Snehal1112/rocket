@@ -1,15 +1,5 @@
+import { Copy, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { MoreHorizontal, Copy, Trash2 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -20,17 +10,27 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
-import { cn } from '@/lib/utils';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
-import { renameRequest } from '@/lib/tauri-api';
-import { usePaneStore } from '@/stores/pane-store';
 import { mapApiRequestToState } from '@/lib/pane-utils';
-import { isActiveRequest } from './tree-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import type { RequestTab, RequestState } from '@/types/pane-types';
+import { renameRequest } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
+import { usePaneStore } from '@/stores/pane-store';
+import type { RequestState, RequestTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
+import { isActiveRequest } from './tree-utils';
 
 interface RequestNodeProps {
   uid: string;
@@ -40,14 +40,27 @@ interface RequestNodeProps {
   path: string;
   itemData: Extract<CollectionItem, { type: 'request' }>;
   summaries: CollectionSummary[];
-  onMove: (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => Promise<void>;
+  onMove: (
+    srcCollection: string,
+    srcPath: string,
+    dstCollection: string,
+    dstPath: string,
+  ) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
   onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }
 
 export function RequestNode({
-  uid, name, method, collectionName, path, itemData,
-  summaries, onMove, onDelete, onDuplicate,
+  uid,
+  name,
+  method,
+  collectionName,
+  path,
+  itemData,
+  summaries,
+  onMove,
+  onDelete,
+  onDuplicate,
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
@@ -56,7 +69,10 @@ export function RequestNode({
 
   const handleRename = async () => {
     const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === name) { setIsRenaming(false); return; }
+    if (!trimmed || trimmed === name) {
+      setIsRenaming(false);
+      return;
+    }
     try {
       await renameRequest(collectionName, path, trimmed);
       setIsRenaming(false);
@@ -69,8 +85,12 @@ export function RequestNode({
     if (isRenaming) return;
     const request: RequestState = mapApiRequestToState(itemData, true);
     const tab: RequestTab = {
-      id: uid, title: name, tabType: 'request',
-      request, response: null, isDirty: false,
+      id: uid,
+      title: name,
+      tabType: 'request',
+      request,
+      response: null,
+      isDirty: false,
       source: { collection: collectionName, path },
     };
     usePaneStore.getState().openTab(tab);
@@ -79,23 +99,25 @@ export function RequestNode({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="group relative flex items-center">
-          <TreeItem value={uid} active={active} className="flex-1">
+        <div className='group relative flex items-center'>
+          <TreeItem value={uid} active={active} className='flex-1'>
             <TreeItemContent
-              className="flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer"
+              className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
               onClick={handleClick}
               aria-label={`Open ${method} ${name}`}
             >
-              <span className={cn(
-                "shrink-0 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border",
-                METHOD_BADGE_COLOR[method.toUpperCase()] ?? METHOD_BADGE_COLOR["GET"]
-              )}>
+              <span
+                className={cn(
+                  'shrink-0 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border',
+                  METHOD_BADGE_COLOR[method.toUpperCase()] ?? METHOD_BADGE_COLOR['GET'],
+                )}
+              >
                 {method}
               </span>
               {isRenaming ? (
                 <Input
                   autoFocus
-                  className="h-6 text-sm flex-1"
+                  className='h-6 text-sm flex-1'
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -106,7 +128,7 @@ export function RequestNode({
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <span className="truncate text-foreground">{name}</span>
+                <span className='truncate text-foreground'>{name}</span>
               )}
             </TreeItemContent>
           </TreeItem>
@@ -115,24 +137,29 @@ export function RequestNode({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                type="button"
+                type='button'
                 aria-label={`Actions for ${name}`}
-                className="absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground"
+                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
-                <MoreHorizontal className="h-3 w-3" />
+                <MoreHorizontal className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-48" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
-                <Copy className="h-3.5 w-3.5 mr-2" /> Duplicate
+                <Copy className='h-3.5 w-3.5 mr-2' /> Duplicate
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>
+              <DropdownMenuItem
+                onClick={() => {
+                  setRenameValue(name);
+                  setIsRenaming(true);
+                }}
+              >
                 Rename
               </DropdownMenuItem>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>Move to...</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-48">
+                <DropdownMenuSubContent className='w-48'>
                   {summaries.map((s) => (
                     <DropdownMenuItem
                       key={s.name}
@@ -142,15 +169,19 @@ export function RequestNode({
                       {s.name}
                     </DropdownMenuItem>
                   ))}
-                  {summaries.length === 0 && <DropdownMenuItem disabled>No collections</DropdownMenuItem>}
+                  {summaries.length === 0 && (
+                    <DropdownMenuItem disabled>No collections</DropdownMenuItem>
+                  )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="text-destructive"
-                onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}
+                className='text-destructive'
+                onClick={() =>
+                  onDelete({ type: 'request', collection: collectionName, path, name })
+                }
               >
-                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -158,14 +189,27 @@ export function RequestNode({
       </ContextMenuTrigger>
 
       {/* Right-click context menu — same actions, power-user shortcut. */}
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>Duplicate</ContextMenuItem>
-        <ContextMenuItem onClick={() => { setRenameValue(name); setIsRenaming(true); }}>Rename</ContextMenuItem>
+      <ContextMenuContent className='w-48'>
+        <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
+          Duplicate
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            setRenameValue(name);
+            setIsRenaming(true);
+          }}
+        >
+          Rename
+        </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger>Move to...</ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48">
+          <ContextMenuSubContent className='w-48'>
             {summaries.map((s) => (
-              <ContextMenuItem key={s.name} onClick={() => void onMove(collectionName, path, s.name, '')} disabled={s.name === collectionName}>
+              <ContextMenuItem
+                key={s.name}
+                onClick={() => void onMove(collectionName, path, s.name, '')}
+                disabled={s.name === collectionName}
+              >
                 {s.name}
               </ContextMenuItem>
             ))}
@@ -173,7 +217,10 @@ export function RequestNode({
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
-        <ContextMenuItem className="text-destructive" onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}>
+        <ContextMenuItem
+          className='text-destructive'
+          onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}
+        >
           Delete
         </ContextMenuItem>
       </ContextMenuContent>

@@ -28,7 +28,10 @@ function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null)
   if (now >= expiresAt) return 'Expired';
   const remaining = expiresAt - now;
   const date = new Date(expiresAt * 1000);
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   if (remaining < 60) return `Expires in ${remaining}s (at ${time})`;
   if (remaining < 3600) return `Expires in ${Math.floor(remaining / 60)}m (at ${time})`;
   return `Expires in ${Math.floor(remaining / 3600)}h (at ${time})`;
@@ -89,11 +92,19 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
     if (oauth.scope) params.set('scope', oauth.scope);
 
     const headers: { key: string; value: string; enabled: boolean }[] = [
-      { key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true },
+      {
+        key: 'Content-Type',
+        value: 'application/x-www-form-urlencoded',
+        enabled: true,
+      },
     ];
     if (oauth.clientAuthentication === 'header') {
       const basic = btoa(`${oauth.clientId}:${oauth.clientSecret}`);
-      headers.push({ key: 'Authorization', value: `Basic ${basic}`, enabled: true });
+      headers.push({
+        key: 'Authorization',
+        value: `Basic ${basic}`,
+        enabled: true,
+      });
     } else {
       params.set('client_id', oauth.clientId);
       params.set('client_secret', oauth.clientSecret);
@@ -157,11 +168,19 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       params.set('grant_type', 'refresh_token');
       params.set('refresh_token', oauth.refreshToken);
       const headers: { key: string; value: string; enabled: boolean }[] = [
-        { key: 'Content-Type', value: 'application/x-www-form-urlencoded', enabled: true },
+        {
+          key: 'Content-Type',
+          value: 'application/x-www-form-urlencoded',
+          enabled: true,
+        },
       ];
       if (oauth.clientAuthentication === 'header') {
         const basic = btoa(`${oauth.clientId}:${oauth.clientSecret}`);
-        headers.push({ key: 'Authorization', value: `Basic ${basic}`, enabled: true });
+        headers.push({
+          key: 'Authorization',
+          value: `Basic ${basic}`,
+          enabled: true,
+        });
       } else {
         params.set('client_id', oauth.clientId);
         params.set('client_secret', oauth.clientSecret);
@@ -499,7 +518,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                       <Select
                         value={o.clientAuthentication}
                         onValueChange={(v) =>
-                          patchOAuth2({ clientAuthentication: v as 'header' | 'body' })
+                          patchOAuth2({
+                            clientAuthentication: v as 'header' | 'body',
+                          })
                         }
                       >
                         <SelectTrigger className='w-full text-sm'>
@@ -528,7 +549,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                       <Select
                         value={o.addTokenTo}
                         onValueChange={(v) =>
-                          patchOAuth2({ addTokenTo: v as 'header' | 'queryParams' })
+                          patchOAuth2({
+                            addTokenTo: v as 'header' | 'queryParams',
+                          })
                         }
                       >
                         <SelectTrigger className='w-full text-sm'>

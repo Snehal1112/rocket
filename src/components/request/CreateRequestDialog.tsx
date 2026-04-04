@@ -1,25 +1,33 @@
 import { useState } from 'react';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
-import { saveRequest } from '@/lib/tauri-api';
 import { sanitizeFilename } from '@/lib/filename-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
 
 type RequestType = 'http' | 'graphql' | 'grpc' | 'websocket' | 'curl';
 
 const REQUEST_TYPES: { label: string; value: RequestType }[] = [
-  { label: 'HTTP',      value: 'http' },
-  { label: 'GraphQL',   value: 'graphql' },
-  { label: 'gRPC',      value: 'grpc' },
+  { label: 'HTTP', value: 'http' },
+  { label: 'GraphQL', value: 'graphql' },
+  { label: 'gRPC', value: 'grpc' },
   { label: 'WebSocket', value: 'websocket' },
   { label: 'From cURL', value: 'curl' },
 ];
@@ -34,7 +42,10 @@ export interface CreateRequestDialogProps {
 }
 
 export function CreateRequestDialog({
-  open, collectionName, folderPath, onClose,
+  open,
+  collectionName,
+  folderPath,
+  onClose,
 }: CreateRequestDialogProps) {
   const [requestType, setRequestType] = useState<RequestType>('http');
   const [name, setName] = useState('');
@@ -58,7 +69,10 @@ export function CreateRequestDialog({
   }
 
   async function handleCreate() {
-    if (!trimmedName) { setError('Request name is required.'); return; }
+    if (!trimmedName) {
+      setError('Request name is required.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -104,67 +118,104 @@ export function CreateRequestDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); onClose(); } }}>
-      <DialogContent className="sm:max-w-md" onKeyDown={handleKeyDown}>
-        <DialogHeader><DialogTitle>New Request</DialogTitle></DialogHeader>
-        <div className="flex flex-col gap-4 py-2">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="crd-type" className="text-xs font-medium">Request Type</Label>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) {
+          reset();
+          onClose();
+        }
+      }}
+    >
+      <DialogContent className='sm:max-w-md' onKeyDown={handleKeyDown}>
+        <DialogHeader>
+          <DialogTitle>New Request</DialogTitle>
+        </DialogHeader>
+        <div className='flex flex-col gap-4 py-2'>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='crd-type' className='text-xs font-medium'>
+              Request Type
+            </Label>
             <Select value={requestType} onValueChange={(v) => setRequestType(v as RequestType)}>
-              <SelectTrigger id="crd-type" className="h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger id='crd-type' className='h-9'>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 {REQUEST_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="crd-name" className="text-xs font-medium">Request Name</Label>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='crd-name' className='text-xs font-medium'>
+              Request Name
+            </Label>
             <Input
-              id="crd-name"
+              id='crd-name'
               autoFocus
-              placeholder="e.g. GET /users/:id"
+              placeholder='e.g. GET /users/:id'
               value={name}
-              onChange={(e) => { setName(e.target.value); setError(''); }}
-              className="h-9"
+              onChange={(e) => {
+                setName(e.target.value);
+                setError('');
+              }}
+              className='h-9'
             />
             {showFsHint && (
-              <p className="text-xs text-muted-foreground">
-                Saved as: <span className="font-mono">{fsName}</span>
+              <p className='text-xs text-muted-foreground'>
+                Saved as: <span className='font-mono'>{fsName}</span>
               </p>
             )}
           </div>
           {(requestType === 'http' || requestType === 'curl') && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="crd-method" className="text-xs font-medium">HTTP Method</Label>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='crd-method' className='text-xs font-medium'>
+                HTTP Method
+              </Label>
               <Select value={method} onValueChange={(v) => setMethod(v as HttpMethod)}>
-                <SelectTrigger id="crd-method" className="h-9"><SelectValue /></SelectTrigger>
+                <SelectTrigger id='crd-method' className='h-9'>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {HTTP_METHODS.map((m) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           )}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="crd-url" className="text-xs font-medium">URL</Label>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='crd-url' className='text-xs font-medium'>
+              URL
+            </Label>
             <Input
-              id="crd-url"
-              placeholder="https://api.example.com/users"
+              id='crd-url'
+              placeholder='https://api.example.com/users'
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="h-9 font-mono text-sm"
+              className='h-9 font-mono text-sm'
             />
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className='text-xs text-destructive'>{error}</p>}
         </div>
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => { reset(); onClose(); }} disabled={saving}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              reset();
+              onClose();
+            }}
+            disabled={saving}
+          >
             Cancel
           </Button>
-          <Button size="sm" onClick={() => void handleCreate()} disabled={saving || !trimmedName}>
+          <Button size='sm' onClick={() => void handleCreate()} disabled={saving || !trimmedName}>
             {saving ? 'Creating...' : 'Create'}
           </Button>
         </DialogFooter>

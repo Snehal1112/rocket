@@ -1,42 +1,42 @@
 import { create } from 'zustand';
 import {
-  gitIsRepo,
-  gitStatus,
-  gitStage,
-  gitUnstage,
-  gitDiscard,
-  gitCommit,
-  gitStashList,
-  gitStashSave,
-  gitStashPop,
-  gitStashApply,
-  gitStashDrop,
-  gitBranches,
-  gitSwitchBranch,
-  gitCreateBranch,
-  gitDeleteBranch,
-  gitMergeBranch,
-  gitPush,
-  gitPull,
-  gitFetch,
-  gitLog,
-  gitConflicts,
-  gitResolveConflict,
-  gitAbortMerge,
-  gitListRemotes,
-  gitAddRemote,
-  gitRemoveRemote,
-  gitSetRemoteUrl,
-  gitCheckoutRemoteBranch,
-  type RepoStatus,
-  type FileStatus,
-  type StashEntry,
   type BranchList,
-  type GitCredentials,
   type CommitInfo,
   type ConflictFile,
   type ConflictResolution,
+  type FileStatus,
+  type GitCredentials,
+  gitAbortMerge,
+  gitAddRemote,
+  gitBranches,
+  gitCheckoutRemoteBranch,
+  gitCommit,
+  gitConflicts,
+  gitCreateBranch,
+  gitDeleteBranch,
+  gitDiscard,
+  gitFetch,
+  gitIsRepo,
+  gitListRemotes,
+  gitLog,
+  gitMergeBranch,
+  gitPull,
+  gitPush,
+  gitRemoveRemote,
+  gitResolveConflict,
+  gitSetRemoteUrl,
+  gitStage,
+  gitStashApply,
+  gitStashDrop,
+  gitStashList,
+  gitStashPop,
+  gitStashSave,
+  gitStatus,
+  gitSwitchBranch,
+  gitUnstage,
   type RemoteInfo,
+  type RepoStatus,
+  type StashEntry,
 } from '@/lib/tauri-api';
 
 interface GitState {
@@ -96,7 +96,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   // Selector to determine if any file is in a conflicted state
   hasConflicts: () => {
     const { status } = get();
-    return status?.files.some((f) => f.status === "conflicted") ?? false;
+    return status?.files.some((f) => f.status === 'conflicted') ?? false;
   },
   isRepo: false,
   collectionPath: null,
@@ -151,7 +151,9 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const conflicts = await gitConflicts(collectionPath);
       set({ conflicts });
-    } catch { set({ conflicts: [] }); }
+    } catch {
+      set({ conflicts: [] });
+    }
   },
 
   // Resolve a single conflicted file with the given strategy.
@@ -292,9 +294,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   unstageAll: async () => {
     const { status } = get();
     if (!status) return;
-    const staged = status.files
-      .filter((f: FileStatus) => f.staged)
-      .map((f: FileStatus) => f.path);
+    const staged = status.files.filter((f: FileStatus) => f.staged).map((f: FileStatus) => f.path);
     if (staged.length > 0) {
       await get().unstageFiles(staged);
     }
@@ -460,7 +460,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   // Show or hide the credentials dialog.
-  setShowCredentialsDialog: (show) => set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
+  setShowCredentialsDialog: (show) =>
+    set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
 
   clearPendingNetworkOp: () => set({ pendingNetworkOp: null }),
 
@@ -468,7 +469,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   push: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'push' }); return; }
+    if (!credentials) {
+      set({ showCredentialsDialog: true, pendingNetworkOp: 'push' });
+      return;
+    }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
@@ -483,7 +487,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   pull: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' }); return; }
+    if (!credentials) {
+      set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' });
+      return;
+    }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
@@ -503,7 +510,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   fetch: async (remote) => {
     const { collectionPath, credentials } = get();
     if (!collectionPath) return;
-    if (!credentials) { set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' }); return; }
+    if (!credentials) {
+      set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' });
+      return;
+    }
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {

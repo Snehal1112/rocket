@@ -1,14 +1,14 @@
-import type {
-  PaneNode,
-  SplitNode,
-  LeafNode,
-  Tab,
-  RequestState,
-  AuthState,
-  BodyState,
-} from '@/types/pane-types';
 import type { Request as ApiRequest } from '@/lib/tauri-api';
 import { parseQueryParams } from '@/lib/url-params';
+import type {
+  AuthState,
+  BodyState,
+  LeafNode,
+  PaneNode,
+  RequestState,
+  SplitNode,
+  Tab,
+} from '@/types/pane-types';
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
 export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
@@ -16,23 +16,34 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
   let auth: AuthState;
   switch (req.auth.authType) {
     case 'basic':
-      auth = { authType: 'basic', basic: { username: req.auth.username, password: req.auth.password } };
+      auth = {
+        authType: 'basic',
+        basic: { username: req.auth.username, password: req.auth.password },
+      };
       break;
     case 'bearer':
       auth = { authType: 'bearer', bearer: { token: req.auth.token } };
       break;
     case 'api-key':
-      auth = { authType: 'api-key', apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.addTo } };
+      auth = {
+        authType: 'api-key',
+        apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.addTo },
+      };
       break;
     case 'oauth2': {
       const a = req.auth as Record<string, unknown>;
       auth = {
         authType: 'oauth2',
         oauth2: {
-          grantType: (a.grantType ?? 'client_credentials') as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
+          grantType: (a.grantType ?? 'client_credentials') as
+            | 'client_credentials'
+            | 'password'
+            | 'authorization_code'
+            | 'implicit',
           authorizationUrl: (a.authorizationUrl as string) ?? '',
           tokenUrl: (a.tokenUrl as string) ?? '',
-          callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+          callbackUrl:
+            (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
           clientId: (a.clientId as string) ?? '',
           clientSecret: (a.clientSecret as string) ?? '',
           scope: (a.scope as string) ?? '',
@@ -145,10 +156,7 @@ export function findLeaf(node: PaneNode, groupId: string): LeafNode | null {
 }
 
 // Searches all leaves depth-first for a tab by id.
-export function findTabInTree(
-  node: PaneNode,
-  tabId: string,
-): { leaf: LeafNode; tab: Tab } | null {
+export function findTabInTree(node: PaneNode, tabId: string): { leaf: LeafNode; tab: Tab } | null {
   if (node.type === 'leaf') {
     const tab = node.tabs.find((t) => t.id === tabId);
     return tab ? { leaf: node, tab } : null;

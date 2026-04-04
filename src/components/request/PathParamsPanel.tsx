@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface PathParamsPanelProps {
@@ -22,15 +22,15 @@ export function PathParamsPanel({ params, onChange }: PathParamsPanelProps) {
   );
 
   return (
-    <div className="space-y-2">
-      <div className="text-xs font-medium text-muted-foreground">Path</div>
+    <div className='space-y-2'>
+      <div className='text-xs font-medium text-muted-foreground'>Path</div>
       {params.length === 0 ? (
-        <p className="text-xs text-muted-foreground italic px-1">
-          No path params. Add <span className="font-mono">:param</span> segments to the URL.
+        <p className='text-xs text-muted-foreground italic px-1'>
+          No path params. Add <span className='font-mono'>:param</span> segments to the URL.
         </p>
       ) : (
         params.map((entry) => (
-          <div key={entry.id} className="flex gap-2 items-center">
+          <div key={entry.id} className='flex gap-2 items-center'>
             <Checkbox
               checked={entry.enabled}
               onCheckedChange={(checked) => updateEntry(entry.id, { enabled: !!checked })}
@@ -40,16 +40,16 @@ export function PathParamsPanel({ params, onChange }: PathParamsPanelProps) {
               value={entry.key}
               readOnly
               tabIndex={-1}
-              className="flex-1 text-xs bg-muted/50 cursor-default"
+              className='flex-1 text-xs bg-muted/50 cursor-default'
             />
             <Input
-              placeholder="Value"
+              placeholder='Value'
               value={entry.value}
               onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
-              className="flex-1 text-xs"
+              className='flex-1 text-xs'
             />
             {/* No remove button — path params are controlled by the URL. */}
-            <div className="w-7" />
+            <div className='w-7' />
           </div>
         ))
       )}

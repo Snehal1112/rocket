@@ -17,25 +17,24 @@ function varsToMap(vars: CollectionVariable[]): Record<string, string> {
 // Build a flat variable context by merging all 7 scopes in priority order.
 // Later assignments win — highest-priority scope is applied last.
 export function buildVariableContext(params: {
-  runtimeVars?:    Record<string, string>;
-  requestVars?:    CollectionVariable[];
-  folderVars?:     CollectionVariable[];  // chain-merged by the backend
+  runtimeVars?: Record<string, string>;
+  requestVars?: CollectionVariable[];
+  folderVars?: CollectionVariable[]; // chain-merged by the backend
   collectionVars?: CollectionVariable[];
-  envVars?:        Record<string, string>;
-  globalVars?:     Record<string, string>;
+  envVars?: Record<string, string>;
+  globalVars?: Record<string, string>;
   processEnvVars?: Record<string, string>;
 }): Record<string, string> {
   const ctx: Record<string, string> = {};
 
   // Lowest priority first — each layer overwrites on collision.
-  for (const [k, v] of Object.entries(params.processEnvVars ?? {}))
-    ctx[`process.env.${k}`] = v;
+  for (const [k, v] of Object.entries(params.processEnvVars ?? {})) ctx[`process.env.${k}`] = v;
   Object.assign(ctx, params.globalVars ?? {});
   Object.assign(ctx, varsToMap(params.collectionVars ?? []));
-  Object.assign(ctx, params.envVars ?? {});          // env beats collection
+  Object.assign(ctx, params.envVars ?? {}); // env beats collection
   Object.assign(ctx, varsToMap(params.folderVars ?? []));
   Object.assign(ctx, varsToMap(params.requestVars ?? []));
-  Object.assign(ctx, params.runtimeVars ?? {});      // runtime wins all
+  Object.assign(ctx, params.runtimeVars ?? {}); // runtime wins all
 
   return ctx;
 }
@@ -51,7 +50,5 @@ export function resolveMapWithContext(
   map: Record<string, string>,
   ctx: Record<string, string>,
 ): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(map).map(([k, v]) => [k, resolveWithContext(v, ctx)]),
-  );
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, resolveWithContext(v, ctx)]));
 }

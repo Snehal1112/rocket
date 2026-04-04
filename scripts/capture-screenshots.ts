@@ -7,9 +7,9 @@
  * Usage: npx tsx scripts/capture-screenshots.ts
  */
 
-import { chromium, type Page, type Browser } from 'playwright';
-import { spawn, type ChildProcess } from 'child_process';
-import { resolve, dirname } from 'path';
+import { type ChildProcess, spawn } from 'child_process';
+import { dirname, resolve } from 'path';
+import { type Browser, chromium, type Page } from 'playwright';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -131,7 +131,10 @@ async function captureAllScreens(page: Page): Promise<void> {
     }
 
     // Switch to Headers tab in response.
-    const headersTab = page.locator('button').filter({ hasText: /^headers$/i }).last();
+    const headersTab = page
+      .locator('button')
+      .filter({ hasText: /^headers$/i })
+      .last();
     if (await headersTab.isVisible()) {
       await headersTab.click();
       await page.waitForTimeout(300);

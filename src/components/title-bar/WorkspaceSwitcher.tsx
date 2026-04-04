@@ -1,19 +1,5 @@
-import { useState } from "react";
-import {
-  Check,
-  ChevronDown,
-  FolderOpen,
-  MoreHorizontal,
-  Pin,
-  Plus,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Check, ChevronDown, FolderOpen, MoreHorizontal, Pin, Plus } from 'lucide-react';
+import { useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,13 +9,20 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { openFolderPicker } from "@/lib/tauri-api";
-import { useWorkspaceStore } from "@/stores/workspace-store";
-import { CreateWorkspaceDialog } from "@/components/workspace/CreateWorkspaceDialog";
-import { RenameWorkspaceDialog } from "@/components/workspace/RenameWorkspaceDialog";
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { CreateWorkspaceDialog } from '@/components/workspace/CreateWorkspaceDialog';
+import { RenameWorkspaceDialog } from '@/components/workspace/RenameWorkspaceDialog';
+import { openFolderPicker } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 type DialogTarget = { id: string; name: string };
 
@@ -48,33 +41,26 @@ export function WorkspaceSwitcher() {
   const active = workspaces.find((w) => w.id === activeId);
   const canCloseOrDelete = workspaces.length > 1;
 
-  const pinned = workspaces
-    .filter((w) => w.pinned)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const unpinned = workspaces
-    .filter((w) => !w.pinned)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const pinned = workspaces.filter((w) => w.pinned).sort((a, b) => a.name.localeCompare(b.name));
+  const unpinned = workspaces.filter((w) => !w.pinned).sort((a, b) => a.name.localeCompare(b.name));
 
   const renderWorkspaceRow = (ws: (typeof workspaces)[number]) => (
-    <div key={ws.id} className="flex items-center group">
+    <div key={ws.id} className='flex items-center group'>
       <DropdownMenuItem
-        className="flex-1 gap-2"
+        className='flex-1 gap-2'
         onSelect={() => {
           if (ws.id !== activeId) void switchWorkspace(ws.id);
         }}
       >
-        <Check
-          className="h-3.5 w-3.5 shrink-0"
-          style={{ opacity: ws.id === activeId ? 1 : 0 }}
-        />
-        <span className="flex-1 truncate">{ws.name}</span>
+        <Check className='h-3.5 w-3.5 shrink-0' style={{ opacity: ws.id === activeId ? 1 : 0 }} />
+        <span className='flex-1 truncate'>{ws.name}</span>
       </DropdownMenuItem>
 
       {/* Pin/unpin toggle button */}
       <Button
-        variant="ghost"
-        size="icon"
-        className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100"
+        variant='ghost'
+        size='icon'
+        className='h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100'
         onClick={(e) => {
           e.stopPropagation();
           if (ws.pinned) {
@@ -84,25 +70,23 @@ export function WorkspaceSwitcher() {
           }
         }}
       >
-        <Pin className={cn("h-3.5 w-3.5", ws.pinned && "fill-current")} />
+        <Pin className={cn('h-3.5 w-3.5', ws.pinned && 'fill-current')} />
       </Button>
 
       {/* Per-workspace context menu */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 mr-1"
+            variant='ghost'
+            size='icon'
+            className='h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 mr-1'
             onClick={(e) => e.stopPropagation()}
           >
-            <MoreHorizontal className="h-3.5 w-3.5" />
+            <MoreHorizontal className='h-3.5 w-3.5' />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-36">
-          <DropdownMenuItem
-            onSelect={() => setRenameTarget({ id: ws.id, name: ws.name })}
-          >
+        <DropdownMenuContent align='end' className='w-36'>
+          <DropdownMenuItem onSelect={() => setRenameTarget({ id: ws.id, name: ws.name })}>
             Rename
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -113,9 +97,9 @@ export function WorkspaceSwitcher() {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
+            className='text-destructive focus:text-destructive'
             onSelect={() => setDeleteTarget({ id: ws.id, name: ws.name })}
-            disabled={ws.id === "default" || !canCloseOrDelete}
+            disabled={ws.id === 'default' || !canCloseOrDelete}
           >
             Delete
           </DropdownMenuItem>
@@ -128,31 +112,23 @@ export function WorkspaceSwitcher() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 font-medium max-w-[200px]"
-          >
-            <span className="truncate">
-              {active?.name ?? "Select workspace"}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <Button variant='outline' size='sm' className='gap-1.5 font-medium max-w-[200px]'>
+            <span className='truncate'>{active?.name ?? 'Select workspace'}</span>
+            <ChevronDown className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
           </Button>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent
-          align="center"
-          className="min-w-[220px] bg-card/50 backdrop-blur-sm border border-border/70"
+          align='center'
+          className='min-w-[220px] bg-card/50 backdrop-blur-sm border border-border/70'
         >
           {pinned.map(renderWorkspaceRow)}
-          {pinned.length > 0 && unpinned.length > 0 && (
-            <DropdownMenuSeparator />
-          )}
+          {pinned.length > 0 && unpinned.length > 0 && <DropdownMenuSeparator />}
           {unpinned.map(renderWorkspaceRow)}
 
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-2" />
+            <Plus className='h-3.5 w-3.5 mr-2' />
             New workspace
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -160,16 +136,14 @@ export function WorkspaceSwitcher() {
               const path = await openFolderPicker();
               if (path) {
                 try {
-                  await useWorkspaceStore
-                    .getState()
-                    .openWorkspaceFromDisk(path);
+                  await useWorkspaceStore.getState().openWorkspaceFromDisk(path);
                 } catch (err) {
-                  console.error("Failed to open workspace:", err);
+                  console.error('Failed to open workspace:', err);
                 }
               }
             }}
           >
-            <FolderOpen className="h-3.5 w-3.5 mr-2" />
+            <FolderOpen className='h-3.5 w-3.5 mr-2' />
             Open workspace
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -201,8 +175,8 @@ export function WorkspaceSwitcher() {
           <AlertDialogHeader>
             <AlertDialogTitle>Close workspace</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove &quot;{closeTarget?.name}&quot; from Rocket? The files on
-              disk will not be affected.
+              Remove &quot;{closeTarget?.name}&quot; from Rocket? The files on disk will not be
+              affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -230,14 +204,14 @@ export function WorkspaceSwitcher() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete workspace</AlertDialogTitle>
             <AlertDialogDescription>
-              Permanently delete &quot;{deleteTarget?.name}&quot; and all its
-              files from disk? This cannot be undone.
+              Permanently delete &quot;{deleteTarget?.name}&quot; and all its files from disk? This
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               onClick={() => {
                 void deleteWorkspace(deleteTarget!.id);
                 setDeleteTarget(null);

@@ -20,8 +20,10 @@ yarn dev
 # TypeScript check
 yarn tsc --noEmit
 
-# Lint
-yarn lint
+# Lint & format
+yarn check          # lint + format check (read-only)
+yarn lint           # auto-fix lint issues
+yarn format         # auto-format
 
 # Frontend tests (Vitest — all)
 yarn test
@@ -43,7 +45,7 @@ yarn tauri build                         # full Tauri release
 
 ```bash
 yarn tsc --noEmit   # TypeScript check
-yarn lint           # ESLint
+yarn check          # Biome lint + format
 yarn build          # Ensure frontend builds
 cargo check         # Rust check
 cargo test          # Rust tests

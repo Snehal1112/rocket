@@ -1,37 +1,37 @@
-import { useState, useEffect } from "react";
 import {
   Folder,
   FolderOpen,
   FolderPlus,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Trash2,
-  Pencil,
-  MoreHorizontal,
   Variable,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Input } from "@/components/ui/input";
-import { TreeItem, TreeItemContent } from "@/components/ui/tree";
-import { moveItem, saveRequest } from "@/lib/tauri-api";
-import { usePaneStore } from "@/stores/pane-store";
-import { createDefaultRequest } from "@/lib/pane-utils";
-import { RequestNode } from "./RequestNode";
-import { FolderVariablesPopover } from "./FolderVariablesPopover";
-import type { CollectionItem, CollectionSummary } from "@/lib/tauri-api";
-import type { DeleteTarget } from "./tree-utils";
+} from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { createDefaultRequest } from '@/lib/pane-utils';
+import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
+import { moveItem, saveRequest } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
+import { FolderVariablesPopover } from './FolderVariablesPopover';
+import { RequestNode } from './RequestNode';
+import type { DeleteTarget } from './tree-utils';
 
 interface FolderNodeProps {
   name: string;
@@ -49,11 +49,7 @@ interface FolderNodeProps {
     dstPath: string,
   ) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (
-    collection: string,
-    path: string,
-    name: string,
-  ) => Promise<void>;
+  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
 }
 
 export function FolderNode({
@@ -73,7 +69,7 @@ export function FolderNode({
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const [creatingRequest, setCreatingRequest] = useState(false);
-  const [newRequestName, setNewRequestName] = useState("");
+  const [newRequestName, setNewRequestName] = useState('');
   const [varsOpen, setVarsOpen] = useState(false);
   // Auto-expand when filter is active.
   useEffect(() => {
@@ -87,14 +83,14 @@ export function FolderNode({
       return;
     }
     // Folder rename is done by moving the folder to a new path (no rename_folder command).
-    const parts = basePath.split("/");
+    const parts = basePath.split('/');
     parts[parts.length - 1] = trimmed;
-    const newPath = parts.join("/");
+    const newPath = parts.join('/');
     try {
       await moveItem(collectionName, basePath, collectionName, newPath);
       setIsRenaming(false);
     } catch (err) {
-      console.error("Rename folder failed:", err);
+      console.error('Rename folder failed:', err);
     }
   };
 
@@ -111,16 +107,16 @@ export function FolderNode({
       const payload = {
         uid,
         name: reqName,
-        method: "GET" as const,
-        url: "",
+        method: 'GET' as const,
+        url: '',
         headers: [],
-        auth: { authType: "none" as const },
+        auth: { authType: 'none' as const },
       };
       const saved = await saveRequest(collectionName, path, payload);
       usePaneStore.getState().openTab({
         id: uid,
         title: saved.name,
-        tabType: "request",
+        tabType: 'request',
         request: createDefaultRequest(),
         response: null,
         isDirty: false,
@@ -130,15 +126,13 @@ export function FolderNode({
         },
       });
     } catch (err) {
-      console.error("[FolderNode] Failed to create request:", err);
+      console.error('[FolderNode] Failed to create request:', err);
     }
   };
 
   const filteredItems = filter
     ? items.filter(
-        (item) =>
-          item.type !== "request" ||
-          item.name.toLowerCase().includes(filter.toLowerCase()),
+        (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
       )
     : items;
 
@@ -148,39 +142,32 @@ export function FolderNode({
     <div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="group relative flex items-center">
-            <TreeItem
-              value={basePath}
-              open={open}
-              onOpenChange={setOpen}
-              className="flex-1"
-            >
+          <div className='group relative flex items-center'>
+            <TreeItem value={basePath} open={open} onOpenChange={setOpen} className='flex-1'>
               <TreeItemContent
-                className="flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer"
+                className='flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer'
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? (
-                  <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <FolderOpen className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
                 ) : (
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <Folder className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
                 )}
                 {isRenaming ? (
                   <Input
                     autoFocus
-                    className="h-6 text-xs flex-1"
+                    className='h-6 text-xs flex-1'
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleRename();
-                      if (e.key === "Escape") setIsRenaming(false);
+                      if (e.key === 'Enter') void handleRename();
+                      if (e.key === 'Escape') setIsRenaming(false);
                     }}
                     onBlur={() => void handleRename()}
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span className="truncate font-medium text-foreground">
-                    {name}
-                  </span>
+                  <span className='truncate font-medium text-foreground'>{name}</span>
                 )}
               </TreeItemContent>
             </TreeItem>
@@ -188,35 +175,30 @@ export function FolderNode({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  type="button"
+                  type='button'
                   aria-label={`Actions for ${name}`}
-                  className="absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground"
+                  className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <MoreHorizontal className="h-3 w-3" />
+                  <MoreHorizontal className='h-3 w-3' />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="w-48"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem
                   onClick={() => {
                     setOpen(true);
                     setCreatingRequest(true);
-                    setNewRequestName("");
+                    setNewRequestName('');
                   }}
                 >
-                  <Plus className="h-3.5 w-3.5 mr-2" /> New Request
+                  <Plus className='h-3.5 w-3.5 mr-2' /> New Request
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => void onNewFolder(collectionName, basePath)}
-                >
-                  <FolderPlus className="h-3.5 w-3.5 mr-2" /> New Folder
+                <DropdownMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
+                  <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setVarsOpen(true)}>
-                  <Variable className="h-3.5 w-3.5 mr-2" /> Variables
+                  <Variable className='h-3.5 w-3.5 mr-2' /> Variables
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -225,45 +207,41 @@ export function FolderNode({
                     setIsRenaming(true);
                   }}
                 >
-                  <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
+                  <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  className="text-destructive"
+                  className='text-destructive'
                   onClick={() =>
                     onDelete({
-                      type: "folder",
+                      type: 'folder',
                       collection: collectionName,
                       path: basePath,
                       name,
                     })
                   }
                 >
-                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                  <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
+        <ContextMenuContent className='w-48'>
           <ContextMenuItem
             onClick={() => {
               setOpen(true);
               setCreatingRequest(true);
-              setNewRequestName("");
+              setNewRequestName('');
             }}
           >
             New Request
           </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => void onNewFolder(collectionName, basePath)}
-          >
+          <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
             New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => setVarsOpen(true)}>
-            Variables
-          </ContextMenuItem>
+          <ContextMenuItem onClick={() => setVarsOpen(true)}>Variables</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {
@@ -275,10 +253,10 @@ export function FolderNode({
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            className="text-destructive"
+            className='text-destructive'
             onClick={() =>
               onDelete({
-                type: "folder",
+                type: 'folder',
                 collection: collectionName,
                 path: basePath,
                 name,
@@ -301,9 +279,9 @@ export function FolderNode({
 
       {open && (
         // Indentation guide line.
-        <div className="pl-1.5 border-l border-border/70 ml-2">
+        <div className='pl-1.5 border-l border-border/70 ml-2'>
           {filteredItems.map((item) => {
-            if (item.type === "folder") {
+            if (item.type === 'folder') {
               const folderPath = `${basePath}/${item.name}`;
               return (
                 <FolderNode
@@ -341,16 +319,16 @@ export function FolderNode({
             );
           })}
           {creatingRequest && (
-            <div className="flex items-center gap-1 px-2 py-1 text-xs">
+            <div className='flex items-center gap-1 px-2 py-1 text-xs'>
               <Input
                 autoFocus
-                className="h-5 text-xs flex-1"
-                placeholder="Request name"
+                className='h-5 text-xs flex-1'
+                placeholder='Request name'
                 value={newRequestName}
                 onChange={(e) => setNewRequestName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleNewRequestCreate();
-                  if (e.key === "Escape") setCreatingRequest(false);
+                  if (e.key === 'Enter') void handleNewRequestCreate();
+                  if (e.key === 'Escape') setCreatingRequest(false);
                 }}
                 onBlur={() => setCreatingRequest(false)}
                 onClick={(e) => e.stopPropagation()}

@@ -1,10 +1,10 @@
-import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
-import { useCallback, useState } from "react";
-import { useMonacoTheme } from "@/components/editor/useMonacoTheme";
-import { gitDiff, gitDiffStaged } from "@/lib/tauri-api";
-import type { DiffState } from "@/types/pane-types";
-import { DiffHeader } from "./DiffHeader";
-import { VisualDiffView } from "./VisualDiffView";
+import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
+import { useCallback, useState } from 'react';
+import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
+import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
+import type { DiffState } from '@/types/pane-types';
+import { DiffHeader } from './DiffHeader';
+import { VisualDiffView } from './VisualDiffView';
 
 interface DiffViewerProps {
   diffState: DiffState;
@@ -12,22 +12,22 @@ interface DiffViewerProps {
 
 // Maps file extension to a Monaco language identifier.
 function getLanguage(filePath: string): string {
-  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = {
-    json: "json",
-    js: "javascript",
-    ts: "typescript",
-    tsx: "typescript",
-    jsx: "javascript",
-    md: "markdown",
-    yaml: "yaml",
-    yml: "yaml",
-    xml: "xml",
-    html: "html",
-    css: "css",
-    bru: "plaintext",
+    json: 'json',
+    js: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    jsx: 'javascript',
+    md: 'markdown',
+    yaml: 'yaml',
+    yml: 'yaml',
+    xml: 'xml',
+    html: 'html',
+    css: 'css',
+    bru: 'plaintext',
   };
-  return map[ext] ?? "plaintext";
+  return map[ext] ?? 'plaintext';
 }
 
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
@@ -39,15 +39,13 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   };
 
   // Persist mode preference across sessions.
-  const [mode, setMode] = useState<"text" | "visual">(() => {
-    return (
-      (localStorage.getItem("git-diff-mode") as "text" | "visual") ?? "text"
-    );
+  const [mode, setMode] = useState<'text' | 'visual'>(() => {
+    return (localStorage.getItem('git-diff-mode') as 'text' | 'visual') ?? 'text';
   });
 
-  const handleModeChange = useCallback((m: "text" | "visual") => {
+  const handleModeChange = useCallback((m: 'text' | 'visual') => {
     setMode(m);
-    localStorage.setItem("git-diff-mode", m);
+    localStorage.setItem('git-diff-mode', m);
   }, []);
 
   const handleToggleStaged = useCallback(
@@ -58,8 +56,8 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
           : await gitDiff(diffState.collectionPath, diffState.filePath);
         setDiffState((prev) => ({
           ...prev!,
-          oldContent: diff.oldContent ?? "",
-          newContent: diff.newContent ?? "",
+          oldContent: diff.oldContent ?? '',
+          newContent: diff.newContent ?? '',
           isStaged,
         }));
       } catch {
@@ -70,11 +68,11 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   );
 
   // Visual mode is only available for JSON request files.
-  const canShowVisual = diffState.filePath.endsWith(".yml");
+  const canShowVisual = diffState.filePath.endsWith('.yml');
   const language = getLanguage(diffState.filePath);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className='flex flex-col h-full'>
       <DiffHeader
         diffState={diffState}
         onToggleStaged={handleToggleStaged}
@@ -82,13 +80,10 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
         onModeChange={handleModeChange}
         canShowVisual={canShowVisual}
       />
-      {mode === "visual" && canShowVisual ? (
-        <VisualDiffView
-          oldContent={diffState.oldContent}
-          newContent={diffState.newContent}
-        />
+      {mode === 'visual' && canShowVisual ? (
+        <VisualDiffView oldContent={diffState.oldContent} newContent={diffState.newContent} />
       ) : (
-        <div className="flex-1">
+        <div className='flex-1'>
           <DiffEditor
             original={diffState.oldContent}
             modified={diffState.newContent}

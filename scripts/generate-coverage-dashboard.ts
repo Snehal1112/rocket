@@ -10,12 +10,12 @@
  *   - coverage/index.html  (combined human-readable dashboard)
  */
 
-import { execSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { execSync } from 'child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
-const ROOT = new URL("..", import.meta.url).pathname;
-const COVERAGE_DIR = join(ROOT, "coverage");
+const ROOT = new URL('..', import.meta.url).pathname;
+const COVERAGE_DIR = join(ROOT, 'coverage');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -24,9 +24,9 @@ function pct(covered: number, total: number): number {
 }
 
 function colorClass(p: number): string {
-  if (p >= 80) return "good";
-  if (p >= 60) return "warn";
-  return "bad";
+  if (p >= 80) return 'good';
+  if (p >= 60) return 'warn';
+  return 'bad';
 }
 
 function bar(p: number): string {
@@ -51,17 +51,17 @@ function loadFrontendCoverage(): {
   rows: { file: string; lines: number; stmts: number; funcs: number; branches: number }[];
   totals: V8FileSummary | null;
 } {
-  const summaryPath = join(COVERAGE_DIR, "frontend", "coverage-summary.json");
+  const summaryPath = join(COVERAGE_DIR, 'frontend', 'coverage-summary.json');
   if (!existsSync(summaryPath)) {
     return { rows: [], totals: null };
   }
 
-  const raw: V8Summary = JSON.parse(readFileSync(summaryPath, "utf8"));
-  const totals = raw["total"] ?? null;
+  const raw: V8Summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  const totals = raw['total'] ?? null;
   const rows = Object.entries(raw)
-    .filter(([k]) => k !== "total")
+    .filter(([k]) => k !== 'total')
     .map(([file, s]) => ({
-      file: file.replace(ROOT, ""),
+      file: file.replace(ROOT, ''),
       lines: s.lines.pct,
       stmts: s.statements.pct,
       funcs: s.functions.pct,
@@ -85,30 +85,30 @@ interface LlvmFileCov {
 }
 
 interface LlvmReport {
-  data: Array<{ files: LlvmFileCov[]; totals: LlvmFileCov["summary"] }>;
+  data: Array<{ files: LlvmFileCov[]; totals: LlvmFileCov['summary'] }>;
 }
 
 function loadRustCoverage(): {
   rows: { file: string; lines: number; funcs: number; regions: number }[];
-  totals: LlvmFileCov["summary"] | null;
+  totals: LlvmFileCov['summary'] | null;
 } {
-  const summaryPath = join(COVERAGE_DIR, "rust", "coverage-summary.json");
+  const summaryPath = join(COVERAGE_DIR, 'rust', 'coverage-summary.json');
   if (!existsSync(summaryPath)) {
     return { rows: [], totals: null };
   }
 
-  const raw: LlvmReport = JSON.parse(readFileSync(summaryPath, "utf8"));
+  const raw: LlvmReport = JSON.parse(readFileSync(summaryPath, 'utf8'));
   const data = raw.data?.[0];
   if (!data) return { rows: [], totals: null };
 
   const rows = data.files
     .map((f) => ({
-      file: f.filename.replace(ROOT, "").replace(/^\//, ""),
+      file: f.filename.replace(ROOT, '').replace(/^\//, ''),
       lines: Math.round(f.summary.lines.percent * 10) / 10,
       funcs: Math.round(f.summary.functions.percent * 10) / 10,
       regions: Math.round(f.summary.regions.percent * 10) / 10,
     }))
-    .filter((r) => !r.file.includes("/.cargo/") && !r.file.includes("/target/"))
+    .filter((r) => !r.file.includes('/.cargo/') && !r.file.includes('/target/'))
     .sort((a, b) => a.lines - b.lines);
 
   return { rows, totals: data.totals };
@@ -116,14 +116,19 @@ function loadRustCoverage(): {
 
 // ─── test counts from cargo test output ─────────────────────────────────────
 
-interface CrateResult { crate: string; passed: number; failed: number; ignored: number }
+interface CrateResult {
+  crate: string;
+  passed: number;
+  failed: number;
+  ignored: number;
+}
 
 function runCargoTests(): CrateResult[] {
-  console.log("Running cargo test --workspace (for test counts)...");
+  console.log('Running cargo test --workspace (for test counts)...');
   try {
-    const out = execSync("cargo test --workspace 2>&1", {
+    const out = execSync('cargo test --workspace 2>&1', {
       cwd: ROOT,
-      encoding: "utf8",
+      encoding: 'utf8',
       timeout: 300_000,
     });
 
@@ -132,12 +137,12 @@ function runCargoTests(): CrateResult[] {
     const binaryRe = /Running unittests .+\(target\/\w+\/deps\/([a-zA-Z_]+)-[0-9a-f]+\)/;
     const resultRe = /test result: (ok|FAILED)\. (\d+) passed; (\d+) failed; (\d+) ignored/;
 
-    const lines = out.split("\n");
-    let currentCrate = "";
+    const lines = out.split('\n');
+    let currentCrate = '';
     for (const line of lines) {
       const binaryMatch = line.match(binaryRe);
       if (binaryMatch) {
-        currentCrate = binaryMatch[1].replace(/_/g, "-");
+        currentCrate = binaryMatch[1].replace(/_/g, '-');
         continue;
       }
       const resultMatch = line.match(resultRe);
@@ -148,7 +153,7 @@ function runCargoTests(): CrateResult[] {
         if (passed + failed + ignored > 0) {
           results.push({ crate: currentCrate, passed, failed, ignored });
         }
-        currentCrate = "";
+        currentCrate = '';
       }
     }
     return results;
@@ -213,46 +218,57 @@ function generateHTML(
     <div class="grid">
       <div class="card">
         <div class="label">Tests Passed</div>
-        <div class="value ${totalFailed === 0 ? "good" : "bad"}">${totalPassed}</div>
+        <div class="value ${totalFailed === 0 ? 'good' : 'bad'}">${totalPassed}</div>
       </div>
       <div class="card">
         <div class="label">Tests Failed</div>
-        <div class="value ${totalFailed === 0 ? "neutral" : "bad"}">${totalFailed}</div>
+        <div class="value ${totalFailed === 0 ? 'neutral' : 'bad'}">${totalFailed}</div>
       </div>
       <div class="card">
         <div class="label">Ignored</div>
         <div class="value neutral">${totalIgnored}</div>
       </div>
-      ${feLinesTotal ? `
+      ${
+        feLinesTotal
+          ? `
       <div class="card">
         <div class="label">Frontend Line Cov</div>
         <div class="value ${colorClass(feLinesTotal.pct)}">${feLinesTotal.pct}%</div>
-      </div>` : ""}
-      ${rsLinesTotal ? `
+      </div>`
+          : ''
+      }
+      ${
+        rsLinesTotal
+          ? `
       <div class="card">
         <div class="label">Rust Line Cov</div>
         <div class="value ${colorClass(rsLinesTotal.percent)}">${Math.round(rsLinesTotal.percent * 10) / 10}%</div>
-      </div>` : ""}
+      </div>`
+          : ''
+      }
     </div>`;
 
   // ── crate results table ──
-  const crateRows = tests.map((r) => {
-    const status = r.failed === 0 ? "ok" : "fail";
-    return `<tr>
+  const crateRows = tests
+    .map((r) => {
+      const status = r.failed === 0 ? 'ok' : 'fail';
+      return `<tr>
       <td class="file-name">${r.crate}</td>
-      <td><span class="badge ${status}">${status === "ok" ? "PASS" : "FAIL"}</span></td>
+      <td><span class="badge ${status}">${status === 'ok' ? 'PASS' : 'FAIL'}</span></td>
       <td>${r.passed}</td>
       <td>${r.failed}</td>
       <td>${r.ignored}</td>
     </tr>`;
-  }).join("");
+    })
+    .join('');
 
   const crateSection = `
     <div class="section">
       <div class="section-header">Rust Tests by Crate</div>
-      ${tests.length === 0
-        ? `<div class="empty">No test results — run <code>yarn coverage</code> first</div>`
-        : `<table>
+      ${
+        tests.length === 0
+          ? `<div class="empty">No test results — run <code>yarn coverage</code> first</div>`
+          : `<table>
           <thead><tr><th>Crate</th><th>Status</th><th>Passed</th><th>Failed</th><th>Ignored</th></tr></thead>
           <tbody>${crateRows}</tbody>
         </table>`
@@ -260,29 +276,36 @@ function generateHTML(
     </div>`;
 
   // ── frontend coverage table ──
-  const feRows = fe.rows.map((r) => `<tr>
+  const feRows = fe.rows
+    .map(
+      (r) => `<tr>
     <td class="file-name" title="${r.file}">${r.file}</td>
     <td>${bar(r.lines)}</td>
     <td>${bar(r.stmts)}</td>
     <td>${bar(r.funcs)}</td>
     <td>${bar(r.branches)}</td>
-  </tr>`).join("");
+  </tr>`,
+    )
+    .join('');
 
-  const totalRow = feLinesTotal ? `
+  const totalRow = feLinesTotal
+    ? `
     <tr style="font-weight:600">
       <td>TOTAL</td>
       <td>${bar(feLinesTotal.pct)}</td>
       <td>${bar(fe.totals!.statements.pct)}</td>
       <td>${bar(fe.totals!.functions.pct)}</td>
       <td>${bar(fe.totals!.branches.pct)}</td>
-    </tr>` : "";
+    </tr>`
+    : '';
 
   const feSection = `
     <div class="section">
       <div class="section-header">Frontend Coverage (TypeScript)</div>
-      ${fe.rows.length === 0
-        ? `<div class="empty">No frontend coverage data — run <code>yarn coverage:frontend</code> first</div>`
-        : `<table>
+      ${
+        fe.rows.length === 0
+          ? `<div class="empty">No frontend coverage data — run <code>yarn coverage:frontend</code> first</div>`
+          : `<table>
           <thead><tr><th>File</th><th>Lines</th><th>Statements</th><th>Functions</th><th>Branches</th></tr></thead>
           <tbody>${feRows}${totalRow}</tbody>
         </table>
@@ -291,27 +314,34 @@ function generateHTML(
     </div>`;
 
   // ── rust coverage table ──
-  const rsRows = rs.rows.map((r) => `<tr>
+  const rsRows = rs.rows
+    .map(
+      (r) => `<tr>
     <td class="file-name" title="${r.file}">${r.file}</td>
     <td>${bar(r.lines)}</td>
     <td>${bar(r.funcs)}</td>
     <td>${bar(r.regions)}</td>
-  </tr>`).join("");
+  </tr>`,
+    )
+    .join('');
 
-  const rsTotalRow = rsLinesTotal ? `
+  const rsTotalRow = rsLinesTotal
+    ? `
     <tr style="font-weight:600">
       <td>TOTAL</td>
       <td>${bar(Math.round(rsLinesTotal.percent * 10) / 10)}</td>
       <td>${bar(Math.round(rs.totals!.functions.percent * 10) / 10)}</td>
       <td>${bar(Math.round(rs.totals!.regions.percent * 10) / 10)}</td>
-    </tr>` : "";
+    </tr>`
+    : '';
 
   const rsSection = `
     <div class="section">
       <div class="section-header">Rust Coverage</div>
-      ${rs.rows.length === 0
-        ? `<div class="empty">No Rust coverage data — run <code>yarn coverage:rust</code> first</div>`
-        : `<table>
+      ${
+        rs.rows.length === 0
+          ? `<div class="empty">No Rust coverage data — run <code>yarn coverage:rust</code> first</div>`
+          : `<table>
           <thead><tr><th>File</th><th>Lines</th><th>Functions</th><th>Regions</th></tr></thead>
           <tbody>${rsRows}${rsTotalRow}</tbody>
         </table>
@@ -347,12 +377,13 @@ const rs = loadRustCoverage();
 const tests = runCargoTests();
 
 const html = generateHTML(fe, rs, tests, new Date());
-const outPath = join(COVERAGE_DIR, "index.html");
-writeFileSync(outPath, html, "utf8");
+const outPath = join(COVERAGE_DIR, 'index.html');
+writeFileSync(outPath, html, 'utf8');
 
 const totalPassed = tests.reduce((s, r) => s + r.passed, 0);
 const totalFailed = tests.reduce((s, r) => s + r.failed, 0);
 console.log(`\nDashboard written → ${outPath}`);
 console.log(`Tests: ${totalPassed} passed, ${totalFailed} failed`);
 if (fe.totals) console.log(`Frontend coverage: ${fe.totals.lines.pct}% lines`);
-if (rs.totals) console.log(`Rust coverage: ${Math.round(rs.totals.lines.percent * 10) / 10}% lines`);
+if (rs.totals)
+  console.log(`Rust coverage: ${Math.round(rs.totals.lines.percent * 10) / 10}% lines`);

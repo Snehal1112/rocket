@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { usePaneStore } from '@/stores/pane-store';
-import { findActiveLeaf } from '@/lib/pane-utils';
 import { sendRequest } from '@/lib/execute-request';
+import { findActiveLeaf } from '@/lib/pane-utils';
+import { usePaneStore } from '@/stores/pane-store';
 import { isRequestTab } from '@/types/pane-types';
 
 // Registers global keyboard shortcuts for tab management across all pane groups.
@@ -35,9 +35,7 @@ export function useKeyboardShortcuts() {
             new CustomEvent('rocket:save-to-collection', { detail: { tabId: tab.id } }),
           );
         } else {
-          window.dispatchEvent(
-            new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }),
-          );
+          window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }));
         }
         return;
       }

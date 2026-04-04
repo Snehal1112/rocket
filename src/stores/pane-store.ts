@@ -1,25 +1,37 @@
 import { create } from 'zustand';
-import type { PaneNode, Tab, ResponseState, RequestState, RequestTab, LeafNode, SplitNode, CollectionSection, CollectionTab, DiffTab, DiffState, ConflictTab, ConflictState, WorkspaceTab, WorkspaceTabSection } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
 import { scheduleAutoSave } from '@/lib/auto-save';
-import { renameRequest } from '@/lib/tauri-api';
 import {
   createDefaultLeaf,
   createDefaultRequest,
-  findTabInTree,
   findActiveLeaf,
-  updateLeaf,
+  findTabInTree,
   removeLeaf,
   splitLeaf,
+  updateLeaf,
 } from '@/lib/pane-utils';
+import { renameRequest } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
+import type {
+  CollectionSection,
+  CollectionTab,
+  ConflictState,
+  ConflictTab,
+  DiffState,
+  DiffTab,
+  LeafNode,
+  PaneNode,
+  RequestState,
+  RequestTab,
+  ResponseState,
+  SplitNode,
+  Tab,
+  WorkspaceTab,
+  WorkspaceTabSection,
+} from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
-function updateTabInTree(
-  node: PaneNode,
-  tabId: string,
-  updater: (tab: Tab) => Tab,
-): PaneNode {
+function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
   if (node.type === 'leaf') {
     const idx = node.tabs.findIndex((t) => t.id === tabId);
     if (idx === -1) return node;
@@ -34,11 +46,7 @@ function updateTabInTree(
 }
 
 // Recursively finds a split node by id and updates its sizes.
-function updateSplitSizes(
-  node: PaneNode,
-  splitId: string,
-  sizes: [number, number],
-): PaneNode {
+function updateSplitSizes(node: PaneNode, splitId: string, sizes: [number, number]): PaneNode {
   if (node.type === 'leaf') return node;
   if (node.id === splitId) return { ...node, sizes } satisfies SplitNode;
   const left = updateSplitSizes(node.children[0], splitId, sizes);
@@ -48,9 +56,17 @@ function updateSplitSizes(
 }
 
 // Builds the initial store state with one empty leaf.
-function buildInitialState(): Pick<PaneState, 'root' | 'activeGroupId' | 'activeCollection' | 'collectionTabState'> {
+function buildInitialState(): Pick<
+  PaneState,
+  'root' | 'activeGroupId' | 'activeCollection' | 'collectionTabState'
+> {
   const leaf = createDefaultLeaf();
-  return { root: leaf, activeGroupId: leaf.groupId, activeCollection: null, collectionTabState: {} };
+  return {
+    root: leaf,
+    activeGroupId: leaf.groupId,
+    activeCollection: null,
+    collectionTabState: {},
+  };
 }
 
 export interface PaneState {
@@ -113,7 +129,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const collectionName =
       tab.tabType === 'collection'
         ? (tab as CollectionTab).collectionName
-        : tab.source?.collection ?? null;
+        : (tab.source?.collection ?? null);
     if (collectionName && collectionName !== get().activeCollection) {
       get().switchCollection(collectionName);
     }
@@ -155,7 +171,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     const found = findTabInTree(root, tabId);
     if (found?.tab.isDirty && found.tab.source && isRequestTab(found.tab)) {
-      scheduleAutoSave(tabId, found.tab.source.collection, found.tab.source.path, found.tab.title, found.tab.request);
+      scheduleAutoSave(
+        tabId,
+        found.tab.source.collection,
+        found.tab.source.path,
+        found.tab.title,
+        found.tab.request,
+      );
     }
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
@@ -205,7 +227,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (leaf.groupId === groupId) {
       const prevTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
       if (prevTab?.isDirty && prevTab.source && isRequestTab(prevTab)) {
-        scheduleAutoSave(prevTab.id, prevTab.source.collection, prevTab.source.path, prevTab.title, prevTab.request);
+        scheduleAutoSave(
+          prevTab.id,
+          prevTab.source.collection,
+          prevTab.source.path,
+          prevTab.title,
+          prevTab.request,
+        );
       }
     }
     const newRoot = updateLeaf(root, groupId, (l) => ({
@@ -394,7 +422,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       if (node.type === 'leaf') {
         for (const tab of node.tabs) {
           if (tab.isDirty && tab.source && isRequestTab(tab)) {
-            scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
+            scheduleAutoSave(
+              tab.id,
+              tab.source.collection,
+              tab.source.path,
+              tab.title,
+              tab.request,
+            );
           }
         }
       } else {
@@ -495,8 +529,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Persist rename to disk. The file watcher detects the write and
     // emits collection-changed, which refreshes the sidebar automatically.
     if (found?.tab.source) {
-      renameRequest(found.tab.source!.collection, found.tab.source!.path, title)
-        .catch((err) => console.error('[pane-store] rename failed:', err));
+      renameRequest(found.tab.source!.collection, found.tab.source!.path, title).catch((err) =>
+        console.error('[pane-store] rename failed:', err),
+      );
     }
   },
 

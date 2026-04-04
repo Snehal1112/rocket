@@ -1,6 +1,6 @@
-import { Check, FolderOpen, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Check, FolderOpen, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -8,19 +8,19 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   type CollectionScanResult,
   gitClone,
   openFolderPicker,
   scanCollectionsInPath,
-} from "@/lib/tauri-api";
-import { useGitStore } from "@/stores/git-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+} from '@/lib/tauri-api';
+import { useGitStore } from '@/stores/git-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
-type Step = "input" | "progress" | "picker";
+type Step = 'input' | 'progress' | 'picker';
 
 interface Props {
   open: boolean;
@@ -28,23 +28,21 @@ interface Props {
 }
 
 export function GitCloneDialog({ open, onOpenChange }: Props) {
-  const [step, setStep] = useState<Step>("input");
-  const [repoUrl, setRepoUrl] = useState("");
-  const [destPath, setDestPath] = useState("");
+  const [step, setStep] = useState<Step>('input');
+  const [repoUrl, setRepoUrl] = useState('');
+  const [destPath, setDestPath] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [collections, setCollections] = useState<CollectionScanResult[]>([]);
-  const [selectedCollection, setSelectedCollection] = useState<string | null>(
-    null,
-  );
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
 
   const credentials = useGitStore((s) => s.credentials);
 
   // Reset all state when dialog opens.
   useEffect(() => {
     if (open) {
-      setStep("input");
-      setRepoUrl("");
-      setDestPath("");
+      setStep('input');
+      setRepoUrl('');
+      setDestPath('');
       setError(null);
       setCollections([]);
       setSelectedCollection(null);
@@ -53,16 +51,16 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   // Retry clone when credentials arrive while waiting in progress step.
   useEffect(() => {
-    if (step === "progress" && credentials) {
+    if (step === 'progress' && credentials) {
       const doClone = async () => {
         try {
           await gitClone(repoUrl.trim(), destPath.trim(), credentials);
           const found = await scanCollectionsInPath(destPath.trim());
           setCollections(found);
-          setStep("picker");
+          setStep('picker');
         } catch (e) {
           setError(String(e));
-          setStep("input");
+          setStep('input');
         }
       };
       void doClone();
@@ -78,7 +76,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   const handleClone = async () => {
     setError(null);
-    setStep("progress");
+    setStep('progress');
     const creds = useGitStore.getState().credentials;
     if (!creds) {
       useGitStore.getState().setShowCredentialsDialog(true);
@@ -88,18 +86,16 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       await gitClone(repoUrl.trim(), destPath.trim(), creds);
       const found = await scanCollectionsInPath(destPath.trim());
       setCollections(found);
-      setStep("picker");
+      setStep('picker');
     } catch (e) {
       setError(String(e));
-      setStep("input");
+      setStep('input');
     }
   };
 
   const handleOpen = async (collectionPath: string) => {
     try {
-      const ws = await useWorkspaceStore
-        .getState()
-        .openWorkspaceFromDisk(collectionPath);
+      const ws = await useWorkspaceStore.getState().openWorkspaceFromDisk(collectionPath);
       await useWorkspaceStore.getState().switchWorkspace(ws.id);
       onOpenChange(false);
     } catch (e) {
@@ -107,87 +103,77 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
     }
   };
 
-  if (step === "progress") {
+  if (step === 'progress') {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className='sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>Clone Repository</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col items-center justify-center gap-3 min-h-[120px]">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              Cloning repository...
-            </p>
+          <div className='flex flex-col items-center justify-center gap-3 min-h-[120px]'>
+            <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
+            <p className='text-sm text-muted-foreground'>Cloning repository...</p>
           </div>
         </DialogContent>
       </Dialog>
     );
   }
 
-  if (step === "picker") {
+  if (step === 'picker') {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className='sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>Clone Repository</DialogTitle>
-            <DialogDescription>
-              Repository cloned successfully.
-            </DialogDescription>
+            <DialogDescription>Repository cloned successfully.</DialogDescription>
           </DialogHeader>
           {collections.length === 0 ? (
             <>
-              <p className="text-sm text-muted-foreground text-center py-4">
+              <p className='text-sm text-muted-foreground text-center py-4'>
                 No collections found in this repository.
               </p>
               <DialogFooter>
-                <Button size="sm" onClick={() => onOpenChange(false)}>
+                <Button size='sm' onClick={() => onOpenChange(false)}>
                   Close
                 </Button>
               </DialogFooter>
             </>
           ) : collections.length === 1 ? (
             <>
-              <p className="text-sm">
-                Found collection:{" "}
-                <span className="font-medium">{collections[0].name}</span>
+              <p className='text-sm'>
+                Found collection: <span className='font-medium'>{collections[0].name}</span>
               </p>
               <DialogFooter>
-                <Button
-                  size="sm"
-                  onClick={() => handleOpen(collections[0].path)}
-                >
+                <Button size='sm' onClick={() => handleOpen(collections[0].path)}>
                   Open
                 </Button>
               </DialogFooter>
             </>
           ) : (
             <>
-              <div className="space-y-1">
+              <div className='space-y-1'>
                 {collections.map((col) => (
                   <button
                     key={col.path}
-                    type="button"
-                    className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm w-full text-left"
+                    type='button'
+                    className='flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm w-full text-left'
                     onClick={() => setSelectedCollection(col.path)}
                   >
                     <Check
-                      className="h-3 w-3 shrink-0"
+                      className='h-3 w-3 shrink-0'
                       style={{
                         opacity: selectedCollection === col.path ? 1 : 0,
                       }}
                     />
-                    <span className="truncate">{col.name}</span>
+                    <span className='truncate'>{col.name}</span>
                   </button>
                 ))}
               </div>
               <DialogFooter>
                 <Button
-                  size="sm"
+                  size='sm'
                   disabled={!selectedCollection}
-                  onClick={() =>
-                    selectedCollection && handleOpen(selectedCollection)
-                  }
+                  onClick={() => selectedCollection && handleOpen(selectedCollection)}
                 >
                   Open
                 </Button>
@@ -202,48 +188,37 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   // Default: input step.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className='sm:max-w-md'>
         <DialogHeader>
           <DialogTitle>Clone Repository</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className='space-y-4'>
           <div>
-            <Label className="text-sm">Repository URL</Label>
+            <Label className='text-sm'>Repository URL</Label>
             <Input
-              placeholder="https://github.com/user/repo.git"
+              placeholder='https://github.com/user/repo.git'
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
-              className="h-8 text-sm"
+              className='h-8 text-sm'
             />
           </div>
           <div>
-            <Label className="text-sm">Destination</Label>
-            <div className="flex gap-2">
+            <Label className='text-sm'>Destination</Label>
+            <div className='flex gap-2'>
               <Input
                 value={destPath}
                 onChange={(e) => setDestPath(e.target.value)}
-                className="h-8 text-sm flex-1"
+                className='h-8 text-sm flex-1'
               />
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 shrink-0"
-                onClick={handleBrowse}
-              >
-                <FolderOpen className="h-3.5 w-3.5 mr-1" /> Browse
+              <Button variant='outline' size='sm' className='h-8 shrink-0' onClick={handleBrowse}>
+                <FolderOpen className='h-3.5 w-3.5 mr-1' /> Browse
               </Button>
             </div>
           </div>
-          {error && (
-            <p className="text-sm text-destructive break-words">{error}</p>
-          )}
+          {error && <p className='text-sm text-destructive break-words'>{error}</p>}
         </div>
         <DialogFooter>
-          <Button
-            size="sm"
-            disabled={!repoUrl.trim() || !destPath.trim()}
-            onClick={handleClone}
-          >
+          <Button size='sm' disabled={!repoUrl.trim() || !destPath.trim()} onClick={handleClone}>
             Clone
           </Button>
         </DialogFooter>

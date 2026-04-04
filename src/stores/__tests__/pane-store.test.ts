@@ -1,13 +1,19 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { usePaneStore } from '../pane-store';
-import type { LeafNode, SplitNode, ResponseState, RequestTab, CollectionTab } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
-import { createDefaultRequest } from '@/lib/pane-utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleAutoSave } from '@/lib/auto-save';
+import { createDefaultRequest } from '@/lib/pane-utils';
+import type {
+  CollectionTab,
+  LeafNode,
+  RequestTab,
+  ResponseState,
+  SplitNode,
+} from '@/types/pane-types';
+import { isRequestTab } from '@/types/pane-types';
+import { usePaneStore } from '../pane-store';
 
 vi.mock('@/lib/auto-save', () => ({
   scheduleAutoSave: vi.fn(),
-}))
+}));
 
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
@@ -481,5 +487,4 @@ describe('pane-store', () => {
     expect(usePaneStore.getState().getOpenTabCount('colB')).toBe(1);
     expect(usePaneStore.getState().getOpenTabCount('colC')).toBe(0);
   });
-
 });

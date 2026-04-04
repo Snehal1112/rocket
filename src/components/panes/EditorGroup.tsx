@@ -1,4 +1,10 @@
 import { useState } from 'react';
+import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { ConflictResolver } from '@/components/git/ConflictResolver';
+import { DiffViewer } from '@/components/git/DiffViewer';
+import { GitPanel } from '@/components/git/GitPanel';
+import { RocketLaunch } from '@/components/illustrations';
+import { RequestPanel } from '@/components/request/RequestPanel';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,38 +15,40 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { RocketLaunch } from '@/components/illustrations';
-import { TabBar } from './TabBar';
-import { RequestPanel } from '@/components/request/RequestPanel';
-import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
-import { DiffViewer } from '@/components/git/DiffViewer';
-import { ConflictResolver } from '@/components/git/ConflictResolver';
-import { GitPanel } from '@/components/git/GitPanel';
-import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
 import { WorkspaceEnvironmentsTab } from '@/components/workspace/WorkspaceEnvironmentsTab';
 import { WorkspaceGitTab } from '@/components/workspace/WorkspaceGitTab';
+import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isDiffTab, isRequestTab, isConflictTab, isGitTab, isWorkspaceTab } from '@/types/pane-types';
+import {
+  isConflictTab,
+  isDiffTab,
+  isGitTab,
+  isRequestTab,
+  isWorkspaceTab,
+} from '@/types/pane-types';
+import { TabBar } from './TabBar';
 
 // Branded empty state shown when no tabs are open.
 function EmptyState() {
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="flex flex-col items-center gap-6 text-center max-w-sm">
-        <div className="flex flex-col items-center gap-3">
-          <RocketLaunch className="w-32 h-32" />
+    <div className='flex h-full items-center justify-center'>
+      <div className='flex flex-col items-center gap-6 text-center max-w-sm'>
+        <div className='flex flex-col items-center gap-3'>
+          <RocketLaunch className='w-32 h-32' />
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Rocket API</h2>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h2 className='text-lg font-semibold text-foreground'>Rocket API</h2>
+            <p className='text-sm text-muted-foreground mt-1'>
               Open a request from the collections sidebar to get started.
             </p>
           </div>
         </div>
-        <div className="flex gap-4 text-xs text-muted-foreground">
+        <div className='flex gap-4 text-xs text-muted-foreground'>
           <span>
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs">Cmd+Enter</kbd>
-            {' '}Send
+            <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
+              Cmd+Enter
+            </kbd>{' '}
+            Send
           </span>
         </div>
       </div>
@@ -59,9 +67,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
     // Guard if ephemeral (no source) or has unsaved edits.
-    const needsGuard =
-      (tab && isRequestTab(tab) && !tab.source) ||
-      (tab?.isDirty ?? false);
+    const needsGuard = (tab && isRequestTab(tab) && !tab.source) || (tab?.isDirty ?? false);
     if (tab && needsGuard) {
       setPendingCloseTabId(tabId);
     } else {
@@ -70,9 +76,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className='flex flex-col h-full'>
       {hasTabs && <TabBar node={node} onCloseTab={handleCloseTab} />}
-      <div className="flex-1 overflow-hidden">
+      <div className='flex-1 overflow-hidden'>
         {activeTab ? (
           isConflictTab(activeTab) ? (
             <ConflictResolver conflictState={activeTab.conflictState} />
@@ -81,7 +87,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (
-            <GitPanel collectionPath={activeTab.collectionPath} collectionName={activeTab.collectionName} />
+            <GitPanel
+              collectionPath={activeTab.collectionPath}
+              collectionName={activeTab.collectionName}
+            />
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
@@ -97,7 +106,12 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           <EmptyState />
         )}
       </div>
-      <AlertDialog open={!!pendingCloseTabId} onOpenChange={(open) => { if (!open) setPendingCloseTabId(null); }}>
+      <AlertDialog
+        open={!!pendingCloseTabId}
+        onOpenChange={(open) => {
+          if (!open) setPendingCloseTabId(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
@@ -114,10 +128,12 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => {
-              if (pendingCloseTabId) closeTab(pendingCloseTabId, node.groupId);
-              setPendingCloseTabId(null);
-            }}>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingCloseTabId) closeTab(pendingCloseTabId, node.groupId);
+                setPendingCloseTabId(null);
+              }}
+            >
               Close
             </AlertDialogAction>
           </AlertDialogFooter>

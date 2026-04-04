@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -7,10 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { CollectionVariablesEditor } from './CollectionVariablesEditor';
-import { getFolderVariables, saveFolderVariables } from '@/lib/tauri-api';
 import type { CollectionVariable } from '@/lib/tauri-api';
+import { getFolderVariables, saveFolderVariables } from '@/lib/tauri-api';
+import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 
 interface FolderVariablesPopoverProps {
   open: boolean;
@@ -52,26 +52,28 @@ export function FolderVariablesPopover({
   }, [collection, folderPath, variables, onClose]);
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-      <DialogContent className="max-w-3xl">
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onClose();
+      }}
+    >
+      <DialogContent className='max-w-3xl'>
         <DialogHeader>
           <DialogTitle>{folderName} — Variables</DialogTitle>
           <DialogDescription>
-            Variables defined here are available to all requests in this folder.
-            Inner folders inherit and can override these variables.
+            Variables defined here are available to all requests in this folder. Inner folders
+            inherit and can override these variables.
           </DialogDescription>
         </DialogHeader>
 
         {/* Editable variable table. */}
-        <div className="overflow-y-auto max-h-[60vh]">
-          <CollectionVariablesEditor
-            variables={variables}
-            onChange={setVariables}
-          />
+        <div className='overflow-y-auto max-h-[60vh]'>
+          <CollectionVariablesEditor variables={variables} onChange={setVariables} />
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>
+          <Button variant='outline' onClick={onClose} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={() => void handleSave()} disabled={saving}>

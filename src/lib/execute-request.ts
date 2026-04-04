@@ -1,24 +1,19 @@
-import { usePaneStore } from '@/stores/pane-store';
-import { useEnvStore } from '@/stores/env-store';
-import { useConsoleStore } from '@/stores/console-store';
+import { findTabInTree } from '@/lib/pane-utils';
 import {
+  type Auth,
+  type Body,
+  type CollectionVariable,
   executeRequest,
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
-  type Auth,
-  type Body,
-  type CollectionVariable,
   type Header,
 } from '@/lib/tauri-api';
-import { findTabInTree } from '@/lib/pane-utils';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
-import type {
-  AuthState,
-  BodyState,
-  RequestState,
-  ResponseState,
-} from '@/types/pane-types';
+import { useConsoleStore } from '@/stores/console-store';
+import { useEnvStore } from '@/stores/env-store';
+import { usePaneStore } from '@/stores/pane-store';
+import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
 export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
@@ -105,13 +100,17 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   // Fetch folder-chain variables (server walks full parent chain).
   let folderVars: CollectionVariable[] = [];
   if (collection && requestPath) {
-    try { folderVars = await getFolderChainVariables(collection, requestPath); } catch {}
+    try {
+      folderVars = await getFolderChainVariables(collection, requestPath);
+    } catch {}
   }
 
   // Fetch request-level variables.
   let requestVars: CollectionVariable[] = [];
   if (collection && requestPath) {
-    try { requestVars = await getRequestVariables(collection, requestPath); } catch {}
+    try {
+      requestVars = await getRequestVariables(collection, requestPath);
+    } catch {}
   }
 
   const ctx = buildVariableContext({

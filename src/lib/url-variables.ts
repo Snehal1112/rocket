@@ -3,7 +3,7 @@ const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
 // Matches :paramName between / delimiters or at end of path.
 const PATH_PARAM_REGEX = /:(\w+)/g;
 
-import type { CollectionVariable } from '@/lib/tauri-api'
+import type { CollectionVariable } from '@/lib/tauri-api';
 
 export type VariableSource =
   | 'runtime'
@@ -12,13 +12,13 @@ export type VariableSource =
   | 'environment'
   | 'collection'
   | 'global'
-  | 'process'
+  | 'process';
 
 export interface VariableScopeEntry {
-  value:  string
-  source: VariableSource
-  label:  string   // Human-readable label, e.g. "Staging", "Collection".
-  secret: boolean  // True means show ●●●● in tooltip instead of value.
+  value: string;
+  source: VariableSource;
+  label: string; // Human-readable label, e.g. "Staging", "Collection".
+  secret: boolean; // True means show ●●●● in tooltip instead of value.
 }
 
 export interface UrlToken {
@@ -26,12 +26,12 @@ export interface UrlToken {
   value: string;
   start: number;
   end: number;
-  resolved?:    string;
-  source?:      string;
+  resolved?: string;
+  source?: string;
   // Scope-aware fields for the overlay UI.
   scopeSource?: VariableSource;
   sourceLabel?: string;
-  secret?:      boolean;
+  secret?: boolean;
 }
 
 // Parses text segments for :pathParam tokens in the path portion (before ?).
@@ -46,7 +46,12 @@ function expandPathParams(
   for (const match of text.matchAll(PATH_PARAM_REGEX)) {
     const matchStart = match.index!;
     if (matchStart > lastIdx) {
-      tokens.push({ type: 'text', value: text.slice(lastIdx, matchStart), start: offset + lastIdx, end: offset + matchStart });
+      tokens.push({
+        type: 'text',
+        value: text.slice(lastIdx, matchStart),
+        start: offset + lastIdx,
+        end: offset + matchStart,
+      });
     }
     const paramName = match[1];
     const resolved = pathParams && paramName in pathParams ? pathParams[paramName] : undefined;
@@ -62,7 +67,12 @@ function expandPathParams(
   }
 
   if (lastIdx < text.length) {
-    tokens.push({ type: 'text', value: text.slice(lastIdx), start: offset + lastIdx, end: offset + text.length });
+    tokens.push({
+      type: 'text',
+      value: text.slice(lastIdx),
+      start: offset + lastIdx,
+      end: offset + text.length,
+    });
   }
 
   return tokens;
@@ -97,7 +107,12 @@ function expandQueryTokens(
         resolved,
         source: resolved !== undefined ? 'Query Params' : undefined,
       });
-      tokens.push({ type: 'text', value: '=', start: offset + pos + key.length, end: offset + pos + key.length + 1 });
+      tokens.push({
+        type: 'text',
+        value: '=',
+        start: offset + pos + key.length,
+        end: offset + pos + key.length + 1,
+      });
       if (val) {
         tokens.push({
           type: 'queryValue',
@@ -107,7 +122,12 @@ function expandQueryTokens(
         });
       }
     } else if (segment) {
-      tokens.push({ type: 'text', value: segment, start: offset + pos, end: offset + pos + segment.length });
+      tokens.push({
+        type: 'text',
+        value: segment,
+        start: offset + pos,
+        end: offset + pos + segment.length,
+      });
     }
     pos += segment.length;
   }
@@ -131,7 +151,12 @@ export function parseUrlTokens(
   for (const match of url.matchAll(VAR_REGEX)) {
     const matchStart = match.index!;
     if (matchStart > lastIndex) {
-      varTokens.push({ type: 'text', value: url.slice(lastIndex, matchStart), start: lastIndex, end: matchStart });
+      varTokens.push({
+        type: 'text',
+        value: url.slice(lastIndex, matchStart),
+        start: lastIndex,
+        end: matchStart,
+      });
     }
     const varName = match[1];
     let resolved: string | undefined;
@@ -143,11 +168,23 @@ export function parseUrlTokens(
       resolved = collectionVariables[varName];
       source = 'Collection';
     }
-    varTokens.push({ type: 'variable', value: varName, start: matchStart, end: matchStart + match[0].length, resolved, source });
+    varTokens.push({
+      type: 'variable',
+      value: varName,
+      start: matchStart,
+      end: matchStart + match[0].length,
+      resolved,
+      source,
+    });
     lastIndex = matchStart + match[0].length;
   }
   if (lastIndex < url.length) {
-    varTokens.push({ type: 'text', value: url.slice(lastIndex), start: lastIndex, end: url.length });
+    varTokens.push({
+      type: 'text',
+      value: url.slice(lastIndex),
+      start: lastIndex,
+      end: url.length,
+    });
   }
 
   // Second pass: expand text segments for :pathParam and query tokens.
@@ -164,7 +201,12 @@ export function parseUrlTokens(
       if (pathPart) {
         finalTokens.push(...expandPathParams(pathPart, token.start, pathParams));
       }
-      finalTokens.push({ type: 'text', value: '?', start: token.start + qIdx, end: token.start + qIdx + 1 });
+      finalTokens.push({
+        type: 'text',
+        value: '?',
+        start: token.start + qIdx,
+        end: token.start + qIdx + 1,
+      });
       const queryPart = token.value.slice(qIdx + 1);
       if (queryPart) {
         finalTokens.push(...expandQueryTokens(queryPart, token.start + qIdx + 1, queryParams));
@@ -194,52 +236,50 @@ export function buildResolver(
 // Lower-priority scopes are written first; higher-priority scopes overwrite them.
 // Priority (lowest → highest): process → global → collection → env → folder → request → runtime.
 export function buildScopedContext(params: {
-  runtimeVars?:    Record<string, string>
-  requestVars?:    CollectionVariable[]
-  folderVars?:     CollectionVariable[]
-  collectionVars?: CollectionVariable[]
-  envVars?:        Record<string, string>
-  envLabel?:       string
-  globalVars?:     Record<string, string>
-  processEnvVars?: Record<string, string>
+  runtimeVars?: Record<string, string>;
+  requestVars?: CollectionVariable[];
+  folderVars?: CollectionVariable[];
+  collectionVars?: CollectionVariable[];
+  envVars?: Record<string, string>;
+  envLabel?: string;
+  globalVars?: Record<string, string>;
+  processEnvVars?: Record<string, string>;
 }): Map<string, VariableScopeEntry> {
-  const out = new Map<string, VariableScopeEntry>()
+  const out = new Map<string, VariableScopeEntry>();
   const add = (k: string, v: string, source: VariableSource, label: string, secret = false) =>
-    out.set(k, { value: v, source, label, secret })
+    out.set(k, { value: v, source, label, secret });
 
   for (const [k, v] of Object.entries(params.processEnvVars ?? {}))
-    add(`process.env.${k}`, v, 'process', 'Process Env')
-  for (const [k, v] of Object.entries(params.globalVars ?? {}))
-    add(k, v, 'global', 'Global')
-  for (const v of (params.collectionVars ?? []).filter(v => v.enabled)) {
-    const val = v.value || v.initialValue || ''
-    if (val) add(v.key, val, 'collection', 'Collection', v.secret)
+    add(`process.env.${k}`, v, 'process', 'Process Env');
+  for (const [k, v] of Object.entries(params.globalVars ?? {})) add(k, v, 'global', 'Global');
+  for (const v of (params.collectionVars ?? []).filter((v) => v.enabled)) {
+    const val = v.value || v.initialValue || '';
+    if (val) add(v.key, val, 'collection', 'Collection', v.secret);
   }
   for (const [k, v] of Object.entries(params.envVars ?? {}))
-    add(k, v, 'environment', params.envLabel ?? 'Environment')
-  for (const v of (params.folderVars ?? []).filter(v => v.enabled)) {
-    const val = v.value || v.initialValue || ''
-    if (val) add(v.key, val, 'folder', 'Folder', v.secret)
+    add(k, v, 'environment', params.envLabel ?? 'Environment');
+  for (const v of (params.folderVars ?? []).filter((v) => v.enabled)) {
+    const val = v.value || v.initialValue || '';
+    if (val) add(v.key, val, 'folder', 'Folder', v.secret);
   }
-  for (const v of (params.requestVars ?? []).filter(v => v.enabled)) {
-    const val = v.value || v.initialValue || ''
-    if (val) add(v.key, val, 'request', 'Request', v.secret)
+  for (const v of (params.requestVars ?? []).filter((v) => v.enabled)) {
+    const val = v.value || v.initialValue || '';
+    if (val) add(v.key, val, 'request', 'Request', v.secret);
   }
-  for (const [k, v] of Object.entries(params.runtimeVars ?? {}))
-    add(k, v, 'runtime', 'Runtime')
-  return out
+  for (const [k, v] of Object.entries(params.runtimeVars ?? {})) add(k, v, 'runtime', 'Runtime');
+  return out;
 }
 
 // Returns the Tailwind class string for a variable source badge.
 export function sourceBadgeClass(source: VariableSource): string {
   const classes: Record<VariableSource, string> = {
-    runtime:     'bg-orange-500/15 text-orange-700 dark:text-orange-400',
-    request:     'bg-purple-500/15 text-purple-700 dark:text-purple-400',
-    folder:      'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+    runtime: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
+    request: 'bg-purple-500/15 text-purple-700 dark:text-purple-400',
+    folder: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     environment: 'bg-primary/15 text-primary',
-    collection:  'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-    global:      'bg-teal-500/15 text-teal-700 dark:text-teal-400',
-    process:     'bg-muted text-muted-foreground',
-  }
-  return classes[source]
+    collection: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
+    global: 'bg-teal-500/15 text-teal-700 dark:text-teal-400',
+    process: 'bg-muted text-muted-foreground',
+  };
+  return classes[source];
 }

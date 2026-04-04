@@ -12,11 +12,13 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
 
   if (!workspacePath) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
         No workspace path configured.
       </div>
     );
   }
 
-  return <GitPanel collectionPath={workspacePath} collectionName={workspace?.name ?? 'Collection'} />;
+  return (
+    <GitPanel collectionPath={workspacePath} collectionName={workspace?.name ?? 'Collection'} />
+  );
 }

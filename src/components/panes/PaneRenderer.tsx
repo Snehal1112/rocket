@@ -1,11 +1,7 @@
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from '@/components/ui/resizable';
-import { EditorGroup } from './EditorGroup';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { usePaneStore } from '@/stores/pane-store';
 import type { PaneNode } from '@/types/pane-types';
+import { EditorGroup } from './EditorGroup';
 
 // Recursive entry point that renders leaf groups or resizable split panels.
 export function PaneRenderer({ node }: { node: PaneNode }) {

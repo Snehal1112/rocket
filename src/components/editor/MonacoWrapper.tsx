@@ -1,7 +1,7 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { BASE_EDITOR_OPTIONS, READONLY_OPTIONS, detectLanguage } from './monaco-config';
-import { useMonacoTheme } from './useMonacoTheme';
 import { EditorSkeleton } from './EditorSkeleton';
+import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
+import { useMonacoTheme } from './useMonacoTheme';
 
 interface MonacoWrapperProps {
   value: string;
