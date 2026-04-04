@@ -1,71 +1,79 @@
-import { useState, useRef } from 'react'
-import { ChevronDown, ChevronRight, LayoutDashboard, Pencil, X } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import {
+  ChevronDown,
+  ChevronRight,
+  LayoutDashboard,
+  Pencil,
+  X,
+} from "lucide-react";
+import { useRef, useState } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@/components/ui/context-menu'
-import { usePaneStore } from '@/stores/pane-store'
-import { useWorkspaceStore } from '@/stores/workspace-store'
-import type { Workspace } from '@/lib/tauri-api'
+} from "@/components/ui/context-menu";
+import { Input } from "@/components/ui/input";
+import type { Workspace } from "@/lib/tauri-api";
+import { usePaneStore } from "@/stores/pane-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 
 interface WorkspaceSectionProps {
-  workspace: Workspace
-  children: React.ReactNode
-  collectionCount: number
+  workspace: Workspace;
+  children: React.ReactNode;
+  collectionCount: number;
 }
 
-export function WorkspaceSection({ workspace, children, collectionCount }: WorkspaceSectionProps) {
-  const [expanded, setExpanded] = useState(true)
-  const [isRenaming, setIsRenaming] = useState(false)
-  const [renameValue, setRenameValue] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+export function WorkspaceSection({
+  workspace,
+  children,
+  collectionCount,
+}: WorkspaceSectionProps) {
+  const [expanded, setExpanded] = useState(true);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleOpenWorkspace = () => {
-    usePaneStore.getState().openWorkspaceTabs(workspace.id)
-  }
+    usePaneStore.getState().openWorkspaceTabs(workspace.id);
+  };
 
   const handleRename = (newName: string) => {
     if (newName !== workspace.name) {
-      void useWorkspaceStore.getState().renameWorkspace(workspace.id, newName)
+      void useWorkspaceStore.getState().renameWorkspace(workspace.id, newName);
     }
-  }
+  };
 
   const startRenaming = () => {
-    setRenameValue(workspace.name)
-    setIsRenaming(true)
+    setRenameValue(workspace.name);
+    setIsRenaming(true);
     // Focus after state flushes.
-    setTimeout(() => inputRef.current?.focus(), 0)
-  }
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
 
   const commitRename = () => {
-    const trimmed = renameValue.trim()
+    const trimmed = renameValue.trim();
     if (trimmed) {
-      handleRename(trimmed)
+      handleRename(trimmed);
     }
-    setIsRenaming(false)
-  }
+    setIsRenaming(false);
+  };
 
   const handleClose = () => {
-    void useWorkspaceStore.getState().closeWorkspace(workspace.id)
-  }
+    void useWorkspaceStore.getState().closeWorkspace(workspace.id);
+  };
 
   return (
     <div>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div
-            className="group flex items-center gap-1 px-2 py-1 rounded-md hover:bg-accent cursor-pointer"
-          >
+          <div className="group flex items-center gap-1 px-2 py-1 rounded-md hover:bg-accent cursor-pointer">
             {/* Chevron toggle. */}
             <button
               type="button"
               onClick={(e) => {
-                e.stopPropagation()
-                setExpanded((prev) => !prev)
+                e.stopPropagation();
+                setExpanded((prev) => !prev);
               }}
               className="flex items-center justify-center"
             >
@@ -86,12 +94,12 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    commitRename()
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRename();
                   }
-                  if (e.key === 'Escape') {
-                    setIsRenaming(false)
+                  if (e.key === "Escape") {
+                    setIsRenaming(false);
                   }
                 }}
                 onBlur={commitRename}
@@ -101,14 +109,24 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
             ) : (
               <span
                 className="flex-1 truncate text-sm font-medium"
+                role="button"
+                tabIndex={0}
                 onClick={handleOpenWorkspace}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleOpenWorkspace();
+                  }
+                }}
               >
                 {workspace.name}
               </span>
             )}
 
             {/* Collection count. */}
-            <span className="text-xs text-muted-foreground">{collectionCount}</span>
+            <span className="text-xs text-muted-foreground">
+              {collectionCount}
+            </span>
           </div>
         </ContextMenuTrigger>
 
@@ -122,7 +140,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
           <ContextMenuSeparator />
           <ContextMenuItem
             className="text-destructive focus:text-destructive"
-            disabled={workspace.id === 'default'}
+            disabled={workspace.id === "default"}
             onSelect={handleClose}
           >
             <X className="mr-2 h-3.5 w-3.5" /> Close workspace
@@ -133,5 +151,5 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
       {/* Collapsible children. */}
       {expanded && <div className="pl-3">{children}</div>}
     </div>
-  )
+  );
 }

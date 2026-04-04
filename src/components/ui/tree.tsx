@@ -1,5 +1,5 @@
-import * as React from "react";
 import { ChevronRight } from "lucide-react";
+import * as React from "react";
 import { cn } from "@/lib/utils";
 
 // Context shared between Tree and all TreeItem descendants.
@@ -78,7 +78,10 @@ function TreeItem({
   const subTreeChildren: React.ReactNode[] = [];
 
   React.Children.forEach(children, (child) => {
-    if (React.isValidElement(child) && (child.type as React.FC).displayName === "Tree") {
+    if (
+      React.isValidElement(child) &&
+      (child.type as React.FC).displayName === "Tree"
+    ) {
       subTreeChildren.push(child);
     } else {
       contentChildren.push(child);
@@ -117,8 +120,18 @@ function TreeItem({
             "data-[selected]:bg-accent/30",
             "data-[active]:border-l-2 data-[active]:border-primary data-[active]:bg-accent/60 data-[active]:text-accent-foreground",
           )}
-          style={{ '--tree-indent': `${(depth + 1) * 8}px` } as React.CSSProperties}
+          style={
+            { "--tree-indent": `${(depth + 1) * 8}px` } as React.CSSProperties
+          }
+          role="button"
+          tabIndex={0}
           onClick={handleSelect}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleSelect();
+            }
+          }}
         >
           {/* Expand/collapse chevron, shown only for items with sub-trees. */}
           {hasChildren ? (

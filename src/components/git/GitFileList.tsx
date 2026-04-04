@@ -1,23 +1,26 @@
-import { Plus, Minus, Trash2, AlertTriangle } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { AlertTriangle, Minus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
-  TooltipTrigger,
   TooltipContent,
   TooltipProvider,
+  TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useGitStore } from "@/stores/git-store";
 import { GIT_STATUS_CONFIG } from "@/lib/colors";
 import type { ConflictFile, FileStatus } from "@/lib/tauri-api";
+import { useGitStore } from "@/stores/git-store";
 
 interface GitFileListProps {
   onFileClick: (file: FileStatus) => void;
   onConflictClick: (conflictFile: ConflictFile) => void;
 }
 
-export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) {
+export function GitFileList({
+  onFileClick,
+  onConflictClick,
+}: GitFileListProps) {
   const {
     status,
     conflicts,
@@ -36,7 +39,9 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
 
   const handleDiscardAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    discardFiles(unstaged.filter((f) => f.status !== "conflicted").map((f) => f.path));
+    discardFiles(
+      unstaged.filter((f) => f.status !== "conflicted").map((f) => f.path),
+    );
   };
 
   const handleStageAll = (e: React.MouseEvent) => {
@@ -92,9 +97,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
 
               {/* Staged file rows. */}
               {staged.map((file) => (
-                <div
+                <button
                   key={file.path}
-                  className="group flex items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5"
+                  type="button"
+                  className="group flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left"
                   onClick={() => onFileClick(file)}
                 >
                   <span className="text-sm truncate flex-1 min-w-0">
@@ -123,7 +129,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                       <TooltipContent>Unstage</TooltipContent>
                     </Tooltip>
                   </div>
-                </div>
+                </button>
               ))}
               <Separator className="my-2" />
             </>
@@ -171,9 +177,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
           {unstaged.map((file) => {
             const isConflicted = file.status === "conflicted";
             return (
-              <div
+              <button
                 key={file.path}
-                className="group flex items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5"
+                type="button"
+                className="group flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left"
                 onClick={() => {
                   if (isConflicted) {
                     void handleConflictClick(file);
@@ -194,7 +201,9 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                   {GIT_STATUS_CONFIG[file.status].label}
                 </span>
                 {!isConflicted && (
-                  <div className="hidden gap-0.5 shrink-0 group-hover:flex">
+                  <div
+                    className="hidden gap-0.5 shrink-0 group-hover:flex"
+                  >
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -229,7 +238,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     </Tooltip>
                   </div>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
