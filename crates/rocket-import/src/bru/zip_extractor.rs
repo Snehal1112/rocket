@@ -38,7 +38,16 @@ pub(crate) fn extract_to_temp(zip_path: &Path) -> ImportResult<(tempfile::TempDi
         }
     }
 
-    // Bruno ZIPs always extract to a single top-level folder.
+    // Some ZIPs have no wrapper folder — workspace.yml sits directly at the archive root.
+    let root = temp_dir.path().to_path_buf();
+    if root.join("workspace.yml").exists()
+        || root.join("opencollection.yml").exists()
+        || root.join("bruno.json").exists()
+    {
+        return Ok((temp_dir, root));
+    }
+
+    // Standard case: Bruno ZIPs extract to a single top-level folder.
     let inner = fs::read_dir(temp_dir.path())?
         .filter_map(|e| e.ok())
         .find(|e| e.path().is_dir())
@@ -89,6 +98,19 @@ mod tests {
         assert!(inner.is_dir());
         assert_eq!(inner.file_name().unwrap(), "my-workspace");
         assert!(inner.join("workspace.yml").exists());
+    }
+
+    #[test]
+    fn flat_root_zip_returns_temp_root_when_marker_at_root() {
+        // Reproduces the "new workspace.zip" case: no wrapper folder, workspace.yml at root.
+        let tmp = make_test_zip(&[
+            ("workspace.yml", "opencollection: 1.0.0\n"),
+            ("collections/my-col/opencollection.yml", "opencollection: 1.0.0\n"),
+        ]);
+        let zip_path = tmp.path().join("test.zip");
+
+        let (_dir, inner) = extract_to_temp(&zip_path).unwrap();
+        assert!(inner.join("workspace.yml").exists(), "should return root");
     }
 
     #[test]

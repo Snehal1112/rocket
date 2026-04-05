@@ -125,7 +125,14 @@ impl ImportService {
             combined.created_workspace = Some(ws_name);
         }
 
-        for entry in std::fs::read_dir(path)? {
+        // Bruno workspaces may nest collections under a `collections/` directory.
+        let scan_root = if path.join("collections").is_dir() {
+            path.join("collections")
+        } else {
+            path.to_path_buf()
+        };
+
+        for entry in std::fs::read_dir(&scan_root)? {
             let entry = entry?;
             let p = entry.path();
             if p.is_dir() && detect_collection(&p).is_some() {
@@ -161,11 +168,12 @@ impl ImportService {
         &self,
         path: &Path,
         workspace_id: &str,
+        create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
         if detect_collection(path).is_some() {
             self.import_collection(path, workspace_id)
         } else if detect_workspace(path).is_some() {
-            self.import_workspace(path, false, Some(workspace_id))
+            self.import_workspace(path, create_new_workspace, Some(workspace_id))
         } else {
             Err(ImportError::NotABrunoDirectory(path.to_path_buf()))
         }
@@ -179,9 +187,10 @@ impl ImportService {
         &self,
         zip_path: &Path,
         workspace_id: &str,
+        create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
         let (_temp, inner) = crate::bru::zip_extractor::extract_to_temp(zip_path)?;
-        self.import_auto(&inner, workspace_id)
+        self.import_auto(&inner, workspace_id, create_new_workspace)
     }
 
     fn walk_requests(
@@ -214,7 +223,10 @@ impl ImportService {
                 continue;
             }
             // Skip Bruno metadata files.
-            if p.file_name().map_or(false, |n| n == "bruno.json" || n == "_order.yml") {
+            // Skip Bruno metadata files — not requests.
+            if p.file_name().map_or(false, |n| {
+                matches!(n.to_str(), Some("bruno.json" | "_order.yml" | "folder.bru" | "collection.bru"))
+            }) {
                 continue;
             }
 
@@ -482,10 +494,45 @@ mod auto_tests {
 
         let ws = TempDir::new().unwrap();
         let service = ImportService::new_with_workspace_path(ws.path());
-        let report = service.import_auto(&src, "default").unwrap();
+        let report = service.import_auto(&src, "default", false).unwrap();
 
         assert_eq!(report.detected_type, "collection");
         assert_eq!(report.imported, 1);
+    }
+
+    #[test]
+    fn import_workspace_finds_collections_inside_collections_subdir() {
+        // Reproduces the real Bruno workspace ZIP structure:
+        //   workspace.yml
+        //   collections/
+        //     MyCollection/
+        //       bruno.json
+        //       req.bru
+        let root = TempDir::new().unwrap();
+        let ws_root = root.path().join("my-workspace");
+        let col_dir = ws_root.join("collections").join("MyCollection");
+        std::fs::create_dir_all(&col_dir).unwrap();
+        std::fs::write(ws_root.join("workspace.yml"), "name: test\n").unwrap();
+        std::fs::write(col_dir.join("bruno.json"), "{}").unwrap();
+        std::fs::write(
+            col_dir.join("req.bru"),
+            "meta {\n  name: R\n  type: http\n  seq: 1\n}\nget {\n  url: https://ex.com\n}\n",
+        )
+        .unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service
+            .import_workspace(&ws_root, false, Some("default"))
+            .expect("workspace import should succeed");
+
+        assert_eq!(report.detected_type, "workspace");
+        assert_eq!(report.imported, 1, "should import the request inside collections/");
+        assert!(
+            report.created_collections.iter().any(|c| c.contains("MyCollection")),
+            "should create MyCollection, got: {:?}",
+            report.created_collections
+        );
     }
 
     #[test]
@@ -493,7 +540,7 @@ mod auto_tests {
         let dir = TempDir::new().unwrap();
         let ws = TempDir::new().unwrap();
         let service = ImportService::new_with_workspace_path(ws.path());
-        let result = service.import_auto(dir.path(), "default");
+        let result = service.import_auto(dir.path(), "default", false);
         assert!(
             matches!(result, Err(ImportError::NotABrunoDirectory(_))),
             "expected NotABrunoDirectory"

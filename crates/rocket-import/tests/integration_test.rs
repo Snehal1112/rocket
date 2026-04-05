@@ -166,7 +166,7 @@ fn import_auto_modern_collection_directory() {
 
     let ws = TempDir::new().unwrap();
     let service = ImportService::new_with_workspace_path(ws.path());
-    let report = service.import_auto(&col_src, "default").unwrap();
+    let report = service.import_auto(&col_src, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "collection");
     assert_eq!(report.imported, 3);
@@ -190,7 +190,7 @@ fn import_auto_modern_workspace_directory() {
 
     let ws_dir = TempDir::new().unwrap();
     let service = ImportService::new_with_workspace_path(ws_dir.path());
-    let report = service.import_auto(&ws_src, "default").unwrap();
+    let report = service.import_auto(&ws_src, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "workspace");
     assert_eq!(report.imported, 3, "2 from col-a + 1 from col-b");
@@ -205,7 +205,7 @@ fn import_auto_legacy_collection_still_works() {
     let service = ImportService::new_with_workspace_path(workspace_dir.path());
 
     let report = service
-        .import_auto(&fixture_path(), "default")
+        .import_auto(&fixture_path(), "default", false)
         .expect("legacy collection import via import_auto should succeed");
 
     assert_eq!(report.detected_type, "collection");
@@ -218,7 +218,7 @@ fn import_auto_returns_error_for_non_bruno_dir() {
     let dir = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
     let service = ImportService::new_with_workspace_path(ws.path());
-    let result = service.import_auto(dir.path(), "default");
+    let result = service.import_auto(dir.path(), "default", false);
     assert!(result.is_err(), "expected error for non-Bruno directory");
 }
 
@@ -242,7 +242,7 @@ fn import_auto_from_zip_modern_collection() {
 
     let ws_dir = TempDir::new().unwrap();
     let service = ImportService::new_with_workspace_path(ws_dir.path());
-    let report = service.import_auto_from_zip(&zip_path, "default").unwrap();
+    let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "collection");
     assert_eq!(report.imported, 1);

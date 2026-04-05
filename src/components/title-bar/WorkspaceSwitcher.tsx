@@ -1,5 +1,6 @@
-import { Check, ChevronDown, FolderOpen, MoreHorizontal, Pin, Plus } from 'lucide-react';
+import { Check, ChevronDown, Download, FolderOpen, MoreHorizontal, Pin, Plus } from 'lucide-react';
 import { useState } from 'react';
+import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +35,7 @@ export function WorkspaceSwitcher() {
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<DialogTarget | null>(null);
   const [closeTarget, setCloseTarget] = useState<DialogTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DialogTarget | null>(null);
@@ -146,11 +148,23 @@ export function WorkspaceSwitcher() {
             <FolderOpen className='h-3.5 w-3.5 mr-2' />
             Open workspace
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+            <Download className='h-3.5 w-3.5 mr-2' />
+            Import workspace
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       {/* Create dialog */}
       <CreateWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      {/* Import from Bruno dialog */}
+      <ImportBrunoDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        workspaceId={activeId ?? 'default'}
+        createWorkspace
+      />
 
       {/* Rename dialog */}
       {renameTarget && (

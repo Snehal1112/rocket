@@ -12,12 +12,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { type ImportReport, importBruno, importBrunoZip } from '@/lib/tauri-api';
+import {
+  createWorkspace as apiCreateWorkspace,
+  switchWorkspace as apiSwitchWorkspace,
+  getAppDataDir,
+  type ImportReport,
+  importBruno,
+  importBrunoZip,
+} from '@/lib/tauri-api';
 
 interface ImportBrunoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
+  /** When true, a new workspace is created from the imported source. */
+  createWorkspace?: boolean;
   onImportComplete?: () => void;
 }
 
@@ -34,6 +43,7 @@ export function ImportBrunoDialog({
   open,
   onOpenChange,
   workspaceId,
+  createWorkspace,
   onImportComplete,
 }: ImportBrunoDialogProps) {
   const [source, setSource] = useState<SelectedSource | null>(null);
@@ -86,10 +96,24 @@ export function ImportBrunoDialog({
     setDialogState('importing');
     setError(null);
     try {
+      let targetWsId = workspaceId;
+
+      // When importing as a new workspace, create it first and switch to it
+      // so the import writes files into the new workspace directory.
+      if (createWorkspace) {
+        const wsName = source.name.replace(/\.zip$/i, '');
+        const dataDir = await getAppDataDir();
+        const sep = dataDir.includes('\\') ? '\\' : '/';
+        const fullPath = dataDir.endsWith(sep) ? dataDir + wsName : dataDir + sep + wsName;
+        const ws = await apiCreateWorkspace(wsName, fullPath);
+        await apiSwitchWorkspace(ws.id);
+        targetWsId = ws.id;
+      }
+
       const result =
         source.kind === 'zip'
-          ? await importBrunoZip(source.path, workspaceId)
-          : await importBruno(source.path, workspaceId);
+          ? await importBrunoZip(source.path, targetWsId, createWorkspace)
+          : await importBruno(source.path, targetWsId, createWorkspace);
       setReport(result);
       setDialogState('done');
       onImportComplete?.();
