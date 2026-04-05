@@ -364,6 +364,26 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, updateRequest],
   );
 
+  const handleHeadersChange = useCallback(
+    (headers: KeyValueEntry[]) => updateRequest(tab.id, { headers }),
+    [tab.id, updateRequest],
+  );
+
+  const handleBodyChange = useCallback(
+    (body: BodyState) => updateRequest(tab.id, { body }),
+    [tab.id, updateRequest],
+  );
+
+  const handleAuthChange = useCallback(
+    (auth: AuthState) => updateRequest(tab.id, { auth }),
+    [tab.id, updateRequest],
+  );
+
+  const handlePathParamsChange = useCallback(
+    (pathParams: KeyValueEntry[]) => updateRequest(tab.id, { pathParams }),
+    [tab.id, updateRequest],
+  );
+
   const handleSaveDocs = useCallback(
     async (docs: string | null) => {
       if (!tab.source) return;
@@ -664,30 +684,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <div className='flex-1 overflow-auto p-3'>
             {activeSection === 'params' && (
               <div className='space-y-2'>
-                <PathParamsPanel
-                  params={request.pathParams}
-                  onChange={(pathParams) => updateRequest(tab.id, { pathParams })}
-                />
+                <PathParamsPanel params={request.pathParams} onChange={handlePathParamsChange} />
                 <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
               </div>
             )}
             {activeSection === 'headers' && (
-              <HeadersEditor
-                headers={request.headers}
-                onChange={(headers) => updateRequest(tab.id, { headers })}
-              />
+              <HeadersEditor headers={request.headers} onChange={handleHeadersChange} />
             )}
             {activeSection === 'body' && (
-              <BodyEditor
-                body={request.body}
-                onChange={(body) => updateRequest(tab.id, { body })}
-              />
+              <BodyEditor body={request.body} onChange={handleBodyChange} />
             )}
             {activeSection === 'auth' && (
-              <AuthEditor
-                auth={request.auth}
-                onChange={(auth) => updateRequest(tab.id, { auth })}
-              />
+              <AuthEditor auth={request.auth} onChange={handleAuthChange} />
             )}
             {activeSection === 'variables' &&
               (tab.source?.collection && tab.source?.path ? (
