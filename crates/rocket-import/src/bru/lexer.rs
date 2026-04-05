@@ -44,13 +44,21 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
             tokens.push(Token::BlockOpen { name: name.clone(), subtype });
 
             // Collect block body.
+            // For raw-text blocks, track brace/bracket depth so that
+            // inner braces in JSON or scripts don't close the block early.
             let mut raw_lines: Vec<&str> = Vec::new();
+            let mut raw_depth: usize = 0;
+            let open_ch = if is_list { '[' } else { '{' };
+            let close_ch = if is_list { ']' } else { '}' };
             loop {
                 match lines.next() {
                     None => break,
                     Some(inner) => {
                         let inner_trimmed = inner.trim();
-                        if inner_trimmed == closer {
+
+                        // Check for block close: line is exactly the closer
+                        // and no unmatched inner braces remain.
+                        if inner_trimmed == closer && raw_depth == 0 {
                             if is_raw && !raw_lines.is_empty() {
                                 // Detect indent width from the first non-empty raw line
                                 // so 2-space, 4-space, and tab-indented files all work.
@@ -71,6 +79,14 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                         }
                         if is_raw {
                             raw_lines.push(inner);
+                            // Track nesting depth for inner braces.
+                            for ch in inner_trimmed.chars() {
+                                if ch == open_ch {
+                                    raw_depth += 1;
+                                } else if ch == close_ch {
+                                    raw_depth = raw_depth.saturating_sub(1);
+                                }
+                            }
                         } else if !inner_trimmed.is_empty() {
                             // Key-value: `key: value` (value may contain colons)
                             if let Some((k, v)) = inner_trimmed.split_once(':') {
@@ -168,5 +184,40 @@ mod tests {
         } else {
             panic!("expected RawText token");
         }
+    }
+
+    #[test]
+    fn raw_text_block_preserves_nested_braces() {
+        // JSON body with nested objects — inner } must not close the block.
+        let input = r#"body:json {
+  {
+    "key": "val",
+    "nested": {
+      "x": "t"
+    }
+  }
+}
+
+auth:bearer {
+  token: {{Bearer Token}}
+}
+"#;
+        let tokens = tokenise(input).unwrap();
+        // The body block should capture the full JSON including nested braces.
+        if let Token::RawText(text) = &tokens[1] {
+            assert!(text.contains(r#""nested""#), "should contain nested key");
+            assert!(text.ends_with('}'), "should end with closing brace");
+            // Count braces to verify completeness.
+            let opens = text.chars().filter(|&c| c == '{').count();
+            let closes = text.chars().filter(|&c| c == '}').count();
+            assert_eq!(opens, closes, "braces must be balanced");
+        } else {
+            panic!("expected RawText token for body");
+        }
+        // The auth block should still be parsed correctly after the body.
+        assert!(
+            tokens.iter().any(|t| matches!(t, Token::BlockOpen { name, .. } if name == "auth")),
+            "auth block should follow body block"
+        );
     }
 }
