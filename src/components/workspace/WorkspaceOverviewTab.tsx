@@ -59,17 +59,13 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     setSummaries(cols);
   }, []);
 
-  useEffect(() => {
-    refresh().catch(console.error);
-    loadGlobalEnvironments().catch(console.error);
-  }, [refresh, loadGlobalEnvironments]);
-
-  // listCollections returns data for the active backend workspace.
-  // Refetch when the user switches workspace so the UI stays in sync.
+  // Both listCollections and loadGlobalEnvironments return data for the
+  // active backend workspace. Refetch when workspaceId changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
   useEffect(() => {
     refresh().catch(console.error);
-  }, [workspaceId, refresh]);
+    loadGlobalEnvironments().catch(console.error);
+  }, [workspaceId, refresh, loadGlobalEnvironments]);
 
   useEffect(() => {
     setDocContent(workspace?.description ?? '');

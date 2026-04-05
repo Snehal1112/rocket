@@ -292,7 +292,7 @@ export function CollectionsSidebar() {
   }, [fetchCollections]);
 
   return (
-    <div className='h-full flex flex-col bg-card/50 backdrop-blur-sm border-r border-border-70'>
+    <div className='h-full flex flex-col bg-card/50 border-r border-border-70'>
       <div className='flex-1 flex flex-col overflow-hidden'>
         {/* View tabs and action icons (Bruno-style). */}
         <div className='flex items-center justify-between px-3 pt-2.5 pb-1'>
