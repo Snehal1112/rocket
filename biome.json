@@ -29,37 +29,39 @@
         "rules": {
             "recommended": true,
             "correctness": {
-                "useExhaustiveDependencies": "warn",
+                "useExhaustiveDependencies": "error",
                 "useHookAtTopLevel": "error",
-                "noUnusedVariables": "off",
-                "noUnusedImports": "off",
-                "useParseIntRadix": "warn"
+                "noUnusedVariables": "error",
+                "noUnusedImports": "error",
+                "useParseIntRadix": "error"
             },
             "suspicious": {
-                "noExplicitAny": "warn",
-                "noEmptyBlockStatements": "off",
-                "noArrayIndexKey": "warn"
+                "noExplicitAny": "error",
+                "noEmptyBlockStatements": "error",
+                "noArrayIndexKey": "error",
+                "noConsole": "off"
             },
             "style": {
-                "noParameterAssign": "off",
-                "noNonNullAssertion": "off",
-                "useNodejsImportProtocol": "error"
+                "noParameterAssign": "error",
+                "noNonNullAssertion": "warn",
+                "useNodejsImportProtocol": "error",
+                "useImportType": "error"
             },
             "complexity": {
                 "useLiteralKeys": "off",
-                "useOptionalChain": "warn"
+                "useOptionalChain": "error"
             },
             "a11y": {
                 "noSvgWithoutTitle": "off",
-                "noStaticElementInteractions": "warn",
-                "useKeyWithClickEvents": "warn",
-                "useFocusableInteractive": "warn",
-                "useSemanticElements": "warn",
-                "useAriaPropsForRole": "warn",
-                "noNoninteractiveTabindex": "warn",
-                "noNoninteractiveElementToInteractiveRole": "warn",
-                "useAriaPropsSupportedByRole": "warn",
-                "useButtonType": "warn",
+                "noStaticElementInteractions": "error",
+                "useKeyWithClickEvents": "error",
+                "useFocusableInteractive": "error",
+                "useSemanticElements": "error",
+                "useAriaPropsForRole": "error",
+                "noNoninteractiveTabindex": "error",
+                "noNoninteractiveElementToInteractiveRole": "error",
+                "useAriaPropsSupportedByRole": "error",
+                "useButtonType": "error",
                 "noAutofocus": "off"
             }
         }

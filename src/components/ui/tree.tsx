@@ -10,7 +10,7 @@ type TreeContextValue = {
 
 const TreeContext = React.createContext<TreeContextValue>({
   value: undefined,
-  onValueChange: () => {},
+  onValueChange: () => undefined,
 });
 
 // Root tree container.
@@ -25,7 +25,7 @@ function Tree({
   onValueChange?: (id: string) => void;
 }) {
   return (
-    <TreeContext.Provider value={{ value, onValueChange: onValueChange ?? (() => {}) }}>
+    <TreeContext.Provider value={{ value, onValueChange: onValueChange ?? (() => undefined) }}>
       <div
         role='tree'
         data-slot='tree'

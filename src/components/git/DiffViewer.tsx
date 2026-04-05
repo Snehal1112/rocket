@@ -55,7 +55,7 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
           ? await gitDiffStaged(diffState.collectionPath, diffState.filePath)
           : await gitDiff(diffState.collectionPath, diffState.filePath);
         setDiffState((prev) => ({
-          ...prev!,
+          ...prev,
           oldContent: diff.oldContent ?? '',
           newContent: diff.newContent ?? '',
           isStaged,

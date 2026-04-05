@@ -31,7 +31,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
     if (open && !path) {
       getAppDataDir()
         .then(setPath)
-        .catch(() => {});
+        .catch(() => undefined);
     }
   }, [open]);
 

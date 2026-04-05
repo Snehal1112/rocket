@@ -68,7 +68,7 @@ function diffRows(oldRows: KVRow[], newRows: KVRow[]): RowChange[] {
       result.push({
         key,
         oldRow: undefined,
-        newRow: { value: n!.value, enabled: n!.enabled },
+        newRow: { value: n?.value ?? '', enabled: n?.enabled ?? false },
         status: 'added',
       });
     } else if (!n) {

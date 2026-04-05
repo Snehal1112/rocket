@@ -43,7 +43,7 @@ describe('pane-utils', () => {
   it('findLeaf returns correct leaf by groupId', () => {
     const found = findLeaf(splitTree, 'g1');
     expect(found).toBeDefined();
-    expect(found!.groupId).toBe('g1');
+    expect(found?.groupId).toBe('g1');
   });
 
   it('findLeaf returns null for missing groupId', () => {
@@ -67,8 +67,8 @@ describe('pane-utils', () => {
     };
     const result = findTabInTree(tree, tab.id);
     expect(result).not.toBeNull();
-    expect(result!.leaf.groupId).toBe('g-tab');
-    expect(result!.tab.id).toBe(tab.id);
+    expect(result?.leaf.groupId).toBe('g-tab');
+    expect(result?.tab.id).toBe(tab.id);
   });
 
   it('findTabInTree returns null for unknown tabId', () => {

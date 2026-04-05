@@ -19,10 +19,6 @@ const COVERAGE_DIR = join(ROOT, 'coverage');
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function pct(covered: number, total: number): number {
-  return total === 0 ? 100 : Math.round((covered / total) * 1000) / 10;
-}
-
 function colorClass(p: number): string {
   if (p >= 80) return 'good';
   if (p >= 60) return 'warn';
@@ -293,9 +289,9 @@ function generateHTML(
     <tr style="font-weight:600">
       <td>TOTAL</td>
       <td>${bar(feLinesTotal.pct)}</td>
-      <td>${bar(fe.totals!.statements.pct)}</td>
-      <td>${bar(fe.totals!.functions.pct)}</td>
-      <td>${bar(fe.totals!.branches.pct)}</td>
+      <td>${bar(fe.totals?.statements.pct)}</td>
+      <td>${bar(fe.totals?.functions.pct)}</td>
+      <td>${bar(fe.totals?.branches.pct)}</td>
     </tr>`
     : '';
 
@@ -330,8 +326,8 @@ function generateHTML(
     <tr style="font-weight:600">
       <td>TOTAL</td>
       <td>${bar(Math.round(rsLinesTotal.percent * 10) / 10)}</td>
-      <td>${bar(Math.round(rs.totals!.functions.percent * 10) / 10)}</td>
-      <td>${bar(Math.round(rs.totals!.regions.percent * 10) / 10)}</td>
+      <td>${bar(Math.round(rs.totals?.functions.percent * 10) / 10)}</td>
+      <td>${bar(Math.round(rs.totals?.regions.percent * 10) / 10)}</td>
     </tr>`
     : '';
 

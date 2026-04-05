@@ -102,7 +102,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   if (collection && requestPath) {
     try {
       folderVars = await getFolderChainVariables(collection, requestPath);
-    } catch {}
+    } catch {
+      // Non-critical: fall back to empty vars if chain lookup fails.
+    }
   }
 
   // Fetch request-level variables.
@@ -110,7 +112,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   if (collection && requestPath) {
     try {
       requestVars = await getRequestVariables(collection, requestPath);
-    } catch {}
+    } catch {
+      // Non-critical: fall back to empty vars if lookup fails.
+    }
   }
 
   const ctx = buildVariableContext({

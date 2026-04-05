@@ -197,7 +197,8 @@ export function WorkspaceSwitcher() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                void closeWorkspace(closeTarget!.id);
+                if (!closeTarget) return;
+                void closeWorkspace(closeTarget.id);
                 setCloseTarget(null);
               }}
             >
@@ -227,7 +228,8 @@ export function WorkspaceSwitcher() {
             <AlertDialogAction
               className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               onClick={() => {
-                void deleteWorkspace(deleteTarget!.id);
+                if (!deleteTarget) return;
+                void deleteWorkspace(deleteTarget.id);
                 setDeleteTarget(null);
               }}
             >

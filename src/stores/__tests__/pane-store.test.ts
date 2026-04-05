@@ -252,8 +252,8 @@ describe('pane-store', () => {
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().updateRequest(tabId, { url: 'https://api.test', method: 'POST' });
     const updated = getLeaf();
-    const tab = updated.tabs.find((t) => t.id === tabId)!;
-    if (!isRequestTab(tab)) throw new Error('Expected request tab');
+    const tab = updated.tabs.find((t) => t.id === tabId);
+    if (!tab || !isRequestTab(tab)) throw new Error('Expected request tab');
     expect(tab.request.url).toBe('https://api.test');
     expect(tab.request.method).toBe('POST');
     expect(tab.isDirty).toBe(true);
@@ -275,8 +275,8 @@ describe('pane-store', () => {
     };
     usePaneStore.getState().setResponse(tabId, response);
     const updated = getLeaf();
-    const tab = updated.tabs.find((t) => t.id === tabId)!;
-    if (!isRequestTab(tab)) throw new Error('Expected request tab');
+    const tab = updated.tabs.find((t) => t.id === tabId);
+    if (!tab || !isRequestTab(tab)) throw new Error('Expected request tab');
     expect(tab.response).toEqual(response);
   });
 
@@ -287,7 +287,7 @@ describe('pane-store', () => {
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().markDirty(tabId);
     const updated = getLeaf();
-    expect(updated.tabs.find((t) => t.id === tabId)!.isDirty).toBe(true);
+    expect(updated.tabs.find((t) => t.id === tabId)?.isDirty).toBe(true);
   });
 
   it('markClean sets isDirty to false after markDirty', () => {
@@ -296,7 +296,7 @@ describe('pane-store', () => {
     usePaneStore.getState().markDirty(tabId);
     usePaneStore.getState().markClean(tabId);
     const updated = getLeaf();
-    expect(updated.tabs.find((t) => t.id === tabId)!.isDirty).toBe(false);
+    expect(updated.tabs.find((t) => t.id === tabId)?.isDirty).toBe(false);
   });
 
   // ── reset ─────────────────────────────────────────────────────────────────

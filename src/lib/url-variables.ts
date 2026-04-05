@@ -44,7 +44,7 @@ function expandPathParams(
   let lastIdx = 0;
 
   for (const match of text.matchAll(PATH_PARAM_REGEX)) {
-    const matchStart = match.index!;
+    const matchStart = match.index ?? 0;
     if (matchStart > lastIdx) {
       tokens.push({
         type: 'text',
@@ -149,7 +149,7 @@ export function parseUrlTokens(
   let lastIndex = 0;
 
   for (const match of url.matchAll(VAR_REGEX)) {
-    const matchStart = match.index!;
+    const matchStart = match.index ?? 0;
     if (matchStart > lastIndex) {
       varTokens.push({
         type: 'text',

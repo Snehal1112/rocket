@@ -41,7 +41,10 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
   // Helper: patch oauth2 fields without losing other auth state.
   const patchOAuth2 = useCallback(
     (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
-      onChange({ ...auth, oauth2: { ...auth.oauth2!, ...patch } });
+      onChange({
+        ...auth,
+        oauth2: { ...auth.oauth2, ...patch } as NonNullable<AuthState['oauth2']>,
+      });
     },
     [auth, onChange],
   );
@@ -216,7 +219,10 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
   // Helper: patch awsSigV4 fields without losing other auth state.
   const patchAWS = useCallback(
     (patch: Partial<NonNullable<AuthState['awsSigV4']>>) => {
-      onChange({ ...auth, awsSigV4: { ...auth.awsSigV4!, ...patch } });
+      onChange({
+        ...auth,
+        awsSigV4: { ...auth.awsSigV4, ...patch } as NonNullable<AuthState['awsSigV4']>,
+      });
     },
     [auth, onChange],
   );
@@ -250,7 +256,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               onChange={(e) =>
                 onChange({
                   ...auth,
-                  basic: { ...auth.basic!, username: e.target.value },
+                  basic: { ...auth.basic, username: e.target.value } as NonNullable<
+                    AuthState['basic']
+                  >,
                 })
               }
             />
@@ -265,7 +273,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               onChange={(e) =>
                 onChange({
                   ...auth,
-                  basic: { ...auth.basic!, password: e.target.value },
+                  basic: { ...auth.basic, password: e.target.value } as NonNullable<
+                    AuthState['basic']
+                  >,
                 })
               }
             />
@@ -301,7 +311,7 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
             onChange={(e) =>
               onChange({
                 ...auth,
-                apiKey: { ...auth.apiKey!, key: e.target.value },
+                apiKey: { ...auth.apiKey, key: e.target.value } as NonNullable<AuthState['apiKey']>,
               })
             }
           />
@@ -312,7 +322,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
             onChange={(e) =>
               onChange({
                 ...auth,
-                apiKey: { ...auth.apiKey!, value: e.target.value },
+                apiKey: { ...auth.apiKey, value: e.target.value } as NonNullable<
+                  AuthState['apiKey']
+                >,
               })
             }
           />
@@ -322,9 +334,9 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               onChange({
                 ...auth,
                 apiKey: {
-                  ...auth.apiKey!,
+                  ...auth.apiKey,
                   addTo: val as 'header' | 'query',
-                },
+                } as NonNullable<AuthState['apiKey']>,
               })
             }
           >

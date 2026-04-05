@@ -220,7 +220,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Guard against stale section values from before the tab redesign.
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
-    ? tab.activeSection!
+    ? (tab.activeSection ?? 'overview')
     : 'overview';
 
   const handleSectionChange = useCallback(
