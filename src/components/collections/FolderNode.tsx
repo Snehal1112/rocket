@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { moveItem, saveRequest } from '@/lib/tauri-api';
@@ -136,11 +137,14 @@ export function FolderNode({
     }
   };
 
-  const filteredItems = filter
-    ? items.filter(
-        (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : items;
+  const filteredItems = sortItemsFoldersFirst(
+    filter
+      ? items.filter(
+          (item) =>
+            item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
+        )
+      : items,
+  );
 
   if (filter && filteredItems.length === 0) return null;
 
