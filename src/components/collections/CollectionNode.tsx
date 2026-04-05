@@ -1,4 +1,5 @@
 import {
+  BoxIcon,
   ChevronDown,
   ChevronRight,
   FolderPlus,
@@ -206,23 +207,23 @@ export function CollectionNode({
         <div className='group relative flex items-center'>
           <TreeItem value={summary.uid} open={open} onOpenChange={setOpen} className='flex-1'>
             <TreeItemContent
-              className='flex gap-3 w-full px-2 py-1 cursor-pointer'
+              className='flex gap-2 w-full  py-1 cursor-pointer'
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               {open ? (
                 <ChevronDown
-                  className='h-3.5 w-3.5 flex-none text-muted-foreground'
+                  className='h-5 w-5 flex-none text-muted-foreground'
                   strokeWidth={1.5}
                 />
               ) : (
                 <ChevronRight
-                  className='h-3.5 w-3.5 flex-none text-muted-foreground'
+                  className='h-5 w-5 flex-none text-muted-foreground'
                   strokeWidth={1.5}
                 />
               )}
-              <Layers className='h-3.5 w-3.5 shrink-0 text-primary' />
+              <BoxIcon className='h-5 w-5 shrink-0 ' />
               {isRenaming ? (
                 <Input
                   autoFocus
@@ -350,7 +351,7 @@ export function CollectionNode({
       </ContextMenuContent>
 
       {open && collection && (
-        <div className='pl-1.5 border-l border-border/70 ml-2'>
+        <div className='border-l border-border/70 ml-8'>
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
               return (

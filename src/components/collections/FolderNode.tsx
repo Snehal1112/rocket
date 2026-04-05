@@ -149,9 +149,9 @@ export function FolderNode({
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? (
-                  <FolderOpen className='h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400' />
+                  <FolderOpen strokeWidth={10} className='h-5 w-5 shrink-0' />
                 ) : (
-                  <Folder className='h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400' />
+                  <Folder strokeWidth={10} className='h-5 w-5 shrink-0 ' />
                 )}
                 {isRenaming ? (
                   <Input
