@@ -235,13 +235,21 @@ impl GitService for Git2Service {
         dest_path: &str,
         creds: &GitCredentials,
     ) -> DomainResult<()> {
+        let dest = Path::new(dest_path);
+        if dest.is_dir() && std::fs::read_dir(dest).map_or(false, |mut d| d.next().is_some()) {
+            return Err(DomainError::InvalidInput(format!(
+                "Destination '{}' already exists and is not empty. Please choose an empty directory or a new path.",
+                dest_path
+            )));
+        }
+
         let callbacks = build_callbacks(creds);
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
 
         git2::build::RepoBuilder::new()
             .fetch_options(fetch_opts)
-            .clone(url, Path::new(dest_path))
+            .clone(url, dest)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
     }
@@ -2287,6 +2295,26 @@ mod tests {
         };
         let result = svc.clone_repo("not-a-valid-url", &dest_path, &creds);
         assert!(result.is_err(), "clone with invalid url must fail");
+    }
+
+    #[test]
+    fn clone_fails_on_non_empty_directory() {
+        let dest_dir = TempDir::new().unwrap();
+        // Put a file in the directory so it's non-empty.
+        fs::write(dest_dir.path().join("existing.txt"), "data").unwrap();
+        let dest_path = dest_dir.path().to_string_lossy().to_string();
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
+        let result = svc.clone_repo("https://example.com/repo.git", &dest_path, &creds);
+        assert!(result.is_err(), "clone into non-empty dir must fail");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not empty"),
+            "error should mention non-empty directory, got: {err}"
+        );
     }
 
     #[test]

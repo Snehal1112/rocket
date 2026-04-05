@@ -168,6 +168,118 @@ pub fn scan_collections_in_path(path: String) -> Result<Vec<CollectionScanResult
     Ok(results)
 }
 
+/// Result of analyzing a cloned repository's structure.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClonedRepoStructure {
+    /// "workspace" | "collection" | "multi_collection" | "unknown"
+    pub kind: String,
+    /// Path to open as workspace (for "workspace" kind).
+    pub workspace_path: Option<String>,
+    /// Detected collections (for "collection" or "multi_collection" kind).
+    pub collections: Vec<CollectionScanResult>,
+}
+
+/// Analyze a cloned directory to determine its structure.
+///
+/// Detection order:
+/// 1. Path has `workspace.yml` -> workspace (also scan for collections inside)
+/// 2. Path has `opencollection.yml` -> single collection at root
+/// 3. Path has `collections/` subdir with collections -> multi-collection workspace-like
+/// 4. Direct children have `opencollection.yml` -> multi-collection
+/// 5. Otherwise -> unknown
+#[tauri::command]
+pub fn detect_cloned_structure(path: String) -> Result<ClonedRepoStructure, DomainError> {
+    let dir = Path::new(&path);
+    if !dir.is_dir() {
+        return Ok(ClonedRepoStructure {
+            kind: "unknown".into(),
+            workspace_path: None,
+            collections: vec![],
+        });
+    }
+
+    // Case 1: Workspace root with workspace.yml.
+    if dir.join("workspace.yml").exists() {
+        let collections = scan_opencollection_dirs(dir)?;
+        return Ok(ClonedRepoStructure {
+            kind: "workspace".into(),
+            workspace_path: Some(path),
+            collections,
+        });
+    }
+
+    // Case 2: Single collection at root.
+    if dir.join("opencollection.yml").exists() {
+        let name = dir.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "collection".into());
+        return Ok(ClonedRepoStructure {
+            kind: "collection".into(),
+            workspace_path: None,
+            collections: vec![CollectionScanResult {
+                name,
+                path: path.clone(),
+            }],
+        });
+    }
+
+    // Case 3: collections/ subdirectory.
+    let collections_subdir = dir.join("collections");
+    if collections_subdir.is_dir() {
+        let collections = scan_opencollection_dirs(&collections_subdir)?;
+        if !collections.is_empty() {
+            return Ok(ClonedRepoStructure {
+                kind: "multi_collection".into(),
+                workspace_path: None,
+                collections,
+            });
+        }
+    }
+
+    // Case 4: Direct children are collections.
+    let collections = scan_opencollection_dirs(dir)?;
+    if !collections.is_empty() {
+        return Ok(ClonedRepoStructure {
+            kind: "multi_collection".into(),
+            workspace_path: None,
+            collections,
+        });
+    }
+
+    Ok(ClonedRepoStructure {
+        kind: "unknown".into(),
+        workspace_path: None,
+        collections: vec![],
+    })
+}
+
+/// Scan direct subdirectories for ones containing `opencollection.yml`.
+fn scan_opencollection_dirs(dir: &Path) -> Result<Vec<CollectionScanResult>, DomainError> {
+    let mut results = Vec::new();
+    let entries = fs::read_dir(dir)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| DomainError::Internal(e.to_string()))?;
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        if entry_path.join("opencollection.yml").exists() {
+            results.push(CollectionScanResult {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+            });
+        }
+    }
+    results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(results)
+}
+
 #[tauri::command]
 pub fn get_folder_chain_variables(
     collection: String,

@@ -156,6 +156,7 @@ pub fn run() {
             commands::collections::get_collection_settings,
             commands::collections::save_collection_settings,
             commands::collections::scan_collections_in_path,
+            commands::collections::detect_cloned_structure,
             commands::collections::get_folder_chain_variables,
             commands::collections::get_folder_variables,
             commands::collections::save_folder_variables,

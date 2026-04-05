@@ -1,5 +1,5 @@
 import { Check, FolderOpen, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,10 +12,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  type ClonedRepoStructure,
   type CollectionScanResult,
+  detectClonedStructure,
   gitClone,
   openFolderPicker,
-  scanCollectionsInPath,
 } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -49,15 +50,55 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
     }
   }, [open]);
 
+  const handleOpenWorkspace = useCallback(
+    async (workspacePath: string) => {
+      try {
+        const ws = await useWorkspaceStore.getState().openWorkspaceFromDisk(workspacePath);
+        await useWorkspaceStore.getState().switchWorkspace(ws.id);
+        onOpenChange(false);
+      } catch (e) {
+        setError(String(e));
+        setStep('input');
+      }
+    },
+    [onOpenChange],
+  );
+
+  // Handle post-clone detection: auto-open workspace or show picker.
+  const handlePostClone = useCallback(
+    async (clonedPath: string) => {
+      const structure: ClonedRepoStructure = await detectClonedStructure(clonedPath);
+
+      if (structure.kind === 'workspace' && structure.workspacePath) {
+        await handleOpenWorkspace(structure.workspacePath);
+        return;
+      }
+
+      if (structure.kind === 'collection' && structure.collections.length === 1) {
+        await handleOpenWorkspace(structure.collections[0].path);
+        return;
+      }
+
+      if (structure.collections.length > 0) {
+        setCollections(structure.collections);
+        setStep('picker');
+        return;
+      }
+
+      // Nothing detected — show empty picker.
+      setCollections([]);
+      setStep('picker');
+    },
+    [handleOpenWorkspace],
+  );
+
   // Retry clone when credentials arrive while waiting in progress step.
   useEffect(() => {
     if (step === 'progress' && credentials) {
       const doClone = async () => {
         try {
           await gitClone(repoUrl.trim(), destPath.trim(), credentials);
-          const found = await scanCollectionsInPath(destPath.trim());
-          setCollections(found);
-          setStep('picker');
+          await handlePostClone(destPath.trim());
         } catch (e) {
           setError(String(e));
           setStep('input');
@@ -65,7 +106,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       };
       void doClone();
     }
-  }, [credentials, step, repoUrl, destPath]);
+  }, [credentials, step, repoUrl, destPath, handlePostClone]);
 
   const handleBrowse = async () => {
     const result = await openFolderPicker();
@@ -84,9 +125,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
     }
     try {
       await gitClone(repoUrl.trim(), destPath.trim(), creds);
-      const found = await scanCollectionsInPath(destPath.trim());
-      setCollections(found);
-      setStep('picker');
+      await handlePostClone(destPath.trim());
     } catch (e) {
       setError(String(e));
       setStep('input');
@@ -94,13 +133,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   };
 
   const handleOpen = async (collectionPath: string) => {
-    try {
-      const ws = await useWorkspaceStore.getState().openWorkspaceFromDisk(collectionPath);
-      await useWorkspaceStore.getState().switchWorkspace(ws.id);
-      onOpenChange(false);
-    } catch (e) {
-      setError(String(e));
-    }
+    await handleOpenWorkspace(collectionPath);
   };
 
   if (step === 'progress') {

@@ -295,6 +295,12 @@ export interface CollectionScanResult {
   path: string;
 }
 
+export interface ClonedRepoStructure {
+  kind: 'workspace' | 'collection' | 'multi_collection' | 'unknown';
+  workspacePath: string | null;
+  collections: CollectionScanResult[];
+}
+
 // ============================================================
 // Workspace types
 // ============================================================
@@ -585,6 +591,9 @@ export const gitSetRemoteUrl = (collectionPath: string, name: string, url: strin
 
 export const scanCollectionsInPath = (path: string) =>
   invoke<CollectionScanResult[]>('scan_collections_in_path', { path });
+
+export const detectClonedStructure = (path: string) =>
+  invoke<ClonedRepoStructure>('detect_cloned_structure', { path });
 
 // ============================================================
 // Realtime events
