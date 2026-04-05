@@ -203,7 +203,8 @@ export function CollectionNode({
   const filteredItems = sortItemsFoldersFirst(
     filter
       ? rawItems.filter(
-          (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
+          (item) =>
+            item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : rawItems,
   );
