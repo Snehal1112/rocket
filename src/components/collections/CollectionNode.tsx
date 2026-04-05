@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { Collection, CollectionSummary } from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
@@ -199,11 +200,13 @@ export function CollectionNode({
   };
 
   const rawItems = collection?.root.items ?? [];
-  const filteredItems = filter
-    ? rawItems.filter(
-        (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : rawItems;
+  const filteredItems = sortItemsFoldersFirst(
+    filter
+      ? rawItems.filter(
+          (item) => item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
+        )
+      : rawItems,
+  );
 
   return (
     <ContextMenu>
