@@ -238,7 +238,7 @@ export function CollectionNode({
                 />
               ) : (
                 <>
-                  <span className='truncate font-medium text-foreground'>{summary.name}</span>
+                  <span className='truncate text-foreground'>{summary.name}</span>
                   {summary.refType === 'external' && (
                     <span className='ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
                       ext

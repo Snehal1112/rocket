@@ -115,7 +115,7 @@ function TreeItem({
             'flex items-center gap-1 px-1 py-1 text-sm cursor-pointer pl-(--tree-indent) w-full text-left bg-transparent border-0',
             'hover:bg-accent/50',
             'data-selected:bg-accent/30',
-            'data-active:border-l-2 data-active:border-primary data-active:bg-accent/60 data-active:text-accent-foreground',
+            'data-active:border-l-2 data-active:border-primary data-active:bg-accent/60',
           )}
           style={{ '--tree-indent': `${(depth + 1) * 8}px` } as React.CSSProperties}
           onClick={handleSelect}

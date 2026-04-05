@@ -65,7 +65,7 @@ export function FolderNode({
   onDelete,
   onDuplicate,
 }: FolderNodeProps) {
-  const [open, setOpen] = useState(depth < 2);
+  const [open, setOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const [creatingRequest, setCreatingRequest] = useState(false);
@@ -149,9 +149,9 @@ export function FolderNode({
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? (
-                  <FolderOpen className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                  <FolderOpen className='h-3.5 w-3.5 shrink-0 text-amber-500/80 dark:text-amber-400/70' />
                 ) : (
-                  <Folder className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                  <Folder className='h-3.5 w-3.5 shrink-0 text-amber-500/80 dark:text-amber-400/70' />
                 )}
                 {isRenaming ? (
                   <Input
@@ -167,7 +167,7 @@ export function FolderNode({
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span className='truncate font-medium text-foreground'>{name}</span>
+                  <span className='truncate text-foreground'>{name}</span>
                 )}
               </TreeItemContent>
             </TreeItem>
