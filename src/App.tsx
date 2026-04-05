@@ -1,5 +1,6 @@
 import { type as osType } from '@tauri-apps/plugin-os';
 import { useEffect, useState } from 'react';
+import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
@@ -34,9 +35,8 @@ function App() {
         if (ws) {
           usePaneStore.getState().openWorkspaceTabs(ws.id);
         }
-      }
-      // Task 9: First-launch fallback
-      if (!uiState) {
+      } else {
+        // No saved workspace state or collection mode — show workspace overview.
         const store = useWorkspaceStore.getState();
         const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId);
         if (activeWs) {
@@ -131,6 +131,7 @@ function App() {
         onConsoleToggle={() => setIsConsoleOpen((o) => !o)}
       />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
+      <Toaster position='bottom-right' richColors closeButton />
     </div>
   );
 }
