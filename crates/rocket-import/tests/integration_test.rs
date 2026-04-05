@@ -249,6 +249,40 @@ fn import_auto_from_zip_modern_collection() {
     assert!(ws_dir.path().join("collections/my-col/get-users.yml").exists());
 }
 
+/// Flat-root ZIP (no wrapper folder) should use ZIP filename as collection name,
+/// not the temp directory name which starts with a dot.
+#[test]
+fn import_flat_root_zip_uses_zip_filename_as_collection_name() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let src = TempDir::new().unwrap();
+    let zip_path = src.path().join("Lockstep-Inbox.zip");
+    let file = std::fs::File::create(&zip_path).unwrap();
+    let mut w = zip::ZipWriter::new(file);
+    let opts = SimpleFileOptions::default();
+
+    // Flat-root: bruno.json and request files at archive root, no wrapper folder.
+    w.start_file("bruno.json", opts).unwrap();
+    w.write_all(b"{}").unwrap();
+    w.start_file("req.bru", opts).unwrap();
+    w.write_all(b"meta {\n  name: Req\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n").unwrap();
+    w.finish().unwrap();
+
+    let ws_dir = TempDir::new().unwrap();
+    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
+
+    assert_eq!(report.detected_type, "collection");
+    assert_eq!(report.imported, 1);
+    assert!(
+        report.created_collections.contains(&"Lockstep-Inbox".to_string()),
+        "expected collection named 'Lockstep-Inbox' from ZIP filename, got: {:?}",
+        report.created_collections
+    );
+    assert!(ws_dir.path().join("collections/Lockstep-Inbox").exists());
+}
+
 #[test]
 fn import_workspace_mixed_modern_and_legacy_collections() {
     let src = TempDir::new().unwrap();

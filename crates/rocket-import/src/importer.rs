@@ -64,10 +64,20 @@ impl ImportService {
         path: &Path,
         workspace_id: &str,
     ) -> ImportResult<ImportReport> {
+        self.import_collection_with_name(path, workspace_id, None)
+    }
+
+    /// Import a collection, optionally overriding the derived name.
+    fn import_collection_with_name(
+        &self,
+        path: &Path,
+        workspace_id: &str,
+        name_hint: Option<&str>,
+    ) -> ImportResult<ImportReport> {
         match detect_collection(path) {
             None => Err(ImportError::NotABrunoDirectory(path.to_path_buf())),
-            Some(BrunoFormat::Modern) => self.import_modern_collection(path, workspace_id),
-            Some(BrunoFormat::Legacy) => self.import_legacy_collection(path, workspace_id),
+            Some(BrunoFormat::Modern) => self.import_modern_collection(path, workspace_id, name_hint),
+            Some(BrunoFormat::Legacy) => self.import_legacy_collection(path, workspace_id, name_hint),
         }
     }
 
@@ -76,13 +86,14 @@ impl ImportService {
         &self,
         path: &Path,
         _workspace_id: &str,
+        name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
         let mut report = ImportReport::default();
         report.detected_type = "collection".to_string();
 
-        let col_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
+        let col_name = name_hint
+            .map(|n| n.to_string())
+            .or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name);
@@ -110,6 +121,16 @@ impl ImportService {
         create_new_workspace: bool,
         target_workspace_id: Option<&str>,
     ) -> ImportResult<ImportReport> {
+        self.import_workspace_with_name(path, create_new_workspace, target_workspace_id, None)
+    }
+
+    fn import_workspace_with_name(
+        &self,
+        path: &Path,
+        create_new_workspace: bool,
+        target_workspace_id: Option<&str>,
+        name_hint: Option<&str>,
+    ) -> ImportResult<ImportReport> {
         if detect_workspace(path).is_none() {
             return Err(ImportError::NotABrunoDirectory(path.to_path_buf()));
         }
@@ -118,9 +139,9 @@ impl ImportService {
         combined.detected_type = "workspace".to_string();
 
         if create_new_workspace {
-            let ws_name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
+            let ws_name = name_hint
+                .map(|n| n.to_string())
+                .or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()))
                 .unwrap_or_else(|| "imported-workspace".into());
             combined.created_workspace = Some(ws_name);
         }
@@ -164,16 +185,29 @@ impl ImportService {
     /// collection detection runs first — a dir with `.bru` request files is treated as
     /// a collection before trying workspace detection.
     /// Returns `NotABrunoDirectory` if neither marker is found.
+    ///
+    /// `name_hint` overrides the directory-derived name (useful for ZIP imports where the
+    /// extracted temp path has no meaningful name).
     pub fn import_auto(
         &self,
         path: &Path,
         workspace_id: &str,
         create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
+        self.import_auto_with_name(path, workspace_id, create_new_workspace, None)
+    }
+
+    fn import_auto_with_name(
+        &self,
+        path: &Path,
+        workspace_id: &str,
+        create_new_workspace: bool,
+        name_hint: Option<&str>,
+    ) -> ImportResult<ImportReport> {
         if detect_collection(path).is_some() {
-            self.import_collection(path, workspace_id)
+            self.import_collection_with_name(path, workspace_id, name_hint)
         } else if detect_workspace(path).is_some() {
-            self.import_workspace(path, create_new_workspace, Some(workspace_id))
+            self.import_workspace_with_name(path, create_new_workspace, Some(workspace_id), name_hint)
         } else {
             Err(ImportError::NotABrunoDirectory(path.to_path_buf()))
         }
@@ -182,7 +216,8 @@ impl ImportService {
     /// Extract a Bruno ZIP to a temp directory and call `import_auto` on the inner path.
     ///
     /// The `TempDir` is held for the duration of the import and cleaned up automatically
-    /// when this method returns.
+    /// when this method returns. The collection/workspace name is derived from the ZIP
+    /// filename so flat-root archives get a meaningful name instead of a temp path.
     pub fn import_auto_from_zip(
         &self,
         zip_path: &Path,
@@ -190,7 +225,14 @@ impl ImportService {
         create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
         let (_temp, inner) = crate::bru::zip_extractor::extract_to_temp(zip_path)?;
-        self.import_auto(&inner, workspace_id, create_new_workspace)
+
+        // Use ZIP file stem as name hint (e.g. "Lockstep-Inbox.zip" -> "Lockstep-Inbox").
+        let zip_name = zip_path
+            .file_stem()
+            .map(|n| n.to_string_lossy().to_string());
+        let name_hint = zip_name.as_deref();
+
+        self.import_auto_with_name(&inner, workspace_id, create_new_workspace, name_hint)
     }
 
     fn walk_requests(
@@ -332,13 +374,14 @@ impl ImportService {
         &self,
         src: &Path,
         _workspace_id: &str,
+        name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
         let mut report = ImportReport::default();
         report.detected_type = "collection".to_string();
 
-        let col_name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
+        let col_name = name_hint
+            .map(|n| n.to_string())
+            .or_else(|| src.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name);
@@ -447,7 +490,7 @@ mod modern_tests {
         let service = ImportService::new_with_workspace_path(ws_dir.path());
 
         let report = service
-            .import_modern_collection(&col_src, "default")
+            .import_modern_collection(&col_src, "default", None)
             .expect("modern import should succeed");
 
         assert_eq!(report.detected_type, "collection");
@@ -467,7 +510,7 @@ mod modern_tests {
 
         let ws_dir = TempDir::new().unwrap();
         let service = ImportService::new_with_workspace_path(ws_dir.path());
-        service.import_modern_collection(&col_src, "default").unwrap();
+        service.import_modern_collection(&col_src, "default", None).unwrap();
 
         let oc_path = ws_dir.path().join("collections/col/opencollection.yml");
         assert!(oc_path.exists());
