@@ -82,9 +82,11 @@ export function CollectionsSidebar() {
       if (deleteTarget.type === 'collection') {
         await deleteCollection(deleteTarget.collection);
       } else if (deleteTarget.type === 'folder') {
-        await deleteFolder(deleteTarget.collection, deleteTarget.path!);
+        if (!deleteTarget.path) return;
+        await deleteFolder(deleteTarget.collection, deleteTarget.path);
       } else {
-        await deleteRequest(deleteTarget.collection, deleteTarget.path!);
+        if (!deleteTarget.path) return;
+        await deleteRequest(deleteTarget.collection, deleteTarget.path);
       }
       // Close open tabs for deleted items.
       const store = usePaneStore.getState();
@@ -100,7 +102,7 @@ export function CollectionsSidebar() {
                 tab.source.path === deleteTarget.path) ||
               (deleteTarget.type === 'folder' &&
                 tab.source.collection === deleteTarget.collection &&
-                tab.source.path.startsWith(deleteTarget.path!));
+                tab.source.path.startsWith(deleteTarget.path ?? ''));
             if (matches) store.closeTab(tab.id, node.groupId);
           }
         } else {
@@ -165,7 +167,11 @@ export function CollectionsSidebar() {
 
   const handleMove = useCallback(
     async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
-      await moveItem(srcCollection, srcPath, dstCollection, dstPath);
+      try {
+        await moveItem(srcCollection, srcPath, dstCollection, dstPath);
+      } catch (err) {
+        console.error('[CollectionsSidebar] move failed:', err);
+      }
     },
     [],
   );

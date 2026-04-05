@@ -3,7 +3,6 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
-  Layers,
   MoreHorizontal,
   Plus,
   Trash2,
@@ -65,6 +64,7 @@ export function CollectionNode({
   const [renameValue, setRenameValue] = useState(summary.name);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const renameInFlight = useRef(false);
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
@@ -116,16 +116,20 @@ export function CollectionNode({
   }, []);
 
   const handleRename = async () => {
+    if (renameInFlight.current) return;
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === summary.name) {
       setIsRenaming(false);
       return;
     }
+    renameInFlight.current = true;
     try {
       await renameCollection(summary.name, trimmed);
-      setIsRenaming(false);
     } catch (err) {
       console.error('Rename collection failed:', err);
+    } finally {
+      renameInFlight.current = false;
+      setIsRenaming(false);
     }
   };
 

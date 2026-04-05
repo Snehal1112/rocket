@@ -1,8 +1,8 @@
 import {
+  Box,
   ExternalLink,
   FileText,
   FolderOpen,
-  Layers,
   MoreHorizontal,
   Plus,
   Trash2,
@@ -63,6 +63,13 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     refresh().catch(console.error);
     loadGlobalEnvironments().catch(console.error);
   }, [refresh, loadGlobalEnvironments]);
+
+  // listCollections returns data for the active backend workspace.
+  // Refetch when the user switches workspace so the UI stays in sync.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
+  useEffect(() => {
+    refresh().catch(console.error);
+  }, [workspaceId, refresh]);
 
   useEffect(() => {
     setDocContent(workspace?.description ?? '');
@@ -244,11 +251,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                         }}
                         className='group flex items-center gap-2.5 px-3 py-2.5 border-b border-border last:border-b-0 hover:bg-muted/50 cursor-pointer transition-colors'
                       >
-                        <div
-                          className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${col.refType === 'external' ? 'bg-orange-950/40 border border-orange-900/40' : 'bg-primary/10 border border-primary/20'}`}
-                        >
-                          <Layers className='h-3.5 w-3.5 text-primary' />
-                        </div>
+                        <Box className='h-5 w-5 ' />
                         <div className='flex-1 min-w-0'>
                           <span className='text-sm font-medium truncate block'>{col.name}</span>
                           {col.path && (

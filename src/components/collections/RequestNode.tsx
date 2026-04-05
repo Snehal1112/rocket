@@ -1,5 +1,5 @@
 import { Copy, MoreHorizontal, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -66,18 +66,23 @@ export function RequestNode({
   const active = isActiveRequest(root, uid);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
+  const renameInFlight = useRef(false);
 
   const handleRename = async () => {
+    if (renameInFlight.current) return;
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === name) {
       setIsRenaming(false);
       return;
     }
+    renameInFlight.current = true;
     try {
       await renameRequest(collectionName, path, trimmed);
-      setIsRenaming(false);
     } catch (err) {
       console.error('Rename request failed:', err);
+    } finally {
+      renameInFlight.current = false;
+      setIsRenaming(false);
     }
   };
 

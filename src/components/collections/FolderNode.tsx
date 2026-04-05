@@ -8,7 +8,7 @@ import {
   Trash2,
   Variable,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -71,12 +71,15 @@ export function FolderNode({
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [varsOpen, setVarsOpen] = useState(false);
+  const renameInFlight = useRef(false);
+
   // Auto-expand when filter is active.
   useEffect(() => {
     if (filter) setOpen(true);
   }, [filter]);
 
   const handleRename = async () => {
+    if (renameInFlight.current) return;
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === name) {
       setIsRenaming(false);
@@ -86,11 +89,14 @@ export function FolderNode({
     const parts = basePath.split('/');
     parts[parts.length - 1] = trimmed;
     const newPath = parts.join('/');
+    renameInFlight.current = true;
     try {
       await moveItem(collectionName, basePath, collectionName, newPath);
-      setIsRenaming(false);
     } catch (err) {
       console.error('Rename folder failed:', err);
+    } finally {
+      renameInFlight.current = false;
+      setIsRenaming(false);
     }
   };
 
