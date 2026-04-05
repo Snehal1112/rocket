@@ -72,7 +72,8 @@ export function CollectionVariablesEditor({
           </TableHeader>
           <TableBody>
             {variables.map((v, i) => (
-              <TableRow key={v.key}>
+              // biome-ignore lint/suspicious/noArrayIndexKey: index is stable — rows are not reordered
+              <TableRow key={i}>
                 {/* Enabled toggle. */}
                 <TableCell className='px-2 py-1.5'>
                   <Checkbox

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
+import { saveEnvironment } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 
@@ -19,7 +20,6 @@ interface EnvironmentDialogProps {
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const environments = useEnvStore((s) => s.environments);
   const createEnvironment = useEnvStore((s) => s.createEnvironment);
-  const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
   const deleteEnvironment = useEnvStore((s) => s.deleteEnvironment);
 
   const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
@@ -48,14 +48,22 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     setSelectedName(environments.find((e) => e.name !== selectedName)?.name ?? null);
   }, [selectedName, deleteEnvironment, environments]);
 
+  // Persist to backend only — the store is already updated optimistically
+  // by updateVariable. Using updateEnvironment here would overwrite the
+  // live store with a stale snapshot captured at debounce time.
+  const activeCollection = useEnvStore((s) => s.activeCollection);
   const saveEnv = useCallback(
     (env: Environment) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        void updateEnvironment(env);
+        if (activeCollection) {
+          saveEnvironment(activeCollection, env).catch((err) =>
+            console.error('[EnvironmentDialog] save failed:', err),
+          );
+        }
       }, 500);
     },
-    [updateEnvironment],
+    [activeCollection],
   );
 
   const updateVariable = useCallback(
@@ -109,7 +117,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
         <DialogHeader className='p-4 pb-2'>
           <DialogTitle>Manage Environments</DialogTitle>
         </DialogHeader>
-        <div className='flex border-t border-border min-h-87.5'>
+        <div className='flex border-t  border-border min-h-87.5'>
           {/* Left panel: environment list. */}
           <div className='w-50 border-r border-border flex flex-col'>
             <ScrollArea className='flex-1'>
@@ -181,7 +189,8 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 <ScrollArea className='flex-1 p-3'>
                   <div className='space-y-1.5'>
                     {selectedEnv.variables.map((variable, idx) => (
-                      <div key={variable.key} className='flex gap-1.5 items-center'>
+                      // biome-ignore lint/suspicious/noArrayIndexKey: index is stable here — rows are not reordered
+                      <div key={idx} className='flex gap-1.5 items-center'>
                         <Checkbox
                           checked={variable.enabled}
                           onCheckedChange={(checked) => updateVariable(idx, { enabled: !!checked })}
