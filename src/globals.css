@@ -146,6 +146,18 @@ html.linux #root {
   overflow: hidden;
 }
 
+/* Git file row hover actions — CSS hover avoids mouseenter timing issues
+   when rows appear under an existing cursor position (e.g. after git init).
+   Both rules are custom (no Tailwind hidden class) to avoid any layer-cascade
+   conflict between utilities and non-layered author styles. */
+.git-row-actions {
+  display: none;
+}
+
+.git-file-row:hover .git-row-actions {
+  display: flex;
+}
+
 /* Workspace documentation markdown */
 .prose-doc h1 {
   font-size: 1.5rem;
