@@ -84,13 +84,18 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
 
               {/* Staged file rows. */}
               {staged.map((file) => (
-                <button
+                // biome-ignore lint/a11y/useSemanticElements: outer <button> nesting inner <button> is invalid HTML; WebKitGTK reparses it and breaks mouseleave tracking.
+                <div
                   key={file.path}
-                  type='button'
+                  role='button'
+                  tabIndex={0}
                   className='flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
                   onMouseEnter={() => setHoveredPath(`staged:${file.path}`)}
                   onMouseLeave={() => setHoveredPath(null)}
                   onClick={() => onFileClick(file)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') onFileClick(file);
+                  }}
                 >
                   <span className='text-sm truncate flex-1 min-w-0'>{file.path}</span>
                   <span
@@ -118,7 +123,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                       </Tooltip>
                     </div>
                   )}
-                </button>
+                </div>
               ))}
               <Separator className='my-2' />
             </>
@@ -157,9 +162,11 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
           {unstaged.map((file) => {
             const isConflicted = file.status === 'conflicted';
             return (
-              <button
+              // biome-ignore lint/a11y/useSemanticElements: outer <button> nesting inner <button> is invalid HTML; WebKitGTK reparses it and breaks mouseleave tracking.
+              <div
                 key={file.path}
-                type='button'
+                role='button'
+                tabIndex={0}
                 className='flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
                 onMouseEnter={() => setHoveredPath(`unstaged:${file.path}`)}
                 onMouseLeave={() => setHoveredPath(null)}
@@ -168,6 +175,15 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     void handleConflictClick(file);
                   } else {
                     onFileClick(file);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    if (isConflicted) {
+                      void handleConflictClick(file);
+                    } else {
+                      onFileClick(file);
+                    }
                   }
                 }}
               >
@@ -216,7 +232,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     </Tooltip>
                   </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
