@@ -1,4 +1,5 @@
 import { AlertTriangle, Minus, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -13,6 +14,7 @@ interface GitFileListProps {
 }
 
 export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) {
+  const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const {
     status,
     conflicts,
@@ -85,7 +87,9 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                 <button
                   key={file.path}
                   type='button'
-                  className='group flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
+                  className='flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
+                  onMouseEnter={() => setHoveredPath(`staged:${file.path}`)}
+                  onMouseLeave={() => setHoveredPath(null)}
                   onClick={() => onFileClick(file)}
                 >
                   <span className='text-sm truncate flex-1 min-w-0'>{file.path}</span>
@@ -94,24 +98,26 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                   >
                     {GIT_STATUS_CONFIG[file.status].label}
                   </span>
-                  <div className='hidden gap-0.5 shrink-0 group-hover:flex'>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-5 w-5'
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            unstageFiles([file.path]);
-                          }}
-                        >
-                          <Minus className='h-3.5 w-3.5' />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Unstage</TooltipContent>
-                    </Tooltip>
-                  </div>
+                  {hoveredPath === `staged:${file.path}` && (
+                    <div className='flex gap-0.5 shrink-0'>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='h-5 w-5'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              unstageFiles([file.path]);
+                            }}
+                          >
+                            <Minus className='h-3.5 w-3.5' />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Unstage</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </button>
               ))}
               <Separator className='my-2' />
@@ -154,7 +160,9 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
               <button
                 key={file.path}
                 type='button'
-                className='group flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
+                className='flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
+                onMouseEnter={() => setHoveredPath(`unstaged:${file.path}`)}
+                onMouseLeave={() => setHoveredPath(null)}
                 onClick={() => {
                   if (isConflicted) {
                     void handleConflictClick(file);
@@ -172,8 +180,8 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                 >
                   {GIT_STATUS_CONFIG[file.status].label}
                 </span>
-                {!isConflicted && (
-                  <div className='hidden gap-0.5 shrink-0 group-hover:flex'>
+                {!isConflicted && hoveredPath === `unstaged:${file.path}` && (
+                  <div className='flex gap-0.5 shrink-0'>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
