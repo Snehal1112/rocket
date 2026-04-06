@@ -4,7 +4,7 @@ import type { CollectionItem } from '../tauri-api';
 
 // Minimal helpers to build test fixtures without filling every field.
 const folder = (name: string): CollectionItem =>
-  ({ type: 'folder', uid: name, name, items: [] }) as CollectionItem;
+  ({ type: 'folder', uid: name, name, items: [] }) as unknown as CollectionItem;
 
 const request = (name: string): CollectionItem =>
   ({
@@ -16,7 +16,7 @@ const request = (name: string): CollectionItem =>
     headers: [],
     body: { mode: 'none' },
     auth: { type: 'none' },
-  }) as CollectionItem;
+  }) as unknown as CollectionItem;
 
 describe('sortItemsFoldersFirst', () => {
   it('returns empty array unchanged', () => {
