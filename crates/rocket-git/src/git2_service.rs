@@ -1345,6 +1345,33 @@ mod tests {
     }
 
     #[test]
+    fn stash_save_captures_untracked_files() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create a brand-new file that has never been staged or committed.
+        let new_file = dir.path().join("untracked.bru");
+        fs::write(&new_file, "new request content").unwrap();
+        assert!(new_file.exists(), "precondition: untracked file should exist before stash");
+
+        // Stash should capture the untracked file.
+        svc.stash_save(&path, "capture untracked").unwrap();
+
+        // After stash, the untracked file should be gone from the working tree.
+        assert!(
+            !new_file.exists(),
+            "untracked file should be removed from working tree after stash"
+        );
+
+        // Pop restores the untracked file.
+        svc.stash_pop(&path, 0).unwrap();
+        assert!(
+            new_file.exists(),
+            "untracked file should be restored after stash pop"
+        );
+    }
+
+    #[test]
     fn stash_apply_keeps_stash() {
         let (dir, path) = setup_repo();
         let svc = Git2Service::new();
