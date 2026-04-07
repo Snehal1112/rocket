@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, ChevronDown, Package } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Package } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { BranchSelector } from '@/components/git/BranchSelector';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
@@ -13,8 +13,6 @@ import { GitLinksSection } from '@/components/git/GitLinksSection';
 import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
 import { gitInit, gitIsRepo } from '@/lib/tauri-api';
@@ -41,9 +39,9 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   });
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
-  const [changesOpen, setChangesOpen] = useState(true);
 
-  const { showCredentialsDialog, setCollection, refreshLog, status } = useGitStore();
+  const { showCredentialsDialog, setCollection, refreshLog, refreshStashes, status } =
+    useGitStore();
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
@@ -72,6 +70,11 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   useEffect(() => {
     if (rightPanel.kind === 'commits') void refreshLog();
   }, [rightPanel.kind, refreshLog]);
+
+  // Refresh the stash list when the stash view is opened.
+  useEffect(() => {
+    if (rightPanel.kind === 'stashes') void refreshStashes();
+  }, [rightPanel.kind, refreshStashes]);
 
   if (isRepo === null) {
     return (
@@ -131,19 +134,9 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             </div>
           )}
 
-          {/* Changes section with commit form */}
-          <div className='shrink-0 px-3 pt-2.5 pb-2 space-y-2 border-b border-border/70'>
-            <Collapsible open={changesOpen} onOpenChange={setChangesOpen}>
-              <CollapsibleTrigger className='flex items-center gap-1 text-sm font-medium text-primary'>
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform ${!changesOpen ? '-rotate-90' : ''}`}
-                />
-                Changes
-              </CollapsibleTrigger>
-              <CollapsibleContent className='pt-2 space-y-2'>
-                <GitCommitForm />
-              </CollapsibleContent>
-            </Collapsible>
+          {/* Commit form */}
+          <div className='shrink-0 px-3 pt-2.5 pb-2 border-b border-border/70'>
+            <GitCommitForm />
           </div>
 
           {/* File list */}
@@ -230,11 +223,11 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             )}
             {rightPanel.kind === 'commits' && <GitCommitLog />}
             {rightPanel.kind === 'stashes' && (
-              <ScrollArea className='h-full'>
+              <div className='overflow-y-auto h-full'>
                 <div className='p-4'>
                   <GitStashSection />
                 </div>
-              </ScrollArea>
+              </div>
             )}
           </div>
         </div>
