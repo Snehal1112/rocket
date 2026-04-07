@@ -917,9 +917,16 @@ impl GitService for Git2Service {
         let mut entries = Vec::new();
 
         repo.stash_foreach(|index, message, _oid| {
+            // git stores stash messages as "On <branch>: <user message>".
+            // Strip that prefix so the UI shows only the user-supplied label.
+            let display = if let Some(pos) = message.find(": ") {
+                message[pos + 2..].to_string()
+            } else {
+                message.to_string()
+            };
             entries.push(StashEntry {
                 index,
-                message: message.to_string(),
+                message: display,
                 timestamp: chrono::Utc::now(),
                 branch: String::new(),
             });
@@ -938,7 +945,11 @@ impl GitService for Git2Service {
             .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-        repo.stash_save(&sig, message, None)
+        // INCLUDE_UNTRACKED matches `git stash` CLI default — captures new
+        // untracked files (e.g. newly created .bru requests) in addition to
+        // tracked modified/deleted files. Without this flag, stash_save returns
+        // "nothing to stash" when only untracked files exist.
+        repo.stash_save(&sig, message, Some(git2::StashFlags::INCLUDE_UNTRACKED))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
     }
