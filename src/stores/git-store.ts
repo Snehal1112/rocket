@@ -375,18 +375,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     await get().refreshStatus();
   },
 
-  // Pop multiple stashes newest-first. Stops on first error.
+  // Pop multiple stashes oldest-first (descending index) to avoid renumbering. Stops on first error.
   popStashMany: async (indices: number[]) => {
     const { collectionPath } = get();
     if (!collectionPath) return;
-    const sorted = [...indices].sort((a, b) => a - b);
+    const sorted = [...indices].sort((a, b) => b - a);
     set({ error: null });
     for (const index of sorted) {
       try {
         await gitStashPop(collectionPath, index);
       } catch (e) {
         set({
-          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already popped.`,
         });
         break;
       }
@@ -395,18 +395,18 @@ export const useGitStore = create<GitState>((set, get) => ({
     await get().refreshStatus();
   },
 
-  // Drop multiple stashes newest-first. Stops on first error. No working-tree changes.
+  // Drop multiple stashes oldest-first (descending index) to avoid renumbering. Stops on first error. No working-tree changes.
   dropStashMany: async (indices: number[]) => {
     const { collectionPath } = get();
     if (!collectionPath) return;
-    const sorted = [...indices].sort((a, b) => a - b);
+    const sorted = [...indices].sort((a, b) => b - a);
     set({ error: null });
     for (const index of sorted) {
       try {
         await gitStashDrop(collectionPath, index);
       } catch (e) {
         set({
-          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already dropped.`,
         });
         break;
       }

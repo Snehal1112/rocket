@@ -631,7 +631,7 @@ describe('git-store stash batch operations', () => {
     expect(vi.mocked(gitStatus)).toHaveBeenCalled();
   });
 
-  it('popStashMany applies indices in ascending order', async () => {
+  it('popStashMany applies indices in descending order (oldest first)', async () => {
     const { gitStashPop } = await import('@/lib/tauri-api');
     const order: number[] = [];
     vi.mocked(gitStashPop).mockImplementation(async (_path, index) => {
@@ -640,10 +640,10 @@ describe('git-store stash batch operations', () => {
 
     await useGitStore.getState().popStashMany([1, 0]);
 
-    expect(order).toEqual([0, 1]);
+    expect(order).toEqual([1, 0]);
   });
 
-  it('dropStashMany applies indices in ascending order', async () => {
+  it('dropStashMany applies indices in descending order (oldest first)', async () => {
     const { gitStashDrop } = await import('@/lib/tauri-api');
     const order: number[] = [];
     vi.mocked(gitStashDrop).mockImplementation(async (_path, index) => {
@@ -652,7 +652,7 @@ describe('git-store stash batch operations', () => {
 
     await useGitStore.getState().dropStashMany([2, 0, 1]);
 
-    expect(order).toEqual([0, 1, 2]);
+    expect(order).toEqual([2, 1, 0]);
   });
 
   it('dropStashMany does not call gitStatus (drop is not a working-tree change)', async () => {
