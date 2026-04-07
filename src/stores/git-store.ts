@@ -355,7 +355,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  // Apply multiple stashes newest-first (ascending index). Stops on first error.
+  // Apply stashes ascending (stash@{0} first). Apply leaves the stack intact so no renumbering occurs.
   applyStashMany: async (indices: number[]) => {
     const { collectionPath } = get();
     if (!collectionPath) return;
