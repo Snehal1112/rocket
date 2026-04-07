@@ -584,3 +584,84 @@ describe('reset', () => {
     expect(s.pendingNetworkOp).toBeNull();
   });
 });
+
+describe('git-store stash batch operations', () => {
+  beforeEach(() => {
+    useGitStore.setState({
+      error: null,
+      collectionPath: '/test/repo',
+      isRepo: true,
+      stashes: [],
+    });
+    vi.clearAllMocks();
+  });
+
+  it('applyStashMany applies indices in ascending order (newest first)', async () => {
+    const { gitStashApply } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashApply).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().applyStashMany([2, 0, 1]);
+
+    expect(order).toEqual([0, 1, 2]);
+  });
+
+  it('applyStashMany stops on first error and sets error with stash index', async () => {
+    const { gitStashApply } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashApply)
+      .mockResolvedValueOnce(undefined)              // index 0 succeeds
+      .mockRejectedValueOnce(new Error('conflict')); // index 1 fails
+
+    await useGitStore.getState().applyStashMany([0, 1, 2]);
+
+    expect(vi.mocked(gitStashApply)).toHaveBeenCalledTimes(2);
+    expect(useGitStore.getState().error).toContain('stash@{1}');
+    expect(useGitStore.getState().error).toContain('conflict');
+  });
+
+  it('applyStashMany refreshes stashes and status after completion', async () => {
+    const { gitStashApply, gitStashList, gitStatus } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashApply).mockResolvedValue(undefined);
+
+    await useGitStore.getState().applyStashMany([0]);
+
+    expect(vi.mocked(gitStashList)).toHaveBeenCalled();
+    expect(vi.mocked(gitStatus)).toHaveBeenCalled();
+  });
+
+  it('popStashMany applies indices in ascending order', async () => {
+    const { gitStashPop } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashPop).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().popStashMany([1, 0]);
+
+    expect(order).toEqual([0, 1]);
+  });
+
+  it('dropStashMany applies indices in ascending order', async () => {
+    const { gitStashDrop } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashDrop).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().dropStashMany([2, 0, 1]);
+
+    expect(order).toEqual([0, 1, 2]);
+  });
+
+  it('dropStashMany does not call gitStatus (drop is not a working-tree change)', async () => {
+    const { gitStashDrop, gitStatus } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashDrop).mockResolvedValue(undefined);
+    vi.mocked(gitStatus).mockClear();
+
+    await useGitStore.getState().dropStashMany([0]);
+
+    expect(vi.mocked(gitStatus)).not.toHaveBeenCalled();
+  });
+});

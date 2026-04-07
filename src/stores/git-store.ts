@@ -74,6 +74,9 @@ interface GitState {
   popStash: (index: number) => Promise<void>;
   applyStash: (index: number) => Promise<void>;
   dropStash: (index: number) => Promise<void>;
+  applyStashMany: (indices: number[]) => Promise<void>;
+  popStashMany: (indices: number[]) => Promise<void>;
+  dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
   checkoutRemoteBranch: (name: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
@@ -350,6 +353,65 @@ export const useGitStore = create<GitState>((set, get) => ({
     } catch (e) {
       set({ error: String(e) });
     }
+  },
+
+  // Apply multiple stashes newest-first (ascending index). Stops on first error.
+  applyStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashApply(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
+    await get().refreshStatus();
+  },
+
+  // Pop multiple stashes newest-first. Stops on first error.
+  popStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashPop(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
+    await get().refreshStatus();
+  },
+
+  // Drop multiple stashes newest-first. Stops on first error. No working-tree changes.
+  dropStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashDrop(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
   },
 
   // Switch to the named branch.
