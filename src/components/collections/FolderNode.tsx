@@ -73,6 +73,9 @@ export function FolderNode({
   const [newRequestName, setNewRequestName] = useState('');
   const [varsOpen, setVarsOpen] = useState(false);
   const renameInFlight = useRef(false);
+  // Set to true on Escape or after a successful rename to block the
+  // blur event that fires when the Input unmounts.
+  const renameCancelled = useRef(false);
 
   // Auto-expand when filter is active.
   useEffect(() => {
@@ -81,6 +84,10 @@ export function FolderNode({
 
   const handleRename = async () => {
     if (renameInFlight.current) return;
+    if (renameCancelled.current) {
+      renameCancelled.current = false;
+      return;
+    }
     const trimmed = renameValue.trim();
     if (!trimmed || trimmed === name) {
       setIsRenaming(false);
@@ -93,6 +100,8 @@ export function FolderNode({
     renameInFlight.current = true;
     try {
       await moveItem(collectionName, basePath, collectionName, newPath);
+      // Prevent the blur (fired when Input unmounts) from triggering a second rename.
+      renameCancelled.current = true;
     } catch (err) {
       console.error('Rename folder failed:', err);
     } finally {
@@ -171,7 +180,10 @@ export function FolderNode({
                     onChange={(e) => setRenameValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') void handleRename();
-                      if (e.key === 'Escape') setIsRenaming(false);
+                      if (e.key === 'Escape') {
+                        renameCancelled.current = true;
+                        setIsRenaming(false);
+                      }
                     }}
                     onBlur={() => void handleRename()}
                     onClick={(e) => e.stopPropagation()}
@@ -213,6 +225,7 @@ export function FolderNode({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => {
+                    renameCancelled.current = false;
                     setRenameValue(name);
                     setIsRenaming(true);
                   }}
@@ -255,6 +268,7 @@ export function FolderNode({
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {
+              renameCancelled.current = false;
               setRenameValue(name);
               setIsRenaming(true);
             }}
