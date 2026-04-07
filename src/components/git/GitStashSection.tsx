@@ -85,25 +85,34 @@ export function GitStashSection() {
   const handleApplyMany = async () => {
     setIsBatchRunning(true);
     clearError();
-    await applyStashMany([...selectedIndices]);
-    setIsBatchRunning(false);
-    if (!useGitStore.getState().error) clearSelection();
+    try {
+      await applyStashMany([...selectedIndices]);
+      if (!useGitStore.getState().error) clearSelection();
+    } finally {
+      setIsBatchRunning(false);
+    }
   };
 
   const handlePopMany = async () => {
     setIsBatchRunning(true);
     clearError();
-    await popStashMany([...selectedIndices]);
-    setIsBatchRunning(false);
-    if (!useGitStore.getState().error) clearSelection();
+    try {
+      await popStashMany([...selectedIndices]);
+      if (!useGitStore.getState().error) clearSelection();
+    } finally {
+      setIsBatchRunning(false);
+    }
   };
 
   const handleDropMany = async () => {
     setIsBatchRunning(true);
     clearError();
-    await dropStashMany([...selectedIndices]);
-    setIsBatchRunning(false);
-    if (!useGitStore.getState().error) clearSelection();
+    try {
+      await dropStashMany([...selectedIndices]);
+      if (!useGitStore.getState().error) clearSelection();
+    } finally {
+      setIsBatchRunning(false);
+    }
   };
 
   return (
@@ -334,7 +343,7 @@ export function GitStashSection() {
             onClick={() => void handlePopMany()}
             disabled={isBatchRunning}
           >
-            Pop
+            {isBatchRunning ? <Loader2 className='h-3 w-3 animate-spin' /> : 'Pop'}
           </Button>
           <Button
             variant='outline'
@@ -343,7 +352,7 @@ export function GitStashSection() {
             onClick={() => void handleDropMany()}
             disabled={isBatchRunning}
           >
-            Drop
+            {isBatchRunning ? <Loader2 className='h-3 w-3 animate-spin' /> : 'Drop'}
           </Button>
           <Button
             variant='ghost'
