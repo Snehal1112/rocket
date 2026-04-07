@@ -362,13 +362,14 @@ export function CollectionNode({
         <div className='border-l border-border/70 ml-8'>
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
+              const folderDirName = item.dirName ?? item.name;
               return (
                 <FolderNode
-                  key={`folder-${item.name}`}
+                  key={`folder-${folderDirName}`}
                   name={item.name}
                   items={item.items}
                   collectionName={summary.name}
-                  basePath={item.name}
+                  basePath={folderDirName}
                   depth={1}
                   filter={filter}
                   summaries={summaries}

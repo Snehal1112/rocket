@@ -89,6 +89,8 @@ export interface Request {
 export interface Folder {
   uid: string;
   name: string;
+  /** Actual on-disk directory name. Use this (not name) for move/rename paths. */
+  dirName?: string;
   items: CollectionItem[];
 }
 
@@ -265,6 +267,10 @@ export interface StashEntry {
   message: string;
   timestamp: string;
   branch: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  changedFiles: string[];
 }
 
 export interface ConflictFile {

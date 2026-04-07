@@ -306,7 +306,8 @@ export function FolderNode({
         <div className='pl-1.5 border-l border-border/70 ml-2'>
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
-              const folderPath = `${basePath}/${item.name}`;
+              const folderDirName = item.dirName ?? item.name;
+              const folderPath = `${basePath}/${folderDirName}`;
               return (
                 <FolderNode
                   key={`folder-${folderPath}`}

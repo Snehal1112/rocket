@@ -1148,6 +1148,7 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
     Folder {
         uid: uuid::Uuid::new_v4().to_string(),
         name,
+        dir_name: None,
         items,
     }
 }
@@ -1266,6 +1267,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
     let root = Folder {
         uid: uuid::Uuid::new_v4().to_string(),
         name: name.clone(),
+        dir_name: None,
         items,
     };
 
@@ -2259,7 +2261,7 @@ items:
         use rocket_collection::Folder;
         let col = Collection {
             name: "Test".into(),
-            root: Folder { uid: "uid".into(), name: "Test".into(), items: vec![] },
+            root: Folder { uid: "uid".into(), name: "Test".into(), dir_name: None, items: vec![] },
             settings: CollectionSettings::default(),
         };
         let oc = super::collection_to_oc_collection(col);

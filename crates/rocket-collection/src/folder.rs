@@ -38,6 +38,11 @@ pub struct Folder {
     #[serde(default = "generate_uid")]
     pub uid: String,
     pub name: String,
+    /// Actual on-disk directory name. May differ from `name` when `folder.yml`
+    /// contains a display name that doesn't match the directory. The frontend
+    /// uses this to build paths for `move_item` calls. Not persisted to disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir_name: Option<String>,
     pub items: Vec<CollectionItem>,
 }
 
@@ -46,6 +51,7 @@ impl Folder {
         Self {
             uid: generate_uid(),
             name: name.into(),
+            dir_name: None,
             items: Vec::new(),
         }
     }

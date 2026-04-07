@@ -426,6 +426,28 @@ impl CollectionRepository for FsCollectionRepo {
             fs::create_dir_all(parent)?;
         }
         fs::rename(&src, &dst)?;
+
+        // When a folder (directory) is moved or renamed, update the name field
+        // inside folder.yml so it matches the new directory name. Without this,
+        // build_folder_tree reads the stale name from folder.yml and the sidebar
+        // keeps showing the old name after rename.
+        if dst.is_dir() {
+            let new_name = dst
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let folder_yml = dst.join("folder.yml");
+            if folder_yml.exists() {
+                let content = fs::read_to_string(&folder_yml)?;
+                if let Ok(mut info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
+                    info.name = new_name;
+                    let yaml = serde_yaml::to_string(&info)
+                        .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
+                    fs::write(&folder_yml, yaml)?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -755,14 +777,16 @@ fn resolve_request_path(repo: &FsCollectionRepo, collection_dir: &Path, path: &s
 }
 
 fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
-    let name = current
+    let dir_name = current
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let mut folder = Folder::new(name);
+    let mut folder = Folder::new(&dir_name);
     folder.uid = read_uid_from_yaml(current);
 
-    // Read folder.yml for metadata if present.
+    // Read folder.yml for metadata if present. The `name` field in folder.yml
+    // is the display name and may differ from the directory name. We preserve
+    // the directory name in `dir_name` so the frontend can use it for paths.
     let folder_yml = current.join("folder.yml");
     if folder_yml.exists() {
         if let Ok(content) = fs::read_to_string(&folder_yml) {
@@ -771,6 +795,7 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             }
         }
     }
+    folder.dir_name = Some(dir_name);
 
     if !current.exists() {
         return Ok(folder);
@@ -1447,5 +1472,46 @@ mod tests {
         let chain = repo.get_folder_chain_variables("my-api", "v1/r.yml").unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].key, "ENABLED");
+    }
+
+    #[test]
+    fn rename_folder_updates_folder_yml_name() {
+        // Regression: move_item renamed the directory but left the stale name in
+        // folder.yml, causing build_folder_tree to override with the old name.
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "old-name").unwrap();
+
+        repo.move_item("my-api", "old-name", "my-api", "new-name").unwrap();
+
+        let collection = repo.get("my-api").unwrap();
+        let folder = collection.root.items.iter().find_map(|item| {
+            if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
+        });
+        assert!(folder.is_some(), "folder should still exist after rename");
+        assert_eq!(
+            folder.unwrap().name, "new-name",
+            "folder name should reflect the new directory name, not the stale folder.yml value"
+        );
+    }
+
+    #[test]
+    fn rename_nested_folder_updates_folder_yml_name() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "parent").unwrap();
+        repo.create_folder("my-api", "parent/child").unwrap();
+
+        repo.move_item("my-api", "parent/child", "my-api", "parent/renamed-child").unwrap();
+
+        let collection = repo.get("my-api").unwrap();
+        let parent = collection.root.items.iter().find_map(|item| {
+            if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
+        }).unwrap();
+        let child = parent.items.iter().find_map(|item| {
+            if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
+        });
+        assert!(child.is_some(), "child folder should exist after rename");
+        assert_eq!(child.unwrap().name, "renamed-child");
     }
 }
