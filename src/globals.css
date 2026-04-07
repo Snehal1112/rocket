@@ -146,15 +146,42 @@ html.linux #root {
   overflow: hidden;
 }
 
-/* Git file row hover actions — CSS hover avoids mouseenter timing issues
-   when rows appear under an existing cursor position (e.g. after git init).
-   Both rules are custom (no Tailwind hidden class) to avoid any layer-cascade
-   conflict between utilities and non-layered author styles. */
+/* Git hover actions — CSS hover avoids mouseenter timing issues when rows
+   appear under an existing cursor position (e.g. after git init).
+   All rules are custom (no Tailwind hidden class) to avoid layer-cascade
+   conflicts between utilities and non-layered author styles. */
 .git-row-actions {
   display: none;
 }
 
 .git-file-row:hover .git-row-actions {
+  display: flex;
+}
+
+/* Branch row hover actions (BranchSelector popover). */
+.branch-row-actions {
+  display: none;
+}
+
+.branch-row:hover .branch-row-actions {
+  display: flex;
+}
+
+/* Stash row hover actions (GitStashSection). */
+.stash-row-actions {
+  display: none;
+}
+
+.stash-row:hover .stash-row-actions {
+  display: flex;
+}
+
+/* Remote row hover actions (GitRemotesDialog). */
+.remote-row-actions {
+  display: none;
+}
+
+.remote-row:hover .remote-row-actions {
   display: flex;
 }
 

@@ -136,7 +136,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                   return (
                     <div
                       key={remote.name}
-                      className='group flex items-center gap-2 px-2 py-1 rounded-md hover:bg-muted/50'
+                      className='remote-row flex items-center gap-2 px-2 py-1 rounded-md hover:bg-muted/50'
                     >
                       <span className='font-mono font-semibold text-sm shrink-0 max-w-[100px] truncate'>
                         {remote.name}
@@ -151,25 +151,27 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           <p>{remote.url}</p>
                         </TooltipContent>
                       </Tooltip>
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        className='h-7 w-7 p-0 shrink-0 opacity-0 group-hover:opacity-100'
-                        onClick={() => {
-                          setEditingRemote(remote.name);
-                          setEditUrl(remote.url);
-                        }}
-                      >
-                        <Pencil className='h-3.5 w-3.5' />
-                      </Button>
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        className='h-7 w-7 p-0 shrink-0 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive'
-                        onClick={() => setDeletingRemote(remote.name)}
-                      >
-                        <Trash2 className='h-3.5 w-3.5' />
-                      </Button>
+                      <div className='remote-row-actions gap-1 shrink-0'>
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          className='h-7 w-7 p-0'
+                          onClick={() => {
+                            setEditingRemote(remote.name);
+                            setEditUrl(remote.url);
+                          }}
+                        >
+                          <Pencil className='h-3.5 w-3.5' />
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+                          onClick={() => setDeletingRemote(remote.name)}
+                        >
+                          <Trash2 className='h-3.5 w-3.5' />
+                        </Button>
+                      </div>
                     </div>
                   );
                 })}

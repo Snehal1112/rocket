@@ -1,9 +1,10 @@
-import { Check, GitBranch, Plus, Trash2 } from 'lucide-react';
+import { Check, GitBranch, GitMerge, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useGitStore } from '@/stores/git-store';
 
 export function BranchSelector() {
@@ -62,48 +63,66 @@ export function BranchSelector() {
         <Separator />
         <div className='max-h-48 overflow-y-auto p-1'>
           {filtered.map((branch) => (
-            <button
+            // biome-ignore lint/a11y/useSemanticElements: outer <button> nesting inner <button> is invalid HTML; WebKitGTK reparses it and breaks hover tracking.
+            <div
               key={branch.name}
-              type='button'
-              className='group flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left'
+              role='button'
+              tabIndex={0}
+              className='branch-row flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left'
               onClick={() => {
                 if (!branch.isHead) switchBranch(branch.name);
                 setOpen(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  if (!branch.isHead) switchBranch(branch.name);
+                  setOpen(false);
+                }
               }}
             >
               {branch.isHead && <Check className='h-3.5 w-3.5 text-primary' />}
               {!branch.isHead && <span className='w-3' />}
               <span className='truncate flex-1'>{branch.name}</span>
               {!branch.isHead && (
-                <div className='flex gap-0.5 opacity-0 group-hover:opacity-100'>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    className='h-5 w-5'
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      mergeBranch(branch.name);
-                      setOpen(false);
-                    }}
-                    title='Merge into current'
-                  >
-                    <GitBranch className='h-3.5 w-3.5 text-muted-foreground' />
-                  </Button>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    className='h-5 w-5 text-destructive'
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteBranch(branch.name);
-                    }}
-                    title='Delete branch'
-                  >
-                    <Trash2 className='h-3.5 w-3.5' />
-                  </Button>
-                </div>
+                <TooltipProvider delayDuration={300}>
+                  <div className='branch-row-actions gap-0.5'>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-5 w-5'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            mergeBranch(branch.name);
+                            setOpen(false);
+                          }}
+                        >
+                          <GitMerge className='h-3.5 w-3.5 text-muted-foreground' />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Merge into current</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-5 w-5 text-destructive'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteBranch(branch.name);
+                          }}
+                        >
+                          <Trash2 className='h-3.5 w-3.5' />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Delete branch</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </TooltipProvider>
               )}
-            </button>
+            </div>
           ))}
           {filteredRemote.length > 0 && (
             <>

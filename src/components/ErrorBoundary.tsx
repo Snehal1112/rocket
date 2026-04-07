@@ -28,11 +28,11 @@ interface ErrorBoundaryProps {
   resetKeys?: unknown[];
 }
 
-export function ErrorBoundary({ children, resetKeys }: ErrorBoundaryProps) {
-  function handleError(error: unknown, info: { componentStack?: string | null }) {
-    console.error('[ErrorBoundary]', error, info.componentStack);
-  }
+function handleError(error: unknown, info: { componentStack?: string | null }) {
+  console.error('[ErrorBoundary]', error, info.componentStack);
+}
 
+export function ErrorBoundary({ children, resetKeys }: ErrorBoundaryProps) {
   return (
     <ReactErrorBoundary
       FallbackComponent={ErrorFallback}
