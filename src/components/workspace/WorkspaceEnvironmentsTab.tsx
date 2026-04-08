@@ -43,6 +43,7 @@ export function WorkspaceEnvironmentsTab() {
   useEffect(() => {
     const env = environments.find((e) => e.name === selectedName);
     setEditingVars(env ? env.variables.slice() : []);
+    setSavedAt(null);
   }, [selectedName, environments]);
 
   // Persist env to backend with debounce.
