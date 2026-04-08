@@ -1,5 +1,5 @@
 import { Check, Loader2, Save } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,13 @@ export function CollectionSettingsDialog({
   const [activeTab, setActiveTab] = useState<SettingsTab>('auth');
   const [auth, setAuth] = useState<AuthState>(DEFAULT_AUTH);
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
 
   const saveFn = useCallback(async () => {
     let apiAuth: Auth | undefined;
@@ -58,7 +65,7 @@ export function CollectionSettingsDialog({
       variables: [],
     });
     // Let the success state show briefly before closing.
-    setTimeout(() => onClose(), 1200);
+    closeTimerRef.current = setTimeout(() => onClose(), 1200);
   }, [auth, headers, collectionName, onClose]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
