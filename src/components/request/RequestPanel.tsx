@@ -629,11 +629,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 setUrlError('URL is required');
                 return;
               }
-              try {
-                new URL(url);
-              } catch {
-                setUrlError('Invalid URL — include http:// or https://');
-                return;
+              // Skip URL format check when the URL has unresolved template vars;
+              // the backend resolves them before making the HTTP call.
+              if (!url.includes('{{')) {
+                try {
+                  new URL(url);
+                } catch {
+                  setUrlError('Invalid URL — include http:// or https://');
+                  return;
+                }
               }
               setUrlError('');
               send(request);
