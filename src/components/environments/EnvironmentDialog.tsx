@@ -2,10 +2,12 @@
 
 import { Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { SavedPill } from '@/components/ui/saved-pill';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
 import { saveEnvironment } from '@/lib/tauri-api';
@@ -27,6 +29,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   const [newEnvName, setNewEnvName] = useState('');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const selectedEnv = environments.find((e) => e.name === selectedName) ?? null;
 
@@ -57,9 +60,12 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         if (activeCollection) {
-          saveEnvironment(activeCollection, env).catch((err) =>
-            console.error('[EnvironmentDialog] save failed:', err),
-          );
+          saveEnvironment(activeCollection, env)
+            .then(() => setSavedAt(Date.now()))
+            .catch((err) => {
+              console.error('[EnvironmentDialog] save failed:', err);
+              toast.error('Failed to save changes');
+            });
         }
       }, 500);
     },
@@ -234,11 +240,12 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     ))}
                   </div>
                 </ScrollArea>
-                <div className='p-3 pt-0'>
+                <div className='p-3 pt-0 flex items-center justify-between'>
                   <Button variant='ghost' size='sm' onClick={addVariable} className='text-sm'>
                     <Plus className='h-3.5 w-3.5 mr-1' />
                     Add Variable
                   </Button>
+                  {savedAt !== null && <SavedPill key={savedAt} />}
                 </div>
               </>
             ) : (
