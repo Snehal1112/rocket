@@ -218,6 +218,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
   const [readme, setReadme] = useState('');
+  // True once the user edits any field; reset after successful save or reload.
+  const [isDirty, setIsDirty] = useState(false);
   // Guard against stale section values from before the tab redesign.
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
@@ -244,6 +246,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         setHeaders(toKeyValueEntries(s.headers));
         setVariables(s.variables ?? []);
         setReadme(s.readme ?? '');
+        setIsDirty(false);
       })
       .catch((err) => {
         console.error('[CollectionOverviewTab] load failed', err);
@@ -267,6 +270,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       readme: readme || undefined,
       variables,
     });
+    setIsDirty(false);
   }, [collectionName, auth, headers, description, readme, variables]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
@@ -348,8 +352,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   rows={3}
                   placeholder='Add a description...'
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  onBlur={() => void triggerSave()}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  onBlur={() => {
+                    if (isDirty) void triggerSave();
+                  }}
                   className='w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                 />
               </div>
@@ -360,12 +369,18 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               {/* Default headers. */}
               <div className='space-y-2'>
                 <h3 className='text-sm font-medium text-muted-foreground'>Default Headers</h3>
-                <HeadersEditor headers={headers} onChange={setHeaders} />
+                <HeadersEditor
+                  headers={headers}
+                  onChange={(v) => {
+                    setHeaders(v);
+                    setIsDirty(true);
+                  }}
+                />
                 <div className='flex justify-end'>
                   <Button
                     size='sm'
                     onClick={() => void triggerSave()}
-                    disabled={saveState !== 'idle'}
+                    disabled={!isDirty || saveState !== 'idle'}
                     className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
                   >
                     {saveState === 'saving' ? (
@@ -398,13 +413,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 </p>
               </div>
 
-              <AuthEditor auth={auth} onChange={setAuth} />
+              <AuthEditor
+                auth={auth}
+                onChange={(v) => {
+                  setAuth(v);
+                  setIsDirty(true);
+                }}
+              />
 
               <div className='flex justify-end'>
                 <Button
                   size='sm'
                   onClick={() => void triggerSave()}
-                  disabled={saveState !== 'idle'}
+                  disabled={!isDirty || saveState !== 'idle'}
                   className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
                 >
                   {saveState === 'saving' ? (
@@ -423,13 +444,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           {/* Variables tab. */}
           {activeSection === 'variables' && (
             <div className='space-y-4'>
-              <CollectionVariablesEditor variables={variables} onChange={setVariables} />
+              <CollectionVariablesEditor
+                variables={variables}
+                onChange={(v) => {
+                  setVariables(v);
+                  setIsDirty(true);
+                }}
+              />
 
               <div className='flex justify-end'>
                 <Button
                   size='sm'
                   onClick={() => void triggerSave()}
-                  disabled={saveState !== 'idle'}
+                  disabled={!isDirty || saveState !== 'idle'}
                   className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
                 >
                   {saveState === 'saving' ? (
@@ -450,14 +477,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             <div className='space-y-4'>
               <MarkdownEditor
                 value={readme}
-                onChange={setReadme}
-                onBlur={() => void triggerSave()}
+                onChange={(v) => {
+                  setReadme(v);
+                  setIsDirty(true);
+                }}
+                onBlur={() => {
+                  if (isDirty) void triggerSave();
+                }}
               />
               <div className='flex justify-end'>
                 <Button
                   size='sm'
                   onClick={() => void triggerSave()}
-                  disabled={saveState !== 'idle'}
+                  disabled={!isDirty || saveState !== 'idle'}
                   className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
                 >
                   {saveState === 'saving' ? (

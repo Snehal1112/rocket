@@ -118,6 +118,9 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     'Failed to save documentation',
   );
 
+  // Only enable the save button when the doc has changed from the persisted value.
+  const isDocDirty = docContent !== (workspace?.description ?? '');
+
   async function handleLinkExternal() {
     try {
       const path = await openFolderPicker();
@@ -342,7 +345,9 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                   placeholder={'Add documentation...\n\nSupports **Markdown**'}
                   value={docContent}
                   onChange={(e) => setDocContent(e.target.value)}
-                  onBlur={() => void triggerSaveDoc()}
+                  onBlur={() => {
+                    if (isDocDirty) void triggerSaveDoc();
+                  }}
                 />
                 <div className='flex justify-end items-center gap-2 px-3 py-2 border-t border-border shrink-0'>
                   <span className='text-[10px] text-muted-foreground/50'>
@@ -355,7 +360,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                       saveDocState === 'success' && 'text-green-600',
                     )}
                     onClick={() => void triggerSaveDoc()}
-                    disabled={saveDocState !== 'idle'}
+                    disabled={!isDocDirty || saveDocState !== 'idle'}
                   >
                     {saveDocState === 'saving' ? (
                       <Loader2 className='h-3 w-3 animate-spin' />
