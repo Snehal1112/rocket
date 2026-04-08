@@ -151,6 +151,13 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
             </div>
           </div>
 
+          {/* Empty state when working tree is clean. */}
+          {unstaged.length === 0 && (
+            <p className='px-2 py-1 text-xs text-muted-foreground/60'>
+              {staged.length > 0 ? 'All changes staged.' : 'Working tree clean.'}
+            </p>
+          )}
+
           {/* Unstaged file rows. */}
           {unstaged.map((file) => {
             const isConflicted = file.status === 'conflicted';

@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,14 +6,20 @@ import { useGitStore } from '@/stores/git-store';
 
 export function GitCommitForm() {
   const [message, setMessage] = useState('');
+  const [committing, setCommitting] = useState(false);
   const { status, commitChanges } = useGitStore();
 
   const stagedCount = status?.files.filter((f) => f.staged).length ?? 0;
 
   const handleCommit = async () => {
     if (!message.trim() || stagedCount === 0) return;
-    await commitChanges(message.trim());
-    setMessage('');
+    setCommitting(true);
+    try {
+      await commitChanges(message.trim());
+      setMessage('');
+    } finally {
+      setCommitting(false);
+    }
   };
 
   return (
@@ -26,15 +32,22 @@ export function GitCommitForm() {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void handleCommit();
         }}
         className='text-sm min-h-[60px] resize-none'
+        disabled={committing}
       />
       <Button
         onClick={handleCommit}
-        disabled={!message.trim() || stagedCount === 0}
+        disabled={!message.trim() || stagedCount === 0 || committing}
         className='w-full'
         size='sm'
       >
-        <Check className='h-3.5 w-3.5' />
-        Commit Changes
+        {committing ? (
+          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+        ) : (
+          <Check className='h-3.5 w-3.5' />
+        )}
+        {committing
+          ? 'Committing...'
+          : `Commit${stagedCount > 0 ? ` ${stagedCount} file${stagedCount !== 1 ? 's' : ''}` : ''}`}
       </Button>
     </div>
   );

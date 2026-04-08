@@ -611,7 +611,7 @@ describe('git-store stash batch operations', () => {
   it('applyStashMany stops on first error and sets error with stash index', async () => {
     const { gitStashApply } = await import('@/lib/tauri-api');
     vi.mocked(gitStashApply)
-      .mockResolvedValueOnce(undefined)              // index 0 succeeds
+      .mockResolvedValueOnce(undefined) // index 0 succeeds
       .mockRejectedValueOnce(new Error('conflict')); // index 1 fails
 
     await useGitStore.getState().applyStashMany([0, 1, 2]);

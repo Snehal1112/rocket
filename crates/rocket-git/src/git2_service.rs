@@ -453,10 +453,32 @@ impl GitService for Git2Service {
     fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         for file in files {
-            let mut cb = CheckoutBuilder::new();
-            cb.path(*file).force();
-            repo.checkout_head(Some(&mut cb))
-                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            // Check if the file exists in HEAD (i.e. it is a tracked file with a committed version).
+            let in_head = repo
+                .head()
+                .ok()
+                .and_then(|h| h.peel_to_commit().ok())
+                .and_then(|c| c.tree().ok())
+                .and_then(|tree| tree.get_path(std::path::Path::new(file)).ok())
+                .is_some();
+
+            if in_head {
+                // Restore the committed version from HEAD.
+                let mut cb = CheckoutBuilder::new();
+                cb.path(*file).force();
+                repo.checkout_head(Some(&mut cb))
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+            } else {
+                // Untracked or new file — delete it from disk.
+                let full_path = std::path::Path::new(path).join(file);
+                if full_path.is_dir() {
+                    std::fs::remove_dir_all(&full_path)
+                        .map_err(|e| DomainError::Internal(e.to_string()))?;
+                } else if full_path.exists() {
+                    std::fs::remove_file(&full_path)
+                        .map_err(|e| DomainError::Internal(e.to_string()))?;
+                }
+            }
         }
         Ok(())
     }
@@ -914,25 +936,85 @@ impl GitService for Git2Service {
     fn stash_list(&self, path: &str) -> DomainResult<Vec<StashEntry>> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        let mut entries = Vec::new();
 
-        repo.stash_foreach(|index, message, _oid| {
-            // git stores stash messages as "On <branch>: <user message>".
-            // Strip that prefix so the UI shows only the user-supplied label.
-            let display = if let Some(pos) = message.find(": ") {
-                message[pos + 2..].to_string()
-            } else {
-                message.to_string()
-            };
-            entries.push(StashEntry {
-                index,
-                message: display,
-                timestamp: chrono::Utc::now(),
-                branch: String::new(),
-            });
+        // Collect raw data first — stash_foreach borrows repo mutably, so we
+        // can't call repo.find_commit() inside the closure.
+        let mut raw: Vec<(usize, String, git2::Oid)> = Vec::new();
+        repo.stash_foreach(|index, message, oid| {
+            raw.push((index, message.to_string(), *oid));
             true
         })
         .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        let mut entries = Vec::new();
+        for (index, message, oid) in raw {
+            // git formats stash reflog messages as "On <branch>: <user msg>"
+            // or "WIP on <branch>: <user msg>". Parse both prefix forms.
+            let (display, branch) = if let Some(pos) = message.find(": ") {
+                let prefix = &message[..pos];
+                let branch = prefix
+                    .strip_prefix("WIP on ")
+                    .or_else(|| prefix.strip_prefix("On "))
+                    .unwrap_or("")
+                    .to_string();
+                (message[pos + 2..].to_string(), branch)
+            } else {
+                (message, String::new())
+            };
+
+            // Look up the stash commit once and derive both timestamp and diff stats.
+            let commit = repo.find_commit(oid).ok();
+
+            let timestamp = commit
+                .as_ref()
+                .and_then(|c| chrono::DateTime::from_timestamp(c.time().seconds(), 0))
+                .unwrap_or_else(chrono::Utc::now);
+
+            // Replicate `git stash show --stat`: diff stash^1 (HEAD at stash
+            // time) vs stash^0 (working-tree commit) to get files + line stats.
+            let (files_changed, insertions, deletions, changed_files) = commit
+                .as_ref()
+                .and_then(|sc| {
+                    let parent = sc.parent(0).ok()?;
+                    let stash_tree = sc.tree().ok()?;
+                    let parent_tree = parent.tree().ok()?;
+                    let diff = repo
+                        .diff_tree_to_tree(Some(&parent_tree), Some(&stash_tree), None)
+                        .ok()?;
+                    let stats = diff.stats().ok()?;
+                    let mut paths: Vec<String> = Vec::new();
+                    diff.foreach(
+                        &mut |delta, _| {
+                            let path = delta
+                                .new_file()
+                                .path()
+                                .or_else(|| delta.old_file().path())
+                                .map(|p| p.to_string_lossy().into_owned());
+                            if let Some(p) = path {
+                                paths.push(p);
+                            }
+                            true
+                        },
+                        None,
+                        None,
+                        None,
+                    )
+                    .ok()?;
+                    Some((stats.files_changed(), stats.insertions(), stats.deletions(), paths))
+                })
+                .unwrap_or_default();
+
+            entries.push(StashEntry {
+                index,
+                message: display,
+                timestamp,
+                branch,
+                files_changed,
+                insertions,
+                deletions,
+                changed_files,
+            });
+        }
 
         Ok(entries)
     }

@@ -15,7 +15,7 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
-import { gitInit, gitIsRepo } from '@/lib/tauri-api';
+import { gitInit, gitIsRepo, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 
 type RightPanelView =
@@ -40,8 +40,14 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
 
-  const { showCredentialsDialog, setCollection, refreshLog, refreshStashes, status } =
-    useGitStore();
+  const {
+    showCredentialsDialog,
+    setCollection,
+    refreshLog,
+    refreshStashes,
+    refreshStatus,
+    status,
+  } = useGitStore();
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
@@ -75,6 +81,20 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   useEffect(() => {
     if (rightPanel.kind === 'stashes') void refreshStashes();
   }, [rightPanel.kind, refreshStashes]);
+
+  // Refresh git status when collection files change (e.g. delete/rename in sidebar).
+  useEffect(() => {
+    if (!isRepo) return;
+    let unlisten: (() => void) | undefined;
+    void onCollectionChanged(() => {
+      void refreshStatus();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [isRepo, refreshStatus]);
 
   if (isRepo === null) {
     return (
