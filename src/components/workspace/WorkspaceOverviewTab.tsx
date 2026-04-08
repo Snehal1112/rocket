@@ -1,10 +1,13 @@
 import {
   Box,
+  Check,
   ExternalLink,
   FileText,
   FolderOpen,
+  Loader2,
   MoreHorizontal,
   Plus,
+  Save,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -23,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useSaveButton } from '@/hooks/use-save-button';
 import {
   type CollectionSummary,
   createCollection,
@@ -31,6 +35,7 @@ import {
   listCollections,
   openFolderPicker,
 } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -104,13 +109,14 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     }
   }
 
-  async function handleSaveDoc() {
-    try {
-      await updateDescription(workspaceId, docContent.trim() || null);
-    } catch (err) {
-      console.error('[WorkspaceOverview] save doc failed:', err);
-    }
-  }
+  const saveDocFn = useCallback(async () => {
+    await updateDescription(workspaceId, docContent.trim() || null);
+  }, [workspaceId, docContent, updateDescription]);
+
+  const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(
+    saveDocFn,
+    'Failed to save documentation',
+  );
 
   async function handleLinkExternal() {
     try {
@@ -336,7 +342,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                   placeholder={'Add documentation...\n\nSupports **Markdown**'}
                   value={docContent}
                   onChange={(e) => setDocContent(e.target.value)}
-                  onBlur={() => void handleSaveDoc()}
+                  onBlur={() => void triggerSaveDoc()}
                 />
                 <div className='flex justify-end items-center gap-2 px-3 py-2 border-t border-border shrink-0'>
                   <span className='text-[10px] text-muted-foreground/50'>
@@ -344,10 +350,21 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                   </span>
                   <Button
                     size='sm'
-                    className='h-6 text-[10px] px-3'
-                    onClick={() => void handleSaveDoc()}
+                    className={cn(
+                      'h-6 text-[10px] px-3 gap-1',
+                      saveDocState === 'success' && 'text-green-600',
+                    )}
+                    onClick={() => void triggerSaveDoc()}
+                    disabled={saveDocState !== 'idle'}
                   >
-                    Save
+                    {saveDocState === 'saving' ? (
+                      <Loader2 className='h-3 w-3 animate-spin' />
+                    ) : saveDocState === 'success' ? (
+                      <Check className='h-3 w-3' />
+                    ) : (
+                      <Save className='h-3 w-3' />
+                    )}
+                    {saveDocState === 'success' ? 'Saved' : 'Save'}
                   </Button>
                 </div>
               </div>
