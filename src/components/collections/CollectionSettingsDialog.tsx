@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { Check, Loader2, Save } from 'lucide-react';
+import { useCallback, useState } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
+import { useSaveButton } from '@/hooks/use-save-button';
 import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
@@ -29,42 +31,40 @@ export function CollectionSettingsDialog({
   const [auth, setAuth] = useState<AuthState>(DEFAULT_AUTH);
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
 
-  async function handleSave() {
-    try {
-      // Convert nested AuthState to flat API Auth for Rust.
-      let apiAuth: Auth | undefined;
-      if (auth.authType === 'basic')
-        apiAuth = {
-          authType: 'basic',
-          username: auth.basic?.username ?? '',
-          password: auth.basic?.password ?? '',
-        };
-      else if (auth.authType === 'bearer')
-        apiAuth = { authType: 'bearer', token: auth.bearer?.token ?? '' };
-      else if (auth.authType === 'api-key')
-        apiAuth = {
-          authType: 'api-key',
-          key: auth.apiKey?.key ?? '',
-          value: auth.apiKey?.value ?? '',
-          addTo: auth.apiKey?.addTo ?? 'header',
-        };
-      else apiAuth = undefined;
-      await saveCollectionSettings(collectionName, {
-        auth: apiAuth,
-        headers: headers
-          .filter((h) => h.key)
-          .map((h) => ({
-            key: h.key,
-            value: h.value,
-            enabled: h.enabled,
-          })),
-        variables: [],
-      });
-      onClose();
-    } catch (err) {
-      console.error('[CollectionSettings] save failed', err);
-    }
-  }
+  const saveFn = useCallback(async () => {
+    let apiAuth: Auth | undefined;
+    if (auth.authType === 'basic')
+      apiAuth = {
+        authType: 'basic',
+        username: auth.basic?.username ?? '',
+        password: auth.basic?.password ?? '',
+      };
+    else if (auth.authType === 'bearer')
+      apiAuth = { authType: 'bearer', token: auth.bearer?.token ?? '' };
+    else if (auth.authType === 'api-key')
+      apiAuth = {
+        authType: 'api-key',
+        key: auth.apiKey?.key ?? '',
+        value: auth.apiKey?.value ?? '',
+        addTo: auth.apiKey?.addTo ?? 'header',
+      };
+    else apiAuth = undefined;
+
+    await saveCollectionSettings(collectionName, {
+      auth: apiAuth,
+      headers: headers
+        .filter((h) => h.key)
+        .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
+      variables: [],
+    });
+    // Let the success state show briefly before closing.
+    setTimeout(() => onClose(), 1200);
+  }, [auth, headers, collectionName, onClose]);
+
+  const { state: saveState, trigger: triggerSave } = useSaveButton(
+    saveFn,
+    'Failed to save settings',
+  );
 
   return (
     <div className='flex flex-col gap-4 p-4'>
@@ -104,8 +104,20 @@ export function CollectionSettingsDialog({
         <Button variant='ghost' size='sm' onClick={onClose}>
           Cancel
         </Button>
-        <Button size='sm' onClick={handleSave}>
-          Save
+        <Button
+          size='sm'
+          onClick={() => void triggerSave()}
+          disabled={saveState !== 'idle'}
+          className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+        >
+          {saveState === 'saving' ? (
+            <Loader2 className='h-3.5 w-3.5 animate-spin' />
+          ) : saveState === 'success' ? (
+            <Check className='h-3.5 w-3.5' />
+          ) : (
+            <Save className='h-3.5 w-3.5' />
+          )}
+          {saveState === 'success' ? 'Saved' : 'Save'}
         </Button>
       </div>
     </div>
