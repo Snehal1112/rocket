@@ -22,6 +22,10 @@ pub struct ExecuteRequestInput {
     pub environment_name: Option<String>,
     pub collection: Option<String>,
     pub request_name: Option<String>,
+    /// Path of the request file relative to the collection root (e.g. "auth/login.yml").
+    /// Used to load folder-chain and request-level variables.
+    #[serde(default)]
+    pub request_path: Option<String>,
 }
 
 pub struct RequestExecutionService {
@@ -342,6 +346,7 @@ mod tests {
             environment_name: env_name.map(str::to_string),
             collection: None,
             request_name: None,
+            request_path: None,
         }
     }
 
