@@ -156,6 +156,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       body: resolvedBody,
       auth: resolvedAuth,
       options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      collection: collection ?? undefined,
+      environmentName: envStore.activeEnvId ?? undefined,
     });
 
     const responseState: ResponseState = {
