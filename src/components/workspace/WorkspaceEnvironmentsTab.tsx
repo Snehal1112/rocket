@@ -2,8 +2,10 @@
 
 import { Check, Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SavedPill } from '@/components/ui/saved-pill';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -20,6 +22,7 @@ export function WorkspaceEnvironmentsTab() {
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
   const [newEnvName, setNewEnvName] = useState('');
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -47,9 +50,12 @@ export function WorkspaceEnvironmentsTab() {
     (env: Environment) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        void updateEnvironment(env).catch((err) => {
-          console.error('[WorkspaceEnvironmentsTab] failed to save environment', err);
-        });
+        updateEnvironment(env)
+          .then(() => setSavedAt(Date.now()))
+          .catch((err) => {
+            console.error('[WorkspaceEnvironmentsTab] failed to save environment', err);
+            toast.error('Failed to save changes');
+          });
       }, 400);
     },
     [updateEnvironment],
@@ -197,6 +203,11 @@ export function WorkspaceEnvironmentsTab() {
       <div className='flex-1 flex flex-col'>
         {selectedName ? (
           <>
+            {/* Environment name and auto-save indicator. */}
+            <div className='flex items-center justify-between px-3 py-2 border-b border-border shrink-0'>
+              <span className='text-sm font-medium truncate'>{selectedName}</span>
+              {savedAt !== null && <SavedPill key={savedAt} />}
+            </div>
             <ScrollArea className='flex-1 p-3'>
               <div className='space-y-1.5'>
                 {editingVars.map((variable, idx) => {
