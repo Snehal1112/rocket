@@ -8,7 +8,7 @@ pub struct CollectionVariable {
     pub key: String,
     pub value: String,
     /// Initial/default value committed to Git; fallback when value is empty.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub initial_value: String,
     pub enabled: bool,
     /// Mark as secret to hide in the UI (like Bruno).
