@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rocket_collection::CollectionRepository;
-use rocket_environment::{resolve, EnvironmentRepository};
+use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
 use rocket_history::{HistoryEntry, HistoryRepository};
 use rocket_http::{CookieRepository, HttpExecutor, HttpRequest, HttpResponse, RequestOptions};
 use rocket_shared::error::DomainResult;
@@ -52,26 +52,48 @@ impl RequestExecutionService {
     }
 
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
-        // Step 1: Build variable map — collection variables first, then env overrides.
-        let mut vars = HashMap::new();
+        // Step 1: Build variable map using full Bruno precedence (collection < env < folder < request).
+        let mut ctx = VariableContext::default();
+
+        // Scope: collection variables (lowest of the 4 backend-accessible scopes).
         if let Some(col) = &input.collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
-            // Load collection variables (lower priority).
-            for cv in &settings.variables {
-                if cv.enabled {
-                    let val = if cv.value.is_empty() { &cv.initial_value } else { &cv.value };
-                    vars.insert(cv.key.clone(), val.clone());
-                }
+            for cv in settings.variables.iter().filter(|v| v.enabled) {
+                let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                ctx.collection.insert(cv.key.clone(), val);
             }
         }
-        // Layer environment variables on top (higher priority, overrides collection vars).
+
+        // Scope: environment variables override collection.
         if let Some(name) = &input.environment_name {
             if let Ok(env) = self.env_repo.get(name) {
                 for (k, v) in env.enabled_variables() {
-                    vars.insert(k.to_string(), v.to_string());
+                    ctx.env.insert(k.to_string(), v.to_string());
                 }
             }
         }
+
+        // Scope: folder-chain variables (repo walks ancestors; inner folder wins).
+        if let (Some(col), Some(path)) = (&input.collection, &input.request_path) {
+            if let Ok(folder_vars) = self.collection_repo.get_folder_chain_variables(col, path) {
+                for cv in folder_vars.iter().filter(|v| v.enabled) {
+                    let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                    ctx.folder.insert(cv.key.clone(), val);
+                }
+            }
+        }
+
+        // Scope: request-level variables (highest priority on the backend).
+        if let (Some(col), Some(path)) = (&input.collection, &input.request_path) {
+            if let Ok(request_vars) = self.collection_repo.get_request_variables(col, path) {
+                for cv in request_vars.iter().filter(|v| v.enabled) {
+                    let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                    ctx.request.insert(cv.key.clone(), val);
+                }
+            }
+        }
+
+        let vars = ctx.flatten();
 
         // Step 2: Load collection settings and merge with request-level values.
         let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
@@ -288,18 +310,30 @@ mod tests {
         }
     }
 
-    // Collection repo with configurable per-collection settings.
+    // Collection repo with configurable per-collection settings, folder, and request variables.
     struct StubCollectionRepo {
         settings: CollectionSettings,
+        folder_vars: Vec<CollectionVariable>,
+        request_vars: Vec<CollectionVariable>,
     }
 
     impl StubCollectionRepo {
         fn empty() -> Self {
-            Self { settings: CollectionSettings::default() }
+            Self { settings: CollectionSettings::default(), folder_vars: vec![], request_vars: vec![] }
         }
 
         fn with_settings(settings: CollectionSettings) -> Self {
-            Self { settings }
+            Self { settings, folder_vars: vec![], request_vars: vec![] }
+        }
+
+        fn with_folder_vars(mut self, vars: Vec<CollectionVariable>) -> Self {
+            self.folder_vars = vars;
+            self
+        }
+
+        fn with_request_vars(mut self, vars: Vec<CollectionVariable>) -> Self {
+            self.request_vars = vars;
+            self
         }
     }
 
@@ -327,10 +361,14 @@ mod tests {
             Ok(self.settings.clone())
         }
         fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> { Ok(()) }
-        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(self.folder_vars.clone())
+        }
         fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
         fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(self.request_vars.clone())
+        }
         fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
     }
 
@@ -515,6 +553,123 @@ mod tests {
     fn merge_auth_none_collection_returns_none() {
         let result = merge_auth(Auth::None, None);
         assert_eq!(result, Auth::None);
+    }
+
+    fn cv(key: &str, value: &str) -> CollectionVariable {
+        CollectionVariable { key: key.into(), value: value.into(), initial_value: String::new(), enabled: true, secret: false }
+    }
+
+    #[tokio::test]
+    async fn folder_vars_override_collection_vars() {
+        let settings = CollectionSettings {
+            variables: vec![cv("HOST", "col-host")],
+            ..Default::default()
+        };
+        let repo = StubCollectionRepo::with_settings(settings)
+            .with_folder_vars(vec![cv("HOST", "folder-host")]);
+
+        let executor = Arc::new(MockExecutor::new(200));
+        struct SharedExec(Arc<MockExecutor>);
+        #[async_trait]
+        impl HttpExecutor for SharedExec {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedExec(executor)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("https://{{HOST}}/api", None);
+        input.collection = Some("my-api".into());
+        input.request_path = Some("auth/login.yml".into());
+        svc.execute(input).await.unwrap();
+
+        let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
+        assert_eq!(url, "https://folder-host/api");
+    }
+
+    #[tokio::test]
+    async fn request_vars_override_folder_vars() {
+        let repo = StubCollectionRepo::empty()
+            .with_folder_vars(vec![cv("TOKEN", "folder-tok")])
+            .with_request_vars(vec![cv("TOKEN", "req-tok")]);
+
+        let executor = Arc::new(MockExecutor::new(200));
+        struct SharedExec2(Arc<MockExecutor>);
+        #[async_trait]
+        impl HttpExecutor for SharedExec2 {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedExec2(executor)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("https://api.example.com/{{TOKEN}}", None);
+        input.collection = Some("my-api".into());
+        input.request_path = Some("get-users.yml".into());
+        svc.execute(input).await.unwrap();
+
+        let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
+        assert_eq!(url, "https://api.example.com/req-tok");
+    }
+
+    #[tokio::test]
+    async fn full_precedence_collection_lt_env_lt_folder_lt_request() {
+        // Same key "V" set at every level — request must win.
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::new("V", "env-val"));
+
+        let settings = CollectionSettings {
+            variables: vec![cv("V", "col-val")],
+            ..Default::default()
+        };
+        let repo = StubCollectionRepo::with_settings(settings)
+            .with_folder_vars(vec![cv("V", "folder-val")])
+            .with_request_vars(vec![cv("V", "req-val")]);
+
+        let executor = Arc::new(MockExecutor::new(200));
+        struct SharedExec3(Arc<MockExecutor>);
+        #[async_trait]
+        impl HttpExecutor for SharedExec3 {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Box::new(SharedExec3(executor)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("https://api.example.com/{{V}}", Some("prod"));
+        input.collection = Some("my-api".into());
+        input.request_path = Some("items/get.yml".into());
+        svc.execute(input).await.unwrap();
+
+        let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
+        assert_eq!(url, "https://api.example.com/req-val");
     }
 
     // -------------------------------------------------------------------------
