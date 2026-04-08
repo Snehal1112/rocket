@@ -1,5 +1,6 @@
-import { Folder as FolderIcon, Save } from 'lucide-react';
+import { Folder as FolderIcon, Loader2, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
@@ -216,6 +217,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
   const [readme, setReadme] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Guard against stale section values from before the tab redesign.
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
@@ -253,6 +255,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
   // Save settings to disk (explicit save only, no auto-save).
   const saveSettings = useCallback(async () => {
+    setSaving(true);
     try {
       await saveCollectionSettings(collectionName, {
         auth: authStateToApi(auth),
@@ -267,8 +270,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         readme: readme || undefined,
         variables,
       });
+      toast.success('Settings saved');
     } catch (err) {
       console.error('[CollectionOverviewTab] save failed', err);
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
     }
   }, [collectionName, auth, headers, description, readme, variables]);
 
@@ -360,8 +367,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 <h3 className='text-sm font-medium text-muted-foreground'>Default Headers</h3>
                 <HeadersEditor headers={headers} onChange={setHeaders} />
                 <div className='flex justify-end'>
-                  <Button size='sm' onClick={saveSettings} className='gap-1.5'>
-                    <Save className='h-3.5 w-3.5' />
+                  <Button size='sm' onClick={saveSettings} disabled={saving} className='gap-1.5'>
+                    {saving ? (
+                      <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                    ) : (
+                      <Save className='h-3.5 w-3.5' />
+                    )}
                     Save
                   </Button>
                 </div>
@@ -415,7 +426,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             <div className='space-y-4'>
               <MarkdownEditor value={readme} onChange={setReadme} onBlur={saveSettings} />
               <div className='flex justify-end'>
-                <Button size='sm' onClick={saveSettings}>
+                <Button size='sm' onClick={saveSettings} disabled={saving} className='gap-1.5'>
+                  {saving ? (
+                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  ) : (
+                    <Save className='h-3.5 w-3.5' />
+                  )}
                   Save
                 </Button>
               </div>
