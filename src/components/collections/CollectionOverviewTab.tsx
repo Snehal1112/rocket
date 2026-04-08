@@ -1,12 +1,12 @@
-import { Folder as FolderIcon, Loader2, Save } from 'lucide-react';
+import { Check, Folder as FolderIcon, Loader2, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { toast } from 'sonner';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useSaveButton } from '@/hooks/use-save-button';
 import type { Auth } from '@/lib/tauri-api';
 import {
   type Collection,
@@ -15,6 +15,7 @@ import {
   getCollection,
   saveCollectionSettings,
 } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 import type {
   AuthState,
@@ -217,8 +218,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
   const [readme, setReadme] = useState('');
-  const [saving, setSaving] = useState(false);
-
   // Guard against stale section values from before the tab redesign.
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
@@ -253,31 +252,27 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       .finally(() => setLoading(false));
   }, [collectionName]);
 
-  // Save settings to disk (explicit save only, no auto-save).
+  // Persist all settings to disk (no auto-save).
   const saveSettings = useCallback(async () => {
-    setSaving(true);
-    try {
-      await saveCollectionSettings(collectionName, {
-        auth: authStateToApi(auth),
-        headers: headers
-          .filter((h) => h.key)
-          .map((h) => ({
-            key: h.key,
-            value: h.value,
-            enabled: h.enabled,
-          })),
-        description: description || undefined,
-        readme: readme || undefined,
-        variables,
-      });
-      toast.success('Settings saved');
-    } catch (err) {
-      console.error('[CollectionOverviewTab] save failed', err);
-      toast.error('Failed to save settings');
-    } finally {
-      setSaving(false);
-    }
+    await saveCollectionSettings(collectionName, {
+      auth: authStateToApi(auth),
+      headers: headers
+        .filter((h) => h.key)
+        .map((h) => ({
+          key: h.key,
+          value: h.value,
+          enabled: h.enabled,
+        })),
+      description: description || undefined,
+      readme: readme || undefined,
+      variables,
+    });
   }, [collectionName, auth, headers, description, readme, variables]);
+
+  const { state: saveState, trigger: triggerSave } = useSaveButton(
+    saveSettings,
+    'Failed to save settings',
+  );
 
   if (loading) {
     return (
@@ -354,7 +349,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   placeholder='Add a description...'
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  onBlur={saveSettings}
+                  onBlur={() => void triggerSave()}
                   className='w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                 />
               </div>
@@ -367,13 +362,20 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 <h3 className='text-sm font-medium text-muted-foreground'>Default Headers</h3>
                 <HeadersEditor headers={headers} onChange={setHeaders} />
                 <div className='flex justify-end'>
-                  <Button size='sm' onClick={saveSettings} disabled={saving} className='gap-1.5'>
-                    {saving ? (
+                  <Button
+                    size='sm'
+                    onClick={() => void triggerSave()}
+                    disabled={saveState !== 'idle'}
+                    className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                  >
+                    {saveState === 'saving' ? (
                       <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                    ) : saveState === 'success' ? (
+                      <Check className='h-3.5 w-3.5' />
                     ) : (
                       <Save className='h-3.5 w-3.5' />
                     )}
-                    Save
+                    {saveState === 'success' ? 'Saved' : 'Save'}
                   </Button>
                 </div>
               </div>
@@ -399,9 +401,20 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               <AuthEditor auth={auth} onChange={setAuth} />
 
               <div className='flex justify-end'>
-                <Button size='sm' onClick={saveSettings} className='gap-1.5'>
-                  <Save className='h-3.5 w-3.5' />
-                  Save
+                <Button
+                  size='sm'
+                  onClick={() => void triggerSave()}
+                  disabled={saveState !== 'idle'}
+                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                >
+                  {saveState === 'saving' ? (
+                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  ) : saveState === 'success' ? (
+                    <Check className='h-3.5 w-3.5' />
+                  ) : (
+                    <Save className='h-3.5 w-3.5' />
+                  )}
+                  {saveState === 'success' ? 'Saved' : 'Save'}
                 </Button>
               </div>
             </div>
@@ -413,9 +426,20 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               <CollectionVariablesEditor variables={variables} onChange={setVariables} />
 
               <div className='flex justify-end'>
-                <Button size='sm' onClick={saveSettings} className='gap-1.5'>
-                  <Save className='h-3.5 w-3.5' />
-                  Save
+                <Button
+                  size='sm'
+                  onClick={() => void triggerSave()}
+                  disabled={saveState !== 'idle'}
+                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                >
+                  {saveState === 'saving' ? (
+                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  ) : saveState === 'success' ? (
+                    <Check className='h-3.5 w-3.5' />
+                  ) : (
+                    <Save className='h-3.5 w-3.5' />
+                  )}
+                  {saveState === 'success' ? 'Saved' : 'Save'}
                 </Button>
               </div>
             </div>
@@ -424,15 +448,26 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           {/* Readme tab. */}
           {activeSection === 'readme' && (
             <div className='space-y-4'>
-              <MarkdownEditor value={readme} onChange={setReadme} onBlur={saveSettings} />
+              <MarkdownEditor
+                value={readme}
+                onChange={setReadme}
+                onBlur={() => void triggerSave()}
+              />
               <div className='flex justify-end'>
-                <Button size='sm' onClick={saveSettings} disabled={saving} className='gap-1.5'>
-                  {saving ? (
+                <Button
+                  size='sm'
+                  onClick={() => void triggerSave()}
+                  disabled={saveState !== 'idle'}
+                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                >
+                  {saveState === 'saving' ? (
                     <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  ) : saveState === 'success' ? (
+                    <Check className='h-3.5 w-3.5' />
                   ) : (
                     <Save className='h-3.5 w-3.5' />
                   )}
-                  Save
+                  {saveState === 'success' ? 'Saved' : 'Save'}
                 </Button>
               </div>
             </div>
