@@ -39,12 +39,17 @@ export function WorkspaceEnvironmentsTab() {
     });
   }, [environments]);
 
-  // Sync editing vars when selected env changes.
+  // Sync editing vars when the selected env or its data changes.
   useEffect(() => {
     const env = environments.find((e) => e.name === selectedName);
     setEditingVars(env ? env.variables.slice() : []);
-    setSavedAt(null);
   }, [selectedName, environments]);
+
+  // Clear the save pill only when switching to a different environment.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger, not used inside the body.
+  useEffect(() => {
+    setSavedAt(null);
+  }, [selectedName]);
 
   // Persist env to backend with debounce.
   const persistEnv = useCallback(

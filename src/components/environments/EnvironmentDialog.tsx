@@ -1,7 +1,7 @@
 // src/components/environments/EnvironmentDialog.tsx
 
 import { Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -30,6 +30,12 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Clear the save pill when switching environments.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger, not used inside the body.
+  useEffect(() => {
+    setSavedAt(null);
+  }, [selectedName]);
 
   const selectedEnv = environments.find((e) => e.name === selectedName) ?? null;
 
