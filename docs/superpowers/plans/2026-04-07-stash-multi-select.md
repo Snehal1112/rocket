@@ -1,0 +1,633 @@
+# Git Stash Multi-Select Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Let users select multiple stashes in the git panel and apply, pop, or drop them all in one action.
+
+**Architecture:** Two files change. The store gets three batch methods (`applyStashMany`, `popStashMany`, `dropStashMany`) that loop over existing single-index Tauri calls, stop on first error, and refresh once at the end. The component gets `selectedIndices: Set<number>` local state, a hover-reveal checkbox that swaps with the `@{N}` index badge, and a sticky action bar that appears when any stash is selected.
+
+**Tech Stack:** React, TypeScript, Zustand, Vitest, Tailwind CSS v4, shadcn/ui, Lucide icons, `tw-animate-css`
+
+---
+
+## File Map
+
+| File | Change |
+|---|---|
+| `src/stores/git-store.ts` | Add `applyStashMany`, `popStashMany`, `dropStashMany` to interface + implementation |
+| `src/stores/__tests__/git-store.test.ts` | Add batch method tests |
+| `src/components/git/GitStashSection.tsx` | Add selection state, checkbox slot, action bar |
+
+---
+
+## Task 1: Batch store methods
+
+**Files:**
+- Modify: `src/stores/git-store.ts`
+- Test: `src/stores/__tests__/git-store.test.ts`
+
+The batch methods call Tauri IPC directly (not the single-index store methods) to avoid N redundant status/stash refreshes — they refresh once after the whole loop.
+
+The existing mock in the test file already covers `gitStashApply`, `gitStashPop`, `gitStashDrop` so no mock changes are needed.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `src/stores/__tests__/git-store.test.ts`:
+
+```ts
+describe('git-store stash batch operations', () => {
+  beforeEach(() => {
+    useGitStore.setState({
+      error: null,
+      collectionPath: '/test/repo',
+      isRepo: true,
+      stashes: [],
+    });
+    vi.clearAllMocks();
+  });
+
+  it('applyStashMany applies indices in ascending order (newest first)', async () => {
+    const { gitStashApply } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashApply).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().applyStashMany([2, 0, 1]);
+
+    expect(order).toEqual([0, 1, 2]);
+  });
+
+  it('applyStashMany stops on first error and sets error with stash index', async () => {
+    const { gitStashApply } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashApply)
+      .mockResolvedValueOnce(undefined)              // index 0 succeeds
+      .mockRejectedValueOnce(new Error('conflict')); // index 1 fails
+
+    await useGitStore.getState().applyStashMany([0, 1, 2]);
+
+    expect(vi.mocked(gitStashApply)).toHaveBeenCalledTimes(2);
+    expect(useGitStore.getState().error).toContain('stash@{1}');
+    expect(useGitStore.getState().error).toContain('conflict');
+  });
+
+  it('applyStashMany refreshes stashes and status after completion', async () => {
+    const { gitStashApply, gitStashList, gitStatus } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashApply).mockResolvedValue(undefined);
+
+    await useGitStore.getState().applyStashMany([0]);
+
+    expect(vi.mocked(gitStashList)).toHaveBeenCalled();
+    expect(vi.mocked(gitStatus)).toHaveBeenCalled();
+  });
+
+  it('popStashMany applies indices in ascending order', async () => {
+    const { gitStashPop } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashPop).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().popStashMany([1, 0]);
+
+    expect(order).toEqual([0, 1]);
+  });
+
+  it('dropStashMany applies indices in ascending order', async () => {
+    const { gitStashDrop } = await import('@/lib/tauri-api');
+    const order: number[] = [];
+    vi.mocked(gitStashDrop).mockImplementation(async (_path, index) => {
+      order.push(index);
+    });
+
+    await useGitStore.getState().dropStashMany([2, 0, 1]);
+
+    expect(order).toEqual([0, 1, 2]);
+  });
+
+  it('dropStashMany does not call gitStatus (drop is not a working-tree change)', async () => {
+    const { gitStashDrop, gitStatus } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashDrop).mockResolvedValue(undefined);
+    vi.mocked(gitStatus).mockClear();
+
+    await useGitStore.getState().dropStashMany([0]);
+
+    expect(vi.mocked(gitStatus)).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to confirm they fail**
+
+```bash
+yarn test src/stores/__tests__/git-store.test.ts
+```
+
+Expected: 6 new tests fail with "is not a function" or similar.
+
+- [ ] **Step 3: Add the three method signatures to `GitState` interface**
+
+In `src/stores/git-store.ts`, find the `dropStash` line in the interface and add three lines after it:
+
+```ts
+  dropStash: (index: number) => Promise<void>;
+  applyStashMany: (indices: number[]) => Promise<void>;
+  popStashMany: (indices: number[]) => Promise<void>;
+  dropStashMany: (indices: number[]) => Promise<void>;
+```
+
+- [ ] **Step 4: Implement the three methods in the store**
+
+In `src/stores/git-store.ts`, find the `dropStash` implementation and add three new methods after it (before `switchBranch`):
+
+```ts
+  // Apply multiple stashes newest-first (ascending index). Stops on first error.
+  applyStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashApply(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
+    await get().refreshStatus();
+  },
+
+  // Pop multiple stashes newest-first. Stops on first error.
+  popStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashPop(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
+    await get().refreshStatus();
+  },
+
+  // Drop multiple stashes newest-first. Stops on first error. No working-tree changes.
+  dropStashMany: async (indices: number[]) => {
+    const { collectionPath } = get();
+    if (!collectionPath) return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    set({ error: null });
+    for (const index of sorted) {
+      try {
+        await gitStashDrop(collectionPath, index);
+      } catch (e) {
+        set({
+          error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
+        });
+        break;
+      }
+    }
+    await get().refreshStashes();
+  },
+```
+
+- [ ] **Step 5: Run tests to confirm they pass**
+
+```bash
+yarn test src/stores/__tests__/git-store.test.ts
+```
+
+Expected: all tests pass including the 6 new ones.
+
+- [ ] **Step 6: TypeScript check**
+
+```bash
+yarn tsc --noEmit
+```
+
+Expected: no errors.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/stores/git-store.ts src/stores/__tests__/git-store.test.ts
+git commit -m "feat(git): add applyStashMany, popStashMany, dropStashMany to git store"
+```
+
+---
+
+## Task 2: Multi-select UI in GitStashSection
+
+**Files:**
+- Modify: `src/components/git/GitStashSection.tsx`
+
+This task replaces the component completely. Key UI changes:
+- `selectedIndices: Set<number>` + `hoveredIndex: number | null` + `isBatchRunning: boolean` local state
+- Each row has a fixed `w-6` left slot: shows `@{N}` badge by default; shows a checkbox on hover OR whenever any stash is selected
+- Per-row `···` menu is hidden for selected rows (suppressed via `style`)
+- A sticky action bar renders at the bottom of the section when `selectedIndices.size > 0`
+
+- [ ] **Step 1: Replace `src/components/git/GitStashSection.tsx` with the full new implementation**
+
+```tsx
+import {
+  AlertCircle,
+  Archive,
+  FileText,
+  GitBranch,
+  Loader2,
+  MoreHorizontal,
+  X,
+} from 'lucide-react';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useGitStore } from '@/stores/git-store';
+
+/** Format a UTC timestamp string into a concise relative label. */
+function formatAge(timestamp: string): string {
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+export function GitStashSection() {
+  const [message, setMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [openStashIndex, setOpenStashIndex] = useState<number | null>(null);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+
+  const {
+    stashes,
+    saveStash,
+    popStash,
+    applyStash,
+    dropStash,
+    applyStashMany,
+    popStashMany,
+    dropStashMany,
+    error,
+    clearError,
+  } = useGitStore();
+
+  const isSelecting = selectedIndices.size > 0;
+
+  const handleSave = async () => {
+    if (!message.trim()) return;
+    clearError();
+    setIsSaving(true);
+    try {
+      await saveStash(message.trim());
+      // Only clear input if the save succeeded.
+      if (!useGitStore.getState().error) {
+        setMessage('');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleSelect = (index: number, checked: boolean) => {
+    setSelectedIndices((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIndices(new Set());
+
+  const handleApplyMany = async () => {
+    setIsBatchRunning(true);
+    clearError();
+    await applyStashMany([...selectedIndices]);
+    setIsBatchRunning(false);
+    if (!useGitStore.getState().error) clearSelection();
+  };
+
+  const handlePopMany = async () => {
+    setIsBatchRunning(true);
+    clearError();
+    await popStashMany([...selectedIndices]);
+    setIsBatchRunning(false);
+    if (!useGitStore.getState().error) clearSelection();
+  };
+
+  const handleDropMany = async () => {
+    setIsBatchRunning(true);
+    clearError();
+    await dropStashMany([...selectedIndices]);
+    setIsBatchRunning(false);
+    if (!useGitStore.getState().error) clearSelection();
+  };
+
+  return (
+    <div>
+      {/* Section header */}
+      <div className='flex items-center gap-1.5 px-3 py-2'>
+        <Archive className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+        <span className='text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground flex-1'>
+          Stashes
+        </span>
+        {stashes.length > 0 && (
+          <span className='text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-px rounded-full leading-none'>
+            {stashes.length}
+          </span>
+        )}
+      </div>
+
+      {/* Save input row */}
+      <div className='flex gap-1.5 px-3 pb-2'>
+        <Input
+          placeholder='Describe your stash…'
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          className='h-7 text-xs flex-1'
+          disabled={isSaving}
+          onKeyDown={(e) => e.key === 'Enter' && !isSaving && void handleSave()}
+        />
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 px-2.5 text-xs shrink-0 gap-1'
+          onClick={() => void handleSave()}
+          disabled={!message.trim() || isSaving}
+        >
+          {isSaving && <Loader2 className='h-3 w-3 animate-spin' />}
+          {isSaving ? 'Saving…' : 'Stash'}
+        </Button>
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+          <AlertCircle className='mt-px h-3 w-3 shrink-0' />
+          <span className='break-all leading-relaxed'>{error}</span>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {stashes.length === 0 && !error && (
+        <div className='flex flex-col items-center gap-2 px-4 py-5 text-center'>
+          <Archive className='h-7 w-7 text-muted-foreground/20' />
+          <p className='text-xs text-muted-foreground/50 leading-relaxed'>
+            No stashes yet.
+            <br />
+            <span className='text-[11px]'>Type a message above and press Stash.</span>
+          </p>
+        </div>
+      )}
+
+      {/* Stash list */}
+      {stashes.map((stash) => {
+        const isSelected = selectedIndices.has(stash.index);
+        const showCheckbox = isSelecting || hoveredIndex === stash.index;
+
+        return (
+          <div
+            key={stash.index}
+            className='stash-row flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors'
+            onMouseEnter={() => setHoveredIndex(stash.index)}
+            onMouseLeave={() => setHoveredIndex(null)}
+          >
+            {/* Checkbox / index badge slot — fixed width, no layout shift */}
+            <div className='shrink-0 w-6 flex items-center justify-end'>
+              {showCheckbox ? (
+                <input
+                  type='checkbox'
+                  className='h-3.5 w-3.5 accent-primary cursor-pointer'
+                  checked={isSelected}
+                  disabled={isBatchRunning}
+                  onChange={(e) => toggleSelect(stash.index, e.target.checked)}
+                />
+              ) : (
+                <span className='text-[10px] font-mono text-muted-foreground/35 select-none leading-none'>
+                  @{stash.index}
+                </span>
+              )}
+            </div>
+
+            {/* Message + metadata */}
+            <div className='flex-1 min-w-0'>
+              <TooltipProvider delayDuration={400}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className='truncate text-[13px] font-mono leading-snug cursor-default'>
+                      {stash.message}
+                    </p>
+                  </TooltipTrigger>
+                  <TooltipContent side='bottom' className='max-w-64'>
+                    <p className='break-words font-mono text-xs'>{stash.message}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Metadata row: files · +ins −del · branch · age */}
+              <div className='flex items-center gap-1 mt-0.5 flex-wrap'>
+                {stash.filesChanged > 0 && (
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className='flex items-center gap-0.5 text-[10px] text-muted-foreground/60 cursor-default'>
+                          <FileText className='h-2.5 w-2.5 shrink-0' />
+                          {stash.filesChanged} {stash.filesChanged === 1 ? 'file' : 'files'}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side='bottom' className='max-w-56 p-2'>
+                        <ul className='space-y-0.5'>
+                          {stash.changedFiles.slice(0, 10).map((f) => (
+                            <li key={f} className='font-mono text-[11px] truncate'>
+                              {f}
+                            </li>
+                          ))}
+                          {stash.changedFiles.length > 10 && (
+                            <li className='text-[11px] text-muted-foreground'>
+                              +{stash.changedFiles.length - 10} more
+                            </li>
+                          )}
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+
+                {(stash.insertions > 0 || stash.deletions > 0) && (
+                  <>
+                    <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                    <span className='text-[10px] font-mono text-emerald-600 dark:text-emerald-400'>
+                      +{stash.insertions}
+                    </span>
+                    <span className='text-[10px] font-mono text-destructive'>
+                      −{stash.deletions}
+                    </span>
+                  </>
+                )}
+
+                {stash.branch && (
+                  <>
+                    <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                    <span className='flex items-center gap-0.5 text-[10px] text-muted-foreground/50 truncate max-w-[5rem]'>
+                      <GitBranch className='h-2.5 w-2.5 shrink-0 text-muted-foreground/35' />
+                      {stash.branch}
+                    </span>
+                  </>
+                )}
+
+                <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                <span className='text-[10px] text-muted-foreground/50 shrink-0'>
+                  {formatAge(stash.timestamp)}
+                </span>
+              </div>
+            </div>
+
+            {/* Per-row hover actions — hidden when row is selected */}
+            <div
+              className='stash-row-actions shrink-0'
+              style={
+                isSelected
+                  ? { display: 'none' }
+                  : openStashIndex === stash.index
+                    ? { display: 'flex' }
+                    : undefined
+              }
+            >
+              <DropdownMenu
+                open={openStashIndex === stash.index}
+                onOpenChange={(open) => setOpenStashIndex(open ? stash.index : null)}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button variant='ghost' size='icon' className='h-6 w-6'>
+                    <MoreHorizontal className='h-3.5 w-3.5' />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end' className='w-48'>
+                  <DropdownMenuItem onClick={() => void popStash(stash.index)}>
+                    <span>Pop</span>
+                    <span className='ml-auto text-[11px] text-muted-foreground'>apply + remove</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void applyStash(stash.index)}>
+                    <span>Apply</span>
+                    <span className='ml-auto text-[11px] text-muted-foreground'>keep stash</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className='text-destructive focus:text-destructive'
+                    onClick={() => void dropStash(stash.index)}
+                  >
+                    Drop
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Sticky action bar — visible when 1+ stashes are selected */}
+      {isSelecting && (
+        <div className='flex items-center gap-1 px-3 py-1.5 border-t border-border/70 bg-background animate-in slide-in-from-bottom-2 duration-150'>
+          <span className='text-[11px] text-muted-foreground flex-1'>
+            {selectedIndices.size} selected
+          </span>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-6 px-2 text-xs'
+            onClick={() => void handleApplyMany()}
+            disabled={isBatchRunning}
+          >
+            {isBatchRunning ? <Loader2 className='h-3 w-3 animate-spin' /> : 'Apply'}
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-6 px-2 text-xs'
+            onClick={() => void handlePopMany()}
+            disabled={isBatchRunning}
+          >
+            Pop
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-6 px-2 text-xs text-destructive border-destructive/40 hover:bg-destructive/10'
+            onClick={() => void handleDropMany()}
+            disabled={isBatchRunning}
+          >
+            Drop
+          </Button>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='h-6 w-6 shrink-0'
+            onClick={clearSelection}
+            disabled={isBatchRunning}
+          >
+            <X className='h-3 w-3' />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: TypeScript check**
+
+```bash
+yarn tsc --noEmit
+```
+
+Expected: no errors.
+
+- [ ] **Step 3: Biome lint + format check**
+
+```bash
+yarn check
+```
+
+Expected: `Checked N files in Xms. No fixes applied.`
+
+If there are format errors, run `yarn format` and re-check.
+
+- [ ] **Step 4: Run all tests**
+
+```bash
+yarn test
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/git/GitStashSection.tsx
+git commit -m "feat(git): multi-select stashes with checkbox reveal and batch action bar"
+```
