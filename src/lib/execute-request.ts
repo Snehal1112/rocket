@@ -86,14 +86,16 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const collection = found?.tab.source?.collection;
   const requestPath = found?.tab.source?.path;
 
-  // Fetch collection-level variables from settings.
+  // Fetch collection-level variables and default headers from settings.
   let collectionVars: CollectionVariable[] = [];
+  let collectionHeaders: { key: string; value: string; enabled: boolean }[] = [];
   if (collection) {
     try {
       const settings = await getCollectionSettings(collection);
       collectionVars = settings.variables;
+      collectionHeaders = settings.headers.filter((h) => h.enabled);
     } catch {
-      // Collection settings unavailable — proceed without collection vars.
+      // Collection settings unavailable — proceed without collection vars/headers.
     }
   }
 
@@ -143,6 +145,17 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const resolvedBody = toApiBody(request.body, resolve);
   const resolvedAuth = toApiAuth(request.auth, resolve);
 
+  // Merge collection default headers with request headers. Request headers
+  // with the same key override collection defaults; collection headers fill in
+  // any keys not present in the request.
+  const requestHeaderKeys = new Set(resolvedHeaders.map((h) => h.key.toLowerCase()));
+  const effectiveHeaders: Header[] = [
+    ...collectionHeaders
+      .filter((h) => !requestHeaderKeys.has(h.key.toLowerCase()))
+      .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: true })),
+    ...resolvedHeaders,
+  ];
+
   try {
     const resolvedQueryParams = request.queryParams
       .filter((p) => p.enabled)
@@ -151,7 +164,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     const result = await executeRequest({
       method: request.method,
       url: resolvedUrl,
-      headers: resolvedHeaders,
+      headers: effectiveHeaders,
       queryParams: resolvedQueryParams,
       body: resolvedBody,
       auth: resolvedAuth,
@@ -182,7 +195,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       statusText: result.statusText,
       durationMs: result.durationMs,
       sizeBytes: result.sizeBytes,
-      requestHeaders: resolvedHeaders.map((h) => ({ key: h.key, value: h.value })),
+      requestHeaders: effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
       requestBody: resolvedBody?.content ?? '',
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
       responseBody: result.body,
@@ -205,7 +218,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       statusText: 'Error',
       durationMs: 0,
       sizeBytes: msg.length,
-      requestHeaders: resolvedHeaders.map((h) => ({ key: h.key, value: h.value })),
+      requestHeaders: effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
       requestBody: resolvedBody?.content ?? '',
       responseHeaders: [],
       responseBody: msg,
