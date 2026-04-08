@@ -113,7 +113,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-2xl p-0 gap-0'>
+      <DialogContent className='max-w-2xl p-0 gap-0 backdrop-blur-sm'>
         <DialogHeader className='p-4 pb-2'>
           <DialogTitle>Manage Environments</DialogTitle>
         </DialogHeader>

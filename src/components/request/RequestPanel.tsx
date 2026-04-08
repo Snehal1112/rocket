@@ -615,7 +615,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               updateRequest(tab.id, { pathParams: updated });
             }}
             onSwitchToParams={() => setActiveSection('params')}
-            placeholder='https://api.example.com/resource'
+            placeholder='Enter URL or paste a cURL request'
             scopedContext={scopedContext}
           />
 
