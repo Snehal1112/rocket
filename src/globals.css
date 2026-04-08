@@ -79,14 +79,10 @@
     color: hsl(var(--foreground));
     font-family: "Inter Variable", "Inter", "Segoe UI", sans-serif;
     border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
-    /* Prevent font size from being too small on mobile devices. */
   }
 
   #root {
     height: 100%;
-    min-height: 100vh;
-    /* biome-ignore lint/suspicious/noDuplicateProperties: dvh with vh fallback for older browsers */
     min-height: 100dvh;
     text-decoration: none;
   }

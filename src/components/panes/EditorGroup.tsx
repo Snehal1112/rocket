@@ -66,8 +66,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
 
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
-    // Guard if ephemeral (no source) or has unsaved edits.
-    const needsGuard = (tab && isRequestTab(tab) && !tab.source) || (tab?.isDirty ?? false);
+    // Guard only if the tab has unsaved edits.
+    const needsGuard = tab?.isDirty ?? false;
     if (tab && needsGuard) {
       setPendingCloseTabId(tabId);
     } else {
