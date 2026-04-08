@@ -182,6 +182,8 @@ export interface ExecuteRequestInput {
   environmentName?: string;
   collection?: string;
   requestName?: string;
+  /** Path of the request file relative to the collection root (e.g. "auth/login.yml"). */
+  requestPath?: string;
 }
 
 export interface FileChangedEvent {
