@@ -10,7 +10,8 @@ describe('useSaveButton', () => {
   afterEach(() => vi.useRealTimers());
 
   it('starts in idle state', () => {
-    const { result } = renderHook(() => useSaveButton(async () => {}));
+    const fn = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useSaveButton(fn));
     expect(result.current.state).toBe('idle');
   });
 
@@ -42,15 +43,26 @@ describe('useSaveButton', () => {
 
   it('ignores trigger calls when not idle', async () => {
     let resolve!: () => void;
-    const fn = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
+    const fn = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        }),
+    );
     const { result } = renderHook(() => useSaveButton(fn));
 
-    act(() => { void result.current.trigger(); });
+    act(() => {
+      void result.current.trigger();
+    });
     expect(result.current.state).toBe('saving');
 
-    act(() => { void result.current.trigger(); });
+    act(() => {
+      void result.current.trigger();
+    });
     expect(fn).toHaveBeenCalledTimes(1);
 
-    await act(async () => { resolve(); });
+    await act(async () => {
+      resolve();
+    });
   });
 });
