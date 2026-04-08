@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rocket_collection::CollectionRepository;
 use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
 use rocket_history::{HistoryEntry, HistoryRepository};
