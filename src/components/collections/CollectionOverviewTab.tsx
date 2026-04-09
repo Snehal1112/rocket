@@ -23,6 +23,7 @@ import {
   saveCollectionSettings,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type {
   AuthState,
@@ -273,6 +274,7 @@ const TABS: { label: string; value: CollectionSection }[] = [
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const collectionName = tab.collectionName;
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
+  const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -308,7 +310,21 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         setCollection(col);
         const s = col.settings;
         setDescription(s.description ?? '');
-        setAuth(toAuthState(s.auth));
+
+        // Load auth from disk. For OAuth2 non-client-credentials flows the access token
+        // is never written to disk, so restore it from the in-memory store if available.
+        const diskAuth = toAuthState(s.auth);
+        const cachedAuth = useCollectionAuthStore.getState().getCollectionAuth(collectionName);
+        if (
+          diskAuth.authType === 'oauth2' &&
+          !diskAuth.oauth2?.accessToken &&
+          cachedAuth?.authType === 'oauth2' &&
+          cachedAuth.oauth2?.accessToken
+        ) {
+          diskAuth.oauth2 = { ...diskAuth.oauth2!, accessToken: cachedAuth.oauth2.accessToken };
+        }
+        setAuth(diskAuth);
+
         setHeaders(toKeyValueEntries(s.headers));
         setVariables(s.variables ?? []);
         setReadme(s.readme ?? '');
@@ -320,6 +336,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       })
       .finally(() => setLoading(false));
   }, [collectionName]);
+
+  // Keep the collection auth store in sync so execute-request.ts can resolve inherited auth.
+  // Runs whenever auth changes (e.g. after "Get Token") so the store always has the latest token.
+  useEffect(() => {
+    setCollectionAuth(collectionName, auth);
+  }, [auth, collectionName, setCollectionAuth]);
 
   // Persist all settings to disk (no auto-save).
   const saveSettings = useCallback(async () => {
