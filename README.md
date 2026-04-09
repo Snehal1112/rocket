@@ -99,6 +99,7 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
 | `rocket-git` | Git operations via libgit2 |
 | `rocket-app` | Orchestration services |
 | `rocket-infra` | Filesystem implementations |
+| `rocket-import` | Bruno collection importer |
 | `src-tauri` | Tauri commands and app initialization |
 
 ### Frontend Stack
