@@ -7,6 +7,7 @@ import {
   sourceBadgeClass,
   type UrlToken,
   type VariableScopeEntry,
+  type VariableSource,
 } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
@@ -20,7 +21,8 @@ interface VariableAwareUrlInputProps {
   pathParams?: Record<string, string>;
   queryParams?: Record<string, string>;
   onPathParamChange?: (key: string, value: string) => void;
-  onSwitchToParams?: () => void;
+  // Called when "Variables in request →" is clicked; section indicates where to navigate.
+  onSwitchToSection?: (section: 'params' | 'variables') => void;
   placeholder?: string;
   className?: string;
   scopedContext?: Map<string, VariableScopeEntry>;
@@ -64,7 +66,7 @@ export function VariableAwareUrlInput({
   pathParams,
   queryParams,
   onPathParamChange,
-  onSwitchToParams,
+  onSwitchToSection,
   placeholder,
   className,
   scopedContext,
@@ -73,6 +75,8 @@ export function VariableAwareUrlInput({
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const environments = useEnvStore((s) => s.environments);
   const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
+  const globalEnv = useEnvStore((s) => s.globalEnv);
+  const updateGlobalEnvironment = useEnvStore((s) => s.updateGlobalEnvironment);
 
   const variables = useMemo(() => {
     if (!activeEnvId) return {};
@@ -87,6 +91,8 @@ export function VariableAwareUrlInput({
 
   const [editingToken, setEditingToken] = useState<UrlToken | null>(null);
   const [editValue, setEditValue] = useState('');
+  // Tracks the variable scope of the token being edited so handleCommit saves to the right place.
+  const editingScopeRef = useRef<VariableSource | null>(null);
 
   const tokens = parseUrlTokens(
     value,
@@ -97,10 +103,14 @@ export function VariableAwareUrlInput({
     queryParams,
   );
 
-  const handleTokenClick = useCallback((token: UrlToken) => {
-    setEditingToken(token);
-    setEditValue(token.resolved ?? '');
-  }, []);
+  const handleTokenClick = useCallback(
+    (token: UrlToken, resolvedValue?: string, scope?: VariableSource) => {
+      setEditingToken(token);
+      setEditValue(resolvedValue ?? token.resolved ?? '');
+      editingScopeRef.current = scope ?? null;
+    },
+    [],
+  );
 
   // Save the edited value based on token type.
   const handleCommit = useCallback(async () => {
@@ -108,9 +118,27 @@ export function VariableAwareUrlInput({
 
     if (editingToken.type === 'pathParam' && onPathParamChange) {
       onPathParamChange(editingToken.value, editValue);
+    } else if (editingToken.type === 'variable' && editingScopeRef.current === 'global') {
+      // Save to global environment.
+      if (globalEnv) {
+        const updatedVars = globalEnv.variables.map((v) =>
+          v.key === editingToken.value ? { ...v, value: editValue } : v,
+        );
+        if (!globalEnv.variables.some((v) => v.key === editingToken.value)) {
+          updatedVars.push({
+            key: editingToken.value,
+            value: editValue,
+            enabled: true,
+            secret: false,
+          });
+        }
+        await updateGlobalEnvironment({ ...globalEnv, variables: updatedVars });
+      }
     } else if (
       editingToken.type === 'variable' &&
-      editingToken.source !== 'Collection' &&
+      // Save to the active environment for env vars or unresolved vars (scope === null).
+      // Collection, folder, request, and process vars are read-only in this popup.
+      (editingScopeRef.current === 'environment' || editingScopeRef.current === null) &&
       activeEnvId
     ) {
       const env = environments.find((e) => e.name === activeEnvId);
@@ -131,7 +159,16 @@ export function VariableAwareUrlInput({
     }
 
     setEditingToken(null);
-  }, [editingToken, editValue, activeEnvId, environments, updateEnvironment, onPathParamChange]);
+  }, [
+    editingToken,
+    editValue,
+    activeEnvId,
+    environments,
+    updateEnvironment,
+    globalEnv,
+    updateGlobalEnvironment,
+    onPathParamChange,
+  ]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -161,9 +198,18 @@ export function VariableAwareUrlInput({
           label: scopeEntry.label,
         }
       : tokenMeta(token, activeEnvId);
-    const isCollectionVar =
+    // Read-only for sources that can't be saved from here.
+    // Editable: environment vars, global vars, and unresolved vars (scope === null).
+    // Read-only: collection, folder, request, and process vars — edit in their own panels.
+    const isReadOnlyVar =
       token.type === 'variable' &&
-      (scopeEntry?.source === 'collection' || token.source === 'Collection');
+      ((scopeEntry !== undefined &&
+        scopeEntry.source !== 'environment' &&
+        scopeEntry.source !== 'global') ||
+        token.source === 'Collection');
+
+    // Target section for the navigation link.
+    const navSection: 'params' | 'variables' = token.type === 'pathParam' ? 'params' : 'variables';
 
     return (
       <Popover
@@ -180,7 +226,7 @@ export function VariableAwareUrlInput({
               'rounded-sm px-0.5 cursor-pointer pointer-events-auto bg-transparent border-0',
               tokenColorClass,
             )}
-            onMouseEnter={() => handleTokenClick(token)}
+            onMouseEnter={() => handleTokenClick(token, scopeEntry?.value, scopeEntry?.source)}
           >
             {displayText}
           </button>
@@ -206,7 +252,7 @@ export function VariableAwareUrlInput({
               }}
               onBlur={() => void handleCommit()}
               placeholder='Value'
-              readOnly={isCollectionVar || scopeEntry?.secret}
+              readOnly={isReadOnlyVar || scopeEntry?.secret}
             />
           </div>
 
@@ -220,13 +266,16 @@ export function VariableAwareUrlInput({
               )}
               <span>{meta.label}</span>
             </div>
-            {onSwitchToParams && (
+            {onSwitchToSection && (
               <button
                 type='button'
                 className='text-2xs text-primary hover:underline cursor-pointer'
-                onClick={() => {
-                  setEditingToken(null);
-                  onSwitchToParams();
+                // Prevent the Input from losing focus on mousedown, which would fire onBlur
+                // and close the popover before the click event fires.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={async () => {
+                  await handleCommit();
+                  onSwitchToSection(navSection);
                 }}
               >
                 Variables in request &rarr;
