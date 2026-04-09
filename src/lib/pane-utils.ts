@@ -37,17 +37,25 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
       const creds = (a.credentials ?? {}) as Record<string, unknown>;
       const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
       const grantType =
-        flow === 'resource_owner_password_credentials' ? 'password' :
-        flow === 'authorization_code' ? 'authorization_code' :
-        flow === 'implicit' ? 'implicit' :
-        'client_credentials';
+        flow === 'resource_owner_password_credentials'
+          ? 'password'
+          : flow === 'authorization_code'
+            ? 'authorization_code'
+            : flow === 'implicit'
+              ? 'implicit'
+              : 'client_credentials';
       auth = {
         authType: 'oauth2',
         oauth2: {
-          grantType: grantType as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
+          grantType: grantType as
+            | 'client_credentials'
+            | 'password'
+            | 'authorization_code'
+            | 'implicit',
           authorizationUrl: (a.authorizationUrl as string) ?? '',
           tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
-          callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+          callbackUrl:
+            (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
           clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
           clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
           scope: (a.scope as string) ?? '',

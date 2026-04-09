@@ -35,10 +35,13 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
       const o = auth.oauth2;
       const gt = o?.grantType ?? 'client_credentials';
       const flow =
-        gt === 'password' ? 'resource_owner_password_credentials' :
-        gt === 'authorization_code' ? 'authorization_code' :
-        gt === 'implicit' ? 'implicit' :
-        'client_credentials';
+        gt === 'password'
+          ? 'resource_owner_password_credentials'
+          : gt === 'authorization_code'
+            ? 'authorization_code'
+            : gt === 'implicit'
+              ? 'implicit'
+              : 'client_credentials';
       if (flow === 'implicit') {
         return {
           authType: 'o-auth2',
@@ -68,7 +71,9 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
       if (flow === 'resource_owner_password_credentials') {
         return {
           ...base,
-          resourceOwner: o?.username ? { username: o.username, password: o.password ?? '' } : undefined,
+          resourceOwner: o?.username
+            ? { username: o.username, password: o.password ?? '' }
+            : undefined,
         } as Auth;
       }
       return base as Auth;

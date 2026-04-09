@@ -74,17 +74,25 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
     const creds = (a.credentials ?? {}) as Record<string, unknown>;
     const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
     const grantType =
-      flow === 'resource_owner_password_credentials' ? 'password' :
-      flow === 'authorization_code' ? 'authorization_code' :
-      flow === 'implicit' ? 'implicit' :
-      'client_credentials';
+      flow === 'resource_owner_password_credentials'
+        ? 'password'
+        : flow === 'authorization_code'
+          ? 'authorization_code'
+          : flow === 'implicit'
+            ? 'implicit'
+            : 'client_credentials';
     return {
       authType: 'oauth2' as const,
       oauth2: {
-        grantType: grantType as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
+        grantType: grantType as
+          | 'client_credentials'
+          | 'password'
+          | 'authorization_code'
+          | 'implicit',
         authorizationUrl: (a.authorizationUrl as string) ?? '',
         tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
-        callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+        callbackUrl:
+          (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
         clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
         clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
         scope: (a.scope as string) ?? '',
@@ -169,10 +177,13 @@ function authStateToApi(auth: AuthState): Auth | undefined {
       const o = auth.oauth2;
       const gt = o?.grantType ?? 'client_credentials';
       const flow =
-        gt === 'password' ? 'resource_owner_password_credentials' :
-        gt === 'authorization_code' ? 'authorization_code' :
-        gt === 'implicit' ? 'implicit' :
-        'client_credentials';
+        gt === 'password'
+          ? 'resource_owner_password_credentials'
+          : gt === 'authorization_code'
+            ? 'authorization_code'
+            : gt === 'implicit'
+              ? 'implicit'
+              : 'client_credentials';
       // Implicit flow: flat shape with clientId, no credentials object.
       if (flow === 'implicit') {
         return {
@@ -203,7 +214,9 @@ function authStateToApi(auth: AuthState): Auth | undefined {
       if (flow === 'resource_owner_password_credentials') {
         return {
           ...base,
-          resourceOwner: o?.username ? { username: o.username, password: o.password ?? '' } : undefined,
+          resourceOwner: o?.username
+            ? { username: o.username, password: o.password ?? '' }
+            : undefined,
         } as unknown as Auth;
       }
       // client_credentials
