@@ -242,6 +242,8 @@ async fn fetch_client_credentials_token(
     scope: Option<&str>,
     verify_ssl: bool,
 ) -> DomainResult<String> {
+    // Build a dedicated client for the token request. SSL setting here is independent
+    // from the main request client built in build_client().
     let client = Client::builder()
         .danger_accept_invalid_certs(!verify_ssl)
         .build()
@@ -598,7 +600,7 @@ mod oauth2_tests {
     }
 
     #[tokio::test]
-    async fn client_credentials_respects_verify_ssl_true() {
+    async fn client_credentials_token_fetch_succeeds_with_verify_ssl_true() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("POST"))
@@ -611,6 +613,9 @@ mod oauth2_tests {
             .await;
 
         let token_url = format!("{}/token", mock_server.uri());
+        // Note: this test uses a plain HTTP mock server so it does not exercise the
+        // danger_accept_invalid_certs path. A verify_ssl=false test would require a
+        // self-signed TLS fixture — tracked as a future improvement.
         let result = fetch_client_credentials_token(
             &token_url,
             &OAuth2ClientCredentials {
