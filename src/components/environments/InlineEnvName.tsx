@@ -99,9 +99,7 @@ export function InlineEnvName({
       onDoubleClick={enterEdit}
       className={cn(
         'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
-        isSelected
-          ? 'bg-accent text-accent-foreground'
-          : 'text-foreground hover:bg-muted/60',
+        isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
       )}
     >
       {name}
