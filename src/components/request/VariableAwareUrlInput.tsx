@@ -21,11 +21,30 @@ interface VariableAwareUrlInputProps {
   pathParams?: Record<string, string>;
   queryParams?: Record<string, string>;
   onPathParamChange?: (key: string, value: string) => void;
-  // Called when "Variables in request →" is clicked; section indicates where to navigate.
-  onSwitchToSection?: (section: 'params' | 'variables') => void;
+  // Called when the navigation link is clicked; source indicates the variable origin.
+  onNavigateToSource?: (source: VariableSource | 'pathParam') => void;
   placeholder?: string;
   className?: string;
   scopedContext?: Map<string, VariableScopeEntry>;
+}
+
+// Returns the link label for a navigation destination, or null if no nav is available.
+function navLinkLabel(source: VariableSource | 'pathParam'): string | null {
+  switch (source) {
+    case 'pathParam':
+      return 'Params \u2192';
+    case 'request':
+    case 'runtime':
+      return 'Request Variables \u2192';
+    case 'environment':
+      return 'Collection Environments \u2192';
+    case 'global':
+      return 'Global Environments \u2192';
+    case 'collection':
+      return 'Collection Variables \u2192';
+    default:
+      return null; // folder, process — no navigation available
+  }
 }
 
 // Determines the type badge and label for the popover footer.
@@ -66,7 +85,7 @@ export function VariableAwareUrlInput({
   pathParams,
   queryParams,
   onPathParamChange,
-  onSwitchToSection,
+  onNavigateToSource,
   placeholder,
   className,
   scopedContext,
@@ -208,8 +227,10 @@ export function VariableAwareUrlInput({
         scopeEntry.source !== 'global') ||
         token.source === 'Collection');
 
-    // Target section for the navigation link.
-    const navSection: 'params' | 'variables' = token.type === 'pathParam' ? 'params' : 'variables';
+    // Resolved source for the navigation link (null = no link).
+    const navSource: VariableSource | 'pathParam' | null =
+      token.type === 'pathParam' ? 'pathParam' : (scopeEntry?.source ?? null);
+    const linkLabel = navSource !== null ? navLinkLabel(navSource) : null;
 
     return (
       <Popover
@@ -266,19 +287,18 @@ export function VariableAwareUrlInput({
               )}
               <span>{meta.label}</span>
             </div>
-            {onSwitchToSection && (
+            {onNavigateToSource && navSource !== null && linkLabel !== null && (
               <button
                 type='button'
                 className='text-2xs text-primary hover:underline cursor-pointer'
-                // Prevent the Input from losing focus on mousedown, which would fire onBlur
-                // and close the popover before the click event fires.
+                // Prevent blur-before-click from closing the popover.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={async () => {
                   await handleCommit();
-                  onSwitchToSection(navSection);
+                  onNavigateToSource(navSource);
                 }}
               >
-                Variables in request &rarr;
+                {linkLabel}
               </button>
             )}
           </div>
