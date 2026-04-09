@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Key, Lock, User } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { VariableAwareInput } from '@/components/request/VariableAwareInput';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { executeRequest, oauth2AuthCodeFlow } from '@/lib/tauri-api';
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { AuthState } from '@/types/pane-types';
 
 type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
@@ -19,6 +21,8 @@ type OAuth2GrantType = NonNullable<AuthState['oauth2']>['grantType'];
 interface AuthEditorProps {
   auth: AuthState;
   onChange: (auth: AuthState) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
 function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null): string {
@@ -37,7 +41,12 @@ function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null)
   return `Expires in ${Math.floor(remaining / 3600)}h (at ${time})`;
 }
 
-export function AuthEditor({ auth, onChange }: AuthEditorProps) {
+export function AuthEditor({
+  auth,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: AuthEditorProps) {
   // Helper: patch oauth2 fields without losing other auth state.
   const patchOAuth2 = useCallback(
     (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
@@ -249,35 +258,34 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         <div className='space-y-2'>
           <div className='flex items-center gap-2'>
             <User className='h-3.5 w-3.5 text-muted-foreground' />
-            <Input
+            <VariableAwareInput
               placeholder='Username'
               className='flex-1 text-sm'
               value={auth.basic.username}
-              onChange={(e) =>
+              onChange={(newVal) =>
                 onChange({
                   ...auth,
-                  basic: { ...auth.basic, username: e.target.value } as NonNullable<
-                    AuthState['basic']
-                  >,
+                  basic: { ...auth.basic, username: newVal } as NonNullable<AuthState['basic']>,
                 })
               }
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
           </div>
           <div className='flex items-center gap-2'>
             <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-            <Input
-              type='password'
+            <VariableAwareInput
               placeholder='Password'
               className='flex-1 text-sm'
               value={auth.basic.password}
-              onChange={(e) =>
+              onChange={(newVal) =>
                 onChange({
                   ...auth,
-                  basic: { ...auth.basic, password: e.target.value } as NonNullable<
-                    AuthState['basic']
-                  >,
+                  basic: { ...auth.basic, password: newVal } as NonNullable<AuthState['basic']>,
                 })
               }
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
           </div>
         </div>
@@ -287,16 +295,18 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       {auth.authType === 'bearer' && auth.bearer && (
         <div className='flex items-center gap-2'>
           <Key className='h-3.5 w-3.5 text-muted-foreground' />
-          <Input
+          <VariableAwareInput
             placeholder='Token'
             className='flex-1 text-sm'
             value={auth.bearer.token}
-            onChange={(e) =>
+            onChange={(newVal) =>
               onChange({
                 ...auth,
-                bearer: { token: e.target.value },
+                bearer: { token: newVal },
               })
             }
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
           />
         </div>
       )}
@@ -304,29 +314,31 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
       {/* API Key: plain inputs + select. */}
       {auth.authType === 'api-key' && auth.apiKey && (
         <div className='space-y-2'>
-          <Input
+          <VariableAwareInput
             placeholder='Key'
             className='text-sm'
             value={auth.apiKey.key}
-            onChange={(e) =>
+            onChange={(newVal) =>
               onChange({
                 ...auth,
-                apiKey: { ...auth.apiKey, key: e.target.value } as NonNullable<AuthState['apiKey']>,
+                apiKey: { ...auth.apiKey, key: newVal } as NonNullable<AuthState['apiKey']>,
               })
             }
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
           />
-          <Input
+          <VariableAwareInput
             placeholder='Value'
             className='text-sm'
             value={auth.apiKey.value}
-            onChange={(e) =>
+            onChange={(newVal) =>
               onChange({
                 ...auth,
-                apiKey: { ...auth.apiKey, value: e.target.value } as NonNullable<
-                  AuthState['apiKey']
-                >,
+                apiKey: { ...auth.apiKey, value: newVal } as NonNullable<AuthState['apiKey']>,
               })
             }
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
           />
           <Select
             value={auth.apiKey.addTo}
@@ -393,11 +405,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (
                 <div>
                   <Label className='mb-1 block'>Authorization URL</Label>
-                  <Input
+                  <VariableAwareInput
                     className='text-sm font-mono'
                     placeholder='https://auth.example.com/authorize'
                     value={o.authorizationUrl}
-                    onChange={(e) => patchOAuth2({ authorizationUrl: e.target.value })}
+                    onChange={(newVal) => patchOAuth2({ authorizationUrl: newVal })}
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
                   />
                 </div>
               )}
@@ -406,11 +420,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               {o.grantType !== 'implicit' && (
                 <div>
                   <Label className='mb-1 block'>Token URL</Label>
-                  <Input
+                  <VariableAwareInput
                     className='text-sm font-mono'
                     placeholder='https://auth.example.com/token'
                     value={o.tokenUrl}
-                    onChange={(e) => patchOAuth2({ tokenUrl: e.target.value })}
+                    onChange={(newVal) => patchOAuth2({ tokenUrl: newVal })}
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
                   />
                 </div>
               )}
@@ -421,10 +437,12 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                   <div>
                     <Label className='mb-1 block'>Callback URL</Label>
                     <div className='flex gap-1.5'>
-                      <Input
+                      <VariableAwareInput
                         className='text-sm font-mono flex-1'
                         value={o.callbackUrl}
-                        onChange={(e) => patchOAuth2({ callbackUrl: e.target.value })}
+                        onChange={(newVal) => patchOAuth2({ callbackUrl: newVal })}
+                        variableContext={variableContext}
+                        onNavigateToSource={onNavigateToSource}
                       />
                       <Button
                         variant='outline'
@@ -439,11 +457,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                   </div>
                   <div>
                     <Label className='mb-1 block'>State</Label>
-                    <Input
+                    <VariableAwareInput
                       className='text-sm'
                       placeholder='Leave empty for auto-generated'
                       value={o.state}
-                      onChange={(e) => patchOAuth2({ state: e.target.value })}
+                      onChange={(newVal) => patchOAuth2({ state: newVal })}
+                      variableContext={variableContext}
+                      onNavigateToSource={onNavigateToSource}
                     />
                   </div>
                 </>
@@ -453,22 +473,25 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               <div className={o.grantType === 'implicit' ? '' : 'grid grid-cols-2 gap-2'}>
                 <div>
                   <Label className='mb-1 block'>Client ID</Label>
-                  <Input
+                  <VariableAwareInput
                     className='text-sm'
                     placeholder='client-id'
                     value={o.clientId}
-                    onChange={(e) => patchOAuth2({ clientId: e.target.value })}
+                    onChange={(newVal) => patchOAuth2({ clientId: newVal })}
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
                   />
                 </div>
                 {o.grantType !== 'implicit' && (
                   <div>
                     <Label className='mb-1 block'>Client Secret</Label>
-                    <Input
+                    <VariableAwareInput
                       className='text-sm'
-                      type='password'
                       placeholder='client-secret'
                       value={o.clientSecret}
-                      onChange={(e) => patchOAuth2({ clientSecret: e.target.value })}
+                      onChange={(newVal) => patchOAuth2({ clientSecret: newVal })}
+                      variableContext={variableContext}
+                      onNavigateToSource={onNavigateToSource}
                     />
                   </div>
                 )}
@@ -477,11 +500,13 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
               {/* Scope — always visible. */}
               <div>
                 <Label className='mb-1 block'>Scope</Label>
-                <Input
+                <VariableAwareInput
                   className='text-sm'
                   placeholder='read write'
                   value={o.scope}
-                  onChange={(e) => patchOAuth2({ scope: e.target.value })}
+                  onChange={(newVal) => patchOAuth2({ scope: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
                 />
               </div>
 
@@ -490,20 +515,23 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                 <div className='grid grid-cols-2 gap-2'>
                   <div>
                     <Label className='mb-1 block'>Username</Label>
-                    <Input
+                    <VariableAwareInput
                       className='text-sm'
                       placeholder='user@example.com'
                       value={o.username}
-                      onChange={(e) => patchOAuth2({ username: e.target.value })}
+                      onChange={(newVal) => patchOAuth2({ username: newVal })}
+                      variableContext={variableContext}
+                      onNavigateToSource={onNavigateToSource}
                     />
                   </div>
                   <div>
                     <Label className='mb-1 block'>Password</Label>
-                    <Input
+                    <VariableAwareInput
                       className='text-sm'
-                      type='password'
                       value={o.password}
-                      onChange={(e) => patchOAuth2({ password: e.target.value })}
+                      onChange={(newVal) => patchOAuth2({ password: newVal })}
+                      variableContext={variableContext}
+                      onNavigateToSource={onNavigateToSource}
                     />
                   </div>
                 </div>
@@ -550,10 +578,12 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
                     </div>
                     <div>
                       <Label className='mb-1 block'>Header Prefix</Label>
-                      <Input
+                      <VariableAwareInput
                         className='text-sm'
                         value={o.headerPrefix}
-                        onChange={(e) => patchOAuth2({ headerPrefix: e.target.value })}
+                        onChange={(newVal) => patchOAuth2({ headerPrefix: newVal })}
+                        variableContext={variableContext}
+                        onNavigateToSource={onNavigateToSource}
                       />
                     </div>
                     <div>
@@ -672,54 +702,62 @@ export function AuthEditor({ auth, onChange }: AuthEditorProps) {
         <div className='space-y-3'>
           <div>
             <Label className='mb-1 block'>Access Key</Label>
-            <Input
+            <VariableAwareInput
               className='text-sm'
               placeholder='AKIAIOSFODNN7EXAMPLE'
               value={auth.awsSigV4.accessKey}
-              onChange={(e) => patchAWS({ accessKey: e.target.value })}
+              onChange={(newVal) => patchAWS({ accessKey: newVal })}
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
           </div>
 
           <div>
             <Label className='mb-1 block'>Secret Key</Label>
-            <Input
+            <VariableAwareInput
               className='text-sm'
-              type='password'
               placeholder='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
               value={auth.awsSigV4.secretKey}
-              onChange={(e) => patchAWS({ secretKey: e.target.value })}
+              onChange={(newVal) => patchAWS({ secretKey: newVal })}
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
           </div>
 
           <div className='grid grid-cols-2 gap-2'>
             <div>
               <Label className='mb-1 block'>Region</Label>
-              <Input
+              <VariableAwareInput
                 className='text-sm'
                 placeholder='us-east-1'
                 value={auth.awsSigV4.region}
-                onChange={(e) => patchAWS({ region: e.target.value })}
+                onChange={(newVal) => patchAWS({ region: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
               />
             </div>
             <div>
               <Label className='mb-1 block'>Service</Label>
-              <Input
+              <VariableAwareInput
                 className='text-sm'
                 placeholder='execute-api'
                 value={auth.awsSigV4.service}
-                onChange={(e) => patchAWS({ service: e.target.value })}
+                onChange={(newVal) => patchAWS({ service: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
               />
             </div>
           </div>
 
           <div>
             <Label className='mb-1 block'>Session Token</Label>
-            <Input
+            <VariableAwareInput
               className='text-sm'
-              type='password'
               placeholder='(optional)'
               value={auth.awsSigV4.sessionToken}
-              onChange={(e) => patchAWS({ sessionToken: e.target.value })}
+              onChange={(newVal) => patchAWS({ sessionToken: newVal })}
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
             <p className='mt-1 text-xs text-muted-foreground'>
               Session token is only required for temporary credentials.
