@@ -38,3 +38,4 @@ coverage/
 .yarn/install-state.gz
 .worktrees/
 .claude/worktrees/
+.gstack/
