@@ -102,6 +102,12 @@ export function isGitTab(tab: Tab): tab is GitTab {
   return tab.tabType === 'git';
 }
 
+export interface RequestSettings {
+  verifySsl: boolean;
+  followRedirects: boolean;
+  timeoutMs: number;
+}
+
 export interface RequestState {
   requestType: 'http' | 'graphql' | 'grpc' | 'websocket';
   method: HttpMethod;
@@ -111,6 +117,7 @@ export interface RequestState {
   headers: KeyValueEntry[];
   body: BodyState;
   auth: AuthState;
+  settings: RequestSettings;
   docs: string | null;
 }
 

@@ -73,6 +73,14 @@ export interface CollectionSummary {
   refType?: string;
 }
 
+/** Per-request execution settings persisted to the collection YAML. */
+export interface ApiRequestSettings {
+  /** Timeout in milliseconds. */
+  timeout?: number;
+  followRedirects?: boolean;
+  verifySsl?: boolean;
+}
+
 export interface Request {
   uid: string;
   name: string;
@@ -84,6 +92,7 @@ export interface Request {
   fileName?: string;
   tags?: string[];
   docs?: string | null;
+  settings?: ApiRequestSettings;
 }
 
 export interface Folder {

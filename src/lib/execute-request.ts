@@ -10,6 +10,7 @@ import {
   type Header,
 } from '@/lib/tauri-api';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
+import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -143,7 +144,20 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: h.enabled }));
 
   const resolvedBody = toApiBody(request.body, resolve);
-  const resolvedAuth = toApiAuth(request.auth, resolve);
+
+  // For "inherit from parent": use the collection's current auth state from the in-memory store.
+  // This is needed for OAuth2 flows (e.g. authorization_code) where the access token is never
+  // persisted to disk — the backend's merge_auth would get the config but not the active token.
+  // For bearer/basic/api-key/client_credentials OAuth2, the backend handles merge correctly even
+  // without this, but resolving in the frontend here is consistent and correct.
+  let authToResolve: AuthState = request.auth;
+  if (request.auth.authType === 'inherit' && collection) {
+    const storedAuth = useCollectionAuthStore.getState().getCollectionAuth(collection);
+    if (storedAuth && storedAuth.authType !== 'none' && storedAuth.authType !== 'inherit') {
+      authToResolve = storedAuth;
+    }
+  }
+  const resolvedAuth = toApiAuth(authToResolve, resolve);
 
   // Merge collection default headers with request headers. Request headers
   // with the same key override collection defaults; collection headers fill in
@@ -168,7 +182,11 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       queryParams: resolvedQueryParams,
       body: resolvedBody,
       auth: resolvedAuth,
-      options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      options: {
+        followRedirects: request.settings?.followRedirects ?? true,
+        timeoutMs: request.settings?.timeoutMs ?? 30000,
+        verifySsl: request.settings?.verifySsl ?? true,
+      },
       collection: collection ?? undefined,
       environmentName: envStore.activeEnvId ?? undefined,
       requestPath,

@@ -647,6 +647,7 @@ fn oc_settings_to_domain(oc: OcHttpRequestSettings) -> RequestSettings {
         timeout: oc.timeout.map(inheritable_number_to_domain),
         follow_redirects: oc.follow_redirects.map(inheritable_bool_to_domain),
         max_redirects: oc.max_redirects.map(inheritable_number_to_domain),
+        verify_ssl: oc.verify_ssl.map(inheritable_bool_to_domain),
     }
 }
 
@@ -656,6 +657,7 @@ fn domain_settings_to_oc(s: RequestSettings) -> OcHttpRequestSettings {
         timeout: s.timeout.map(domain_number_to_inheritable),
         follow_redirects: s.follow_redirects.map(domain_bool_to_inheritable),
         max_redirects: s.max_redirects.map(domain_number_to_inheritable),
+        verify_ssl: s.verify_ssl.map(domain_bool_to_inheritable),
     }
 }
 

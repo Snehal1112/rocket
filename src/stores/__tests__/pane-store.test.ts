@@ -84,6 +84,7 @@ describe('pane-store', () => {
         headers: [],
         body: { mode: 'none' as const, content: '', formData: [] },
         auth: { authType: 'none' as const },
+        settings: { verifySsl: true, followRedirects: true, timeoutMs: 30000 },
         docs: null,
       },
       response: null,

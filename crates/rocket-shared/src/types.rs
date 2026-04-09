@@ -246,6 +246,8 @@ pub struct RequestSettings {
     pub follow_redirects: Option<RequestSettingValue<bool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<RequestSettingValue<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_ssl: Option<RequestSettingValue<bool>>,
 }
 
 #[cfg(test)]

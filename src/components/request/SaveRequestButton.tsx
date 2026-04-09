@@ -94,6 +94,7 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
 
 function buildPayloadFromTab(tab: RequestTab): ApiRequest {
   const body = tab.request.body;
+  const s = tab.request.settings;
   return {
     uid: tab.id,
     name: tab.title,
@@ -104,6 +105,14 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
       .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
     body: body.mode !== 'none' ? { mode: body.mode, content: body.content } : undefined,
     auth: authForSave(tab.request.auth),
+    settings: s
+      ? {
+          timeout: s.timeoutMs,
+          followRedirects: s.followRedirects,
+          verifySsl: s.verifySsl,
+        }
+      : undefined,
+    docs: tab.request.docs ?? undefined,
   };
 }
 

@@ -171,6 +171,8 @@ pub struct OcHttpRequestSettings {
     pub follow_redirects: Option<InheritableBoolean>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_ssl: Option<InheritableBoolean>,
 }
 
 /// GraphQL request execution settings (same fields as HTTP settings).
@@ -1241,6 +1243,7 @@ mod tests {
             timeout: Some(InheritableNumber::Inherit("inherit".into())),
             follow_redirects: None,
             max_redirects: Some(InheritableNumber::Value(10.0)),
+            verify_ssl: Some(InheritableBoolean::Value(true)),
         };
         let yaml = serde_yaml::to_string(&settings).unwrap();
         let back: OcHttpRequestSettings = serde_yaml::from_str(&yaml).unwrap();
