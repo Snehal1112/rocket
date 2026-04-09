@@ -698,7 +698,9 @@ pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
     let val = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
     CollectionVariable {
         key:           v.name,
-        value:         val.clone(),
+        // initial_value is the git-committed baseline stored in YAML.
+        // value is a session-only override — starts empty so the UI shows no override on load.
+        value:         String::new(),
         initial_value: val,
         enabled:       !v.disabled.unwrap_or(false),
         secret:        false,
@@ -706,12 +708,11 @@ pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
 }
 
 /// Convert a CollectionVariable to an OcVariable.
-/// Uses value when non-empty; falls back to initial_value.
+/// Persists initial_value (the git-committed baseline); current-value overrides are session-only.
 pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable {
-    let effective = if !cv.value.is_empty() { cv.value } else { cv.initial_value };
     OcVariable {
         name:        cv.key,
-        value:       if effective.is_empty() { None } else { Some(VariableValue::simple(effective)) },
+        value:       if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
         description: None,
         disabled:    if cv.enabled { None } else { Some(true) },
     }
@@ -1639,6 +1640,41 @@ mod tests {
             }
             _ => panic!("expected OAuth2"),
         }
+    }
+
+    // ---- CollectionVariable tests ----
+
+    #[test]
+    fn collection_variable_save_persists_initial_value_not_override() {
+        // Scenario: user has a variable with an initial value and a current override.
+        // On save, the YAML must preserve initial_value (git-committed), not the runtime override.
+        let cv = CollectionVariable {
+            key: "HOST".into(),
+            value: "http://production.com".into(),    // current session override
+            initial_value: "http://localhost".into(), // git-committed initial
+            enabled: true,
+            secret: false,
+        };
+        let oc = collection_variable_to_oc_variable(cv);
+        assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://localhost"),
+            "YAML should store initial_value, not the current override");
+    }
+
+    #[test]
+    fn collection_variable_roundtrip_preserves_initial_value() {
+        let cv = CollectionVariable {
+            key: "BASE_URL".into(),
+            value: "http://override.com".into(),
+            initial_value: "http://localhost:8080".into(),
+            enabled: true,
+            secret: false,
+        };
+        let oc = collection_variable_to_oc_variable(cv);
+        let back = oc_variable_to_collection_variable(oc);
+        // After roundtrip, initial_value should be the original initial_value.
+        assert_eq!(back.initial_value, "http://localhost:8080");
+        // Current value is session-only — starts empty after loading from YAML.
+        assert_eq!(back.value, "");
     }
 
     // ---- Variable tests ----

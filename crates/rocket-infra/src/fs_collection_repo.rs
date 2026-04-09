@@ -1408,10 +1408,10 @@ mod tests {
         repo.create_folder("my-api", "outer/inner").unwrap();
 
         let outer_vars = vec![
-            CollectionVariable { key: "HOST".into(), value: "outer-host".into(), initial_value: "".into(), enabled: true, secret: false },
+            CollectionVariable { key: "HOST".into(), value: "".into(), initial_value: "outer-host".into(), enabled: true, secret: false },
         ];
         let inner_vars = vec![
-            CollectionVariable { key: "HOST".into(), value: "inner-host".into(), initial_value: "".into(), enabled: true, secret: false },
+            CollectionVariable { key: "HOST".into(), value: "".into(), initial_value: "inner-host".into(), enabled: true, secret: false },
         ];
         repo.save_folder_variables("my-api", "outer", outer_vars).unwrap();
         repo.save_folder_variables("my-api", "outer/inner", inner_vars).unwrap();
@@ -1422,7 +1422,7 @@ mod tests {
         let chain = repo.get_folder_chain_variables("my-api", "outer/inner/test.yml").unwrap();
         assert_eq!(chain.len(), 1);
         assert_eq!(chain[0].key, "HOST");
-        assert_eq!(chain[0].value, "inner-host");
+        assert_eq!(chain[0].initial_value, "inner-host");
     }
 
     #[test]
@@ -1433,14 +1433,16 @@ mod tests {
         repo.save_request("my-api", "get-users.yml", &req).unwrap();
 
         let vars = vec![
-            CollectionVariable { key: "PAGE".into(), value: "1".into(), initial_value: "".into(), enabled: true, secret: false },
+            CollectionVariable { key: "PAGE".into(), value: "".into(), initial_value: "1".into(), enabled: true, secret: false },
         ];
         repo.save_request_variables("my-api", "get-users.yml", vars).unwrap();
 
         let loaded = repo.get_request_variables("my-api", "get-users.yml").unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].key, "PAGE");
-        assert_eq!(loaded[0].value, "1");
+        assert_eq!(loaded[0].initial_value, "1");
+        // value is session-only — starts empty after loading from YAML.
+        assert_eq!(loaded[0].value, "");
     }
 
     #[test]
