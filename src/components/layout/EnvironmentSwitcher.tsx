@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Globe, Plus, Settings } from 'lucide-react';
+import { Check, ChevronDown, Database, Globe, Plus, Settings } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -109,16 +108,22 @@ export function EnvironmentSwitcher() {
     <>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger asChild>
-          <Button variant='ghost' size='sm' className='h-7 gap-1.5 px-2 text-xs'>
-            {globalEnvName && (
-              <span
-                className='h-2 w-2 rounded-full bg-teal-500 shrink-0'
-                title={`Global: ${globalEnvName}`}
-              />
+          <Button variant='ghost' size='sm' className='h-7 gap-2.5 px-2 text-xs'>
+            {activeEnvId && (
+              <span className='flex items-center gap-1'>
+                <Database className='h-3 w-3 text-muted-foreground shrink-0' />
+                <span className='max-w-[80px] truncate'>{activeEnvId}</span>
+              </span>
             )}
-            <span className={cn(!activeEnvId && 'text-muted-foreground')}>
-              {activeEnvId ?? 'No Environment'}
-            </span>
+            {globalEnvName && (
+              <span className='flex items-center gap-1'>
+                <Globe className='h-3 w-3 text-muted-foreground shrink-0' />
+                <span className='max-w-[80px] truncate'>{globalEnvName}</span>
+              </span>
+            )}
+            {!activeEnvId && !globalEnvName && (
+              <span className='text-muted-foreground'>No Environment</span>
+            )}
             <ChevronDown className='h-3 w-3 opacity-50' />
           </Button>
         </PopoverTrigger>
