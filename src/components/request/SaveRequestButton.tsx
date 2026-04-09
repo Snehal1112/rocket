@@ -29,7 +29,7 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
         authType: 'api-key',
         key: auth.apiKey?.key ?? '',
         value: auth.apiKey?.value ?? '',
-        addTo: auth.apiKey?.addTo ?? 'header',
+        placement: auth.apiKey?.addTo ?? 'header',
       };
     case 'oauth2':
       return {

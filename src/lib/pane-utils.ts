@@ -27,7 +27,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     case 'api-key':
       auth = {
         authType: 'api-key',
-        apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.addTo },
+        apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.placement },
       };
       break;
     case 'oauth2': {

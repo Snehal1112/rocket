@@ -53,7 +53,7 @@ export function CollectionSettingsDialog({
         authType: 'api-key',
         key: auth.apiKey?.key ?? '',
         value: auth.apiKey?.value ?? '',
-        addTo: auth.apiKey?.addTo ?? 'header',
+        placement: auth.apiKey?.addTo ?? 'header',
       };
     else apiAuth = undefined;
 

@@ -133,7 +133,7 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
       apiKey: {
         key: (a.key as string) ?? '',
         value: (a.value as string) ?? '',
-        addTo: ((a.addTo as string) ?? 'header') as 'header' | 'query',
+        addTo: ((a.placement as string) ?? 'header') as 'header' | 'query',
       },
     };
   }
@@ -160,7 +160,7 @@ function authStateToApi(auth: AuthState): Auth | undefined {
         authType: 'api-key',
         key: auth.apiKey?.key ?? '',
         value: auth.apiKey?.value ?? '',
-        addTo: auth.apiKey?.addTo ?? 'header',
+        placement: auth.apiKey?.addTo ?? 'header',
       };
     case 'oauth2': {
       const o = auth.oauth2;

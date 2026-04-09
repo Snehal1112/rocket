@@ -33,7 +33,7 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
         authType: 'api-key',
         key: resolve(auth.apiKey?.key ?? ''),
         value: resolve(auth.apiKey?.value ?? ''),
-        addTo: auth.apiKey?.addTo ?? 'header',
+        placement: auth.apiKey?.addTo ?? 'header',
       };
     case 'oauth2':
       // Send the stored access token as a bearer token.
