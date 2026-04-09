@@ -288,6 +288,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [readme, setReadme] = useState('');
   // True once the user edits any field; reset after successful save or reload.
   const [isDirty, setIsDirty] = useState(false);
+  // Prevents the store-sync effect from firing with the empty initial auth
+  // state before getCollection resolves, which would wipe a cached token.
+  const [isLoaded, setIsLoaded] = useState(false);
   // Guard against stale section values from before the tab redesign.
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
@@ -304,6 +307,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
     setLoading(true);
+    setIsLoaded(false);
     setError(null);
     getCollection(collectionName)
       .then((col) => {
@@ -311,8 +315,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         const s = col.settings;
         setDescription(s.description ?? '');
 
-        // Load auth from disk. For OAuth2 non-client-credentials flows the access token
-        // is never written to disk, so restore it from the in-memory store if available.
+        // Load auth from disk. For OAuth2 flows the access/refresh tokens are never
+        // written to disk, so restore them from the in-memory store if available.
         const diskAuth = toAuthState(s.auth);
         const cachedAuth = useCollectionAuthStore.getState().getCollectionAuth(collectionName);
         if (
@@ -321,7 +325,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           cachedAuth?.authType === 'oauth2' &&
           cachedAuth.oauth2?.accessToken
         ) {
-          diskAuth.oauth2 = { ...diskAuth.oauth2!, accessToken: cachedAuth.oauth2.accessToken };
+          diskAuth.oauth2 = {
+            ...diskAuth.oauth2!,
+            accessToken: cachedAuth.oauth2.accessToken,
+            refreshToken: cachedAuth.oauth2.refreshToken ?? '',
+            expiresIn: cachedAuth.oauth2.expiresIn ?? null,
+            tokenAcquiredAt: cachedAuth.oauth2.tokenAcquiredAt ?? null,
+          };
         }
         setAuth(diskAuth);
 
@@ -329,6 +339,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         setVariables(s.variables ?? []);
         setReadme(s.readme ?? '');
         setIsDirty(false);
+        setIsLoaded(true);
       })
       .catch((err) => {
         console.error('[CollectionOverviewTab] load failed', err);
@@ -338,10 +349,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   }, [collectionName]);
 
   // Keep the collection auth store in sync so execute-request.ts can resolve inherited auth.
-  // Runs whenever auth changes (e.g. after "Get Token") so the store always has the latest token.
+  // Guarded by isLoaded to prevent the initial empty auth from wiping a cached token.
   useEffect(() => {
+    if (!isLoaded) return;
     setCollectionAuth(collectionName, auth);
-  }, [auth, collectionName, setCollectionAuth]);
+  }, [auth, collectionName, setCollectionAuth, isLoaded]);
 
   // Persist all settings to disk (no auto-save).
   const saveSettings = useCallback(async () => {
