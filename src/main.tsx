@@ -47,6 +47,7 @@ import('monaco-editor').then((monaco) => {
     rules: [
       { token: 'string', foreground: 'a31515' },
       { token: 'string.key.json', foreground: '0451a5' },
+      { token: 'string.value.json', foreground: 'a31515' },
       { token: 'number', foreground: '098658' },
       { token: 'keyword', foreground: '0000ff' },
       { token: 'comment', foreground: '008000' },
