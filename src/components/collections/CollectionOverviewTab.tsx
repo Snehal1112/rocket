@@ -68,26 +68,29 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
   const a = auth as Record<string, unknown>;
   const authType = a.authType as string;
 
-  // Rust uses kebab-case "o-auth2", frontend uses "oauth2".
+  // Rust uses "o-auth2" authType and OAuth2Flow shape: { flow, credentials, accessTokenUrl }.
   if (authType === 'o-auth2' || authType === 'oauth2') {
+    const flow = (a.flow ?? a.grantType ?? 'client_credentials') as string;
+    const creds = (a.credentials ?? {}) as Record<string, unknown>;
+    const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
+    const grantType =
+      flow === 'resource_owner_password_credentials' ? 'password' :
+      flow === 'authorization_code' ? 'authorization_code' :
+      flow === 'implicit' ? 'implicit' :
+      'client_credentials';
     return {
-      authType: 'oauth2',
+      authType: 'oauth2' as const,
       oauth2: {
-        grantType: ((a.grantType as string) ?? 'client_credentials') as
-          | 'client_credentials'
-          | 'password'
-          | 'authorization_code'
-          | 'implicit',
+        grantType: grantType as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
         authorizationUrl: (a.authorizationUrl as string) ?? '',
-        tokenUrl: (a.tokenUrl as string) ?? '',
-        callbackUrl:
-          (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
-        clientId: (a.clientId as string) ?? '',
-        clientSecret: (a.clientSecret as string) ?? '',
+        tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
+        callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+        clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
+        clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
         scope: (a.scope as string) ?? '',
         state: (a.state as string) ?? '',
-        username: (a.username as string) ?? '',
-        password: (a.password as string) ?? '',
+        username: (resourceOwner.username as string) ?? (a.username as string) ?? '',
+        password: (resourceOwner.password as string) ?? (a.password as string) ?? '',
         clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
         headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
         addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
@@ -164,17 +167,47 @@ function authStateToApi(auth: AuthState): Auth | undefined {
       };
     case 'oauth2': {
       const o = auth.oauth2;
-      return {
-        authType: 'o-auth2',
-        grantType: o?.grantType ?? 'client_credentials',
-        clientId: o?.clientId ?? '',
-        clientSecret: o?.clientSecret ?? '',
-        tokenUrl: o?.tokenUrl ?? '',
+      const gt = o?.grantType ?? 'client_credentials';
+      const flow =
+        gt === 'password' ? 'resource_owner_password_credentials' :
+        gt === 'authorization_code' ? 'authorization_code' :
+        gt === 'implicit' ? 'implicit' :
+        'client_credentials';
+      // Implicit flow: flat shape with clientId, no credentials object.
+      if (flow === 'implicit') {
+        return {
+          authType: 'o-auth2',
+          flow: 'implicit',
+          authorizationUrl: o?.authorizationUrl ?? '',
+          clientId: o?.clientId ?? '',
+          callbackUrl: o?.callbackUrl || undefined,
+          scope: o?.scope || undefined,
+          state: o?.state || undefined,
+        } as unknown as Auth;
+      }
+      const base = {
+        authType: 'o-auth2' as const,
+        flow,
+        accessTokenUrl: o?.tokenUrl ?? '',
+        credentials: { clientId: o?.clientId ?? '', clientSecret: o?.clientSecret ?? '' },
         scope: o?.scope || undefined,
-        accessToken: o?.accessToken || undefined,
-        refreshToken: o?.refreshToken || undefined,
-        expiresAt: undefined,
-      } as unknown as Auth;
+      };
+      if (flow === 'authorization_code') {
+        return {
+          ...base,
+          authorizationUrl: o?.authorizationUrl ?? '',
+          callbackUrl: o?.callbackUrl || undefined,
+          state: o?.state || undefined,
+        } as unknown as Auth;
+      }
+      if (flow === 'resource_owner_password_credentials') {
+        return {
+          ...base,
+          resourceOwner: o?.username ? { username: o.username, password: o.password ?? '' } : undefined,
+        } as unknown as Auth;
+      }
+      // client_credentials
+      return base as unknown as Auth;
     }
     case 'aws-sig-v4': {
       const a = auth.awsSigV4;

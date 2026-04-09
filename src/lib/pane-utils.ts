@@ -30,26 +30,30 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
         apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.placement },
       };
       break;
-    case 'oauth2': {
+    case 'o-auth2': {
       const a = req.auth as Record<string, unknown>;
+      // Support Rust OAuth2Flow shape (flow + credentials + accessTokenUrl) and legacy flat shape.
+      const flow = (a.flow ?? a.grantType ?? 'client_credentials') as string;
+      const creds = (a.credentials ?? {}) as Record<string, unknown>;
+      const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
+      const grantType =
+        flow === 'resource_owner_password_credentials' ? 'password' :
+        flow === 'authorization_code' ? 'authorization_code' :
+        flow === 'implicit' ? 'implicit' :
+        'client_credentials';
       auth = {
         authType: 'oauth2',
         oauth2: {
-          grantType: (a.grantType ?? 'client_credentials') as
-            | 'client_credentials'
-            | 'password'
-            | 'authorization_code'
-            | 'implicit',
+          grantType: grantType as 'client_credentials' | 'password' | 'authorization_code' | 'implicit',
           authorizationUrl: (a.authorizationUrl as string) ?? '',
-          tokenUrl: (a.tokenUrl as string) ?? '',
-          callbackUrl:
-            (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
-          clientId: (a.clientId as string) ?? '',
-          clientSecret: (a.clientSecret as string) ?? '',
+          tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
+          callbackUrl: (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
+          clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
+          clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
           scope: (a.scope as string) ?? '',
           state: (a.state as string) ?? '',
-          username: (a.username as string) ?? '',
-          password: (a.password as string) ?? '',
+          username: (resourceOwner.username as string) ?? (a.username as string) ?? '',
+          password: (resourceOwner.password as string) ?? (a.password as string) ?? '',
           clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
           headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
           addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',

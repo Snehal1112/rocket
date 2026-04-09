@@ -31,28 +31,48 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
         value: auth.apiKey?.value ?? '',
         placement: auth.apiKey?.addTo ?? 'header',
       };
-    case 'oauth2':
-      return {
-        authType: 'oauth2',
-        grantType: auth.oauth2?.grantType ?? 'client_credentials',
-        authorizationUrl: auth.oauth2?.authorizationUrl ?? '',
-        tokenUrl: auth.oauth2?.tokenUrl ?? '',
-        callbackUrl: auth.oauth2?.callbackUrl ?? '',
-        clientId: auth.oauth2?.clientId ?? '',
-        clientSecret: auth.oauth2?.clientSecret ?? '',
-        scope: auth.oauth2?.scope ?? '',
-        state: auth.oauth2?.state ?? '',
-        username: auth.oauth2?.username ?? '',
-        password: auth.oauth2?.password ?? '',
-        clientAuthentication: auth.oauth2?.clientAuthentication ?? 'body',
-        headerPrefix: auth.oauth2?.headerPrefix ?? 'Bearer',
-        addTokenTo: auth.oauth2?.addTokenTo ?? 'header',
-        verifySsl: auth.oauth2?.verifySsl ?? true,
-        accessToken: auth.oauth2?.accessToken ?? '',
-        refreshToken: auth.oauth2?.refreshToken ?? '',
-        expiresIn: auth.oauth2?.expiresIn ?? null,
-        tokenAcquiredAt: auth.oauth2?.tokenAcquiredAt ?? null,
+    case 'oauth2': {
+      const o = auth.oauth2;
+      const gt = o?.grantType ?? 'client_credentials';
+      const flow =
+        gt === 'password' ? 'resource_owner_password_credentials' :
+        gt === 'authorization_code' ? 'authorization_code' :
+        gt === 'implicit' ? 'implicit' :
+        'client_credentials';
+      if (flow === 'implicit') {
+        return {
+          authType: 'o-auth2',
+          flow: 'implicit',
+          authorizationUrl: o?.authorizationUrl ?? '',
+          clientId: o?.clientId ?? '',
+          callbackUrl: o?.callbackUrl || undefined,
+          scope: o?.scope || undefined,
+          state: o?.state || undefined,
+        } as Auth;
+      }
+      const base = {
+        authType: 'o-auth2',
+        flow,
+        accessTokenUrl: o?.tokenUrl ?? '',
+        credentials: { clientId: o?.clientId ?? '', clientSecret: o?.clientSecret ?? '' },
+        scope: o?.scope || undefined,
       };
+      if (flow === 'authorization_code') {
+        return {
+          ...base,
+          authorizationUrl: o?.authorizationUrl ?? '',
+          callbackUrl: o?.callbackUrl || undefined,
+          state: o?.state || undefined,
+        } as Auth;
+      }
+      if (flow === 'resource_owner_password_credentials') {
+        return {
+          ...base,
+          resourceOwner: o?.username ? { username: o.username, password: o.password ?? '' } : undefined,
+        } as Auth;
+      }
+      return base as Auth;
+    }
     case 'aws-sig-v4':
       return {
         authType: 'aws-sig-v4',

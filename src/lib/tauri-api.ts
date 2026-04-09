@@ -38,7 +38,7 @@ export type Auth =
   | { authType: 'basic'; username: string; password: string }
   | { authType: 'bearer'; token: string }
   | { authType: 'api-key'; key: string; value: string; placement: 'header' | 'query' }
-  | { authType: 'oauth2'; [key: string]: unknown }
+  | { authType: 'o-auth2'; [key: string]: unknown }
   | { authType: 'aws-sig-v4'; [key: string]: unknown };
 
 export interface RequestOptions {
