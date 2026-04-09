@@ -546,9 +546,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               </div>
 
               <div className='space-y-1.5'>
-                <label className='text-sm font-medium text-muted-foreground'>Auth Type</label>
+                <label
+                  htmlFor='col-auth-type'
+                  className='text-sm font-medium text-muted-foreground'
+                >
+                  Auth Type
+                </label>
                 <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
-                  <SelectTrigger className='w-48 h-8 text-sm'>
+                  <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
