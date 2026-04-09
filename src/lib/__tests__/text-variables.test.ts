@@ -53,4 +53,10 @@ describe('parseTextTokens', () => {
       { type: 'variable', content: 'b', rawLength: 5 },
     ]);
   });
+
+  it('handles hyphenated variable names', () => {
+    expect(parseTextTokens('{{my-var}}')).toEqual([
+      { type: 'variable', content: 'my-var', rawLength: 10 },
+    ]);
+  });
 });

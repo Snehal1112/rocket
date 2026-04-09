@@ -1,11 +1,11 @@
 // Matches {{variable.name}} style placeholders, same pattern as url-variables.ts.
-const VAR_REGEX = /\{\{\s*([\w.]+)\s*\}\}/g;
+const VAR_REGEX = /\{\{\s*([\w.-]+)\s*\}\}/g;
 
 export interface TextToken {
   type: 'text' | 'variable';
   /** Raw text content, or variable name without braces (whitespace trimmed). */
   content: string;
-  /** Number of characters consumed in the original string (needed for offset math). */
+  /** Characters consumed in the original string, including `{{` and `}}` braces for variable tokens. */
   rawLength: number;
 }
 
