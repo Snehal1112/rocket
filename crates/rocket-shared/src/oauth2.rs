@@ -67,6 +67,8 @@ pub struct OAuth2Settings {
     pub auto_fetch_token: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_refresh_token: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "verifySsl")]
+    pub verify_ssl: Option<bool>,
 }
 
 /// OAuth2 flow — discriminated by `flow` field.
@@ -213,10 +215,34 @@ mod tests {
 
     #[test]
     fn settings() {
-        let s = OAuth2Settings { auto_fetch_token: Some(true), auto_refresh_token: Some(false) };
+        let s = OAuth2Settings { auto_fetch_token: Some(true), auto_refresh_token: Some(false), verify_ssl: None };
         let json = serde_json::to_string(&s).unwrap();
         let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn settings_verify_ssl_roundtrip() {
+        let s = OAuth2Settings {
+            auto_fetch_token: None,
+            auto_refresh_token: None,
+            verify_ssl: Some(false),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("verifySsl"), "field must serialize as verifySsl, got: {json}");
+        let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.verify_ssl, Some(false));
+    }
+
+    #[test]
+    fn settings_verify_ssl_omitted_when_none() {
+        let s = OAuth2Settings {
+            auto_fetch_token: None,
+            auto_refresh_token: None,
+            verify_ssl: None,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("verifySsl"), "None must be skipped, got: {json}");
     }
 
     #[test]
