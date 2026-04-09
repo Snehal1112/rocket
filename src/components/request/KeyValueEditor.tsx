@@ -3,7 +3,9 @@ import { useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { KeyValueEntry } from '@/types/pane-types';
+import { VariableAwareInput } from './VariableAwareInput';
 
 interface KeyValueEditorProps {
   entries: KeyValueEntry[];
@@ -12,6 +14,8 @@ interface KeyValueEditorProps {
   valuePlaceholder?: string;
   addLabel?: string;
   label?: string;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
 export function KeyValueEditor({
@@ -21,6 +25,8 @@ export function KeyValueEditor({
   valuePlaceholder = 'Value',
   addLabel = 'Add Entry',
   label,
+  variableContext,
+  onNavigateToSource,
 }: KeyValueEditorProps) {
   const updateEntry = useCallback(
     (id: string, patch: Partial<KeyValueEntry>) => {
@@ -64,11 +70,13 @@ export function KeyValueEditor({
             onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
             className='flex-1 text-xs'
           />
-          <Input
+          <VariableAwareInput
             placeholder={valuePlaceholder}
             value={entry.value}
-            onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+            onChange={(newVal) => updateEntry(entry.id, { value: newVal })}
             className='flex-1 text-xs'
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
           />
           <Button
             variant='ghost'

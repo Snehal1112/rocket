@@ -1,12 +1,20 @@
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { KeyValueEntry } from '@/types/pane-types';
 import { KeyValueEditor } from './KeyValueEditor';
 
 interface QueryParamsEditorProps {
   params: KeyValueEntry[];
   onChange: (params: KeyValueEntry[]) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
-export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) {
+export function QueryParamsEditor({
+  params,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: QueryParamsEditorProps) {
   return (
     <KeyValueEditor
       entries={params}
@@ -15,6 +23,8 @@ export function QueryParamsEditor({ params, onChange }: QueryParamsEditorProps) 
       valuePlaceholder='Value'
       addLabel='Add Query Param'
       label='Query'
+      variableContext={variableContext}
+      onNavigateToSource={onNavigateToSource}
     />
   );
 }
