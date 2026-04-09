@@ -152,12 +152,15 @@ async fn apply_auth(
                     access_token_url,
                     credentials,
                     scope,
+                    settings,
                     ..
                 } => {
+                    let verify_ssl = settings.as_ref().and_then(|s| s.verify_ssl).unwrap_or(true);
                     let token = fetch_client_credentials_token(
                         access_token_url,
                         credentials,
                         scope.as_deref(),
+                        verify_ssl,
                     )
                     .await?;
                     builder = builder.bearer_auth(&token);
@@ -237,8 +240,12 @@ async fn fetch_client_credentials_token(
     access_token_url: &str,
     credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
     scope: Option<&str>,
+    verify_ssl: bool,
 ) -> DomainResult<String> {
-    let client = Client::new();
+    let client = Client::builder()
+        .danger_accept_invalid_certs(!verify_ssl)
+        .build()
+        .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
     let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
     if let Some(s) = scope {
         params.push(("scope".to_string(), s.to_string()));
@@ -518,6 +525,7 @@ mod oauth2_tests {
                 placement: None,
             },
             Some("read write"),
+            true,
         )
         .await
         .unwrap();
@@ -549,6 +557,7 @@ mod oauth2_tests {
                 placement: Some("body".into()),
             },
             None,
+            true,
         )
         .await
         .unwrap();
@@ -579,11 +588,42 @@ mod oauth2_tests {
                 placement: None,
             },
             None,
+            true,
         )
         .await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("401"), "Error should mention status: {}", err);
+    }
+
+    #[tokio::test]
+    async fn client_credentials_respects_verify_ssl_true() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "access_token": "tok123" })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let token_url = format!("{}/token", mock_server.uri());
+        let result = fetch_client_credentials_token(
+            &token_url,
+            &OAuth2ClientCredentials {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                placement: None,
+            },
+            None,
+            true,
+        )
+        .await;
+
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        assert_eq!(result.unwrap(), "tok123");
     }
 }
