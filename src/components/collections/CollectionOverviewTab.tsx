@@ -1,5 +1,12 @@
 import { Check, Folder as FolderIcon, Loader2, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
@@ -196,6 +203,15 @@ function toKeyValueEntries(
   }));
 }
 
+const COLLECTION_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
+  { label: 'None', value: 'none' },
+  { label: 'Basic', value: 'basic' },
+  { label: 'Bearer', value: 'bearer' },
+  { label: 'API Key', value: 'api-key' },
+  { label: 'OAuth 2.0', value: 'oauth2' },
+  { label: 'AWS Sig v4', value: 'aws-sig-v4' },
+];
+
 const TABS: { label: string; value: CollectionSection }[] = [
   { label: 'Overview', value: 'overview' },
   { label: 'Authorization', value: 'auth' },
@@ -277,6 +293,38 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     saveSettings,
     'Failed to save settings',
   );
+
+  const handleAuthTypeChange = useCallback((authType: AuthState['authType']) => {
+    const next: AuthState = { authType };
+    if (authType === 'basic') next.basic = { username: '', password: '' };
+    if (authType === 'bearer') next.bearer = { token: '' };
+    if (authType === 'api-key') next.apiKey = { key: '', value: '', addTo: 'header' };
+    if (authType === 'oauth2')
+      next.oauth2 = {
+        grantType: 'client_credentials',
+        authorizationUrl: '',
+        tokenUrl: '',
+        callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
+        clientId: '',
+        clientSecret: '',
+        scope: '',
+        state: '',
+        username: '',
+        password: '',
+        clientAuthentication: 'body',
+        headerPrefix: 'Bearer',
+        addTokenTo: 'header',
+        verifySsl: true,
+        accessToken: '',
+        refreshToken: '',
+        expiresIn: null,
+        tokenAcquiredAt: null,
+      };
+    if (authType === 'aws-sig-v4')
+      next.awsSigV4 = { accessKey: '', secretKey: '', region: '', service: '', sessionToken: '' };
+    setAuth(next);
+    setIsDirty(true);
+  }, []);
 
   if (loading) {
     return (
@@ -411,6 +459,22 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   This authorization method will be used for every request in this collection. You
                   can override this by specifying one in the request.
                 </p>
+              </div>
+
+              <div className='space-y-1.5'>
+                <label className='text-sm font-medium text-muted-foreground'>Auth Type</label>
+                <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
+                  <SelectTrigger className='w-48 h-8 text-sm'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COLLECTION_AUTH_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <AuthEditor
