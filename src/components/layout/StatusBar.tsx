@@ -1,4 +1,6 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { Moon, Sun, Terminal } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
@@ -12,6 +14,11 @@ interface StatusBarProps {
 export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   const entryCount = useConsoleStore((s) => s.entries.length);
   const { isDark, toggleTheme } = useTheme();
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setVersion);
+  }, []);
 
   return (
     <div className='h-7 border-t border-border/70 bg-card/50 backdrop-blur-sm px-2 flex items-center gap-1.5 shrink-0'>
@@ -43,6 +50,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
           </span>
         )}
       </Button>
+      {version && <span className='ml-auto text-2xs text-muted-foreground'>{`v${version}`}</span>}
     </div>
   );
 }
