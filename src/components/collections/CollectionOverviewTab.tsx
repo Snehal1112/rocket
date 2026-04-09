@@ -23,7 +23,6 @@ import {
   saveCollectionSettings,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
-import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type {
   AuthState,
@@ -274,7 +273,6 @@ const TABS: { label: string; value: CollectionSection }[] = [
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const collectionName = tab.collectionName;
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
-  const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -300,12 +298,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     },
     [tab.id, updateCollectionSection],
   );
-
-  // Keep the collection auth store in sync so execute-request.ts can resolve inherited auth.
-  // This is especially important for OAuth2 flows where the access token lives only in memory.
-  useEffect(() => {
-    setCollectionAuth(collectionName, auth);
-  }, [auth, collectionName, setCollectionAuth]);
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
