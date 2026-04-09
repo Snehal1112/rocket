@@ -104,7 +104,7 @@ export interface PaneState {
   getOpenTabCount: (collection: string) => number;
 
   // Workspace tabs.
-  openWorkspaceTabs: (workspaceId: string) => void;
+  openWorkspaceTabs: (workspaceId: string, section?: WorkspaceTabSection) => void;
   isWorkspaceMode: () => boolean;
 
   // Utility.
@@ -114,6 +114,9 @@ export interface PaneState {
   updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
   updateTabTitle: (tabId: string, title: string) => void;
   updateCollectionSection: (tabId: string, section: CollectionSection) => void;
+  /** Opens or focuses the collection tab for `collection` and navigates to `section`.
+   *  Returns false if no collection tab is currently open for that collection. */
+  openCollectionTab: (collection: string, section: CollectionSection) => boolean;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -404,7 +407,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     return collectionTabState[collection]?.tabs.length ?? 0;
   },
 
-  openWorkspaceTabs(workspaceId) {
+  openWorkspaceTabs(workspaceId, section) {
     const { root, activeGroupId, activeCollection, collectionTabState } = get();
 
     // Snapshot the current collection's tabs so they survive the switch.
@@ -451,10 +454,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Reset pane tree to a single leaf with workspace tabs.
     const leaf = createDefaultLeaf();
+    const targetTab = section ? (tabs.find((t) => t.activeSection === section) ?? tabs[0]) : tabs[0];
     const newRoot = updateLeaf(leaf, leaf.groupId, (l) => ({
       ...l,
       tabs,
-      activeTabId: tabs[0].id,
+      activeTabId: targetTab.id,
     }));
     set({
       root: newRoot,
@@ -533,6 +537,37 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         console.error('[pane-store] rename failed:', err),
       );
     }
+  },
+
+  openCollectionTab(collection, section) {
+    const { root } = get();
+
+    // Walk the pane tree to find an open tab for this collection.
+    const findTarget = (
+      node: PaneNode,
+    ): { groupId: string; tabId: string } | null => {
+      if (node.type === 'leaf') {
+        const found = node.tabs.find(
+          (t) =>
+            t.tabType === 'collection' &&
+            (t as CollectionTab).collectionName === collection,
+        );
+        return found ? { groupId: node.groupId, tabId: found.id } : null;
+      }
+      return findTarget(node.children[0]) ?? findTarget(node.children[1]);
+    };
+
+    const target = findTarget(root);
+    if (!target) return false;
+
+    // Activate the tab and navigate to the requested section.
+    get().updateCollectionSection(target.tabId, section);
+    const newRoot = updateLeaf(root, target.groupId, (l) => ({
+      ...l,
+      activeTabId: target.tabId,
+    }));
+    set({ root: newRoot, activeGroupId: target.groupId });
+    return true;
   },
 
   updateCollectionSection(tabId, section) {
