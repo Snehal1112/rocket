@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { KeyValueEditor } from './KeyValueEditor';
 
@@ -17,9 +18,16 @@ const MonacoWrapper = lazy(() =>
 interface BodyEditorProps {
   body: BodyState;
   onChange: (body: BodyState) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
-export function BodyEditor({ body, onChange }: BodyEditorProps) {
+export function BodyEditor({
+  body,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: BodyEditorProps) {
   const setContent = useCallback(
     (content: string) => onChange({ ...body, content }),
     [body, onChange],
@@ -66,6 +74,7 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
               onChange={(val) => setContent(val)}
               bodyMode={body.mode}
               height='100%'
+              variableContext={variableContext}
             />
           </Suspense>
         </div>
@@ -78,6 +87,8 @@ export function BodyEditor({ body, onChange }: BodyEditorProps) {
           keyPlaceholder='Field name'
           valuePlaceholder='Value'
           addLabel='Add Field'
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
         />
       )}
 
