@@ -143,7 +143,7 @@ export function MonacoWrapper({
     });
 
     // Register hover providers for common body language IDs.
-    const langIds = ['json', 'xml', 'plaintext', 'graphql', 'text/plain'];
+    const langIds = ['json', 'xml', 'plaintext', 'graphql'];
     for (const langId of langIds) {
       const d = monaco.languages.registerHoverProvider(langId, {
         provideHover(hoverModel: monacoNs.editor.ITextModel, position: monacoNs.Position) {
@@ -167,7 +167,7 @@ export function MonacoWrapper({
               const displayValue = entry
                 ? entry.secret
                   ? '●●●●'
-                  : (entry.value ?? '*(not set)*')
+                  : (entry.value || '*(not set)*')
                 : '*(not set)*';
 
               return {
