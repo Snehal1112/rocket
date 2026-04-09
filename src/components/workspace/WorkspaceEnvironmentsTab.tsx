@@ -3,11 +3,13 @@
 import { Check, Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { InlineEnvName } from '@/components/environments/InlineEnvName';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SavedPill } from '@/components/ui/saved-pill';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
+import { deleteGlobalEnvironment, saveGlobalEnvironment } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 
@@ -142,6 +144,33 @@ export function WorkspaceEnvironmentsTab() {
     }
   }, [selectedName, environments, deleteEnv]);
 
+  // Rename an environment.
+  const handleRenameEnv = useCallback(
+    async (oldName: string, newName: string) => {
+      const env = environments.find((e) => e.name === oldName);
+      if (!env) return;
+      try {
+        await saveGlobalEnvironment({ ...env, name: newName });
+        await deleteGlobalEnvironment(oldName);
+        const wasActive = useEnvStore.getState().globalEnvName === oldName;
+        useEnvStore.setState((s) => ({
+          globalEnvironments: s.globalEnvironments.map((e) =>
+            e.name === oldName ? { ...e, name: newName } : e,
+          ),
+        }));
+        if (wasActive) {
+          await useEnvStore.getState().setGlobalEnv(newName);
+        }
+        setSelectedName(newName);
+      } catch (err) {
+        console.error('[WorkspaceEnvironmentsTab] rename failed:', err);
+        toast.error('Failed to rename environment');
+        throw err;
+      }
+    },
+    [environments],
+  );
+
   return (
     <div className='h-full flex'>
       {/* Left panel: environment list. */}
@@ -149,19 +178,14 @@ export function WorkspaceEnvironmentsTab() {
         <ScrollArea className='flex-1'>
           <div className='p-2 space-y-0.5'>
             {environments.map((env) => (
-              <button
+              <InlineEnvName
                 key={env.name}
-                type='button'
+                name={env.name}
+                isSelected={selectedName === env.name}
+                existingNames={environments.map((e) => e.name)}
                 onClick={() => setSelectedName(env.name)}
-                className={cn(
-                  'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
-                  selectedName === env.name
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-foreground hover:bg-muted/60',
-                )}
-              >
-                {env.name}
-              </button>
+                onRename={(newName) => handleRenameEnv(env.name, newName)}
+              />
             ))}
             {isAddingEnv && (
               <Input
