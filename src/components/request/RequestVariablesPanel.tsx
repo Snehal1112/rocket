@@ -1,3 +1,4 @@
+import { Check, Info } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
 import { Button } from '@/components/ui/button';
@@ -61,22 +62,31 @@ export function RequestVariablesPanel({
   }, [collection, requestPath, vars]);
 
   return (
-    <div className='space-y-4'>
-      <div className='rounded-md border border-border bg-muted/30 px-3 py-2'>
-        <p className='text-xs text-muted-foreground'>
-          Request variables are available to this request only. They have higher priority than
-          folder, environment, and collection variables.
+    <div className='space-y-3'>
+      {/* Info banner. */}
+      <div className='flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2.5'>
+        <Info className='h-3.5 w-3.5 text-muted-foreground/60 mt-0.5 shrink-0' />
+        <p className='text-[11px] text-muted-foreground leading-relaxed'>
+          Request variables are scoped to this request only and take priority over folder,
+          environment, and collection variables.
         </p>
       </div>
 
       {/* showDescription=false avoids duplicating the built-in info banner. */}
       <CollectionVariablesEditor variables={vars} onChange={handleChange} showDescription={false} />
 
-      <div className='flex items-center gap-3'>
-        <Button size='sm' onClick={handleSave}>
-          Save
+      {/* Save footer. */}
+      <div className='flex items-center gap-2.5 pt-1'>
+        <Button size='sm' onClick={handleSave} className='gap-1.5'>
+          {saved ? (
+            <>
+              <Check className='h-3.5 w-3.5' />
+              Saved
+            </>
+          ) : (
+            'Save'
+          )}
         </Button>
-        {saved && <span className='text-xs text-green-600 dark:text-green-400'>Saved</span>}
       </div>
     </div>
   );

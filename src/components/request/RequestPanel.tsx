@@ -1,4 +1,4 @@
-import { Loader2, Send, Zap } from 'lucide-react';
+import { Braces, Clock, Loader2, RotateCw, Send, ShieldCheck, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -41,6 +43,7 @@ import type {
   BodyState,
   HttpMethod,
   KeyValueEntry,
+  RequestSettings,
   RequestTab,
 } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
@@ -81,7 +84,7 @@ const INHERIT_AUTH_OPTION = {
   value: 'inherit' as AuthState['authType'],
 };
 
-type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables' | 'docs';
+type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables' | 'docs' | 'settings';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -275,6 +278,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
+  // Docs and Settings don't use the response panel — expand to full height.
+  const expandFull = activeSection === 'docs' || activeSection === 'settings';
+  // Use safe access in case settings is absent on a request loaded from an older saved state.
+  const settings = request.settings ?? { verifySsl: true, followRedirects: true, timeoutMs: 30000 };
+  const settingsModified =
+    !settings.verifySsl || !settings.followRedirects || settings.timeoutMs !== 30000;
 
   const pathParamMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -382,6 +391,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const handleAuthChange = useCallback(
     (auth: AuthState) => updateRequest(tab.id, { auth }),
     [tab.id, updateRequest],
+  );
+
+  const handleSettingsChange = useCallback(
+    (patch: Partial<RequestSettings>) => {
+      const current = request.settings ?? {
+        verifySsl: true,
+        followRedirects: true,
+        timeoutMs: 30000,
+      };
+      updateRequest(tab.id, { settings: { ...current, ...patch } });
+    },
+    [tab.id, updateRequest, request.settings],
   );
 
   const handlePathParamsChange = useCallback(
@@ -532,6 +553,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'docs',
         onClick: () => setActiveSection('docs'),
       },
+      {
+        value: 'settings',
+        label: (
+          <>
+            Settings
+            {settingsModified && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'settings',
+        onClick: () => setActiveSection('settings'),
+      },
     ],
     [
       activeSection,
@@ -541,6 +575,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       request.auth.authType,
       requestVarCount,
       request.docs,
+      settingsModified,
     ],
   );
 
@@ -617,8 +652,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
       {/* ── Request area ── */}
       <div
-        className='flex flex-col overflow-hidden bg-card/80 h-(--req-h) min-h-[20%] max-h-[80%]'
-        style={{ '--req-h': `${requestHeight}%` } as React.CSSProperties}
+        className={cn(
+          'flex flex-col overflow-hidden bg-card/80',
+          expandFull ? 'flex-1' : 'h-(--req-h) min-h-[20%] max-h-[80%]',
+        )}
+        style={expandFull ? undefined : ({ '--req-h': `${requestHeight}%` } as React.CSSProperties)}
       >
         {/* URL bar. */}
         <div className='flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm'>
@@ -732,9 +770,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         )}
 
         {/* Section tabs. */}
-        <div className='flex-1 flex flex-col min-h-0'>
+        <div className='flex-1 flex flex-col min-h-0  bg-card/50'>
           <BrunoTabBar tabs={tabDefs} rightContent={tabRightContent} />
-          <div className='flex-1 overflow-auto p-3'>
+          <div className='flex-1 overflow-auto p-3 bg-card/65'>
             {activeSection === 'params' && (
               <div className='space-y-2'>
                 <PathParamsPanel
@@ -783,10 +821,104 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                   onVarCountChange={setRequestVarCount}
                 />
               ) : (
-                <p className='p-4 text-sm text-muted-foreground'>
-                  Save this request to a collection before adding request variables.
-                </p>
+                <div className='flex flex-col items-center justify-center gap-4 py-10 text-center'>
+                  <div className='h-12 w-12 rounded-xl bg-muted/40 border border-border/50 flex items-center justify-center'>
+                    <Braces className='h-5 w-5 text-muted-foreground/30' />
+                  </div>
+                  <div className='space-y-1.5'>
+                    <p className='text-xs font-medium text-muted-foreground/70'>
+                      No collection attached
+                    </p>
+                    <p className='text-[11px] text-muted-foreground/40 max-w-[200px] leading-relaxed'>
+                      Save this request to a collection to define request-scoped variables.
+                    </p>
+                  </div>
+                </div>
               ))}
+            {activeSection === 'settings' && (
+              <div className='space-y-4'>
+                {/* Security group. */}
+                <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <ShieldCheck className='h-3.5 w-3.5 text-muted-foreground' />
+                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                      Security
+                    </span>
+                  </div>
+                  <label
+                    htmlFor='verify-ssl'
+                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+                  >
+                    <Checkbox
+                      id='verify-ssl'
+                      checked={settings.verifySsl}
+                      onCheckedChange={(checked) => handleSettingsChange({ verifySsl: !!checked })}
+                    />
+                    <div>
+                      <span className='text-sm'>Verify SSL certificate</span>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Validate the server's TLS certificate chain.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Connection group. */}
+                <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
+                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                      Connection
+                    </span>
+                  </div>
+                  <label
+                    htmlFor='follow-redirects'
+                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+                  >
+                    <Checkbox
+                      id='follow-redirects'
+                      checked={settings.followRedirects}
+                      onCheckedChange={(checked) =>
+                        handleSettingsChange({ followRedirects: !!checked })
+                      }
+                    />
+                    <div>
+                      <span className='text-sm'>Follow redirects</span>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Automatically follow HTTP 3xx redirects.
+                      </p>
+                    </div>
+                  </label>
+                  <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
+                    <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+                    <div className='flex items-center gap-2.5 flex-1'>
+                      <div className='flex-1'>
+                        <span className='text-sm'>Timeout</span>
+                        <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                          Max wait time before aborting the request.
+                        </p>
+                      </div>
+                      <div className='flex items-center gap-1.5'>
+                        <Input
+                          id='timeout-ms'
+                          type='number'
+                          min={0}
+                          className='h-7 w-24 text-xs text-right tabular-nums'
+                          value={settings.timeoutMs}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            if (!Number.isNaN(val) && val >= 0) {
+                              handleSettingsChange({ timeoutMs: val });
+                            }
+                          }}
+                        />
+                        <span className='text-[11px] text-muted-foreground'>ms</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {activeSection === 'docs' && (
               <RequestDocsPanel
                 docs={request.docs}
@@ -802,48 +934,53 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </div>
       </div>
 
-      {/* ── Drag separator ── */}
-      <div
-        onPointerDown={handleSeparatorDown}
-        className={cn(
-          'h-3 flex items-center justify-center cursor-row-resize select-none border-y transition-colors',
-          isDragging
-            ? 'bg-primary/15 border-primary/50'
-            : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
-        )}
-      >
-        <div
-          className={cn(
-            'rounded-full transition-all',
-            isDragging ? 'w-24 h-1.5 bg-primary' : 'w-16 h-1 bg-muted-foreground/40',
-          )}
-        />
-      </div>
+      {/* ── Drag separator and response area — hidden on Docs/Settings tabs. ── */}
+      {!expandFull && (
+        <>
+          <div
+            onPointerDown={handleSeparatorDown}
+            className={cn(
+              'h-3 flex items-center justify-center cursor-row-resize select-none border-y transition-colors',
+              isDragging
+                ? 'bg-primary/15 border-primary/50'
+                : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
+            )}
+          >
+            <div
+              className={cn(
+                'rounded-full transition-all',
+                isDragging ? 'w-24 h-1.5 bg-primary' : 'w-16 h-1 bg-muted-foreground/40',
+              )}
+            />
+          </div>
 
-      {/* ── Response area ── */}
-      <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0'>
-        {sending ? (
-          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
-            <Loader2 className='h-5 w-5 animate-spin text-primary' />
-            <p className='text-sm text-muted-foreground'>Sending request...</p>
+          <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0'>
+            {sending ? (
+              <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+                <Loader2 className='h-5 w-5 animate-spin text-primary' />
+                <p className='text-sm text-muted-foreground'>Sending request...</p>
+              </div>
+            ) : response ? (
+              <ResponseBodyViewer response={response} />
+            ) : (
+              <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+                <RocketLiftOff className='w-24 h-24' />
+                <p className='text-sm font-medium text-foreground'>Ready for liftoff</p>
+                <p className='text-xs text-muted-foreground'>
+                  Send a request to see the response here
+                </p>
+                <p className='text-xs text-muted-foreground mt-1'>
+                  Press{' '}
+                  <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
+                    Ctrl+Enter
+                  </kbd>{' '}
+                  to send
+                </p>
+              </div>
+            )}
           </div>
-        ) : response ? (
-          <ResponseBodyViewer response={response} />
-        ) : (
-          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
-            <RocketLiftOff className='w-24 h-24' />
-            <p className='text-sm font-medium text-foreground'>Ready for liftoff</p>
-            <p className='text-xs text-muted-foreground'>Send a request to see the response here</p>
-            <p className='text-xs text-muted-foreground mt-1'>
-              Press{' '}
-              <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
-                Ctrl+Enter
-              </kbd>{' '}
-              to send
-            </p>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       <LoadTestDialog open={showLoadTest} onOpenChange={setShowLoadTest} request={request} />
       <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
