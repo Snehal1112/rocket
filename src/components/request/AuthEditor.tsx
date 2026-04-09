@@ -276,6 +276,7 @@ export function AuthEditor({
             <Lock className='h-3.5 w-3.5 text-muted-foreground' />
             <VariableAwareInput
               placeholder='Password'
+              type='password'
               className='flex-1 text-sm'
               value={auth.basic.password}
               onChange={(newVal) =>
@@ -487,6 +488,7 @@ export function AuthEditor({
                     <Label className='mb-1 block'>Client Secret</Label>
                     <VariableAwareInput
                       className='text-sm'
+                      type='password'
                       placeholder='client-secret'
                       value={o.clientSecret}
                       onChange={(newVal) => patchOAuth2({ clientSecret: newVal })}
@@ -528,6 +530,7 @@ export function AuthEditor({
                     <Label className='mb-1 block'>Password</Label>
                     <VariableAwareInput
                       className='text-sm'
+                      type='password'
                       value={o.password}
                       onChange={(newVal) => patchOAuth2({ password: newVal })}
                       variableContext={variableContext}
@@ -716,6 +719,7 @@ export function AuthEditor({
             <Label className='mb-1 block'>Secret Key</Label>
             <VariableAwareInput
               className='text-sm'
+              type='password'
               placeholder='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
               value={auth.awsSigV4.secretKey}
               onChange={(newVal) => patchAWS({ secretKey: newVal })}

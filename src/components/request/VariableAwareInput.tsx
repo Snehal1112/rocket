@@ -16,6 +16,7 @@ export interface VariableAwareInputProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  type?: 'text' | 'password';
   variableContext?: Map<string, VariableScopeEntry>;
   onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
@@ -55,6 +56,7 @@ export function VariableAwareInput({
   placeholder,
   className,
   disabled,
+  type = 'text',
   variableContext,
   onNavigateToSource,
 }: VariableAwareInputProps) {
@@ -62,6 +64,7 @@ export function VariableAwareInput({
   if (!variableContext) {
     return (
       <Input
+        type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -78,6 +81,7 @@ export function VariableAwareInput({
       placeholder={placeholder}
       className={className}
       disabled={disabled}
+      type={type}
       variableContext={variableContext}
       onNavigateToSource={onNavigateToSource}
     />
@@ -91,6 +95,7 @@ function VariableAwareInputInner({
   placeholder,
   className,
   disabled,
+  type = 'text',
   variableContext,
   onNavigateToSource,
 }: Required<Pick<VariableAwareInputProps, 'variableContext'>> &
@@ -101,7 +106,9 @@ function VariableAwareInputInner({
   const globalEnv = useEnvStore((s) => s.globalEnv);
   const updateGlobalEnvironment = useEnvStore((s) => s.updateGlobalEnvironment);
 
-  // Key of the variable whose popover is currently open.
+  // Index of the token whose popover is currently open. Using index (not variable name) prevents
+  // duplicate variable names (e.g., "{{token}} {{token}}") from opening two popovers at once.
+  const [openTokenIdx, setOpenTokenIdx] = useState<number | null>(null);
   const [openVarKey, setOpenVarKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   // Tracks the scope of the variable being edited so handleCommit saves to the right store.
@@ -109,11 +116,15 @@ function VariableAwareInputInner({
 
   const tokens = parseTextTokens(value);
 
-  const handleTokenHover = useCallback((varKey: string, entry: VariableScopeEntry | undefined) => {
-    setOpenVarKey(varKey);
-    setEditValue(entry?.secret ? '' : (entry?.value ?? ''));
-    editingScopeRef.current = entry?.source ?? null;
-  }, []);
+  const handleTokenHover = useCallback(
+    (idx: number, varKey: string, entry: VariableScopeEntry | undefined) => {
+      setOpenTokenIdx(idx);
+      setOpenVarKey(varKey);
+      setEditValue(entry?.secret ? '' : (entry?.value ?? ''));
+      editingScopeRef.current = entry?.source ?? null;
+    },
+    [],
+  );
 
   // Persist the edited value to the appropriate environment store.
   const handleCommit = useCallback(async () => {
@@ -141,6 +152,7 @@ function VariableAwareInputInner({
       }
     }
 
+    setOpenTokenIdx(null);
     setOpenVarKey(null);
   }, [
     openVarKey,
@@ -160,7 +172,7 @@ function VariableAwareInputInner({
     <div className={cn('relative', className)}>
       {/* Transparent real input receives keystrokes and shows the text caret. */}
       <input
-        type='text'
+        type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -181,8 +193,12 @@ function VariableAwareInputInner({
         {tokens.length > 0 ? (
           tokens.map((token, idx) => {
             if (token.type === 'text') {
-              // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
-              return <span key={idx}>{token.content}</span>;
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
+                <span key={idx}>
+                  {type === 'password' ? '●'.repeat(token.content.length) : token.content}
+                </span>
+              );
             }
 
             const entry = variableContext.get(token.content);
@@ -201,9 +217,9 @@ function VariableAwareInputInner({
               <Popover
                 // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
                 key={idx}
-                open={openVarKey === token.content}
+                open={openTokenIdx === idx}
                 onOpenChange={(open) => {
-                  if (!open) setOpenVarKey(null);
+                  if (!open) setOpenTokenIdx(null);
                 }}
               >
                 <PopoverTrigger asChild>
@@ -213,8 +229,8 @@ function VariableAwareInputInner({
                       'rounded-sm px-0.5 cursor-pointer pointer-events-auto bg-transparent border-0',
                       badgeClass,
                     )}
-                    onMouseEnter={() => handleTokenHover(token.content, entry)}
-                    onClick={() => handleTokenHover(token.content, entry)}
+                    onMouseEnter={() => handleTokenHover(idx, token.content, entry)}
+                    onClick={() => handleTokenHover(idx, token.content, entry)}
                   >
                     {`{{${token.content}}}`}
                   </button>
@@ -233,7 +249,10 @@ function VariableAwareInputInner({
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void handleCommitRef.current();
-                        if (e.key === 'Escape') setOpenVarKey(null);
+                        if (e.key === 'Escape') {
+                          setOpenTokenIdx(null);
+                          setOpenVarKey(null);
+                        }
                       }}
                       onBlur={() => void handleCommitRef.current()}
                     />

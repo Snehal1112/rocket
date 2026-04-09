@@ -1,4 +1,6 @@
-// Matches {{variable.name}} style placeholders, same pattern as url-variables.ts.
+// Allows optional whitespace inside braces (e.g., {{ token }}) so that hand-typed
+// variables are highlighted even with padding. The URL bar uses a stricter regex
+// without whitespace tolerance; this divergence is intentional.
 const VAR_REGEX = /\{\{\s*([\w.-]+)\s*\}\}/g;
 
 export interface TextToken {
