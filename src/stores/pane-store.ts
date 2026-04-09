@@ -454,7 +454,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Reset pane tree to a single leaf with workspace tabs.
     const leaf = createDefaultLeaf();
-    const targetTab = section ? (tabs.find((t) => t.activeSection === section) ?? tabs[0]) : tabs[0];
+    const targetTab = section
+      ? (tabs.find((t) => t.activeSection === section) ?? tabs[0])
+      : tabs[0];
     const newRoot = updateLeaf(leaf, leaf.groupId, (l) => ({
       ...l,
       tabs,
@@ -543,14 +545,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
 
     // Walk the pane tree to find an open tab for this collection.
-    const findTarget = (
-      node: PaneNode,
-    ): { groupId: string; tabId: string } | null => {
+    const findTarget = (node: PaneNode): { groupId: string; tabId: string } | null => {
       if (node.type === 'leaf') {
         const found = node.tabs.find(
-          (t) =>
-            t.tabType === 'collection' &&
-            (t as CollectionTab).collectionName === collection,
+          (t) => t.tabType === 'collection' && (t as CollectionTab).collectionName === collection,
         );
         return found ? { groupId: node.groupId, tabId: found.id } : null;
       }

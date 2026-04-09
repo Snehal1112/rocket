@@ -1,5 +1,7 @@
 import { Loader2, Send, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 import { RocketLiftOff } from '@/components/illustrations';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
@@ -28,10 +30,12 @@ import type { ParsedCurl } from '@/lib/curl-parser';
 import { findTabInTree } from '@/lib/pane-utils';
 import { type CollectionVariable, getCollectionSettings, updateRequestDocs } from '@/lib/tauri-api';
 import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
+import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type {
   AuthState,
   BodyState,
@@ -95,6 +99,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
+  const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
@@ -397,6 +402,42 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, tab.source, updateRequest],
   );
 
+  const handleNavigateToSource = useCallback(
+    (source: VariableSource | 'pathParam') => {
+      switch (source) {
+        case 'pathParam':
+          setActiveSection('params');
+          break;
+        case 'request':
+        case 'runtime':
+          setActiveSection('variables');
+          break;
+        case 'environment':
+          setEnvDialogOpen(true);
+          break;
+        case 'global': {
+          const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+          if (wsId) usePaneStore.getState().openWorkspaceTabs(wsId, 'environments');
+          break;
+        }
+        case 'collection': {
+          const collection = tab.source?.collection;
+          if (collection) {
+            const found = usePaneStore.getState().openCollectionTab(collection, 'variables');
+            if (!found) {
+              toast.info('Open the collection tab to edit collection variables.');
+            }
+          }
+          break;
+        }
+        default:
+          // folder and process vars have no navigable destination in the current UI.
+          break;
+      }
+    },
+    [tab.source?.collection],
+  );
+
   const tabDefs = useMemo(
     () => [
       {
@@ -614,7 +655,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               );
               updateRequest(tab.id, { pathParams: updated });
             }}
-            onSwitchToSection={(section) => setActiveSection(section)}
+            onNavigateToSource={handleNavigateToSource}
             placeholder='Enter URL or paste a cURL request'
             scopedContext={scopedContext}
           />
@@ -772,6 +813,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       </div>
 
       <LoadTestDialog open={showLoadTest} onOpenChange={setShowLoadTest} request={request} />
+      <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
 
       {/* Unsaved changes dialog. */}
       <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
