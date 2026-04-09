@@ -443,13 +443,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Build workspace tabs.
     const sections: WorkspaceTabSection[] = ['overview', 'environments', 'git'];
-    const tabs: WorkspaceTab[] = sections.map((section) => ({
-      id: `workspace:${workspaceId}:${section}`,
-      title: section === 'git' ? 'Git UI' : section.charAt(0).toUpperCase() + section.slice(1),
+    const tabs: WorkspaceTab[] = sections.map((s) => ({
+      id: `workspace:${workspaceId}:${s}`,
+      title: s === 'git' ? 'Git UI' : s.charAt(0).toUpperCase() + s.slice(1),
       isDirty: false,
       tabType: 'workspace',
       workspaceId,
-      activeSection: section,
+      activeSection: s,
     }));
 
     // Reset pane tree to a single leaf with workspace tabs.
@@ -557,16 +557,22 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       return findTarget(node.children[0]) ?? findTarget(node.children[1]);
     };
 
+    // Only searches the live pane tree. Tabs snapshotted in collectionTabState
+    // (from a previous collection switch) are not considered "open" here.
     const target = findTarget(root);
     if (!target) return false;
 
     // Activate the tab and navigate to the requested section.
     get().updateCollectionSection(target.tabId, section);
-    const newRoot = updateLeaf(root, target.groupId, (l) => ({
+    // Re-read root after updateCollectionSection has written its own set().
+    const updatedRoot = get().root;
+    const newRoot = updateLeaf(updatedRoot, target.groupId, (l) => ({
       ...l,
       activeTabId: target.tabId,
     }));
     set({ root: newRoot, activeGroupId: target.groupId });
+    // Note: activeCollection is not updated here. This is safe because CollectionTabs
+    // are only present in the tree when their collection is already active.
     return true;
   },
 
