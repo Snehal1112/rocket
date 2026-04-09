@@ -118,9 +118,41 @@ export function parseCurl(input: string): ParsedCurl | null {
     } else if (token === '-A' || token === '--user-agent') {
       headers.push({ key: 'User-Agent', value: tokens[++i] ?? '' });
     } else if (token.startsWith('-')) {
-      // Skip unknown flags. If the next token doesn't start with -, it's the flag's value.
-      if (i + 1 < tokens.length && !tokens[i + 1].startsWith('-')) {
-        i++; // Skip the value too.
+      // Boolean flags that take no value — do not consume the next token.
+      const boolFlags = new Set([
+        '-L',
+        '--location',
+        '-k',
+        '--insecure',
+        '-v',
+        '--verbose',
+        '-s',
+        '--silent',
+        '-i',
+        '--include',
+        '-I',
+        '--head',
+        '-f',
+        '--fail',
+        '--compressed',
+        '--http1.0',
+        '--http1.1',
+        '--http2',
+        '--no-keepalive',
+        '--ipv4',
+        '--ipv6',
+        '--anyauth',
+        '--digest',
+        '--negotiate',
+        '--ntlm',
+        '--proxy-anyauth',
+        '--proxy-digest',
+        '--proxy-negotiate',
+        '--proxy-ntlm',
+      ]);
+      // Skip the next token only for flags that take a value argument.
+      if (!boolFlags.has(token) && i + 1 < tokens.length && !tokens[i + 1].startsWith('-')) {
+        i++; // Skip the flag's value.
       }
     } else {
       // Positional argument — this is the URL.

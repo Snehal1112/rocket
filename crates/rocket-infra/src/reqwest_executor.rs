@@ -32,9 +32,12 @@ impl HttpExecutor for ReqwestExecutor {
         let mut url = reqwest::Url::parse(&request.url)
             .map_err(|e| DomainError::InvalidInput(format!("Invalid URL: {e}")))?;
         {
-            let mut pairs = url.query_pairs_mut();
-            for p in &request.query_params {
-                if p.enabled {
+            let enabled: Vec<_> = request.query_params.iter().filter(|p| p.enabled).collect();
+            // Only call query_pairs_mut when there are params; calling it with no
+            // appends sets an empty query string and produces a trailing '?'.
+            if !enabled.is_empty() {
+                let mut pairs = url.query_pairs_mut();
+                for p in enabled {
                     pairs.append_pair(&p.key, &p.value);
                 }
             }
