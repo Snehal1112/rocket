@@ -167,7 +167,7 @@ export function MonacoWrapper({
               const displayValue = entry
                 ? entry.secret
                   ? '●●●●'
-                  : (entry.value || '*(not set)*')
+                  : entry.value || '*(not set)*'
                 : '*(not set)*';
 
               return {
