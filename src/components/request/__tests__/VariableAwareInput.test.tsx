@@ -82,7 +82,7 @@ describe('VariableAwareInput', () => {
     expect(span).not.toBeNull();
   });
 
-  it('renders plain input when value has no variables', () => {
+  it('renders plain text in overlay when value has no variables', () => {
     render(
       <VariableAwareInput
         value='plain text'

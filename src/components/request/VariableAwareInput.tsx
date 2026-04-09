@@ -167,7 +167,7 @@ function VariableAwareInputInner({
         disabled={disabled}
         className={cn(
           'h-8 w-full rounded-md border border-input bg-background px-3 py-1 font-mono text-xs',
-          'text-transparent caret-foreground outline-none ring-ring/50',
+          'text-transparent caret-foreground outline-none ring-ring/50 pointer-events-auto',
           'focus-visible:ring-[3px] focus-visible:border-ring',
           'disabled:cursor-not-allowed disabled:opacity-50',
         )}
@@ -214,6 +214,7 @@ function VariableAwareInputInner({
                       badgeClass,
                     )}
                     onMouseEnter={() => handleTokenHover(token.content, entry)}
+                    onClick={() => handleTokenHover(token.content, entry)}
                   >
                     {`{{${token.content}}}`}
                   </button>
@@ -224,7 +225,7 @@ function VariableAwareInputInner({
                       autoFocus
                       className='h-7 text-xs font-mono'
                       value={entry?.secret ? '●●●●' : editValue}
-                      placeholder='Value'
+                      placeholder={entry ? 'Value' : 'Not set'}
                       readOnly={isReadOnly || entry?.secret}
                       onChange={(e) => {
                         if (isReadOnly || entry?.secret) return;
