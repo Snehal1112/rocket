@@ -1,11 +1,15 @@
 import { useCallback } from 'react';
+import { VariableAwareInput } from '@/components/request/VariableAwareInput';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface PathParamsPanelProps {
   params: KeyValueEntry[];
   onChange: (params: KeyValueEntry[]) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
 /**
@@ -13,7 +17,12 @@ interface PathParamsPanelProps {
  * (e.g. `:id` segments) and cannot be added, removed, or renamed.
  * Only values and the enabled toggle are editable.
  */
-export function PathParamsPanel({ params, onChange }: PathParamsPanelProps) {
+export function PathParamsPanel({
+  params,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: PathParamsPanelProps) {
   const updateEntry = useCallback(
     (id: string, patch: Partial<KeyValueEntry>) => {
       onChange(params.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -42,11 +51,13 @@ export function PathParamsPanel({ params, onChange }: PathParamsPanelProps) {
               tabIndex={-1}
               className='flex-1 text-xs bg-muted/50 cursor-default'
             />
-            <Input
+            <VariableAwareInput
               placeholder='Value'
               value={entry.value}
-              onChange={(e) => updateEntry(entry.id, { value: e.target.value })}
+              onChange={(newVal) => updateEntry(entry.id, { value: newVal })}
               className='flex-1 text-xs'
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
             />
             {/* No remove button — path params are controlled by the URL. */}
             <div className='w-7' />
