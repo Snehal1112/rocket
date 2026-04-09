@@ -190,7 +190,7 @@ function VariableAwareInputInner({
               ? sourceBadgeClass(entry.source)
               : 'bg-destructive/15 text-destructive';
 
-            // Only environment and global vars can be edited from this popover.
+            // Editable: environment vars, global vars, and unresolved vars (entry === undefined).
             const isReadOnly =
               entry !== undefined && entry.source !== 'environment' && entry.source !== 'global';
 
@@ -251,6 +251,7 @@ function VariableAwareInputInner({
                       <button
                         type='button'
                         className='text-2xs text-primary hover:underline cursor-pointer'
+                        // Prevent input blur before click handler can commit — avoids potential double-save.
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={async () => {
                           await handleCommitRef.current();
