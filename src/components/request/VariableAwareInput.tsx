@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { parseTextTokens } from '@/lib/text-variables';
@@ -114,7 +114,7 @@ function VariableAwareInputInner({
   // Tracks the scope of the variable being edited so handleCommit saves to the right store.
   const editingScopeRef = useRef<VariableSource | null>(null);
 
-  const tokens = parseTextTokens(value);
+  const tokens = useMemo(() => parseTextTokens(value), [value]);
 
   const handleTokenHover = useCallback(
     (idx: number, varKey: string, entry: VariableScopeEntry | undefined) => {

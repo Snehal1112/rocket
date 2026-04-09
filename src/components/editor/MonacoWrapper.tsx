@@ -147,6 +147,8 @@ export function MonacoWrapper({
     for (const langId of langIds) {
       const d = monaco.languages.registerHoverProvider(langId, {
         provideHover(hoverModel: monacoNs.editor.ITextModel, position: monacoNs.Position) {
+          // Guard against hover events from a different editor instance using the same language.
+          if (editor.getModel()?.id !== hoverModel.id) return null;
           const ctx = variableContextRef.current;
           if (!ctx) return null;
 

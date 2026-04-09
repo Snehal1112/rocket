@@ -64,6 +64,7 @@ export function KeyValueEditor({
             onCheckedChange={(checked) => updateEntry(entry.id, { enabled: !!checked })}
             aria-label={`${entry.enabled ? 'Disable' : 'Enable'} ${entry.key || 'unnamed'}`}
           />
+          {/* Key column stays as plain Input — variable templates are for values only. */}
           <Input
             placeholder={keyPlaceholder}
             value={entry.key}
