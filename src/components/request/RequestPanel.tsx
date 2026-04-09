@@ -438,6 +438,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.source?.collection],
   );
 
+  // Adapter for editors: they pass (source, key) but navigation only uses source.
+  const handleEditorNavigateToSource = useCallback(
+    (source: VariableSource, _key: string) => {
+      handleNavigateToSource(source);
+    },
+    [handleNavigateToSource],
+  );
+
   const tabDefs = useMemo(
     () => [
       {
@@ -729,18 +737,43 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <div className='flex-1 overflow-auto p-3'>
             {activeSection === 'params' && (
               <div className='space-y-2'>
-                <PathParamsPanel params={request.pathParams} onChange={handlePathParamsChange} />
-                <QueryParamsEditor params={request.queryParams} onChange={handleParamsChange} />
+                <PathParamsPanel
+                  params={request.pathParams}
+                  onChange={handlePathParamsChange}
+                  variableContext={scopedContext}
+                  onNavigateToSource={handleEditorNavigateToSource}
+                />
+                <QueryParamsEditor
+                  params={request.queryParams}
+                  onChange={handleParamsChange}
+                  variableContext={scopedContext}
+                  onNavigateToSource={handleEditorNavigateToSource}
+                />
               </div>
             )}
             {activeSection === 'headers' && (
-              <HeadersEditor headers={request.headers} onChange={handleHeadersChange} />
+              <HeadersEditor
+                headers={request.headers}
+                onChange={handleHeadersChange}
+                variableContext={scopedContext}
+                onNavigateToSource={handleEditorNavigateToSource}
+              />
             )}
             {activeSection === 'body' && (
-              <BodyEditor body={request.body} onChange={handleBodyChange} />
+              <BodyEditor
+                body={request.body}
+                onChange={handleBodyChange}
+                variableContext={scopedContext}
+                onNavigateToSource={handleEditorNavigateToSource}
+              />
             )}
             {activeSection === 'auth' && (
-              <AuthEditor auth={request.auth} onChange={handleAuthChange} />
+              <AuthEditor
+                auth={request.auth}
+                onChange={handleAuthChange}
+                variableContext={scopedContext}
+                onNavigateToSource={handleEditorNavigateToSource}
+              />
             )}
             {activeSection === 'variables' &&
               (tab.source?.collection && tab.source?.path ? (
