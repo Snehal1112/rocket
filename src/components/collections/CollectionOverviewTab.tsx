@@ -23,6 +23,7 @@ import {
   saveCollectionSettings,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type {
   AuthState,
@@ -102,7 +103,9 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
         clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
         headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
         addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
-        verifySsl: (a.verifySsl as boolean) ?? true,
+        // verifySsl lives in settings.verifySsl on the API response (nested in OAuth2Settings).
+        verifySsl:
+          ((a.settings as Record<string, unknown> | undefined)?.verifySsl as boolean) ?? true,
         accessToken: (a.accessToken as string) ?? '',
         refreshToken: (a.refreshToken as string) ?? '',
         expiresIn: (a.expiresIn as number) ?? null,
@@ -194,6 +197,7 @@ function authStateToApi(auth: AuthState): Auth | undefined {
           callbackUrl: o?.callbackUrl || undefined,
           scope: o?.scope || undefined,
           state: o?.state || undefined,
+          settings: { verifySsl: o?.verifySsl ?? true },
         } as unknown as Auth;
       }
       const base = {
@@ -202,6 +206,7 @@ function authStateToApi(auth: AuthState): Auth | undefined {
         accessTokenUrl: o?.tokenUrl ?? '',
         credentials: { clientId: o?.clientId ?? '', clientSecret: o?.clientSecret ?? '' },
         scope: o?.scope || undefined,
+        settings: { verifySsl: o?.verifySsl ?? true },
       };
       if (flow === 'authorization_code') {
         return {
@@ -269,6 +274,7 @@ const TABS: { label: string; value: CollectionSection }[] = [
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const collectionName = tab.collectionName;
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
+  const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -294,6 +300,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     },
     [tab.id, updateCollectionSection],
   );
+
+  // Keep the collection auth store in sync so execute-request.ts can resolve inherited auth.
+  // This is especially important for OAuth2 flows where the access token lives only in memory.
+  useEffect(() => {
+    setCollectionAuth(collectionName, auth);
+  }, [auth, collectionName, setCollectionAuth]);
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
