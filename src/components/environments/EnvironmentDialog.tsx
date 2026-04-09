@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input';
 import { SavedPill } from '@/components/ui/saved-pill';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
-import { saveEnvironment } from '@/lib/tauri-api';
-import { cn } from '@/lib/utils';
+import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
+import { InlineEnvName } from './InlineEnvName';
 
 interface EnvironmentDialogProps {
   open: boolean;
@@ -20,9 +20,10 @@ interface EnvironmentDialogProps {
 }
 
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
+  const activeCollection = useEnvStore((s) => s.activeCollection);
   const environments = useEnvStore((s) => s.environments);
   const createEnvironment = useEnvStore((s) => s.createEnvironment);
-  const deleteEnvironment = useEnvStore((s) => s.deleteEnvironment);
+  const deleteEnvironmentStore = useEnvStore((s) => s.deleteEnvironment);
 
   const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
@@ -53,14 +54,36 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const handleDeleteEnv = useCallback(async () => {
     if (!selectedName) return;
-    await deleteEnvironment(selectedName);
+    await deleteEnvironmentStore(selectedName);
     setSelectedName(environments.find((e) => e.name !== selectedName)?.name ?? null);
-  }, [selectedName, deleteEnvironment, environments]);
+  }, [selectedName, deleteEnvironmentStore, environments]);
+
+  const handleRenameEnv = useCallback(
+    async (oldName: string, newName: string) => {
+      const env = environments.find((e) => e.name === oldName);
+      if (!env || !activeCollection) return;
+      try {
+        await saveEnvironment(activeCollection, { ...env, name: newName });
+        await deleteEnvironmentApi(activeCollection, oldName);
+        useEnvStore.setState((s) => ({
+          environments: s.environments.map((e) =>
+            e.name === oldName ? { ...e, name: newName } : e,
+          ),
+          activeEnvId: s.activeEnvId === oldName ? newName : s.activeEnvId,
+        }));
+        setSelectedName(newName);
+      } catch (err) {
+        console.error('[EnvironmentDialog] rename failed:', err);
+        toast.error('Failed to rename environment');
+        throw err;
+      }
+    },
+    [environments, activeCollection],
+  );
 
   // Persist to backend only — the store is already updated optimistically
   // by updateVariable. Using updateEnvironment here would overwrite the
   // live store with a stale snapshot captured at debounce time.
-  const activeCollection = useEnvStore((s) => s.activeCollection);
   const saveEnv = useCallback(
     (env: Environment) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -135,19 +158,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
             <ScrollArea className='flex-1'>
               <div className='p-2 space-y-0.5'>
                 {environments.map((env) => (
-                  <button
+                  <InlineEnvName
                     key={env.name}
-                    type='button'
+                    name={env.name}
+                    isSelected={selectedName === env.name}
+                    existingNames={environments.map((e) => e.name)}
                     onClick={() => setSelectedName(env.name)}
-                    className={cn(
-                      'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
-                      selectedName === env.name
-                        ? 'bg-accent text-accent-foreground'
-                        : 'text-foreground hover:bg-muted/60',
-                    )}
-                  >
-                    {env.name}
-                  </button>
+                    onRename={(newName) => handleRenameEnv(env.name, newName)}
+                  />
                 ))}
                 {isAddingEnv && (
                   <Input
