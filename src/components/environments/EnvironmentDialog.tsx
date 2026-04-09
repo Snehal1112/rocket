@@ -65,12 +65,15 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       try {
         await saveEnvironment(activeCollection, { ...env, name: newName });
         await deleteEnvironmentApi(activeCollection, oldName);
+        const wasActive = useEnvStore.getState().activeEnvId === oldName;
         useEnvStore.setState((s) => ({
           environments: s.environments.map((e) =>
             e.name === oldName ? { ...e, name: newName } : e,
           ),
-          activeEnvId: s.activeEnvId === oldName ? newName : s.activeEnvId,
         }));
+        if (wasActive) {
+          useEnvStore.getState().setActiveEnv(newName);
+        }
         setSelectedName(newName);
       } catch (err) {
         console.error('[EnvironmentDialog] rename failed:', err);
