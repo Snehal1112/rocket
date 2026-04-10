@@ -158,11 +158,19 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
               <div className='grid grid-cols-3 gap-2'>
                 <Stat label='Total' value={result.totalRequests} />
                 <Stat label='Succeeded' value={result.succeeded} className='text-emerald-500' />
-                <Stat
-                  label='Failed'
-                  value={result.failed}
-                  className={result.failed > 0 ? 'text-destructive' : ''}
-                />
+                <div>
+                  <p className='text-[10px] text-muted-foreground uppercase'>Failed</p>
+                  <p
+                    className={`text-sm font-medium ${result.failed > 0 ? 'text-destructive' : ''}`}
+                  >
+                    {result.failed}
+                  </p>
+                  {result.failed > 0 && (
+                    <p className='text-[9px] text-muted-foreground leading-tight'>
+                      {result.failedStatus} status, {result.failedTransport} transport
+                    </p>
+                  )}
+                </div>
               </div>
               <div className='border-t pt-2 grid grid-cols-3 gap-2'>
                 <Stat label='Min' value={`${result.minLatencyMs.toFixed(1)}ms`} />
