@@ -982,7 +982,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </>
       )}
 
-      <LoadTestDialog open={showLoadTest} onOpenChange={setShowLoadTest} request={request} />
+      <LoadTestDialog
+        open={showLoadTest}
+        onOpenChange={setShowLoadTest}
+        request={request}
+        tabId={tab.id}
+      />
       <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
 
       {/* Unsaved changes dialog. */}

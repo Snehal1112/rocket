@@ -72,11 +72,25 @@ export function toApiBody(body: BodyState, resolve = (s: string) => s): Body | u
   return { mode: body.mode as Body['mode'], content: resolve(body.content) };
 }
 
-// Executes a request and writes the response into the pane store.
-// This is a plain async function so it can be called from both React
-// components and non-React contexts (e.g. keyboard shortcut handlers).
-export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
-  // Build the full 7-scope variable resolution context.
+// Resolved request fields returned by resolveRequestFields().
+export interface ResolvedRequestFields {
+  url: string;
+  headers: Header[];
+  queryParams: { key: string; value: string; enabled: boolean }[];
+  body: ReturnType<typeof toApiBody>;
+  auth: Auth;
+  collection: string | undefined;
+  environmentName: string | undefined;
+  requestPath: string | undefined;
+}
+
+// Builds the fully-resolved request fields for a given tab and request state.
+// Applies the same 7-scope variable resolution as sendRequest() so that callers
+// (e.g. the load test dialog) get consistent env var substitution.
+export async function resolveRequestFields(
+  tabId: string,
+  request: RequestState,
+): Promise<ResolvedRequestFields> {
   const envStore = useEnvStore.getState();
   const envVars = envStore.getActiveVariables();
   const globalVars = envStore.getGlobalVariables();
@@ -87,7 +101,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const collection = found?.tab.source?.collection;
   const requestPath = found?.tab.source?.path;
 
-  // Fetch collection-level variables and default headers from settings.
   let collectionVars: CollectionVariable[] = [];
   let collectionHeaders: { key: string; value: string; enabled: boolean }[] = [];
   if (collection) {
@@ -100,7 +113,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     }
   }
 
-  // Fetch folder-chain variables (server walks full parent chain).
   let folderVars: CollectionVariable[] = [];
   if (collection && requestPath) {
     try {
@@ -110,7 +122,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     }
   }
 
-  // Fetch request-level variables.
   let requestVars: CollectionVariable[] = [];
   if (collection && requestPath) {
     try {
@@ -130,26 +141,19 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   });
   const resolve = (text: string) => resolveWithContext(text, ctx);
 
-  // Resolve environment variables in all request fields.
   let resolvedUrl = resolve(request.url);
-
-  // Substitute :pathParam placeholders with values from pathParams.
   for (const p of request.pathParams) {
     if (p.enabled && p.key && p.value) {
       resolvedUrl = resolvedUrl.replace(`:${p.key}`, encodeURIComponent(p.value));
     }
   }
+
   const resolvedHeaders: Header[] = request.headers
     .filter((h) => h.enabled)
     .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: h.enabled }));
 
   const resolvedBody = toApiBody(request.body, resolve);
 
-  // For "inherit from parent": use the collection's current auth state from the in-memory store.
-  // This is needed for OAuth2 flows (e.g. authorization_code) where the access token is never
-  // persisted to disk — the backend's merge_auth would get the config but not the active token.
-  // For bearer/basic/api-key/client_credentials OAuth2, the backend handles merge correctly even
-  // without this, but resolving in the frontend here is consistent and correct.
   let authToResolve: AuthState = request.auth;
   if (request.auth.authType === 'inherit' && collection) {
     const storedAuth = useCollectionAuthStore.getState().getCollectionAuth(collection);
@@ -159,9 +163,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   }
   const resolvedAuth = toApiAuth(authToResolve, resolve);
 
-  // Merge collection default headers with request headers. Request headers
-  // with the same key override collection defaults; collection headers fill in
-  // any keys not present in the request.
   const requestHeaderKeys = new Set(resolvedHeaders.map((h) => h.key.toLowerCase()));
   const effectiveHeaders: Header[] = [
     ...collectionHeaders
@@ -170,11 +171,38 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     ...resolvedHeaders,
   ];
 
-  try {
-    const resolvedQueryParams = request.queryParams
-      .filter((p) => p.enabled)
-      .map((p) => ({ key: resolve(p.key), value: resolve(p.value), enabled: p.enabled }));
+  const resolvedQueryParams = request.queryParams
+    .filter((p) => p.enabled)
+    .map((p) => ({ key: resolve(p.key), value: resolve(p.value), enabled: p.enabled }));
 
+  return {
+    url: resolvedUrl,
+    headers: effectiveHeaders,
+    queryParams: resolvedQueryParams,
+    body: resolvedBody,
+    auth: resolvedAuth,
+    collection,
+    environmentName: envStore.activeEnvId ?? undefined,
+    requestPath,
+  };
+}
+
+// Executes a request and writes the response into the pane store.
+// This is a plain async function so it can be called from both React
+// components and non-React contexts (e.g. keyboard shortcut handlers).
+export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
+  const {
+    url: resolvedUrl,
+    headers: effectiveHeaders,
+    queryParams: resolvedQueryParams,
+    body: resolvedBody,
+    auth: resolvedAuth,
+    collection,
+    environmentName,
+    requestPath,
+  } = await resolveRequestFields(tabId, request);
+
+  try {
     const result = await executeRequest({
       method: request.method,
       url: resolvedUrl,
@@ -188,7 +216,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
         verifySsl: request.settings?.verifySsl ?? true,
       },
       collection: collection ?? undefined,
-      environmentName: envStore.activeEnvId ?? undefined,
+      environmentName,
       requestPath,
     });
 
