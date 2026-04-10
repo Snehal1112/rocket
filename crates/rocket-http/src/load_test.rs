@@ -287,5 +287,8 @@ mod tests {
         assert_eq!(result.succeeded, 1);
         assert_eq!(result.failed, 0);
         assert_eq!(result.failed_status, 0);
+        assert_eq!(result.failed_transport, 0);
+        // 3xx latency is recorded in the distribution just like 2xx.
+        assert!(result.avg_latency_ms >= 5.0);
     }
 }
