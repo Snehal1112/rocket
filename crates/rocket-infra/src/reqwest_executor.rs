@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -7,11 +9,41 @@ use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
 
-pub struct ReqwestExecutor;
+pub struct ReqwestExecutor {
+    // Cache of reqwest::Clients keyed on (follow_redirects, verify_ssl).
+    // These are the only two HttpRequest options that force a different
+    // Client::builder() configuration; everything else (headers, body,
+    // query, timeout, auth) is applied per-request on the request builder.
+    // At most 4 distinct keys can ever exist.
+    clients: Mutex<HashMap<(bool, bool), Client>>,
+}
 
 impl ReqwestExecutor {
     pub fn new() -> Self {
-        Self
+        Self {
+            clients: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get_or_build_client(
+        &self,
+        follow_redirects: bool,
+        verify_ssl: bool,
+    ) -> DomainResult<Client> {
+        let key = (follow_redirects, verify_ssl);
+        let mut cache = self.clients.lock().unwrap();
+        if let Some(c) = cache.get(&key) {
+            // reqwest::Client::clone is cheap — internally Arc.
+            return Ok(c.clone());
+        }
+        let client = build_client_impl(follow_redirects, verify_ssl)?;
+        cache.insert(key, client.clone());
+        Ok(client)
+    }
+
+    #[cfg(test)]
+    pub fn cache_len(&self) -> usize {
+        self.clients.lock().unwrap().len()
     }
 }
 
@@ -24,7 +56,10 @@ impl Default for ReqwestExecutor {
 #[async_trait]
 impl HttpExecutor for ReqwestExecutor {
     async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
-        let client = build_client(request)?;
+        let client = self.get_or_build_client(
+            request.options.follow_redirects,
+            request.options.verify_ssl,
+        )?;
         let method = map_method(&request.method);
         let start = Instant::now();
 
@@ -97,8 +132,8 @@ impl HttpExecutor for ReqwestExecutor {
     }
 }
 
-fn build_client(request: &HttpRequest) -> DomainResult<Client> {
-    let redirect_policy = if request.options.follow_redirects {
+fn build_client_impl(follow_redirects: bool, verify_ssl: bool) -> DomainResult<Client> {
+    let redirect_policy = if follow_redirects {
         redirect::Policy::limited(10)
     } else {
         redirect::Policy::none()
@@ -106,7 +141,7 @@ fn build_client(request: &HttpRequest) -> DomainResult<Client> {
 
     Client::builder()
         .redirect(redirect_policy)
-        .danger_accept_invalid_certs(!request.options.verify_ssl)
+        .danger_accept_invalid_certs(!verify_ssl)
         .build()
         .map_err(|e| DomainError::Http(e.to_string()))
 }
@@ -410,11 +445,38 @@ mod tests {
     }
 
     #[test]
-    fn build_client_respects_ssl_option() {
-        let mut req = HttpRequest::new(HttpMethod::Get, "https://example.com");
-        req.options.verify_ssl = false;
+    fn build_client_impl_respects_ssl_option() {
         // Should not error when building a client that accepts invalid certs.
-        assert!(build_client(&req).is_ok());
+        assert!(build_client_impl(true, false).is_ok());
+    }
+
+    #[test]
+    fn executor_starts_with_empty_cache() {
+        let exec = ReqwestExecutor::new();
+        assert_eq!(exec.cache_len(), 0);
+    }
+
+    #[test]
+    fn executor_caches_client_on_first_use() {
+        let exec = ReqwestExecutor::new();
+        let _c1 = exec.get_or_build_client(true, true).unwrap();
+        let _c2 = exec.get_or_build_client(true, true).unwrap();
+        // Same options → only one cached client.
+        assert_eq!(exec.cache_len(), 1);
+    }
+
+    #[test]
+    fn executor_builds_different_clients_for_different_options() {
+        let exec = ReqwestExecutor::new();
+        let _a = exec.get_or_build_client(true, true).unwrap();
+        let _b = exec.get_or_build_client(true, false).unwrap();
+        let _c = exec.get_or_build_client(false, true).unwrap();
+        let _d = exec.get_or_build_client(false, false).unwrap();
+        // 4 distinct (redirects, ssl) combinations → 4 cached clients.
+        assert_eq!(exec.cache_len(), 4);
+        // Re-querying one does not grow the cache.
+        let _a2 = exec.get_or_build_client(true, true).unwrap();
+        assert_eq!(exec.cache_len(), 4);
     }
 
     #[test]
