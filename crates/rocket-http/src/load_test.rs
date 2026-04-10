@@ -1,6 +1,7 @@
 use crate::{HttpExecutor, HttpRequest};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 
 /// Configuration for a load test run.
@@ -9,6 +10,8 @@ use tokio::sync::Semaphore;
 pub struct LoadTestConfig {
     pub concurrency: u32,
     pub total_requests: u32,
+    #[serde(default)]
+    pub interval_ms: u32,
 }
 
 /// Aggregated statistics from a completed load test.
@@ -62,7 +65,7 @@ pub async fn run_load_test(
     let start = std::time::Instant::now();
 
     let mut handles = Vec::with_capacity(total);
-    for _ in 0..total {
+    for i in 0..total {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
         let req = request.clone();
         let exec = executor.clone();
@@ -82,6 +85,11 @@ pub async fn run_load_test(
             }
         });
         handles.push(handle);
+
+        // Rate-limit by sleeping between spawns (skip after the last).
+        if i + 1 < total && config.interval_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(config.interval_ms as u64)).await;
+        }
     }
 
     let mut succeeded: u32 = 0;
@@ -200,6 +208,7 @@ mod tests {
         let config = LoadTestConfig {
             concurrency: 5,
             total_requests: 20,
+            interval_ms: 0,
         };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 20);
@@ -234,7 +243,7 @@ mod tests {
             }
         }
         let executor: Arc<dyn HttpExecutor> = Arc::new(FailingExecutor);
-        let config = LoadTestConfig { concurrency: 2, total_requests: 5 };
+        let config = LoadTestConfig { concurrency: 2, total_requests: 5, interval_ms: 0 };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 5);
         assert_eq!(result.failed, 5);
@@ -246,7 +255,7 @@ mod tests {
     #[tokio::test]
     async fn load_test_single_request() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0 };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 1);
         assert_eq!(result.succeeded, 1);
@@ -258,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn load_test_4xx_counts_as_failed_status() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(404));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0 };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed_status, 1);
@@ -271,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn load_test_5xx_counts_as_failed_status() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(502));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0 };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.failed_status, 1);
         assert_eq!(result.failed_transport, 0);
@@ -282,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn load_test_3xx_counts_as_success() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(301));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0 };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.succeeded, 1);
         assert_eq!(result.failed, 0);
@@ -290,5 +299,44 @@ mod tests {
         assert_eq!(result.failed_transport, 0);
         // 3xx latency is recorded in the distribution just like 2xx.
         assert!(result.avg_latency_ms >= 5.0);
+    }
+
+    #[tokio::test]
+    async fn load_test_interval_spacing_lower_bound() {
+        // With interval=50ms, total=3, concurrency=1, the spawn loop sleeps
+        // between iterations 0→1 and 1→2 (but not after the last), so the
+        // total duration is at least 2 * 50ms = 100ms.
+        let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 3,
+            interval_ms: 50,
+        };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.succeeded, 3);
+        assert!(
+            result.total_duration_ms >= 100.0,
+            "expected >= 100ms, got {}",
+            result.total_duration_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn load_test_interval_zero_no_delay() {
+        // Regression: interval_ms=0 should match pre-interval behaviour.
+        // total=10 fast requests should finish well under 500ms.
+        let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
+        let config = LoadTestConfig {
+            concurrency: 10,
+            total_requests: 10,
+            interval_ms: 0,
+        };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.succeeded, 10);
+        assert!(
+            result.total_duration_ms < 500.0,
+            "expected < 500ms, got {}",
+            result.total_duration_ms
+        );
     }
 }

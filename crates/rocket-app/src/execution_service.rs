@@ -434,7 +434,7 @@ mod tests {
         let mut input = sample_input("{{oidc-baseurl}}/api/data", Some("staging"));
         input.collection = None;
 
-        let config = rocket_http::LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let config = rocket_http::LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0 };
         let result = svc.run_load_test(input, config).await.unwrap();
 
         assert_eq!(result.total_requests, 1);
