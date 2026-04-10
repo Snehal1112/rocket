@@ -161,7 +161,7 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
                 <div>
                   <p className='text-[10px] text-muted-foreground uppercase'>Failed</p>
                   <p
-                    className={`text-sm font-medium ${result.failed > 0 ? 'text-destructive' : ''}`}
+                    className={`text-sm font-medium${result.failed > 0 ? ' text-destructive' : ''}`}
                   >
                     {result.failed}
                   </p>
