@@ -66,7 +66,7 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
         {
           concurrency: parseInt(concurrency, 10),
           totalRequests: parseInt(totalRequests, 10),
-          intervalMs: Math.round(parseFloat(intervalSeconds) * 1000) || 0,
+          intervalMs: Math.max(0, Math.round(parseFloat(intervalSeconds) * 1000) || 0),
         },
       );
       setResult(res);
