@@ -1,4 +1,5 @@
 pub mod collection;
+pub mod contract;
 pub mod folder;
 pub mod repository;
 pub mod request;
