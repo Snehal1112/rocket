@@ -33,6 +33,7 @@ const CONCURRENCY_OPTIONS = ['1', '5', '10', '25', '50', '100'];
 export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
   const [concurrency, setConcurrency] = useState('10');
   const [totalRequests, setTotalRequests] = useState('100');
+  const [intervalSeconds, setIntervalSeconds] = useState('0');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<LoadTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
         {
           concurrency: parseInt(concurrency, 10),
           totalRequests: parseInt(totalRequests, 10),
+          intervalMs: Math.round(parseFloat(intervalSeconds) * 1000) || 0,
         },
       );
       setResult(res);
@@ -122,6 +124,20 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
                 disabled={running}
               />
             </div>
+          </div>
+
+          <div className='space-y-1.5'>
+            <Label>Delay between requests (s)</Label>
+            <Input
+              type='number'
+              min={0}
+              max={60}
+              step={0.1}
+              value={intervalSeconds}
+              onChange={(e) => setIntervalSeconds(e.target.value)}
+              className='h-8 text-sm'
+              disabled={running}
+            />
           </div>
 
           <p className='text-xs text-muted-foreground'>

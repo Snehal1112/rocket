@@ -423,12 +423,15 @@ export const deleteEnvironment = (collection: string, name: string) =>
 export interface LoadTestConfig {
   concurrency: number;
   totalRequests: number;
+  intervalMs: number;
 }
 
 export interface LoadTestResult {
   totalRequests: number;
   succeeded: number;
   failed: number;
+  failedTransport: number;
+  failedStatus: number;
   minLatencyMs: number;
   avgLatencyMs: number;
   p50LatencyMs: number;
