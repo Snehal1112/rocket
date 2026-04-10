@@ -1,6 +1,7 @@
 // Application services — orchestration layer
 
 pub mod collection_service;
+pub mod contract_service;
 pub mod cookie_service;
 pub mod environment_service;
 pub mod execution_service;
@@ -10,6 +11,7 @@ pub mod template_service;
 pub mod workspace_service;
 
 pub use collection_service::CollectionService;
+pub use contract_service::ContractService;
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::{ExecuteRequestInput, RequestExecutionService};

@@ -23,6 +23,7 @@ base64.workspace = true
 log.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+ulid.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -4112,6 +4112,7 @@ name = "rocket-app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "log",
  "rocket-collection",
  "rocket-environment",
@@ -4124,6 +4125,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+ "ulid",
 ]
 
 [[package]]
@@ -4136,6 +4138,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "thiserror 1.0.69",
  "ulid",
  "uuid",
 ]
@@ -4233,6 +4236,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "ulid",
  "uuid",
  "wiremock",
 ]
