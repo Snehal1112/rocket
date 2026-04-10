@@ -49,8 +49,11 @@ impl RequestExecutionService {
         Self { env_repo, executor, history_repo, collection_repo, cookie_repo, events }
     }
 
-    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
-        // Step 1: Build variable map using full Bruno precedence (collection < env < folder < request).
+    /// Resolves all {{placeholders}} in `input` using the full variable precedence
+    /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
+    /// `run_load_test` so resolution logic is never duplicated.
+    fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
+        // Build variable map: collection < env < folder < request.
         let mut ctx = VariableContext::default();
 
         // Scope: collection variables (lowest of the 4 backend-accessible scopes).
@@ -93,7 +96,7 @@ impl RequestExecutionService {
 
         let vars = ctx.flatten();
 
-        // Step 2: Load collection settings and merge with request-level values.
+        // Merge collection auth and headers with request-level values.
         let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
             let auth = merge_auth(input.auth.clone(), settings.auth);
@@ -103,7 +106,7 @@ impl RequestExecutionService {
             (input.auth.clone(), input.headers.clone())
         };
 
-        // Step 3: Resolve {{placeholders}} in URL and headers.
+        // Resolve {{placeholders}} in URL and headers.
         let resolved_url = resolve(&input.url, &vars).output;
         let resolved_headers: Vec<Header> = effective_headers
             .iter()
@@ -115,22 +118,25 @@ impl RequestExecutionService {
             })
             .collect();
 
-        // Step 4: Build and execute the HTTP request.
-        let http_request = HttpRequest {
-            method: input.method,
-            url: resolved_url.clone(),
+        Ok(HttpRequest {
+            method: input.method.clone(),
+            url: resolved_url,
             headers: resolved_headers,
-            query_params: input.query_params,
-            body: input.body,
+            query_params: input.query_params.clone(),
+            body: input.body.clone(),
             auth: effective_auth,
-            options: input.options,
-        };
+            options: input.options.clone(),
+        })
+    }
+
+    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
+        let http_request = self.resolve_request(&input)?;
         let response = self.executor.execute(&http_request).await?;
 
-        // Step 5: Persist history (non-fatal — a save failure won't cancel the response).
+        // Persist history (non-fatal — a save failure won't cancel the response).
         let mut entry = HistoryEntry::new(
             input.method.to_string(),
-            &resolved_url,
+            &http_request.url,
             response.status,
             response.duration_ms,
             response.size_bytes,
@@ -140,10 +146,10 @@ impl RequestExecutionService {
         }
         let _ = self.history_repo.save(&entry);
 
-        // Step 6: Publish domain event.
+        // Publish domain event.
         self.events.publish(DomainEvent::RequestExecuted {
             method: input.method.to_string(),
-            url: resolved_url,
+            url: http_request.url.clone(),
             status: response.status,
             duration_ms: response.duration_ms,
         });
@@ -384,6 +390,25 @@ mod tests {
             request_name: None,
             request_path: None,
         }
+    }
+
+    #[tokio::test]
+    async fn resolve_request_handles_hyphenated_variable_names() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("oidc-baseurl", "https://auth.local"));
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Box::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let input = sample_input("{{oidc-baseurl}}/api/v1/users", Some("dev"));
+        let resolved = svc.resolve_request(&input).unwrap();
+        assert_eq!(resolved.url, "https://auth.local/api/v1/users");
     }
 
     #[tokio::test]
