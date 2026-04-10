@@ -59,4 +59,8 @@ describe('resolveWithContext', () => {
     expect(resolveWithContext('{{ key }}', { key: 'val' })).toBe('val'));
   it('resolves process.env.KEY', () =>
     expect(resolveWithContext('{{process.env.K}}', { 'process.env.K': 'v' })).toBe('v'));
+  it('resolves hyphenated variable names', () =>
+    expect(resolveWithContext('{{oidc-baseurl}}/api', { 'oidc-baseurl': 'https://auth.local' })).toBe(
+      'https://auth.local/api',
+    ));
 });

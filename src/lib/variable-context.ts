@@ -1,6 +1,6 @@
 import type { CollectionVariable } from '@/lib/tauri-api';
 
-const VAR_REGEX = /\{\{\s*([\w.]+)\s*\}\}/g;
+const VAR_REGEX = /\{\{\s*([\w.-]+)\s*\}\}/g;
 
 // Convert a CollectionVariable array into a plain key→value map, skipping
 // disabled entries and falling back to initialValue when value is empty.
