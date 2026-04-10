@@ -48,6 +48,18 @@ describe('LoadTestDialog', () => {
     vi.clearAllMocks();
   });
 
+  // Anchor on the label text, then walk to the sibling input inside the
+  // same wrapper <div class='space-y-1.5'>. Robust to added inputs
+  // elsewhere in the dialog.
+  function getDelayInput(): HTMLInputElement {
+    const label = screen.getByText(/delay between requests/i);
+    const input = label.parentElement?.querySelector('input[type="number"]');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error('delay input not found');
+    }
+    return input;
+  }
+
   it('renders the delay input', () => {
     render(
       <LoadTestDialog
@@ -57,13 +69,7 @@ describe('LoadTestDialog', () => {
         tabId='t1'
       />,
     );
-    // The delay input is a spinbutton (type="number"). There are two
-    // spinbuttons in the dialog (total requests + delay); the delay one
-    // comes second.
-    const spinbuttons = screen.getAllByRole('spinbutton');
-    expect(spinbuttons.length).toBeGreaterThanOrEqual(1);
-    // The delay label text is visible in the document.
-    expect(screen.getByText(/delay between requests/i)).toBeDefined();
+    expect(getDelayInput()).toBeDefined();
   });
 
   it('forwards intervalMs = seconds * 1000 to runLoadTest', async () => {
@@ -92,9 +98,7 @@ describe('LoadTestDialog', () => {
       />,
     );
 
-    // The delay spinbutton is the second number input (total-requests is first).
-    const spinbuttons = screen.getAllByRole('spinbutton');
-    const delayInput = spinbuttons[spinbuttons.length - 1];
+    const delayInput = getDelayInput();
     fireEvent.change(delayInput, { target: { value: '0.5' } });
 
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
