@@ -107,7 +107,7 @@ pub fn run() {
             );
             let exec_svc = RequestExecutionService::new(
                 Box::new(FsEnvironmentRepo::new(environments_dir)),
-                Box::new(ReqwestExecutor::new()),
+                Arc::new(ReqwestExecutor::new()),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
