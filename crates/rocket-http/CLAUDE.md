@@ -41,7 +41,7 @@ cargo test -p rocket-http <test_name>
 - `AwsCredentials` and `SignedHeaders` do **not** derive `serde` (they are transient signing artefacts, never serialised for IPC).
 - All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
 - `CookieJar::add` silently replaces a cookie with the same name — upsert semantics.
-- `run_load_test` uses a `Semaphore` to cap concurrency; failed requests contribute to `failed` count but not to latency stats.
+- `run_load_test` uses a `Semaphore` to cap concurrency and classifies each request as one of three outcomes: `Success` (HTTP status < 400), `StatusFail` (status ≥ 400), or `TransportFail` (executor error). `Success` and `StatusFail` both contribute latency to the stats; only `TransportFail` is excluded (no latency sample). `failed = failed_transport + failed_status`. Optional `interval_ms` on `LoadTestConfig` adds a staggered-start delay between spawns.
 
 ## Relationships
 

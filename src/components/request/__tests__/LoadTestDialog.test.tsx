@@ -120,4 +120,31 @@ describe('LoadTestDialog', () => {
 
     await waitFor(() => expect(screen.getByText(/3 status, 2 transport/i)).toBeDefined());
   });
+
+  it('does not show the failure breakdown when failed is zero', async () => {
+    (runLoadTest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalRequests: 10,
+      succeeded: 10,
+      failed: 0,
+      failedTransport: 0,
+      failedStatus: 0,
+      minLatencyMs: 1,
+      avgLatencyMs: 1,
+      p50LatencyMs: 1,
+      p95LatencyMs: 1,
+      p99LatencyMs: 1,
+      maxLatencyMs: 1,
+      requestsPerSecond: 1,
+      totalDurationMs: 1,
+    });
+
+    render(<LoadTestDialog open onOpenChange={noop} request={makeRequest()} tabId='t1' />);
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+
+    // Wait until a result field is rendered (the Total stat displays 10).
+    await waitFor(() => expect(screen.getByText('10')).toBeDefined());
+
+    // The "N status, M transport" sub-line must NOT appear.
+    expect(screen.queryByText(/status,.*transport/i)).toBeNull();
+  });
 });

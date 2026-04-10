@@ -302,6 +302,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_test_mixed_outcomes_stats() {
+        // An executor that alternates between 200 (success) and 500 (status fail).
+        // Success responses report 10ms, failure responses report 20ms — different
+        // enough that we can distinguish which outcomes contributed to the stats.
+        struct AlternatingExecutor {
+            counter: std::sync::atomic::AtomicUsize,
+        }
+
+        #[async_trait]
+        impl HttpExecutor for AlternatingExecutor {
+            async fn execute(&self, _: &HttpRequest) -> DomainResult<HttpResponse> {
+                let n = self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let (status, duration_ms) = if n % 2 == 0 { (200, 10) } else { (500, 20) };
+                Ok(HttpResponse {
+                    status,
+                    status_text: "".into(),
+                    headers: vec![],
+                    body: "".into(),
+                    duration_ms,
+                    size_bytes: 0,
+                })
+            }
+        }
+
+        let executor: Arc<dyn HttpExecutor> = Arc::new(AlternatingExecutor {
+            counter: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let config = LoadTestConfig { concurrency: 1, total_requests: 10, interval_ms: 0 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+
+        assert_eq!(result.total_requests, 10);
+        assert_eq!(result.succeeded, 5);
+        assert_eq!(result.failed_status, 5);
+        assert_eq!(result.failed_transport, 0);
+        assert_eq!(result.failed, 5);
+
+        // Both outcome classes contribute to the latency distribution.
+        // Min latency comes from the 200s (10ms), max from the 500s (20ms).
+        assert_eq!(result.min_latency_ms, 10.0);
+        assert_eq!(result.max_latency_ms, 20.0);
+        // Average is (5*10 + 5*20) / 10 = 15.0
+        assert!((result.avg_latency_ms - 15.0).abs() < 0.01);
+    }
+
+    #[tokio::test]
     async fn load_test_interval_spacing_lower_bound() {
         // With interval=50ms, total=3, concurrency=1, the spawn loop sleeps
         // between iterations 0→1 and 1→2 (but not after the last), so the
