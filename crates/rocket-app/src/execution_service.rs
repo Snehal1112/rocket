@@ -1,8 +1,12 @@
 use rocket_collection::CollectionRepository;
 use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
 use rocket_history::{HistoryEntry, HistoryRepository};
-use rocket_http::{CookieRepository, HttpExecutor, HttpRequest, HttpResponse, RequestOptions};
+use rocket_http::{
+    run_load_test as http_run_load_test, CookieRepository, HttpExecutor, HttpRequest, HttpResponse,
+    LoadTestConfig, LoadTestResult, RequestOptions,
+};
 use rocket_shared::error::DomainResult;
+use std::sync::Arc;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
@@ -28,7 +32,7 @@ pub struct ExecuteRequestInput {
 
 pub struct RequestExecutionService {
     env_repo: Box<dyn EnvironmentRepository>,
-    executor: Box<dyn HttpExecutor>,
+    executor: Arc<dyn HttpExecutor>,
     history_repo: Box<dyn HistoryRepository>,
     collection_repo: Box<dyn CollectionRepository>,
     // Reserved for automatic cookie persistence in future requests.
@@ -40,7 +44,7 @@ pub struct RequestExecutionService {
 impl RequestExecutionService {
     pub fn new(
         env_repo: Box<dyn EnvironmentRepository>,
-        executor: Box<dyn HttpExecutor>,
+        executor: Arc<dyn HttpExecutor>,
         history_repo: Box<dyn HistoryRepository>,
         collection_repo: Box<dyn CollectionRepository>,
         cookie_repo: Box<dyn CookieRepository>,
@@ -155,6 +159,16 @@ impl RequestExecutionService {
         });
 
         Ok(response)
+    }
+
+    pub async fn run_load_test(
+        &self,
+        input: ExecuteRequestInput,
+        config: LoadTestConfig,
+    ) -> DomainResult<LoadTestResult> {
+        let resolved = self.resolve_request(&input)?;
+        let executor = Arc::clone(&self.executor);
+        Ok(http_run_load_test(executor, &resolved, &config).await)
     }
 
 }
@@ -393,13 +407,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn service_run_load_test_resolves_variables_before_firing() {
+        let mut env = Environment::new("staging");
+        env.set_variable(Variable::new("oidc-baseurl", "https://auth.local"));
+
+        let executor = Arc::new(MockExecutor::new(200));
+
+        struct SharedExecLt(Arc<MockExecutor>);
+        #[async_trait]
+        impl HttpExecutor for SharedExecLt {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+
+        let exec_arc = Arc::clone(&executor);
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(SharedExecLt(executor)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("{{oidc-baseurl}}/api/data", Some("staging"));
+        input.collection = None;
+
+        let config = rocket_http::LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let result = svc.run_load_test(input, config).await.unwrap();
+
+        assert_eq!(result.total_requests, 1);
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.failed, 0);
+
+        // Verify the resolved URL reached the executor.
+        let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
+        assert_eq!(url, "https://auth.local/api/data");
+    }
+
+    #[tokio::test]
     async fn resolve_request_handles_hyphenated_variable_names() {
         let mut env = Environment::new("dev");
         env.set_variable(Variable::new("oidc-baseurl", "https://auth.local"));
 
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
-            Box::new(MockExecutor::new(200)),
+            Arc::new(MockExecutor::new(200)),
             Box::new(MockHistoryRepo::new()),
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
@@ -418,7 +472,7 @@ mod tests {
 
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
-            Box::new(MockExecutor::new(200)),
+            Arc::new(MockExecutor::new(200)),
             Box::new(MockHistoryRepo::new()),
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
@@ -460,7 +514,7 @@ mod tests {
         let history_arc = Arc::clone(&history);
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
-            Box::new(MockExecutor::new(200)),
+            Arc::new(MockExecutor::new(200)),
             Box::new(SharedHistoryRepo(history)),
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
@@ -499,7 +553,7 @@ mod tests {
         let pub_arc = Arc::clone(&publisher);
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
-            Box::new(MockExecutor::new(201)),
+            Arc::new(MockExecutor::new(201)),
             Box::new(MockHistoryRepo::new()),
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
@@ -603,7 +657,7 @@ mod tests {
 
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
-            Box::new(SharedExec(executor)),
+            Arc::new(SharedExec(executor)),
             Box::new(MockHistoryRepo::new()),
             Box::new(repo),
             Box::new(NullCookieRepo),
@@ -637,7 +691,7 @@ mod tests {
 
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
-            Box::new(SharedExec2(executor)),
+            Arc::new(SharedExec2(executor)),
             Box::new(MockHistoryRepo::new()),
             Box::new(repo),
             Box::new(NullCookieRepo),
@@ -679,7 +733,7 @@ mod tests {
 
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
-            Box::new(SharedExec3(executor)),
+            Arc::new(SharedExec3(executor)),
             Box::new(MockHistoryRepo::new()),
             Box::new(repo),
             Box::new(NullCookieRepo),
@@ -744,7 +798,7 @@ mod tests {
         let exec_arc = Arc::clone(&executor);
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
-            Box::new(SharedExecutor(executor)),
+            Arc::new(SharedExecutor(executor)),
             Box::new(MockHistoryRepo::new()),
             Box::new(StubCollectionRepo::with_settings(settings)),
             Box::new(NullCookieRepo),
