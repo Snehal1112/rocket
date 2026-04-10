@@ -1,9 +1,12 @@
-use rocket_app::CollectionService;
+use rocket_app::{CollectionService, ContractService};
+use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::{Collection, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::error::DomainError;
+use rocket_shared::types::{Auth, Body, BodyMode, HttpMethod};
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 #[tauri::command]
@@ -52,8 +55,95 @@ pub fn save_request(
     path: String,
     request: Request,
     svc: State<'_, CollectionService>,
+    contract_svc: State<'_, ContractService>,
+    active_workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<Request, DomainError> {
-    svc.save_request(&collection, &path, &request)
+    let saved = svc.save_request(&collection, &path, &request)?;
+
+    // Contract audit hook — silently diffs the new signature against the
+    // stored snapshot and appends any changes to the contract changelog.
+    // Failures here must never propagate: the save itself has succeeded.
+    let collection_root = {
+        let guard = active_workspace_path.lock().unwrap();
+        guard.join("collections").join(&collection)
+    };
+    let snapshot = build_request_signature_snapshot(&path, &saved);
+    let _ = contract_svc.on_request_saved(&collection_root, snapshot);
+
+    Ok(saved)
+}
+
+/// Build a contract signature snapshot from a freshly saved request.
+///
+/// `path` is the collection-relative request path supplied to `save_request`;
+/// the `Request` struct itself has no `path` field, so it is passed in
+/// explicitly. Keys are taken as-is (no sorting) — ordering is irrelevant for
+/// diffing since `diff_signature` uses set-style contains checks.
+fn build_request_signature_snapshot(path: &str, request: &Request) -> RequestSignatureSnapshot {
+    RequestSignatureSnapshot {
+        request_path: PathBuf::from(path),
+        method: http_method_name(&request.method),
+        url_pattern: request.url.clone(),
+        query_param_keys: request.query_params.iter().map(|q| q.key.clone()).collect(),
+        header_keys: request.headers.iter().map(|h| h.key.clone()).collect(),
+        body_field_keys: extract_body_keys(&request.body),
+        auth_type: auth_type_name(&request.auth),
+        captured_at: chrono::Utc::now(),
+    }
+}
+
+fn http_method_name(m: &HttpMethod) -> String {
+    match m {
+        HttpMethod::Get => "GET",
+        HttpMethod::Post => "POST",
+        HttpMethod::Put => "PUT",
+        HttpMethod::Patch => "PATCH",
+        HttpMethod::Delete => "DELETE",
+        HttpMethod::Options => "OPTIONS",
+        HttpMethod::Head => "HEAD",
+    }
+    .to_string()
+}
+
+fn auth_type_name(auth: &Auth) -> String {
+    match auth {
+        Auth::None => "none",
+        Auth::Basic { .. } => "basic",
+        Auth::Bearer { .. } => "bearer",
+        Auth::ApiKey { .. } => "api-key",
+        Auth::OAuth2(_) => "oauth2",
+        Auth::AwsSigV4 { .. } => "aws-sig-v4",
+        Auth::Inherit => "inherit",
+        Auth::Wsse { .. } => "wsse",
+        Auth::Digest { .. } => "digest",
+        Auth::Ntlm { .. } => "ntlm",
+    }
+    .to_string()
+}
+
+fn extract_body_keys(body: &Option<Body>) -> Vec<String> {
+    let Some(body) = body else {
+        return vec![];
+    };
+    match body.mode {
+        BodyMode::FormUrlEncoded | BodyMode::FormData => body
+            .form_data
+            .as_ref()
+            .map(|entries| entries.iter().map(|e| e.key.clone()).collect())
+            .unwrap_or_default(),
+        BodyMode::Json => body
+            .content
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| v.as_object().cloned())
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default(),
+        BodyMode::None
+        | BodyMode::Xml
+        | BodyMode::Text
+        | BodyMode::Sparql
+        | BodyMode::Binary => vec![],
+    }
 }
 
 #[tauri::command]

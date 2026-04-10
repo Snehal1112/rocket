@@ -1,5 +1,6 @@
 pub mod app;
 pub mod collections;
+pub mod contract;
 pub mod import;
 pub mod cookies;
 pub mod environments;

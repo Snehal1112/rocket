@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_app::{
-    CollectionService, CookieService, GitAppService,
+    CollectionService, ContractService, CookieService, GitAppService,
     HistoryService, RequestExecutionService, TemplateService, WorkspaceService,
 };
 use rocket_infra::{
-    FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo,
-    FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
+    FsCollectionRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo,
+    FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor,
+    SharedPathCollectionRepo,
 };
 use rocket_workspace::WorkspaceConfigRepository;
 use rocket_shared::events::NullEventPublisher;
@@ -119,8 +120,14 @@ pub fn run() {
                 Box::new(NullEventPublisher),
             );
 
+            // Contract service — owns the save-hook audit log.
+            // FsContractRepo is stateless; it receives the per-collection
+            // directory on every call, computed as <workspace>/collections/<name>.
+            let contract_svc = ContractService::new(Arc::new(FsContractRepo));
+
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
+            app.manage(contract_svc);
             app.manage(history_svc);
             app.manage(template_svc);
             app.manage(cookie_svc);
@@ -243,6 +250,11 @@ pub fn run() {
             commands::ui_state::save_ui_state,
             commands::import::import_bruno,
             commands::import::import_bruno_zip,
+            commands::contract::attach_contract,
+            commands::contract::list_contracts,
+            commands::contract::get_contract,
+            commands::contract::delete_contract,
+            commands::contract::get_contract_changelog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
