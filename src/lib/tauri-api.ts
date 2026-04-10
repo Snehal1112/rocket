@@ -455,9 +455,12 @@ export const runLoadTest = (
     body?: Body | null;
     auth: Auth;
     options: RequestOptions;
+    collection?: string;
+    environmentName?: string;
+    requestPath?: string;
   },
   config: LoadTestConfig,
-) => invoke<LoadTestResult>('run_load_test_command', { request, config });
+) => invoke<LoadTestResult>('run_load_test_command', { input: request, config });
 
 // ============================================================
 // History

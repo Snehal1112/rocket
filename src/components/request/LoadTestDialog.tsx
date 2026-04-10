@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { toApiAuth, toApiBody } from '@/lib/execute-request';
+import { resolveRequestFields } from '@/lib/execute-request';
 import { type LoadTestResult, runLoadTest } from '@/lib/tauri-api';
 import type { RequestState } from '@/types/pane-types';
 
@@ -25,11 +25,12 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   request: RequestState;
+  tabId: string;
 }
 
 const CONCURRENCY_OPTIONS = ['1', '5', '10', '25', '50', '100'];
 
-export function LoadTestDialog({ open, onOpenChange, request }: Props) {
+export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
   const [concurrency, setConcurrency] = useState('10');
   const [totalRequests, setTotalRequests] = useState('100');
   const [running, setRunning] = useState(false);
@@ -41,21 +42,25 @@ export function LoadTestDialog({ open, onOpenChange, request }: Props) {
     setResult(null);
     setError(null);
     try {
-      // Map RequestState to the shape expected by the Tauri command, reusing
-      // the same conversion helpers used in execute-request.ts.
+      // Resolve environment variables before sending, using the same 7-scope
+      // resolution as the regular send flow.
+      const resolved = await resolveRequestFields(tabId, request);
       const res = await runLoadTest(
         {
           method: request.method,
-          url: request.url,
-          headers: request.headers
-            .filter((h) => h.enabled)
-            .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-          queryParams: request.queryParams
-            .filter((p) => p.enabled)
-            .map((p) => ({ key: p.key, value: p.value, enabled: p.enabled })),
-          body: toApiBody(request.body) ?? null,
-          auth: toApiAuth(request.auth),
-          options: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+          url: resolved.url,
+          headers: resolved.headers,
+          queryParams: resolved.queryParams,
+          body: resolved.body ?? null,
+          auth: resolved.auth,
+          options: {
+            followRedirects: request.settings.followRedirects,
+            timeoutMs: request.settings.timeoutMs,
+            verifySsl: request.settings.verifySsl,
+          },
+          collection: resolved.collection,
+          environmentName: resolved.environmentName,
+          requestPath: resolved.requestPath,
         },
         {
           concurrency: parseInt(concurrency, 10),
