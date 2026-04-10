@@ -18,6 +18,8 @@ pub struct LoadTestResult {
     pub total_requests: u32,
     pub succeeded: u32,
     pub failed: u32,
+    pub failed_transport: u32,
+    pub failed_status: u32,
     pub min_latency_ms: f64,
     pub avg_latency_ms: f64,
     pub p50_latency_ms: f64,
@@ -35,6 +37,17 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     }
     let idx = (p / 100.0 * (sorted.len() as f64 - 1.0)).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
+}
+
+/// Per-task result from a single load-test request.
+enum Outcome {
+    /// HTTP status < 400 — counted as success, latency recorded.
+    Success(f64),
+    /// HTTP status >= 400 — counted as failure, latency still recorded.
+    StatusFail(f64),
+    /// Executor returned Err (connection refused, TLS error, timeout, ...).
+    /// No latency sample.
+    TransportFail,
 }
 
 /// Fires `config.total_requests` concurrent HTTP requests, bounded by `config.concurrency`,
@@ -57,29 +70,46 @@ pub async fn run_load_test(
             let result = exec.execute(&req).await;
             drop(permit);
             match result {
-                Ok(resp) => (true, resp.duration_ms as f64),
-                Err(_) => (false, 0.0),
+                Ok(resp) => {
+                    let ms = resp.duration_ms as f64;
+                    if resp.status < 400 {
+                        Outcome::Success(ms)
+                    } else {
+                        Outcome::StatusFail(ms)
+                    }
+                }
+                Err(_) => Outcome::TransportFail,
             }
         });
         handles.push(handle);
     }
 
     let mut succeeded: u32 = 0;
-    let mut failed: u32 = 0;
+    let mut failed_transport: u32 = 0;
+    let mut failed_status: u32 = 0;
     let mut latencies = Vec::with_capacity(total);
 
     for handle in handles {
         match handle.await {
-            Ok((true, ms)) => {
+            Ok(Outcome::Success(ms)) => {
                 succeeded += 1;
                 latencies.push(ms);
             }
-            _ => {
-                failed += 1;
+            Ok(Outcome::StatusFail(ms)) => {
+                failed_status += 1;
+                latencies.push(ms);
+            }
+            Ok(Outcome::TransportFail) => {
+                failed_transport += 1;
+            }
+            Err(_) => {
+                // tokio::spawn join error — treat as transport-level failure.
+                failed_transport += 1;
             }
         }
     }
 
+    let failed = failed_transport + failed_status;
     let total_duration_ms = start.elapsed().as_secs_f64() * 1000.0;
     latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
@@ -93,6 +123,8 @@ pub async fn run_load_test(
         total_requests: config.total_requests,
         succeeded,
         failed,
+        failed_transport,
+        failed_status,
         min_latency_ms: latencies.first().copied().unwrap_or(0.0),
         avg_latency_ms: avg,
         p50_latency_ms: percentile(&latencies, 50.0),
@@ -129,6 +161,23 @@ mod tests {
                 body: "ok".into(),
                 duration_ms: 10,
                 size_bytes: 2,
+            })
+        }
+    }
+
+    // Mock that always returns a given HTTP status with a fixed duration.
+    struct StatusExecutor(u16);
+
+    #[async_trait]
+    impl HttpExecutor for StatusExecutor {
+        async fn execute(&self, _request: &HttpRequest) -> DomainResult<HttpResponse> {
+            Ok(HttpResponse {
+                status: self.0,
+                status_text: "".into(),
+                headers: vec![],
+                body: "".into(),
+                duration_ms: 5,
+                size_bytes: 0,
             })
         }
     }
@@ -176,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_test_counts_failures() {
+    async fn load_test_transport_error_counted_as_transport_failure() {
         struct FailingExecutor;
         #[async_trait::async_trait]
         impl HttpExecutor for FailingExecutor {
@@ -189,6 +238,8 @@ mod tests {
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 5);
         assert_eq!(result.failed, 5);
+        assert_eq!(result.failed_transport, 5);
+        assert_eq!(result.failed_status, 0);
         assert_eq!(result.succeeded, 0);
     }
 
@@ -202,5 +253,39 @@ mod tests {
         assert_eq!(result.failed, 0);
         // p50 == p99 == the single sample
         assert_eq!(result.p50_latency_ms, result.p99_latency_ms);
+    }
+
+    #[tokio::test]
+    async fn load_test_4xx_counts_as_failed_status() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(404));
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.succeeded, 0);
+        assert_eq!(result.failed_status, 1);
+        assert_eq!(result.failed_transport, 0);
+        assert_eq!(result.failed, 1);
+        // 4xx latency IS included in the latency distribution.
+        assert!(result.avg_latency_ms >= 5.0);
+    }
+
+    #[tokio::test]
+    async fn load_test_5xx_counts_as_failed_status() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(502));
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.failed_status, 1);
+        assert_eq!(result.failed_transport, 0);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.succeeded, 0);
+    }
+
+    #[tokio::test]
+    async fn load_test_3xx_counts_as_success() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(301));
+        let config = LoadTestConfig { concurrency: 1, total_requests: 1 };
+        let result = run_load_test(executor, &test_request(), &config).await;
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.failed_status, 0);
     }
 }
