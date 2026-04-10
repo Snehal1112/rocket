@@ -821,3 +821,91 @@ export interface UiState {
 export const loadUiState = () => invoke<UiState | null>('load_ui_state');
 
 export const saveUiState = (state: UiState) => invoke<void>('save_ui_state', { state });
+
+// ============================================================
+// Contract Lock
+// ============================================================
+
+/**
+ * Scope of a contract. Serialised from the Rust enum
+ * `ContractScope` with `#[serde(tag = "type", rename_all = "snake_case")]`,
+ * so the discriminant field is `type` and the `rel_path` field keeps
+ * snake_case (not camelCase) on the wire.
+ */
+export type ContractScope =
+  | { type: 'collection' }
+  | { type: 'folder'; rel_path: string }
+  | { type: 'request'; rel_path: string };
+
+export interface Contract {
+  id: string;
+  title: string;
+  provider: string;
+  consumer: string;
+  project: string;
+  version: string;
+  effectiveDate: string;
+  expiryDate: string | null;
+  documentPath: string | null;
+  enforcementMode: 'informational' | 'warn' | 'block';
+  scope: ContractScope;
+}
+
+export interface ChangelogEntry {
+  timestamp: string;
+  requestPath: string;
+  field: string;
+  changeType: 'changed' | 'added' | 'removed';
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+export interface ContractChangelog {
+  contractId: string;
+  entries: ChangelogEntry[];
+}
+
+export interface RequestSignatureSnapshot {
+  requestPath: string;
+  method: string;
+  urlPattern: string;
+  queryParamKeys: string[];
+  headerKeys: string[];
+  bodyFieldKeys: string[];
+  authType: string;
+  capturedAt: string;
+}
+
+export interface AttachContractInput {
+  title: string;
+  provider: string;
+  consumer: string;
+  project: string;
+  version: string;
+  effectiveDate: string;
+  expiryDate: string | null;
+  documentPath: string | null;
+  scope: ContractScope;
+  /**
+   * Initial signature snapshots captured for covered requests at the
+   * moment the contract is signed. Frontend sends an empty array
+   * today — collection-scoped contracts start with no baseline and
+   * accumulate entries as requests are saved.
+   */
+  initialSnapshots: RequestSignatureSnapshot[];
+}
+
+export const attachContract = (collectionRoot: string, input: AttachContractInput) =>
+  invoke<Contract>('attach_contract', { collectionRoot, input });
+
+export const listContracts = (collectionRoot: string) =>
+  invoke<Contract[]>('list_contracts', { collectionRoot });
+
+export const getContract = (collectionRoot: string, contractId: string) =>
+  invoke<Contract>('get_contract', { collectionRoot, contractId });
+
+export const deleteContract = (collectionRoot: string, contractId: string) =>
+  invoke<void>('delete_contract', { collectionRoot, contractId });
+
+export const getContractChangelog = (collectionRoot: string, contractId: string) =>
+  invoke<ContractChangelog>('get_contract_changelog', { collectionRoot, contractId });

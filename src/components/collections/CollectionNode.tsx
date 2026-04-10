@@ -3,11 +3,14 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
+  Lock,
   MoreHorizontal,
   Plus,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AttachContractDialog } from '@/components/contract/AttachContractDialog';
+import { ContractBadge } from '@/components/contract/ContractBadge';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
   ContextMenu,
@@ -27,13 +30,20 @@ import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
-import type { Collection, CollectionSummary } from '@/lib/tauri-api';
+import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
+import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
 import type { DeleteTarget } from './tree-utils';
+
+// Stable empty reference to keep the Zustand selector output identity-stable
+// for collections that have no contracts. Without this, the `?? []` fallback
+// would produce a fresh array on every store update and force re-renders.
+const EMPTY_CONTRACTS: Contract[] = [];
 
 interface CollectionNodeProps {
   summary: CollectionSummary;
@@ -69,6 +79,31 @@ export function CollectionNode({
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
+  const [attachContractOpen, setAttachContractOpen] = useState(false);
+
+  // Derive the filesystem path of this collection so we can talk to the
+  // contract IPC commands. The backend stores contract metadata under
+  // `<workspace>/collections/<name>/.rocket/contracts/` — we mirror the
+  // same construction used by `save_request` on the Rust side.
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
+  const collectionRoot = activeWorkspace
+    ? `${activeWorkspace.path}/collections/${summary.name}`
+    : '';
+
+  const loadContracts = useContractStore((s) => s.loadContracts);
+  const contractsForRoot = useContractStore(
+    (s) => s.contractsByRoot[collectionRoot] ?? EMPTY_CONTRACTS,
+  );
+  const collectionScopedContracts = contractsForRoot.filter((c) => c.scope.type === 'collection');
+
+  // Load contracts for this collection once the workspace path is known.
+  // Cheap when the collection has none — backend returns an empty list.
+  useEffect(() => {
+    if (!collectionRoot) return;
+    void loadContracts(collectionRoot);
+  }, [collectionRoot, loadContracts]);
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
@@ -248,6 +283,12 @@ export function CollectionNode({
               ) : (
                 <>
                   <span className='truncate text-foreground'>{summary.name}</span>
+                  {collectionRoot && (
+                    <ContractBadge
+                      contracts={collectionScopedContracts}
+                      collectionRoot={collectionRoot}
+                    />
+                  )}
                   {summary.refType === 'external' && (
                     <span className='ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
                       ext
@@ -298,6 +339,13 @@ export function CollectionNode({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                disabled={!collectionRoot}
+                onClick={() => setAttachContractOpen(true)}
+              >
+                <Lock className='h-3.5 w-3.5 mr-2' /> Attach contract…
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
                 className='text-destructive'
                 onClick={() =>
                   onDelete({
@@ -342,6 +390,10 @@ export function CollectionNode({
           }}
         >
           Rename
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!collectionRoot} onClick={() => setAttachContractOpen(true)}>
+          Attach contract…
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -420,6 +472,14 @@ export function CollectionNode({
         collectionName={summary.name}
         onClose={() => setCreateRequestOpen(false)}
       />
+      {collectionRoot && (
+        <AttachContractDialog
+          open={attachContractOpen}
+          onOpenChange={setAttachContractOpen}
+          collectionRoot={collectionRoot}
+          defaultScope={{ type: 'collection' }}
+        />
+      )}
     </ContextMenu>
   );
 }
