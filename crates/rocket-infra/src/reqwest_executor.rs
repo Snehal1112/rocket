@@ -278,7 +278,7 @@ async fn fetch_client_credentials_token(
     verify_ssl: bool,
 ) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
-    // from the main request client built in build_client().
+    // from the cached executor client (see build_client_impl).
     let client = Client::builder()
         .danger_accept_invalid_certs(!verify_ssl)
         .build()
