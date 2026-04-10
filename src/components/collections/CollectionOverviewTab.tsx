@@ -1,5 +1,11 @@
 import { Check, Folder as FolderIcon, Loader2, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
+import { TagsList } from '@/components/collections/TagsList';
+import { AuthEditor } from '@/components/request/AuthEditor';
+import { HeadersEditor } from '@/components/request/HeadersEditor';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -7,12 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
-import { TagsList } from '@/components/collections/TagsList';
-import { AuthEditor } from '@/components/request/AuthEditor';
-import { HeadersEditor } from '@/components/request/HeadersEditor';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
 import type { Auth } from '@/lib/tauri-api';
 import {
