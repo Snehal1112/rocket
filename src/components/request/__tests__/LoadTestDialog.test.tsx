@@ -1,7 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoadTestDialog } from '../LoadTestDialog';
 import type { RequestState } from '@/types/pane-types';
+import { LoadTestDialog } from '../LoadTestDialog';
 
 // Mock the tauri-api module so no real IPC call is made.
 vi.mock('@/lib/tauri-api', () => ({
@@ -23,6 +23,10 @@ vi.mock('@/lib/execute-request', () => ({
 }));
 
 import { runLoadTest } from '@/lib/tauri-api';
+
+const noop = () => {
+  // Intentional no-op for test props.
+};
 
 function makeRequest(): RequestState {
   return {
@@ -61,14 +65,7 @@ describe('LoadTestDialog', () => {
   }
 
   it('renders the delay input', () => {
-    render(
-      <LoadTestDialog
-        open
-        onOpenChange={() => {}}
-        request={makeRequest()}
-        tabId='t1'
-      />,
-    );
+    render(<LoadTestDialog open onOpenChange={noop} request={makeRequest()} tabId='t1' />);
     expect(getDelayInput()).toBeDefined();
   });
 
@@ -89,14 +86,7 @@ describe('LoadTestDialog', () => {
       totalDurationMs: 1,
     });
 
-    render(
-      <LoadTestDialog
-        open
-        onOpenChange={() => {}}
-        request={makeRequest()}
-        tabId='t1'
-      />,
-    );
+    render(<LoadTestDialog open onOpenChange={noop} request={makeRequest()} tabId='t1' />);
 
     const delayInput = getDelayInput();
     fireEvent.change(delayInput, { target: { value: '0.5' } });
@@ -104,8 +94,7 @@ describe('LoadTestDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
 
     await waitFor(() => expect(runLoadTest).toHaveBeenCalledTimes(1));
-    const configArg = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock
-      .calls[0][1];
+    const configArg = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(configArg.intervalMs).toBe(500);
   });
 
@@ -126,18 +115,9 @@ describe('LoadTestDialog', () => {
       totalDurationMs: 1,
     });
 
-    render(
-      <LoadTestDialog
-        open
-        onOpenChange={() => {}}
-        request={makeRequest()}
-        tabId='t1'
-      />,
-    );
+    render(<LoadTestDialog open onOpenChange={noop} request={makeRequest()} tabId='t1' />);
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/3 status, 2 transport/i)).toBeDefined(),
-    );
+    await waitFor(() => expect(screen.getByText(/3 status, 2 transport/i)).toBeDefined());
   });
 });
