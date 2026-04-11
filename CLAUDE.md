@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## What This Is
 
@@ -8,52 +8,24 @@ A Postman/Insomnia-like HTTP API client desktop app built with Tauri (Rust backe
 
 ## Commands
 
-### Development
-
 ```bash
-# Full Tauri dev mode (recommended — launches desktop window + Vite HMR)
-yarn tauri dev
+# Dev
+yarn tauri dev            # full desktop + Vite HMR
+yarn dev                  # frontend only (http://localhost:1420)
 
-# Frontend only (Vite server at http://localhost:1420)
-yarn dev
-
-# TypeScript check
-yarn tsc --noEmit
-
-# Lint & format
-yarn check          # lint + format check (read-only)
-yarn lint           # auto-fix lint issues
-yarn format         # auto-format
-
-# Frontend tests (Vitest — all)
-yarn test
-
-# Frontend tests (single file or pattern)
-yarn test src/stores/pane-store
-```
-
-### Rust
-
-```bash
-cargo check                              # fast validation
-cargo build --release                    # full build
-cargo test -p <crate-name> <test_name>  # single test
-yarn tauri build                         # full Tauri release
-```
-
-### Before Opening a PR
-
-```bash
-yarn tsc --noEmit   # TypeScript check
-yarn check          # Biome lint + format
-yarn build          # Ensure frontend builds
-cargo check         # Rust check
-cargo test          # Rust tests
+# Checks
+yarn tsc --noEmit         # TypeScript
+yarn check                # Biome lint + format (read-only)
+yarn lint / yarn format   # auto-fix variants
+yarn test [pattern]       # Vitest
+cargo check               # fast Rust validation
+cargo test -p <crate> <test_name>
+yarn tauri build          # release build
 ```
 
 ## Architecture
 
-### Crate Layout (Domain-Driven Design)
+### Crate Layout (DDD)
 
 | Crate | Role |
 |---|---|
@@ -66,8 +38,10 @@ cargo test          # Rust tests
 | `rocket-git` | `GitService` trait + `Git2Service` (libgit2) |
 | `rocket-app` | Orchestration services — wires domain traits, no I/O |
 | `rocket-infra` | Filesystem implementations of all repository/service traits |
-| `rocket-import` | Bruno API client importer — parses `.bru`/`.yml`, converts to domain types, writes via `rocket-infra` |
+| `rocket-import` | Bruno importer — parses `.bru`/`.yml`, converts to domain types |
 | `src-tauri` | Tauri IPC commands, app initialization, managed state |
+
+Per-crate design rules live in `crates/*/CLAUDE.md` and load automatically when you touch files in that crate.
 
 ### Data Flow
 
@@ -88,22 +62,10 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 - Tests use `tempfile` for filesystem fixtures and `wiremock` for HTTP mocking.
 - `cargo check` is sufficient for most Rust validation; full compilation is slow.
 
-## Detailed Documentation
+## Rules and conventions
 
-### Frontend
-- [`.claude/frontend.md`](.claude/frontend.md) — Zustand stores, tab system, keyboard shortcuts, sandbox mode, UI state persistence
+Rules live in `.claude/rules/` — one file per concern, numbered by read order. Start with [`.claude/rules/00-shortcuts.md`](.claude/rules/00-shortcuts.md) for a pointer map, then read the relevant rule file for your task. See [`.claude/rules/README.md`](.claude/rules/README.md) for the full index.
 
-### Tauri / Backend Bridge
-- [`.claude/tauri-commands.md`](.claude/tauri-commands.md) — IPC command modules and service wiring
+## Frontend-specific notes
 
-### Per-Crate Design Rules
-- [`crates/rocket-shared/CLAUDE.md`](crates/rocket-shared/CLAUDE.md) — `DomainError`, `DomainResult`, `DomainEvent`, serde conventions
-- [`crates/rocket-collection/CLAUDE.md`](crates/rocket-collection/CLAUDE.md) — Collection aggregate, `Request` field semantics, serde rules
-- [`crates/rocket-environment/CLAUDE.md`](crates/rocket-environment/CLAUDE.md) — `Environment`, `Variable`, `resolve()` template engine
-- [`crates/rocket-workspace/CLAUDE.md`](crates/rocket-workspace/CLAUDE.md) — Workspace model, `WorkspaceConfig`, `multi_workspace_mode`
-- [`crates/rocket-app/CLAUDE.md`](crates/rocket-app/CLAUDE.md) — Services, variable resolution, header/auth merging, event patterns
-- [`crates/rocket-infra/CLAUDE.md`](crates/rocket-infra/CLAUDE.md) — OpenCollection YAML format, path validation, migration, `SharedPathCollectionRepo`; serde layer (`opencollection`/`oc_conversions` modules), `OcAuth`/`OcItem` untagged serde gotchas
-- [`crates/rocket-git/CLAUDE.md`](crates/rocket-git/CLAUDE.md) — `GitService` trait, `Git2Service`
-- [`crates/rocket-history/CLAUDE.md`](crates/rocket-history/CLAUDE.md) — History storage and filtering
-- [`crates/rocket-http/CLAUDE.md`](crates/rocket-http/CLAUDE.md) — `HttpExecutor`, auth schemes, cookie handling
-- [`crates/rocket-import/CLAUDE.md`](crates/rocket-import/CLAUDE.md) — Bruno importer: `.bru`/`.yml` parsing pipeline, converters, `ImportService`, fixture layout
+See `.claude/frontend.md` for Zustand stores, tab system, keyboard shortcuts, sandbox mode, and UI state persistence. See `.claude/tauri-commands.md` for IPC command modules and service wiring.

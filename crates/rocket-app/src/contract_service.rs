@@ -1,26 +1,42 @@
-use rocket_collection::contract::{
-    changelog::{ChangelogEntry, ContractChangelog},
-    diff::diff_signature,
-    repository::{ContractRepository, ContractResult},
-    snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-    types::{Contract, ContractEnforcementMode, ContractScope},
+use rocket_collection::{
+    contract::{
+        changelog::{ChangelogEntry, ContractChangelog},
+        diff::diff_signature,
+        repository::{ContractError, ContractRepository, ContractResult},
+        snapshot::{ContractSnapshot, RequestSignatureSnapshot},
+        types::{Contract, ContractEnforcementMode, ContractScope},
+    },
+    CollectionItem, CollectionRepository, Folder,
 };
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use ulid::Ulid;
 
 pub struct ContractService {
     repo: Arc<dyn ContractRepository>,
+    collection_repo: Arc<dyn CollectionRepository>,
 }
 
 impl ContractService {
-    pub fn new(repo: Arc<dyn ContractRepository>) -> Self {
-        Self { repo }
+    pub fn new(
+        repo: Arc<dyn ContractRepository>,
+        collection_repo: Arc<dyn CollectionRepository>,
+    ) -> Self {
+        Self { repo, collection_repo }
     }
 
-    /// Create a new contract and take an initial snapshot of all covered requests.
+    /// Create a new contract and take a baseline snapshot of every covered request.
+    ///
+    /// The service walks the full collection tree via `CollectionRepository`,
+    /// filters by `contract.scope`, and builds a `RequestSignatureSnapshot` for
+    /// each covered request. `initial_snapshots` from the caller are merged
+    /// on top so explicit overrides still win.
     pub fn attach_contract(
         &self,
         collection_root: &Path,
+        collection_name: &str,
         mut contract: Contract,
         initial_snapshots: Vec<RequestSignatureSnapshot>,
     ) -> ContractResult<Contract> {
@@ -28,15 +44,34 @@ impl ContractService {
         // Force Informational — Model B variants not yet UI-reachable.
         contract.enforcement_mode = ContractEnforcementMode::Informational;
 
-        self.repo.save_contract(collection_root, &contract)?;
+        // Load the collection and build the baseline snapshot BEFORE any
+        // write. If the collection read fails, we must not leave an orphan
+        // contract YAML behind with no snapshot and no changelog.
+        // Errors from the collection repo are promoted to
+        // `ContractError::Internal` so they are never swallowed.
+        let collection = self
+            .collection_repo
+            .get(collection_name)
+            .map_err(|e| ContractError::Internal(e.to_string()))?;
 
         let mut snapshot = ContractSnapshot::new(contract.id);
+        let mut built = Vec::new();
+        walk_folder(&collection.root, Path::new(""), &mut built);
+        for (rel_path, request) in built {
+            if !covers(&contract.scope, &rel_path) {
+                continue;
+            }
+            snapshot.upsert(RequestSignatureSnapshot::from_request(&rel_path, request));
+        }
+
+        // Any snapshots supplied explicitly by the caller take precedence.
         for snap in initial_snapshots {
             snapshot.upsert(snap);
         }
-        self.repo.save_snapshot(collection_root, &snapshot)?;
 
-        // Initialise empty changelog.
+        // Only now write the contract, its baseline, and the empty changelog.
+        self.repo.save_contract(collection_root, &contract)?;
+        self.repo.save_snapshot(collection_root, &snapshot)?;
         let changelog = ContractChangelog::new(contract.id);
         self.repo.append_changelog(collection_root, &changelog)?;
 
@@ -122,13 +157,58 @@ fn covers(scope: &ContractScope, request_path: &Path) -> bool {
     }
 }
 
+/// Recursively collect every request in the folder tree along with its
+/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
+/// directory name) to match the path format the save handler emits.
+/// Requests with no `file_name` (e.g. freshly constructed in memory) are
+/// skipped because we cannot key them the same way the save path will.
+fn walk_folder<'a>(
+    folder: &'a Folder,
+    prefix: &Path,
+    out: &mut Vec<(PathBuf, &'a rocket_collection::Request)>,
+) {
+    for item in &folder.items {
+        match item {
+            CollectionItem::Request(req) => {
+                let Some(file_name) = req.file_name.as_deref() else {
+                    continue;
+                };
+                let path = if prefix.as_os_str().is_empty() {
+                    PathBuf::from(file_name)
+                } else {
+                    prefix.join(file_name)
+                };
+                out.push((path, req));
+            }
+            CollectionItem::Folder(sub) => {
+                // Skip folders with no on-disk name. build_folder_tree always
+                // sets dir_name; None here means a malformed in-memory tree.
+                let Some(segment) = sub.dir_name.as_deref() else {
+                    continue;
+                };
+                let next = if prefix.as_os_str().is_empty() {
+                    PathBuf::from(segment)
+                } else {
+                    prefix.join(segment)
+                };
+                walk_folder(sub, &next, out);
+            }
+            CollectionItem::OpaqueItem(_) => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
-    use rocket_collection::contract::repository::ContractError;
+    use rocket_collection::{
+        contract::repository::ContractError, Collection, CollectionSettings, CollectionSummary,
+        CollectionVariable, Request,
+    };
+    use rocket_shared::error::{DomainError, DomainResult};
+    use rocket_shared::types::HttpMethod;
     use std::collections::HashMap;
-    use std::path::PathBuf;
     use std::sync::Mutex;
 
     /// In-memory mock — keeps rocket-app's layering boundary intact
@@ -205,8 +285,121 @@ mod tests {
         }
     }
 
+    /// In-memory collection mock. Only `get` is exercised by the service;
+    /// the other methods are stubs so we can satisfy the trait without
+    /// pulling in `rocket-infra`. `fail_get` lets tests simulate a
+    /// collection-load failure to exercise error-propagation paths.
+    struct MockCollectionRepo {
+        collections: Mutex<Vec<Collection>>,
+        fail_get: bool,
+    }
+
+    impl MockCollectionRepo {
+        fn with_collection(collection: Collection) -> Self {
+            Self {
+                collections: Mutex::new(vec![collection]),
+                fail_get: false,
+            }
+        }
+
+        fn failing() -> Self {
+            Self {
+                collections: Mutex::new(Vec::new()),
+                fail_get: true,
+            }
+        }
+    }
+
+    impl CollectionRepository for MockCollectionRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            Ok(vec![])
+        }
+        fn get(&self, name: &str) -> DomainResult<Collection> {
+            if self.fail_get {
+                return Err(DomainError::NotFound(name.into()));
+            }
+            self.collections
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|c| c.name == name)
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn create(&self, _: &str) -> DomainResult<Collection> {
+            unimplemented!()
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn get_request(&self, _: &str, _: &str) -> DomainResult<Request> {
+            unimplemented!()
+        }
+        fn save_request(&self, _: &str, path: &str, _: &Request) -> DomainResult<String> {
+            Ok(path.to_string())
+        }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
+            Ok(CollectionSettings::default())
+        }
+        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    const COLLECTION_NAME: &str = "demo";
+
     fn make_service() -> ContractService {
-        ContractService::new(Arc::new(MockContractRepo::default()))
+        // Default service for tests that don't care about the tree walk.
+        // Seed an empty collection so `attach_contract` finds it.
+        let mut empty = Collection::new(COLLECTION_NAME);
+        empty.root.dir_name = Some(COLLECTION_NAME.into());
+        ContractService::new(
+            Arc::new(MockContractRepo::default()),
+            Arc::new(MockCollectionRepo::with_collection(empty)),
+        )
+    }
+
+    fn make_service_with_collection(collection: Collection) -> ContractService {
+        ContractService::new(
+            Arc::new(MockContractRepo::default()),
+            Arc::new(MockCollectionRepo::with_collection(collection)),
+        )
     }
 
     fn root() -> &'static Path {
@@ -242,10 +435,33 @@ mod tests {
         }
     }
 
+    /// Build a collection that mirrors what `build_folder_tree` produces:
+    /// one request at the root and one request inside a subfolder, both
+    /// carrying `file_name` so the walker can compute their on-disk paths.
+    fn make_collection_with_two_requests() -> Collection {
+        let mut collection = Collection::new(COLLECTION_NAME);
+        collection.root.dir_name = Some(COLLECTION_NAME.into());
+
+        let mut root_req = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        root_req.file_name = Some("get-users.yml".into());
+        collection.root.add_request(root_req);
+
+        let mut subfolder = Folder::new("auth");
+        subfolder.dir_name = Some("auth".into());
+        let mut login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+        login.file_name = Some("login.yml".into());
+        subfolder.add_request(login);
+        collection.root.add_subfolder(subfolder);
+
+        collection
+    }
+
     #[test]
     fn attach_and_list() {
         let svc = make_service();
-        let contract = svc.attach_contract(root(), make_contract(), vec![]).unwrap();
+        let contract = svc
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .unwrap();
         let list = svc.list_contracts(root()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, contract.id);
@@ -256,7 +472,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), make_contract(), vec![snap.clone()])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()])
             .unwrap();
         svc.on_request_saved(root(), snap).unwrap();
         let log = svc.get_changelog(root(), contract.id).unwrap();
@@ -268,7 +484,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), make_contract(), vec![snap.clone()])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()])
             .unwrap();
         let mut changed = snap;
         changed.method = "POST".into();
@@ -281,8 +497,198 @@ mod tests {
     #[test]
     fn delete_removes_all_files() {
         let svc = make_service();
-        let contract = svc.attach_contract(root(), make_contract(), vec![]).unwrap();
+        let contract = svc
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .unwrap();
         svc.delete_contract(root(), contract.id).unwrap();
         assert!(svc.get_contract(root(), contract.id).is_err());
+    }
+
+    #[test]
+    fn attach_takes_baseline_snapshot_of_all_covered_requests() {
+        // Regression test for C1: when a contract is attached to a non-empty
+        // collection, the service must walk the tree and capture a baseline
+        // for every covered request. An empty `initial_snapshots` must not
+        // leave an empty baseline.
+        let collection = make_collection_with_two_requests();
+        let svc = make_service_with_collection(collection);
+
+        let contract = svc
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .unwrap();
+
+        let snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        assert_eq!(snapshot.entries.len(), 2);
+
+        let root_entry = snapshot
+            .get(Path::new("get-users.yml"))
+            .expect("root-level request must be in the baseline");
+        assert_eq!(root_entry.method, "GET");
+        assert_eq!(root_entry.url_pattern, "https://api.example.com/users");
+
+        let nested_entry = snapshot
+            .get(Path::new("auth/login.yml"))
+            .expect("nested request must be in the baseline");
+        assert_eq!(nested_entry.method, "POST");
+    }
+
+    #[test]
+    fn first_modification_after_attach_is_logged() {
+        // End-to-end proof that C1 is fixed: attach on a non-empty collection,
+        // then save a modified version of a pre-existing request. The first
+        // modification must land in the changelog, not silently fall through.
+        let collection = make_collection_with_two_requests();
+        let svc = make_service_with_collection(collection);
+
+        let contract = svc
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .unwrap();
+
+        // Simulate the save hook emitting a changed shape for the nested
+        // request — the method flips from POST to PUT.
+        let mut changed_login = Request::new("Login", HttpMethod::Put, "https://api.example.com/login");
+        changed_login.file_name = Some("login.yml".into());
+        let new_snap = RequestSignatureSnapshot::from_request("auth/login.yml", &changed_login);
+        svc.on_request_saved(root(), new_snap).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert!(!log.entries.is_empty(), "first modification must be logged");
+        assert!(log.entries.iter().any(|e| e.field == "method"));
+    }
+
+    /// Build a collection with a single request at `login.yml` whose method
+    /// is POST. Used to verify the walker-vs-explicit precedence rule.
+    fn make_collection_with_single_login() -> Collection {
+        let mut collection = Collection::new(COLLECTION_NAME);
+        collection.root.dir_name = Some(COLLECTION_NAME.into());
+        let mut login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+        login.file_name = Some("login.yml".into());
+        collection.root.add_request(login);
+        collection
+    }
+
+    fn make_snap_with_method(path: &str, method: &str) -> RequestSignatureSnapshot {
+        let mut snap = make_snap(path);
+        snap.method = method.into();
+        snap
+    }
+
+    #[test]
+    fn initial_snapshots_override_walked_baseline() {
+        // Explicit `initial_snapshots` must win over values the walker
+        // produces for the same request path. This pins the loop order
+        // so a future refactor cannot silently flip precedence.
+        let svc = make_service_with_collection(make_collection_with_single_login());
+
+        let override_snap = make_snap_with_method("login.yml", "CUSTOM");
+        let contract = svc
+            .attach_contract(
+                root(),
+                COLLECTION_NAME,
+                make_contract(),
+                vec![override_snap],
+            )
+            .unwrap();
+
+        let snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        let entry = snapshot
+            .get(Path::new("login.yml"))
+            .expect("login.yml must be in the baseline");
+        assert_eq!(entry.method, "CUSTOM");
+    }
+
+    /// Build a two-folder collection: `a/x.yml` and `b/y.yml`.
+    fn make_collection_with_two_folders() -> Collection {
+        let mut collection = Collection::new(COLLECTION_NAME);
+        collection.root.dir_name = Some(COLLECTION_NAME.into());
+
+        let mut folder_a = Folder::new("a");
+        folder_a.dir_name = Some("a".into());
+        let mut req_x = Request::new("X", HttpMethod::Get, "/x");
+        req_x.file_name = Some("x.yml".into());
+        folder_a.add_request(req_x);
+        collection.root.add_subfolder(folder_a);
+
+        let mut folder_b = Folder::new("b");
+        folder_b.dir_name = Some("b".into());
+        let mut req_y = Request::new("Y", HttpMethod::Get, "/y");
+        req_y.file_name = Some("y.yml".into());
+        folder_b.add_request(req_y);
+        collection.root.add_subfolder(folder_b);
+
+        collection
+    }
+
+    #[test]
+    fn attach_folder_scope_excludes_requests_outside_folder() {
+        // ContractScope::Folder { rel_path: "a" } must snapshot only requests
+        // under the `a` folder, not sibling folders.
+        let svc = make_service_with_collection(make_collection_with_two_folders());
+
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Folder { rel_path: PathBuf::from("a") };
+
+        let attached = svc
+            .attach_contract(root(), COLLECTION_NAME, contract, vec![])
+            .unwrap();
+
+        let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].request_path, PathBuf::from("a/x.yml"));
+    }
+
+    #[test]
+    fn attach_request_scope_snapshots_only_one_request() {
+        // ContractScope::Request must snapshot exactly that one request,
+        // ignoring everything else in the collection.
+        let mut collection = Collection::new(COLLECTION_NAME);
+        collection.root.dir_name = Some(COLLECTION_NAME.into());
+        let mut foo = Request::new("Foo", HttpMethod::Get, "/foo");
+        foo.file_name = Some("foo.yml".into());
+        collection.root.add_request(foo);
+        let mut bar = Request::new("Bar", HttpMethod::Get, "/bar");
+        bar.file_name = Some("bar.yml".into());
+        collection.root.add_request(bar);
+
+        let svc = make_service_with_collection(collection);
+
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Request { rel_path: PathBuf::from("foo.yml") };
+
+        let attached = svc
+            .attach_contract(root(), COLLECTION_NAME, contract, vec![])
+            .unwrap();
+
+        let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].request_path, PathBuf::from("foo.yml"));
+    }
+
+    #[test]
+    fn attach_propagates_collection_load_error() {
+        // If the collection read fails, the service must surface the error
+        // as ContractError::Internal and must NOT leave an orphan contract
+        // file on disk. This is the regression guard for the fix that moves
+        // the collection load ahead of all writes.
+        let contract_repo = Arc::new(MockContractRepo::default());
+        let svc = ContractService::new(
+            Arc::clone(&contract_repo) as Arc<dyn ContractRepository>,
+            Arc::new(MockCollectionRepo::failing()),
+        );
+
+        let result = svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![]);
+
+        match result {
+            Err(ContractError::Internal(_)) => {}
+            other => panic!("expected ContractError::Internal, got {:?}", other),
+        }
+
+        // No contract should have been persisted.
+        let contracts = svc.list_contracts(root()).unwrap();
+        assert!(
+            contracts.is_empty(),
+            "collection load failure must not leave an orphan contract behind"
+        );
     }
 }

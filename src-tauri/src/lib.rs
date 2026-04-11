@@ -123,7 +123,13 @@ pub fn run() {
             // Contract service — owns the save-hook audit log.
             // FsContractRepo is stateless; it receives the per-collection
             // directory on every call, computed as <workspace>/collections/<name>.
-            let contract_svc = ContractService::new(Arc::new(FsContractRepo));
+            // A second SharedPathCollectionRepo sharing the same workspace
+            // path lets the service walk collections at contract-attach time
+            // without duplicating filesystem state.
+            let contract_svc = ContractService::new(
+                Arc::new(FsContractRepo),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+            );
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);

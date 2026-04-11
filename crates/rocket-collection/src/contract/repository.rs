@@ -16,6 +16,8 @@ pub enum ContractError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_yaml::Error),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub trait ContractRepository: Send + Sync {

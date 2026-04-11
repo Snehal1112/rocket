@@ -39,6 +39,16 @@ pub fn attach_contract(
 ) -> Result<Contract, String> {
     let root = PathBuf::from(&collection_root);
 
+    // The collection name is the final path component of the collection root.
+    // The frontend always builds `collection_root` as
+    // `<workspace>/collections/<name>`, so this mirrors the convention used
+    // by the save hook in `commands::collections::save_request`.
+    let collection_name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "collectionRoot must have a final path component".to_string())?
+        .to_string();
+
     let effective_date = chrono::NaiveDate::parse_from_str(&input.effective_date, "%Y-%m-%d")
         .map_err(|e| format!("invalid effectiveDate: {}", e))?;
 
@@ -65,7 +75,7 @@ pub fn attach_contract(
         scope: input.scope,
     };
 
-    svc.attach_contract(&root, contract, input.initial_snapshots)
+    svc.attach_contract(&root, &collection_name, contract, input.initial_snapshots)
         .map_err(|e| e.to_string())
 }
 
