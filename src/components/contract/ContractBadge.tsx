@@ -1,29 +1,29 @@
 import { Lock } from 'lucide-react';
-import { type MouseEvent, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Contract } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
-import { ContractPanel } from './ContractPanel';
+import { usePaneStore } from '@/stores/pane-store';
 
 interface ContractBadgeProps {
   contracts: Contract[];
+  collectionName: string;
   collectionRoot: string;
 }
 
 /**
- * Small lock icon shown next to a sidebar item that is covered by one
- * or more active contracts. Clicking opens the ContractPanel focused
- * on the first (and usually only) contract.
+ * Small lock icon shown next to a sidebar item covered by one or more
+ * active contracts. Clicking opens the ContractTab for this collection.
  *
  * Visual semantics:
  * - expired   → destructive colour
  * - expiring  → warning colour (≤30 days to expiry)
  * - active    → muted foreground
  */
-export function ContractBadge({ contracts, collectionRoot }: ContractBadgeProps) {
-  const [open, setOpen] = useState(false);
+export function ContractBadge({ contracts, collectionName, collectionRoot }: ContractBadgeProps) {
   const contractStatus = useContractStore((s) => s.contractStatus);
+  const openContractTab = usePaneStore((s) => s.openContractTab);
 
   if (contracts.length === 0) return null;
 
@@ -40,44 +40,35 @@ export function ContractBadge({ contracts, collectionRoot }: ContractBadgeProps)
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     // Prevent the sidebar row click from selecting the collection.
     event.stopPropagation();
-    setOpen(true);
+    openContractTab(collectionName, collectionRoot);
   };
 
   return (
-    <>
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type='button'
-              onClick={handleClick}
-              className={cn(
-                'inline-flex items-center justify-center h-4 w-4 rounded-sm hover:bg-accent',
-                iconColor,
-              )}
-              aria-label={`View contract: ${primary.title}`}
-            >
-              <Lock className='h-3 w-3' />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side='right'>
-            <p className='text-xs font-medium'>{primary.title}</p>
-            <p className='text-xs text-primary-foreground/80'>
-              {primary.provider} → {primary.consumer}
-            </p>
-            {contracts.length > 1 && (
-              <p className='text-xs text-primary-foreground/60'>+{contracts.length - 1} more</p>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type='button'
+            onClick={handleClick}
+            className={cn(
+              'inline-flex items-center justify-center h-4 w-4 rounded-sm hover:bg-accent',
+              iconColor,
             )}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <ContractPanel
-        open={open}
-        onOpenChange={setOpen}
-        contract={primary}
-        collectionRoot={collectionRoot}
-      />
-    </>
+            aria-label='Manage contracts'
+          >
+            <Lock className='h-3 w-3' />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side='right'>
+          <p className='text-xs font-medium'>{primary.title}</p>
+          <p className='text-xs text-primary-foreground/80'>
+            {primary.provider} → {primary.consumer}
+          </p>
+          {contracts.length > 1 && (
+            <p className='text-xs text-primary-foreground/60'>+{contracts.length - 1} more</p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

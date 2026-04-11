@@ -9,7 +9,6 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AttachContractDialog } from '@/components/contract/AttachContractDialog';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
@@ -79,7 +78,6 @@ export function CollectionNode({
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
-  const [attachContractOpen, setAttachContractOpen] = useState(false);
 
   // Derive the filesystem path of this collection so we can talk to the
   // contract IPC commands. The backend stores contract metadata under
@@ -97,6 +95,7 @@ export function CollectionNode({
     (s) => s.contractsByRoot[collectionRoot] ?? EMPTY_CONTRACTS,
   );
   const collectionScopedContracts = contractsForRoot.filter((c) => c.scope.type === 'collection');
+  const openContractTab = usePaneStore((s) => s.openContractTab);
 
   // Load contracts for this collection once the workspace path is known.
   // Cheap when the collection has none — backend returns an empty list.
@@ -286,6 +285,7 @@ export function CollectionNode({
                   {collectionRoot && (
                     <ContractBadge
                       contracts={collectionScopedContracts}
+                      collectionName={summary.name}
                       collectionRoot={collectionRoot}
                     />
                   )}
@@ -340,9 +340,9 @@ export function CollectionNode({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 disabled={!collectionRoot}
-                onClick={() => setAttachContractOpen(true)}
+                onClick={() => openContractTab(summary.name, collectionRoot)}
               >
-                <Lock className='h-3.5 w-3.5 mr-2' /> Attach contract…
+                <Lock className='h-3.5 w-3.5 mr-2' /> Manage contracts
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -392,8 +392,12 @@ export function CollectionNode({
           Rename
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled={!collectionRoot} onClick={() => setAttachContractOpen(true)}>
-          Attach contract…
+        <ContextMenuItem
+          disabled={!collectionRoot}
+          onClick={() => openContractTab(summary.name, collectionRoot)}
+        >
+          <Lock className='h-3.5 w-3.5 mr-2 text-muted-foreground' />
+          Manage contracts
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -472,14 +476,6 @@ export function CollectionNode({
         collectionName={summary.name}
         onClose={() => setCreateRequestOpen(false)}
       />
-      {collectionRoot && (
-        <AttachContractDialog
-          open={attachContractOpen}
-          onOpenChange={setAttachContractOpen}
-          collectionRoot={collectionRoot}
-          defaultScope={{ type: 'collection' }}
-        />
-      )}
     </ContextMenu>
   );
 }

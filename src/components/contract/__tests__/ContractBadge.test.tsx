@@ -4,8 +4,6 @@ import type { Contract, ContractScope } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import { ContractBadge } from '../ContractBadge';
 
-// Mock tauri-api — ContractPanel (rendered alongside the badge) would otherwise
-// try to talk to the backend when mounted.
 vi.mock('@/lib/tauri-api', () => ({
   attachContract: vi.fn(),
   listContracts: vi.fn(),
@@ -14,7 +12,13 @@ vi.mock('@/lib/tauri-api', () => ({
   getContractChangelog: vi.fn().mockResolvedValue({ contractId: '', entries: [] }),
 }));
 
+vi.mock('@/stores/pane-store', () => ({
+  usePaneStore: (selector: (s: { openContractTab: ReturnType<typeof vi.fn> }) => unknown) =>
+    selector({ openContractTab: vi.fn() }),
+}));
+
 const ROOT = '/tmp/workspace/collections/payments';
+const NAME = 'payments';
 const collectionScope: ContractScope = { type: 'collection' };
 
 function makeContract(overrides: Partial<Contract> = {}): Contract {
@@ -56,27 +60,33 @@ describe('ContractBadge', () => {
   });
 
   it('renders nothing when the contracts array is empty', () => {
-    const { container } = render(<ContractBadge contracts={[]} collectionRoot={ROOT} />);
-    // No button, no tooltip trigger — completely empty subtree.
+    const { container } = render(
+      <ContractBadge contracts={[]} collectionName={NAME} collectionRoot={ROOT} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders a button labelled with the primary contract title', () => {
+  it('renders a button with aria-label Manage contracts', () => {
     render(
       <ContractBadge
         contracts={[makeContract({ title: 'Payments API v2.3' })]}
+        collectionName={NAME}
         collectionRoot={ROOT}
       />,
     );
-    const button = screen.getByRole('button', { name: /view contract: payments api v2\.3/i });
+    const button = screen.getByRole('button', { name: /manage contracts/i });
     expect(button).toBeDefined();
   });
 
   it('uses the muted foreground colour for an active contract', () => {
     render(
-      <ContractBadge contracts={[makeContract({ expiryDate: null })]} collectionRoot={ROOT} />,
+      <ContractBadge
+        contracts={[makeContract({ expiryDate: null })]}
+        collectionName={NAME}
+        collectionRoot={ROOT}
+      />,
     );
-    const button = screen.getByRole('button', { name: /view contract/i });
+    const button = screen.getByRole('button', { name: /manage contracts/i });
     expect(button.className).toContain('text-muted-foreground');
     expect(button.className).not.toContain('text-warning');
     expect(button.className).not.toContain('text-destructive');
@@ -87,10 +97,11 @@ describe('ContractBadge', () => {
       <ContractBadge
         // Today + 10 days — inside the 30-day window.
         contracts={[makeContract({ expiryDate: '2026-04-21' })]}
+        collectionName={NAME}
         collectionRoot={ROOT}
       />,
     );
-    const button = screen.getByRole('button', { name: /view contract/i });
+    const button = screen.getByRole('button', { name: /manage contracts/i });
     expect(button.className).toContain('text-warning');
   });
 
@@ -98,20 +109,22 @@ describe('ContractBadge', () => {
     render(
       <ContractBadge
         contracts={[makeContract({ expiryDate: '2026-04-10' })]}
+        collectionName={NAME}
         collectionRoot={ROOT}
       />,
     );
-    const button = screen.getByRole('button', { name: /view contract/i });
+    const button = screen.getByRole('button', { name: /manage contracts/i });
     expect(button.className).toContain('text-destructive');
   });
 
   it('uses the first contract as the primary when multiple are attached', () => {
     const first = makeContract({ id: 'a', title: 'First', expiryDate: null });
     const second = makeContract({ id: 'b', title: 'Second', expiryDate: '2026-04-10' });
-    render(<ContractBadge contracts={[first, second]} collectionRoot={ROOT} />);
-
-    const button = screen.getByRole('button', { name: /view contract: first/i });
-    // Status derives from the *first* contract, not the expired second.
+    render(
+      <ContractBadge contracts={[first, second]} collectionName={NAME} collectionRoot={ROOT} />,
+    );
+    const button = screen.getByRole('button', { name: /manage contracts/i });
+    // Status derives from the first contract, not the expired second.
     expect(button.className).toContain('text-muted-foreground');
     expect(button.className).not.toContain('text-destructive');
   });
