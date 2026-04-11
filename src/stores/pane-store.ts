@@ -16,6 +16,7 @@ import type {
   CollectionTab,
   ConflictState,
   ConflictTab,
+  ContractTab,
   DiffState,
   DiffTab,
   LeafNode,
@@ -117,6 +118,9 @@ export interface PaneState {
   /** Opens or focuses the collection tab for `collection` and navigates to `section`.
    *  Returns false if no collection tab is currently open for that collection. */
   openCollectionTab: (collection: string, section: CollectionSection) => boolean;
+
+  // Contract tab.
+  openContractTab: (collectionName: string, collectionRoot: string) => void;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -582,5 +586,18 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         return { ...tab, activeSection: section };
       }),
     });
+  },
+
+  openContractTab(collectionName, collectionRoot) {
+    const id = `contract:${collectionName}`;
+    const tab: ContractTab = {
+      id,
+      title: `Contracts — ${collectionName}`,
+      tabType: 'contract',
+      collectionName,
+      collectionRoot,
+      isDirty: false,
+    };
+    get().openTab(tab);
   },
 }));

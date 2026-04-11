@@ -80,7 +80,25 @@ export interface GitTab extends BaseTab {
   collectionPath: string;
 }
 
-export type Tab = RequestTab | CollectionTab | WorkspaceTab | DiffTab | ConflictTab | GitTab;
+export interface ContractTab extends BaseTab {
+  tabType: 'contract';
+  collectionName: string;
+  collectionRoot: string; // absolute path — required for all IPC calls
+  initialScope?: import('@/lib/tauri-api').ContractScope;
+}
+
+export function isContractTab(tab: Tab): tab is ContractTab {
+  return tab.tabType === 'contract';
+}
+
+export type Tab =
+  | RequestTab
+  | CollectionTab
+  | WorkspaceTab
+  | DiffTab
+  | ConflictTab
+  | GitTab
+  | ContractTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';
@@ -100,6 +118,10 @@ export function isConflictTab(tab: Tab): tab is ConflictTab {
 
 export function isGitTab(tab: Tab): tab is GitTab {
   return tab.tabType === 'git';
+}
+
+export function isCollectionTab(tab: Tab): tab is CollectionTab {
+  return tab.tabType === 'collection';
 }
 
 export interface RequestSettings {

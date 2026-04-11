@@ -21,6 +21,7 @@ import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTa
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import {
+  isCollectionTab,
   isConflictTab,
   isDiffTab,
   isGitTab,
@@ -99,9 +100,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             ) : activeTab.activeSection === 'git' ? (
               <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
             ) : null
-          ) : (
+          ) : isCollectionTab(activeTab) ? (
             <CollectionOverviewTab tab={activeTab} />
-          )
+          ) : null
         ) : (
           <EmptyState />
         )}
