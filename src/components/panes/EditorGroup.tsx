@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { ContractTab } from '@/components/contract/ContractTab';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
 import { DiffViewer } from '@/components/git/DiffViewer';
 import { GitPanel } from '@/components/git/GitPanel';
@@ -93,8 +94,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionName={activeTab.collectionName}
             />
           ) : isContractTab(activeTab) ? (
-            // ContractTab component added in the next task.
-            null
+            <ContractTab tab={activeTab} />
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
