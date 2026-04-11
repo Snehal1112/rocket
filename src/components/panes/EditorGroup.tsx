@@ -22,6 +22,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import {
   isConflictTab,
+  isContractTab,
   isDiffTab,
   isGitTab,
   isRequestTab,
@@ -91,6 +92,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionPath={activeTab.collectionPath}
               collectionName={activeTab.collectionName}
             />
+          ) : isContractTab(activeTab) ? (
+            // ContractTab component added in the next task.
+            null
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />

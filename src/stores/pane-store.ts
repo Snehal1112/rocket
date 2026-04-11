@@ -16,6 +16,7 @@ import type {
   CollectionTab,
   ConflictState,
   ConflictTab,
+  ContractTab,
   DiffState,
   DiffTab,
   LeafNode,
@@ -106,6 +107,9 @@ export interface PaneState {
   // Workspace tabs.
   openWorkspaceTabs: (workspaceId: string, section?: WorkspaceTabSection) => void;
   isWorkspaceMode: () => boolean;
+
+  // Contract tab.
+  openContractTab: (collectionName: string, collectionRoot: string) => void;
 
   // Utility.
   reset: () => void;
@@ -350,6 +354,19 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       isDirty: false,
       tabType: 'conflict',
       conflictState,
+    };
+    get().openTab(tab);
+  },
+
+  openContractTab(collectionName, collectionRoot) {
+    const id = `contract:${collectionName}`;
+    const tab: ContractTab = {
+      id,
+      title: `Contracts — ${collectionName}`,
+      tabType: 'contract',
+      collectionName,
+      collectionRoot,
+      isDirty: false,
     };
     get().openTab(tab);
   },
