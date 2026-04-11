@@ -36,10 +36,8 @@ export function ContractCard({
     contract.scope.type === 'collection'
       ? 'Entire collection'
       : contract.scope.type === 'folder'
-        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          `Folder: ${(contract.scope as any).rel_path}`
-        : // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          `Request: ${(contract.scope as any).rel_path}`;
+        ? `Folder: ${contract.scope.rel_path}`
+        : `Request: ${contract.scope.rel_path}`;
 
   const changeCount = changelogs[contract.id]?.entries.length ?? 0;
 

@@ -84,8 +84,7 @@ export function ContractTab({ tab }: ContractTabProps) {
       effectiveDate: c.effectiveDate,
       expiryDate: c.expiryDate ?? '',
       scopeType,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scopePath: (c.scope as any).rel_path ?? '',
+      scopePath: c.scope.type !== 'collection' ? c.scope.rel_path : '',
       documentPath: c.documentPath,
     });
     setView({ type: 'edit', contractId });
@@ -220,7 +219,13 @@ export function ContractTab({ tab }: ContractTabProps) {
             Cancel
           </Button>
           <Button size='sm' onClick={() => void handleSubmit()} disabled={saving}>
-            {saving ? (isEdit ? 'Saving…' : 'Creating…') : isEdit ? 'Save changes' : 'Create contract'}
+            {saving
+              ? isEdit
+                ? 'Saving…'
+                : 'Creating…'
+              : isEdit
+                ? 'Save changes'
+                : 'Create contract'}
           </Button>
         </div>
       </div>

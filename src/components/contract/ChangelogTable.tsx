@@ -43,8 +43,8 @@ export function ChangelogTable({ entries }: ChangelogTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {entries.map((entry, i) => (
-            <TableRow key={i}>
+          {entries.map((entry) => (
+            <TableRow key={`${entry.timestamp}:${entry.field}`}>
               {/* Date */}
               <TableCell className='text-xs text-muted-foreground whitespace-nowrap'>
                 {new Date(entry.timestamp).toLocaleDateString(undefined, {

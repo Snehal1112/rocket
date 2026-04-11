@@ -91,7 +91,14 @@ export function isContractTab(tab: Tab): tab is ContractTab {
   return tab.tabType === 'contract';
 }
 
-export type Tab = RequestTab | CollectionTab | WorkspaceTab | DiffTab | ConflictTab | GitTab | ContractTab;
+export type Tab =
+  | RequestTab
+  | CollectionTab
+  | WorkspaceTab
+  | DiffTab
+  | ConflictTab
+  | GitTab
+  | ContractTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

@@ -33,9 +33,8 @@ interface ContractFormProps {
 }
 
 export function ContractForm({ values, onChange, folders, requests, error }: ContractFormProps) {
-  const set =
-    (field: keyof ContractFormValues) => (e: React.ChangeEvent<HTMLInputElement>) =>
-      onChange({ ...values, [field]: e.target.value });
+  const set = (field: keyof ContractFormValues) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    onChange({ ...values, [field]: e.target.value });
 
   const setScopeType = (v: ContractFormValues['scopeType']) =>
     onChange({ ...values, scopeType: v, scopePath: '' });
@@ -177,11 +176,7 @@ export function ContractForm({ values, onChange, folders, requests, error }: Con
                 </SelectTrigger>
                 <SelectContent>
                   {folders.length === 0 && (
-                    <SelectItem
-                      value='__none__'
-                      disabled
-                      className='text-xs text-muted-foreground'
-                    >
+                    <SelectItem value='__none__' disabled className='text-xs text-muted-foreground'>
                       No folders found
                     </SelectItem>
                   )}
@@ -211,11 +206,7 @@ export function ContractForm({ values, onChange, folders, requests, error }: Con
                 </SelectTrigger>
                 <SelectContent>
                   {requests.length === 0 && (
-                    <SelectItem
-                      value='__none__'
-                      disabled
-                      className='text-xs text-muted-foreground'
-                    >
+                    <SelectItem value='__none__' disabled className='text-xs text-muted-foreground'>
                       No requests found
                     </SelectItem>
                   )}
