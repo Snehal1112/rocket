@@ -91,6 +91,10 @@ export function isContractTab(tab: Tab): tab is ContractTab {
   return tab.tabType === 'contract';
 }
 
+export function isCollectionTab(tab: Tab): tab is CollectionTab {
+  return tab.tabType === 'collection';
+}
+
 export type Tab =
   | RequestTab
   | CollectionTab

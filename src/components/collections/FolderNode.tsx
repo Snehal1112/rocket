@@ -9,6 +9,7 @@ import {
   Variable,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -29,15 +30,19 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { moveItem, saveRequest } from '@/lib/tauri-api';
+import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { FolderVariablesPopover } from './FolderVariablesPopover';
 import { RequestNode } from './RequestNode';
 import type { DeleteTarget } from './tree-utils';
 
+const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
+
 interface FolderNodeProps {
   name: string;
   items: CollectionItem[];
   collectionName: string;
+  collectionRoot: string;
   basePath: string;
   depth: number;
   filter: string;
@@ -57,6 +62,7 @@ export function FolderNode({
   name,
   items,
   collectionName,
+  collectionRoot,
   basePath,
   depth,
   filter,
@@ -66,6 +72,9 @@ export function FolderNode({
   onDelete,
   onDuplicate,
 }: FolderNodeProps) {
+  const contractsForScope = useContractStore((s) => s.contractsForScope);
+  const scopedContracts = contractsForScope(collectionRoot, 'folder', basePath) ?? EMPTY_CONTRACTS;
+
   const [open, setOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
@@ -191,6 +200,11 @@ export function FolderNode({
                 ) : (
                   <span className='truncate text-foreground'>{name}</span>
                 )}
+                <ContractBadge
+                  contracts={scopedContracts}
+                  collectionName={collectionName}
+                  collectionRoot={collectionRoot}
+                />
               </TreeItemContent>
             </TreeItem>
 
@@ -314,6 +328,7 @@ export function FolderNode({
                   name={item.name}
                   items={item.items}
                   collectionName={collectionName}
+                  collectionRoot={collectionRoot}
                   basePath={folderPath}
                   depth={depth + 1}
                   filter={filter}
@@ -334,6 +349,7 @@ export function FolderNode({
                 name={item.name}
                 method={item.method}
                 collectionName={collectionName}
+                collectionRoot={collectionRoot}
                 path={requestPath}
                 itemData={item}
                 summaries={summaries}

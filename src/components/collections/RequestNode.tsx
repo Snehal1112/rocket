@@ -1,5 +1,6 @@
 import { Copy, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -27,16 +28,20 @@ import { mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState, RequestTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
+
+const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
 
 interface RequestNodeProps {
   uid: string;
   name: string;
   method: string;
   collectionName: string;
+  collectionRoot: string;
   path: string;
   itemData: Extract<CollectionItem, { type: 'request' }>;
   summaries: CollectionSummary[];
@@ -55,6 +60,7 @@ export function RequestNode({
   name,
   method,
   collectionName,
+  collectionRoot,
   path,
   itemData,
   summaries,
@@ -64,6 +70,8 @@ export function RequestNode({
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
   const active = isActiveRequest(root, uid);
+  const contractsForScope = useContractStore((s) => s.contractsForScope);
+  const scopedContracts = contractsForScope(collectionRoot, 'request', path) ?? EMPTY_CONTRACTS;
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const renameInFlight = useRef(false);
@@ -135,6 +143,11 @@ export function RequestNode({
               ) : (
                 <span className='truncate text-foreground'>{name}</span>
               )}
+              <ContractBadge
+                contracts={scopedContracts}
+                collectionName={collectionName}
+                collectionRoot={collectionRoot}
+              />
             </TreeItemContent>
           </TreeItem>
 

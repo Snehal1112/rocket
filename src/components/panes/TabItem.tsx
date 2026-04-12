@@ -1,7 +1,7 @@
-import { Folder, GitBranch, Globe, LayoutDashboard, X } from 'lucide-react';
+import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, X } from 'lucide-react';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
-import { isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
+import { isContractTab, isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
@@ -37,7 +37,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           onSelect();
         }
       }}
-      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 max-w-47.5 transition-all ${
+      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${
         isActive
           ? 'bg-background/95 border-b-2 border-b-primary -mb-px text-foreground'
           : 'hover:bg-accent/50 text-muted-foreground'
@@ -63,8 +63,10 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
             <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
           )}
         </>
+      ) : isContractTab(tab) ? (
+        <FileLock className='h-4 w-4 shrink-0' />
       ) : (
-        <Folder className='h-3.5 w-3.5 shrink-0 text-primary' />
+        <BoxIcon className='h-4 w-4 shrink-0' />
       )}
       <span className='truncate'>{getTabTitle(tab)}</span>
       {tab.isDirty && (

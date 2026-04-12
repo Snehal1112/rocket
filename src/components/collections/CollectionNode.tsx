@@ -265,7 +265,7 @@ export function CollectionNode({
                   strokeWidth={1.5}
                 />
               )}
-              <BoxIcon className='h-5 w-5 shrink-0 ' />
+              <BoxIcon className='h-5 w-5 shrink-0' />
               {isRenaming ? (
                 <Input
                   autoFocus
@@ -425,6 +425,7 @@ export function CollectionNode({
                   name={item.name}
                   items={item.items}
                   collectionName={summary.name}
+                  collectionRoot={collectionRoot}
                   basePath={folderDirName}
                   depth={1}
                   filter={filter}
@@ -443,6 +444,7 @@ export function CollectionNode({
                 name={item.name}
                 method={item.method}
                 collectionName={summary.name}
+                collectionRoot={collectionRoot}
                 path={item.fileName ?? item.name}
                 itemData={item}
                 summaries={summaries}

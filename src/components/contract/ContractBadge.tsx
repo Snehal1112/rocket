@@ -1,4 +1,4 @@
-import { Lock } from 'lucide-react';
+import { FileLock } from 'lucide-react';
 import type { MouseEvent } from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Contract } from '@/lib/tauri-api';
@@ -56,7 +56,7 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
             )}
             aria-label='Manage contracts'
           >
-            <Lock className='h-3 w-3' />
+            <FileLock className='h-4 w-4 shrink-0' />
           </button>
         </TooltipTrigger>
         <TooltipContent side='right'>

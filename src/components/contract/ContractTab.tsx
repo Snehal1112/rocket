@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { AttachContractInput } from '@/lib/tauri-api';
+import type { AttachContractInput, CollectionItem } from '@/lib/tauri-api';
+import { getCollection } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
 
@@ -12,6 +13,27 @@ import { ContractEmptyState } from './ContractEmptyState';
 import { ContractForm, type ContractFormValues } from './ContractForm';
 import { ContractLivePreview } from './ContractLivePreview';
 import { ContractTabTopBar } from './ContractTabTopBar';
+
+// Walk the collection item tree and collect relative folder/request paths.
+function collectPaths(
+  items: CollectionItem[],
+  prefix: string,
+  folders: string[],
+  requests: string[],
+) {
+  for (const item of items) {
+    if (item.type === 'folder') {
+      const seg = item.dirName ?? item.name;
+      const path = prefix ? `${prefix}/${seg}` : seg;
+      folders.push(path);
+      collectPaths(item.items, path, folders, requests);
+    } else {
+      const seg = item.fileName ?? item.name;
+      const path = prefix ? `${prefix}/${seg}` : seg;
+      requests.push(path);
+    }
+  }
+}
 
 // View discriminant for internal navigation.
 type View =
@@ -51,11 +73,28 @@ export function ContractTab({ tab }: ContractTabProps) {
   const [form, setForm] = useState<ContractFormValues>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [requests, setRequests] = useState<string[]>([]);
 
   // Load contracts whenever the collection root changes.
   useEffect(() => {
     void loadContracts(tab.collectionRoot);
   }, [tab.collectionRoot, loadContracts]);
+
+  // Fetch collection tree to populate the scope folder/request dropdowns.
+  useEffect(() => {
+    getCollection(tab.collectionName)
+      .then((col) => {
+        const f: string[] = [];
+        const r: string[] = [];
+        collectPaths(col.root.items, '', f, r);
+        setFolders(f);
+        setRequests(r);
+      })
+      .catch(() => {
+        // Leave lists empty — dropdowns will show "No folders/requests found".
+      });
+  }, [tab.collectionName]);
 
   // ── Navigation helpers ──────────────────────────────────────────
   const goList = () => {
@@ -201,8 +240,8 @@ export function ContractTab({ tab }: ContractTabProps) {
             <ContractForm
               values={form}
               onChange={setForm}
-              folders={[]}
-              requests={[]}
+              folders={folders}
+              requests={requests}
               error={error}
             />
           </div>

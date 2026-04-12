@@ -136,7 +136,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const collectionName =
       tab.tabType === 'collection'
         ? (tab as CollectionTab).collectionName
-        : (tab.source?.collection ?? null);
+        : tab.tabType === 'contract'
+          ? (tab as ContractTab).collectionName
+          : (tab.source?.collection ?? null);
     if (collectionName && collectionName !== get().activeCollection) {
       get().switchCollection(collectionName);
     }

@@ -1,4 +1,4 @@
-import { Check, Folder as FolderIcon, Loader2, Save } from 'lucide-react';
+import { BoxIcon, Check, Loader2, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
@@ -436,7 +436,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       {/* Collection header. */}
       <div className='shrink-0 border-b border-border/70 px-6 pt-4 pb-0'>
         <div className='flex items-center gap-2 mb-1'>
-          <FolderIcon className='h-5 w-5 text-muted-foreground shrink-0' />
+          <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
           <h1 className='text-lg font-semibold leading-tight truncate'>{collection.name}</h1>
         </div>
         <p className='text-xs text-muted-foreground pl-7 mb-3'>{statsLine}</p>
