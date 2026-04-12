@@ -58,3 +58,41 @@ pub enum ContractScope {
     Folder { rel_path: PathBuf },
     Request { rel_path: PathBuf },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contract_scope_folder_serializes_rel_path_as_snake_case() {
+        let scope = ContractScope::Folder { rel_path: PathBuf::from("auth/login.yml") };
+        let yaml = serde_yaml::to_string(&scope).unwrap();
+        // rel_path must stay snake_case — the frontend wire type uses rel_path.
+        assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
+        assert!(!yaml.contains("relPath:"), "camelCase relPath must not appear in:\n{yaml}");
+    }
+
+    #[test]
+    fn contract_scope_request_serializes_rel_path_as_snake_case() {
+        let scope = ContractScope::Request { rel_path: PathBuf::from("users/get.yml") };
+        let yaml = serde_yaml::to_string(&scope).unwrap();
+        assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
+        assert!(!yaml.contains("relPath:"), "camelCase relPath must not appear in:\n{yaml}");
+    }
+
+    #[test]
+    fn contract_scope_folder_roundtrips() {
+        let scope = ContractScope::Folder { rel_path: PathBuf::from("auth/login.yml") };
+        let yaml = serde_yaml::to_string(&scope).unwrap();
+        let back: ContractScope = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(scope, back);
+    }
+
+    #[test]
+    fn contract_scope_collection_roundtrips() {
+        let scope = ContractScope::Collection;
+        let yaml = serde_yaml::to_string(&scope).unwrap();
+        let back: ContractScope = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(scope, back);
+    }
+}
