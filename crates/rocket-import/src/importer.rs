@@ -188,13 +188,22 @@ impl ImportService {
     ///
     /// `name_hint` overrides the directory-derived name (useful for ZIP imports where the
     /// extracted temp path has no meaningful name).
+    #[tracing::instrument(name = "bruno_import", skip(self), fields(source_path = %path.display()))]
     pub fn import_auto(
         &self,
         path: &Path,
         workspace_id: &str,
         create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
-        self.import_auto_with_name(path, workspace_id, create_new_workspace, None)
+        let report = self.import_auto_with_name(path, workspace_id, create_new_workspace, None)?;
+        tracing::info!(
+            total_files = report.total_files,
+            imported = report.imported,
+            skipped = report.skipped.len(),
+            detected_type = %report.detected_type,
+            "import completed"
+        );
+        Ok(report)
     }
 
     fn import_auto_with_name(
@@ -218,6 +227,7 @@ impl ImportService {
     /// The `TempDir` is held for the duration of the import and cleaned up automatically
     /// when this method returns. The collection/workspace name is derived from the ZIP
     /// filename so flat-root archives get a meaningful name instead of a temp path.
+    #[tracing::instrument(name = "bruno_import_zip", skip(self), fields(source_path = %zip_path.display()))]
     pub fn import_auto_from_zip(
         &self,
         zip_path: &Path,
@@ -232,7 +242,15 @@ impl ImportService {
             .map(|n| n.to_string_lossy().to_string());
         let name_hint = zip_name.as_deref();
 
-        self.import_auto_with_name(&inner, workspace_id, create_new_workspace, name_hint)
+        let report = self.import_auto_with_name(&inner, workspace_id, create_new_workspace, name_hint)?;
+        tracing::info!(
+            total_files = report.total_files,
+            imported = report.imported,
+            skipped = report.skipped.len(),
+            detected_type = %report.detected_type,
+            "zip import completed"
+        );
+        Ok(report)
     }
 
     fn walk_requests(

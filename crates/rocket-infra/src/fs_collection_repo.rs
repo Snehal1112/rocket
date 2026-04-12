@@ -165,7 +165,7 @@ impl CollectionRepository for FsCollectionRepo {
                     CollectionFormat::OpenCollection => {} // Already migrated.
                     CollectionFormat::LegacyJson => {
                         if let Err(e) = migrate_collection(&path) {
-                            log::warn!("Failed to migrate collection '{}': {}", name, e);
+                            tracing::warn!(collection = %name, error = %e, "failed to migrate collection");
                             continue;
                         }
                     }
@@ -191,6 +191,7 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(result)
     }
 
+    #[tracing::instrument(name = "collection_get", skip(self), fields(collection_name = %name))]
     fn get(&self, name: &str) -> DomainResult<Collection> {
         let path = self.collection_path(name);
         if !path.exists() {
@@ -205,6 +206,7 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(Collection { name: name.to_string(), root, settings })
     }
 
+    #[tracing::instrument(name = "collection_create", skip(self), fields(collection_name = %name))]
     fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         let path = self.collection_path(name);
@@ -238,6 +240,7 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(Collection::new(name))
     }
 
+    #[tracing::instrument(name = "collection_delete", skip(self), fields(collection_name = %name))]
     fn delete(&self, name: &str) -> DomainResult<()> {
         let path = self.collection_path(name);
         if !path.exists() {
@@ -247,6 +250,7 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(())
     }
 
+    #[tracing::instrument(name = "collection_rename", skip(self), fields(old_name = %old_name, new_name = %new_name))]
     fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
         Collection::validate_name(new_name)?;
         let old_path = self.collection_path(old_name);
@@ -294,6 +298,7 @@ impl CollectionRepository for FsCollectionRepo {
         Ok(serde_json::from_str(&content)?)
     }
 
+    #[tracing::instrument(name = "collection_save_request", skip(self, request), fields(collection_name = %collection, request_path = %path))]
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
         let collection_dir = self.collection_path(collection);
         // Use .yml extension instead of .json.

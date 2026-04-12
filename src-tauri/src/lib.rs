@@ -19,7 +19,57 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    // Structured logging subscriber with reload layer for TauriTracingLayer.
+    // The reload layer starts as None and gets hot-swapped in .setup() once
+    // the AppHandle is available.
+    use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter, Registry};
+
+    type TauriReloadLayer = reload::Layer<
+        Option<rocket_infra::TauriTracingLayer>,
+        Registry,
+    >;
+    type TauriReloadHandle = reload::Handle<
+        Option<rocket_infra::TauriTracingLayer>,
+        Registry,
+    >;
+
+    let env_filter = EnvFilter::try_from_env("ROCKET_LOG")
+        .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
+        .unwrap_or_else(|_| EnvFilter::new("info,git2=warn,reqwest=warn,hyper=warn"));
+
+    let (tauri_layer, reload_handle): (TauriReloadLayer, TauriReloadHandle) =
+        reload::Layer::new(None::<rocket_infra::TauriTracingLayer>);
+
+    if cfg!(debug_assertions) {
+        tracing_subscriber::registry()
+            .with(tauri_layer)
+            .with(env_filter)
+            .with(
+                fmt::layer()
+                    .with_target(true)
+                    .with_thread_ids(false)
+                    .with_file(false)
+                    .with_line_number(false)
+                    .pretty(),
+            )
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(tauri_layer)
+            .with(env_filter)
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_span_list(true)
+                    .flatten_event(true),
+            )
+            .init();
+    }
+
+    // Bridge log crate to tracing for transitive deps (reqwest, notify, git2).
+    let _ = tracing_log::LogTracer::init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -29,8 +79,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_os::init())
-        .setup(|app| {
+        .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // Activate the Tauri tracing layer now that we have an AppHandle.
+            let tauri_tracing = rocket_infra::TauriTracingLayer::new(app_handle.clone());
+            if let Err(e) = reload_handle.modify(|layer| *layer = Some(tauri_tracing)) {
+                eprintln!("Failed to activate TauriTracingLayer: {e}");
+            }
 
             // Determine the application data directory.
             let data_dir = dirs::home_dir()
@@ -150,7 +206,7 @@ pub fn run() {
             // Share the event bus so commands like watch_collections can reuse it.
             app.manage(watcher_bus);
 
-            log::info!("RocketAPI initialized at {:?}", data_dir);
+            tracing::info!(data_dir = %data_dir.display(), "RocketAPI initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

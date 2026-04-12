@@ -133,9 +133,24 @@ impl RequestExecutionService {
         })
     }
 
+    #[tracing::instrument(
+        name = "http_request",
+        skip(self, input),
+        fields(
+            method = %input.method,
+            url = %input.url,
+        )
+    )]
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
         let http_request = self.resolve_request(&input)?;
         let response = self.executor.execute(&http_request).await?;
+
+        tracing::info!(
+            status = response.status,
+            duration_ms = response.duration_ms,
+            size_bytes = response.size_bytes,
+            "Request completed"
+        );
 
         // Persist history (non-fatal — a save failure won't cancel the response).
         let mut entry = HistoryEntry::new(

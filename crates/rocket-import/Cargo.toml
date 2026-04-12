@@ -12,6 +12,7 @@ rocket-infra = { path = "../rocket-infra" }
 serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 tempfile = "3"
 zip = "2"
 

@@ -229,6 +229,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_clone_repo", skip(self, creds), fields(url = %url, target_path = %dest_path))]
     fn clone_repo(
         &self,
         url: &str,
@@ -309,6 +310,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_status", skip(self), fields(repo_path = %path))]
     fn status(&self, path: &str) -> DomainResult<RepoStatus> {
         let repo = open_repo(path)?;
         let branch = branch_name(&repo);
@@ -483,6 +485,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_commit", skip(self), fields(repo_path = %path, message = %message.get(..50).unwrap_or(message)))]
     fn commit(&self, path: &str, message: &str) -> DomainResult<CommitInfo> {
         let repo = open_repo(path)?;
         let sig = repo.signature().or_else(|_|
@@ -550,6 +553,7 @@ impl GitService for Git2Service {
         Ok(commits)
     }
 
+    #[tracing::instrument(name = "git_push", skip(self, creds), fields(repo_path = %path, remote = %remote))]
     fn push(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let mut remote_obj = repo
@@ -574,6 +578,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_pull", skip(self, creds), fields(repo_path = %path, remote = %remote))]
     fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
         // Fetch first.
         self.fetch(path, remote, creds)?;
@@ -709,6 +714,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_fetch", skip(self, creds), fields(repo_path = %path, remote = %remote))]
     fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let mut remote_obj = repo
