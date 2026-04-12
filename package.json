@@ -1,7 +1,7 @@
 {
   "name": "rocket",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -18,7 +18,11 @@
     "coverage:rust": "cargo llvm-cov --workspace --html --output-dir coverage/rust && cargo llvm-cov report --json --output-path coverage/rust/coverage-summary.json",
     "coverage:dashboard": "npx tsx scripts/generate-coverage-dashboard.ts && echo 'Open coverage/index.html to view the dashboard'",
     "coverage": "yarn coverage:frontend && yarn coverage:rust && yarn coverage:dashboard",
-    "manual": "npx tsx scripts/capture-screenshots.ts"
+    "manual": "npx tsx scripts/capture-screenshots.ts",
+    "release": "release-it",
+    "release:patch": "release-it patch",
+    "release:minor": "release-it minor",
+    "release:major": "release-it major"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -62,6 +66,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
+    "@release-it/conventional-changelog": "^10.0.6",
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",

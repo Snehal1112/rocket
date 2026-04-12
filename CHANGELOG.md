@@ -1,5 +1,9 @@
 # Changelog
 
+* Revert "Release 0.6.0" (1dff254)
+* Release 0.6.0 (06da0f5)
+* Refactor code structure for improved readability and maintainability (157e933)
+
 All notable changes to this project will be documented in this file.
 
 ## [0.1.0] - 2026-03-24
