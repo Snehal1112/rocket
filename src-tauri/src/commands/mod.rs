@@ -1,4 +1,5 @@
 pub mod app;
+pub mod audit;
 pub mod collections;
 pub mod contract;
 pub mod import;
