@@ -49,3 +49,30 @@ For C1 tests the `CollectionRepository` mock must return a `Vec<Request>` that m
 - Do not read from `rocket-infra` in tests. Mock the trait.
 - Do not change the IPC wire type (`initialSnapshots` field in `tauri-api.ts` stays — backend ignores it).
 - Do not move `ContractRepository` to `rocket-infra`. It is a domain trait and belongs in `rocket-collection`.
+
+---
+
+# Security audit
+
+The security audit pipeline lives alongside contract audit. Read this before touching anything under `rocket-audit`, `security_audit_service.rs`, or `src/components/audit/`.
+
+## Concepts
+
+- **`SecurityAuditEvent`** — one record per sensitive operation. Fields: `id` (ULID), `occurredAt`, `actor`, `workspaceId`, `event` (tagged `AuditEventKind`), `controls` (framework tags), `prevHash`, `hash`.
+- **Hash chain** — each event's `hash = SHA-256(canonical_json(event_without_hash))`; `prevHash` links to the previous event. `verify_chain` walks the log and returns `Ok` or `Broken { index, expected, actual }`.
+- **Compliance profile** — user-configurable. `activeFrameworks` picks which frameworks are tracked. `enforcement` is `Record | Warn | Block`. `Block` records the event **then** returns `DomainError::InvalidInput` so callers can abort. `Warn` and `Record` never fail.
+- **Control catalog** — static `CONTROL_CATALOG` in `rocket-audit::control`. Maps event kinds to framework control IDs. Extend the catalog (not individual events) when adding a new kind/framework mapping.
+
+## Invariants
+
+- `SecurityAuditService::record` must be idempotent-safe to call from any service; failures are logged by the bridge, never propagated. Services emit via `SecurityAuditPublisher` (trait) — they never depend on `SecurityAuditService` directly.
+- The chain head is cached in `SecurityAuditService::head` (`Mutex<Option<String>>`); after a successful append, update the cache before releasing the mutex.
+- `FsAuditLogRepo` is append-only — never rewrite or truncate the log. Log-compaction is out of scope for v1.
+- `FsComplianceProfileRepo.save` overwrites atomically via `fs::write` (single syscall). Do not introduce staged writes without explicit justification.
+- IPC event shapes must match `src/lib/tauri-api.ts` exactly. `AuditEventKind` uses `#[serde(tag = "kind", rename_all = "snake_case")]` — frontend TypeScript uses `snake_case` literal types on the `kind` discriminator.
+
+## Do not
+
+- Do not emit security events from inside `rocket-infra`. Only `rocket-app` services emit.
+- Do not store PII/secret values inside `SecurityAuditEvent.metadata`. The `SecretVariableWritten` event intentionally carries only the key, never the value.
+- Do not expose the raw audit log as a writable API surface.
