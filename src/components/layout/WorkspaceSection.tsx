@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, LayoutDashboard, Pencil, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, LayoutDashboard, Pencil, ShieldCheck, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import {
   ContextMenu,
@@ -26,6 +26,10 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
 
   const handleOpenWorkspace = () => {
     usePaneStore.getState().openWorkspaceTabs(workspace.id);
+  };
+
+  const handleOpenAudit = () => {
+    usePaneStore.getState().openWorkspaceTabs(workspace.id, 'audit');
   };
 
   const handleRename = (newName: string) => {
@@ -112,6 +116,20 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
               </button>
             )}
 
+            {/* Audit log shortcut. */}
+            <button
+              type='button'
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenAudit();
+              }}
+              className='opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-foreground rounded-sm p-0.5 transition-opacity'
+              title='Open audit log'
+              aria-label='Open audit log'
+            >
+              <ShieldCheck className='h-3.5 w-3.5' />
+            </button>
+
             {/* Collection count. */}
             <span className='text-xs text-muted-foreground'>{collectionCount}</span>
           </div>
@@ -120,6 +138,9 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
         <ContextMenuContent>
           <ContextMenuItem onSelect={handleOpenWorkspace}>
             <LayoutDashboard className='mr-2 h-3.5 w-3.5' /> Open workspace home
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={handleOpenAudit}>
+            <ShieldCheck className='mr-2 h-3.5 w-3.5' /> Open audit log
           </ContextMenuItem>
           <ContextMenuItem onSelect={startRenaming}>
             <Pencil className='mr-2 h-3.5 w-3.5' /> Rename workspace

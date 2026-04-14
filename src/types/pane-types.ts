@@ -39,7 +39,7 @@ export interface CollectionTab extends BaseTab {
   activeSection?: CollectionSection;
 }
 
-export type WorkspaceTabSection = 'overview' | 'environments' | 'git';
+export type WorkspaceTabSection = 'overview' | 'environments' | 'git' | 'audit';
 
 export interface WorkspaceTab extends BaseTab {
   tabType: 'workspace';

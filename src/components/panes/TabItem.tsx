@@ -1,4 +1,4 @@
-import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, X } from 'lucide-react';
+import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, ShieldCheck, X } from 'lucide-react';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
 import { isContractTab, isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
@@ -61,6 +61,9 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           )}
           {tab.activeSection === 'git' && (
             <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          )}
+          {tab.activeSection === 'audit' && (
+            <ShieldCheck className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
           )}
         </>
       ) : isContractTab(tab) ? (

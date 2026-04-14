@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AuditLogTab } from '@/components/audit/AuditLogTab';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { ContractTab } from '@/components/contract/ContractTab';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
@@ -111,6 +112,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               <WorkspaceEnvironmentsTab />
             ) : activeTab.activeSection === 'git' ? (
               <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
+            ) : activeTab.activeSection === 'audit' ? (
+              <AuditLogTab />
             ) : null
           ) : (
             <CollectionOverviewTab tab={activeTab} />
