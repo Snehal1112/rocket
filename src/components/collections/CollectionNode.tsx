@@ -314,7 +314,10 @@ export function CollectionNode({
                 <MoreHorizontal className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuContent
+              className='w-48 bg-card/40 backdrop-blur-sm'
+              onClick={(e) => e.stopPropagation()}
+            >
               <DropdownMenuItem
                 onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}
               >
@@ -366,7 +369,7 @@ export function CollectionNode({
         </div>
       </ContextMenuTrigger>
 
-      <ContextMenuContent className='w-48'>
+      <ContextMenuContent className='w-48 bg-card/40 backdrop-blur-sm'>
         <ContextMenuItem
           onClick={() => {
             const tab: CollectionTab = {

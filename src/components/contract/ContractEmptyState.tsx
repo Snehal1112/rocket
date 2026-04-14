@@ -1,4 +1,5 @@
-import { Lock, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { RocketLock } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
 
 interface ContractEmptyStateProps {
@@ -7,13 +8,11 @@ interface ContractEmptyStateProps {
 
 export function ContractEmptyState({ onNew }: ContractEmptyStateProps) {
   return (
-    <div className='flex flex-col items-center justify-center py-24 gap-4 text-center'>
-      <div className='w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center'>
-        <Lock className='h-6 w-6 text-primary/50' />
-      </div>
-      <div className='space-y-1.5 max-w-xs'>
-        <p className='text-sm font-medium text-foreground'>No contracts yet</p>
-        <p className='text-xs text-muted-foreground'>
+    <div className='flex flex-col items-center justify-center h-full gap-6 text-center px-8 bg-gradient-to-b from-background to-muted/20'>
+      <RocketLock className='w-36 h-36 opacity-90' />
+      <div className='space-y-2 max-w-xs'>
+        <p className='text-base font-semibold tracking-tight text-foreground'>No contracts yet</p>
+        <p className='text-sm text-muted-foreground leading-relaxed'>
           Attach a contract to lock this collection's API signature and automatically track any
           changes made after signing.
         </p>

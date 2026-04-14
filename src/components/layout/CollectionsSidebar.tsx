@@ -1,9 +1,10 @@
 import { listen } from '@tauri-apps/api/event';
-import { FilePlus, Folder, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-react';
+import { FilePlus, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
+import { RocketBook } from '@/components/illustrations';
 import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import {
   AlertDialog,
@@ -530,7 +531,7 @@ export function CollectionsSidebar() {
                 <div className='px-1 pb-2'>
                   {summaries.length === 0 ? (
                     <div className='flex flex-col items-center justify-center py-8 px-4'>
-                      <Folder className='h-8 w-8 text-muted-foreground/50 mb-2' />
+                      <RocketBook className='w-32 h-32' />
                       <p className='text-sm text-muted-foreground mb-3'>No collections yet.</p>
                       <Button
                         variant='outline'

@@ -4,6 +4,7 @@ import { Check, Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { InlineEnvName } from '@/components/environments/InlineEnvName';
+import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SavedPill } from '@/components/ui/saved-pill';
@@ -316,8 +317,14 @@ export function WorkspaceEnvironmentsTab() {
             </div>
           </>
         ) : (
-          <div className='flex-1 flex items-center justify-center text-muted-foreground text-sm'>
-            Select an environment
+          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-muted/20'>
+            <RocketIdle className='w-40 h-40 opacity-90' />
+            <div className='space-y-1.5'>
+              <p className='text-sm font-medium text-foreground'>No environment selected</p>
+              <p className='text-xs text-muted-foreground leading-relaxed'>
+                Choose an environment from the list, or create one to start managing variables.
+              </p>
+            </div>
           </div>
         )}
       </div>

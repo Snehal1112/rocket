@@ -3,6 +3,7 @@
 import { Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -276,8 +277,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 </div>
               </>
             ) : (
-              <div className='flex-1 flex items-center justify-center text-sm text-muted-foreground'>
-                Select or create an environment.
+              <div className='flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 bg-gradient-to-b from-background to-muted/20'>
+                <RocketIdle className='w-28 h-28 opacity-90' />
+                <div className='space-y-1'>
+                  <p className='text-sm font-medium text-foreground'>No environment selected</p>
+                  <p className='text-xs text-muted-foreground leading-relaxed'>
+                    Pick one from the list or create a new environment.
+                  </p>
+                </div>
               </div>
             )}
           </div>

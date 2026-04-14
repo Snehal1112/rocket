@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { RocketBook } from '@/components/illustrations';
 import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -33,6 +34,7 @@ import {
   deleteCollection,
   linkExternalCollection,
   listCollections,
+  onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -66,10 +68,21 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
 
   // Both listCollections and loadGlobalEnvironments return data for the
   // active backend workspace. Refetch when workspaceId changes.
+  // Also re-fetch when any collection-changed event fires (e.g. sidebar creates/deletes).
   // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
   useEffect(() => {
     refresh().catch(console.error);
     loadGlobalEnvironments().catch(console.error);
+
+    let cancelled = false;
+    const unlistenPromise = onCollectionChanged(() => {
+      if (!cancelled) refresh().catch(console.error);
+    });
+
+    return () => {
+      cancelled = true;
+      unlistenPromise.then((fn) => fn());
+    };
   }, [workspaceId, refresh, loadGlobalEnvironments]);
 
   useEffect(() => {
@@ -201,15 +214,17 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                 </div>
               ) : (
                 <div className='flex flex-wrap gap-1.5'>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    className='text-xs h-7'
-                    onClick={() => setIsCreating(true)}
-                  >
-                    <Plus className='h-3 w-3 mr-1.5' />
-                    Create Collection
-                  </Button>
+                  {summaries.length > 0 && (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='text-xs h-7'
+                      onClick={() => setIsCreating(true)}
+                    >
+                      <Plus className='h-3 w-3 mr-1.5' />
+                      Create Collection
+                    </Button>
+                  )}
                   <Button
                     variant='outline'
                     size='sm'
@@ -302,7 +317,24 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                   </Card>
                 ))
               ) : (
-                <p className='text-sm text-muted-foreground'>No collections yet.</p>
+                <div className='flex flex-col items-center justify-center py-10 gap-5 rounded-lg border border-dashed border-border/60 bg-muted/10 text-center px-6'>
+                  <RocketBook className='w-28 h-28 opacity-90' />
+                  <div className='space-y-1.5'>
+                    <p className='text-sm font-medium text-foreground'>No collections yet</p>
+                    <p className='text-xs text-muted-foreground leading-relaxed'>
+                      Create a new collection or open an existing folder to get started.
+                    </p>
+                  </div>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='text-xs h-7'
+                    onClick={() => setIsCreating(true)}
+                  >
+                    <Plus className='h-3 w-3 mr-1.5' />
+                    <span className='prose prose-sm dark:prose-invert'>Create Collection</span>
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -383,24 +415,22 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{docContent}</ReactMarkdown>
                   </div>
                 ) : (
-                  <div className='h-full flex flex-col items-center justify-center gap-3 text-center py-8'>
-                    <FileText className='h-9 w-9 text-muted-foreground/20' />
-                    <div className='space-y-1'>
-                      <p className='text-xs font-medium text-muted-foreground/60'>
-                        Add documentation to help your team work smoothly.
-                      </p>
-                      <p className='text-[11px] text-muted-foreground/40'>
-                        You can include project overview, setup instructions, key workflows, and
-                        FAQs.
+                  <div className='h-full flex flex-col items-center justify-center gap-3 text-center py-8 '>
+                    <FileText className='w-9 h-9 text-muted-foreground/50' />
+                    <div className='space-y-1.5'>
+                      <p className='text-sm font-medium text-foreground'>No documentation yet</p>
+                      <p className='text-xs font-medium text-muted-foreground leading-relaxed'>
+                        Add an overview, setup instructions, or key workflows to help your team.
                       </p>
                     </div>
                     <Button
                       variant='outline'
                       size='sm'
-                      className='text-xs h-7 mt-1'
+                      className='text-xs h-7'
                       onClick={() => setDocMode('edit')}
                     >
-                      + Add Documentation
+                      <FileText className='h-3 w-3 mr-1.5' />
+                      Add Documentation
                     </Button>
                   </div>
                 )}
