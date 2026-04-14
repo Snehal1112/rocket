@@ -994,14 +994,12 @@ export interface EvidenceExport {
   chainVerified: boolean;
 }
 
-export const listAuditEvents = () =>
-  invoke<SecurityAuditEvent[]>('list_audit_events');
+export const listAuditEvents = () => invoke<SecurityAuditEvent[]>('list_audit_events');
 
 export const listAuditEventsRange = (start: string, end: string) =>
   invoke<SecurityAuditEvent[]>('list_audit_events_range', { input: { start, end } });
 
-export const getComplianceProfile = () =>
-  invoke<ComplianceProfile>('get_compliance_profile');
+export const getComplianceProfile = () => invoke<ComplianceProfile>('get_compliance_profile');
 
 export const setComplianceProfile = (profile: ComplianceProfile) =>
   invoke<void>('set_compliance_profile', { profile });
