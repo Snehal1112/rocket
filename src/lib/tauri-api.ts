@@ -943,3 +943,68 @@ export const deleteContract = (collectionRoot: string, contractId: string) =>
 
 export const getContractChangelog = (collectionRoot: string, contractId: string) =>
   invoke<ContractChangelog>('get_contract_changelog', { collectionRoot, contractId });
+
+// ============================================================
+// Security audit / compliance
+// ============================================================
+
+export type Framework = 'soc2' | 'iso27001' | 'iso42001' | 'csaStar';
+export type EnforcementLevel = 'record' | 'warn' | 'block';
+
+export interface ControlId {
+  framework: Framework;
+  code: string;
+  title: string;
+}
+
+export interface ComplianceProfile {
+  activeFrameworks: Framework[];
+  enforcement: EnforcementLevel;
+  mutedKinds: string[];
+}
+
+export type AuditEventKind =
+  | { kind: 'contract_attached'; contractId: string; collection: string; scope: string }
+  | { kind: 'contract_deleted'; contractId: string; collection: string }
+  | { kind: 'contract_violation'; contractId: string; requestPath: string; field: string }
+  | { kind: 'collection_deleted'; collection: string }
+  | { kind: 'collection_exported'; collection: string; destination: string }
+  | { kind: 'secret_variable_written'; environment: string; variableKey: string }
+  | { kind: 'sensitive_auth_used'; authType: string; collection: string; requestPath: string }
+  | { kind: 'audit_evidence_exported'; rangeStart: string; rangeEnd: string; count: number }
+  | { kind: 'audit_chain_broken'; atEventId: string; expectedHash: string; actualHash: string };
+
+export interface SecurityAuditEvent {
+  id: string;
+  occurredAt: string;
+  actor: string;
+  workspaceId: string | null;
+  event: AuditEventKind;
+  controls: ControlId[];
+  prevHash: string;
+  hash: string;
+  metadata?: Record<string, string>;
+}
+
+export interface EvidenceExport {
+  exportedAt: string;
+  rangeStart: string;
+  rangeEnd: string;
+  events: SecurityAuditEvent[];
+  chainVerified: boolean;
+}
+
+export const listAuditEvents = () =>
+  invoke<SecurityAuditEvent[]>('list_audit_events');
+
+export const listAuditEventsRange = (start: string, end: string) =>
+  invoke<SecurityAuditEvent[]>('list_audit_events_range', { input: { start, end } });
+
+export const getComplianceProfile = () =>
+  invoke<ComplianceProfile>('get_compliance_profile');
+
+export const setComplianceProfile = (profile: ComplianceProfile) =>
+  invoke<void>('set_compliance_profile', { profile });
+
+export const exportAuditEvidence = (start: string, end: string) =>
+  invoke<EvidenceExport>('export_audit_evidence', { input: { start, end } });
