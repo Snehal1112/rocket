@@ -1,0 +1,16 @@
+[package]
+name = "rocket-audit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared = { path = "../rocket-shared" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+sha2 = { workspace = true }
+ulid = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

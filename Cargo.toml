@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/rocket-shared",
+    "crates/rocket-audit",
     "crates/rocket-collection",
     "crates/rocket-environment",
     "crates/rocket-http",
