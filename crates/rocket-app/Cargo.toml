@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 rocket-shared.workspace = true
+rocket-audit = { path = "../rocket-audit" }
 rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-git.workspace = true
