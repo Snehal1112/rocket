@@ -837,6 +837,20 @@ export type ContractScope =
   | { type: 'folder'; rel_path: string }
   | { type: 'request'; rel_path: string };
 
+/** Supported attachment file extensions. Must mirror ALLOWED_EXTENSIONS in contract_service.rs. */
+export const ATTACHMENT_ALLOWED_EXTENSIONS = [
+  'pdf',
+  'doc',
+  'docx',
+  'txt',
+  'md',
+  'png',
+  'jpg',
+  'jpeg',
+] as const;
+/** Maximum attachment size in bytes (2 MB). Must mirror MAX_ATTACHMENT_BYTES in contract_service.rs. */
+export const ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
+
 export interface Contract {
   id: string;
   title: string;
@@ -846,7 +860,8 @@ export interface Contract {
   version: string;
   effectiveDate: string;
   expiryDate: string | null;
-  documentPath: string | null;
+  /** Relative paths to attachments stored inside the collection folder. */
+  documentPaths: string[];
   enforcementMode: 'informational' | 'warn' | 'block';
   scope: ContractScope;
 }
@@ -884,7 +899,8 @@ export interface AttachContractInput {
   version: string;
   effectiveDate: string;
   expiryDate: string | null;
-  documentPath: string | null;
+  /** Absolute paths from the OS file picker. Copied into the collection by the service. */
+  documentPaths: string[];
   scope: ContractScope;
   /**
    * Initial signature snapshots captured for covered requests at the
@@ -895,8 +911,26 @@ export interface AttachContractInput {
   initialSnapshots: RequestSignatureSnapshot[];
 }
 
+export interface UpdateContractInput {
+  contractId: string;
+  title: string;
+  provider: string;
+  consumer: string;
+  project: string;
+  version: string;
+  effectiveDate: string;
+  expiryDate: string | null;
+  /** Absolute paths for newly added attachments (not yet copied). */
+  newDocumentPaths: string[];
+  /** Relative paths of existing attachments the user wants to keep. */
+  keptDocumentPaths: string[];
+}
+
 export const attachContract = (collectionRoot: string, input: AttachContractInput) =>
   invoke<Contract>('attach_contract', { collectionRoot, input });
+
+export const updateContract = (collectionRoot: string, input: UpdateContractInput) =>
+  invoke<Contract>('update_contract', { collectionRoot, input });
 
 export const listContracts = (collectionRoot: string) =>
   invoke<Contract[]>('list_contracts', { collectionRoot });

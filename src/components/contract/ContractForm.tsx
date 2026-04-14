@@ -1,4 +1,5 @@
-import { Paperclip } from 'lucide-react';
+import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
+import { Paperclip, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +22,10 @@ export interface ContractFormValues {
   expiryDate: string;
   scopeType: 'collection' | 'folder' | 'request';
   scopePath: string;
-  documentPath: string | null;
+  /** Relative paths already stored in the collection (populated when editing). */
+  existingDocumentPaths: string[];
+  /** Absolute paths newly chosen via the file picker (not yet copied). */
+  newDocumentPaths: string[];
 }
 
 interface ContractFormProps {
@@ -35,6 +39,28 @@ interface ContractFormProps {
 export function ContractForm({ values, onChange, folders, requests, error }: ContractFormProps) {
   const set = (field: keyof ContractFormValues) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...values, [field]: e.target.value });
+
+  const handleBrowseDocument = async () => {
+    const selected = await openFilePicker({ multiple: true });
+    const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+    if (paths.length > 0) {
+      onChange({ ...values, newDocumentPaths: [...values.newDocumentPaths, ...paths] });
+    }
+  };
+
+  const handleRemoveNew = (path: string) => {
+    onChange({
+      ...values,
+      newDocumentPaths: values.newDocumentPaths.filter((p) => p !== path),
+    });
+  };
+
+  const handleRemoveExisting = (path: string) => {
+    onChange({
+      ...values,
+      existingDocumentPaths: values.existingDocumentPaths.filter((p) => p !== path),
+    });
+  };
 
   const setScopeType = (v: ContractFormValues['scopeType']) =>
     onChange({ ...values, scopeType: v, scopePath: '' });
@@ -222,16 +248,60 @@ export function ContractForm({ values, onChange, folders, requests, error }: Con
         </RadioGroup>
       </div>
 
-      {/* Document attach */}
+      {/* Document attachments */}
       <div className='space-y-1.5'>
-        <Label className='text-xs'>Attach document (optional)</Label>
+        <Label className='text-xs'>Attach documents (optional, max 2 MB each)</Label>
+
+        {/* Existing attachments (already stored in collection) */}
+        {values.existingDocumentPaths.map((p) => (
+          <div key={p} className='flex items-center gap-1'>
+            <span className='inline-flex items-center gap-1.5 flex-1 h-8 px-2 rounded-md border border-border text-xs overflow-hidden'>
+              <Paperclip className='h-3 w-3 shrink-0 text-muted-foreground' />
+              <span className='truncate'>{p.split('/').pop() ?? p}</span>
+            </span>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              className='h-8 w-8 p-0 shrink-0'
+              onClick={() => handleRemoveExisting(p)}
+              aria-label='Remove attachment'
+            >
+              <X className='h-3.5 w-3.5' />
+            </Button>
+          </div>
+        ))}
+
+        {/* Newly picked attachments (not yet copied) */}
+        {values.newDocumentPaths.map((p) => (
+          <div key={p} className='flex items-center gap-1'>
+            <span className='inline-flex items-center gap-1.5 flex-1 h-8 px-2 rounded-md border border-primary/40 text-xs overflow-hidden bg-primary/5'>
+              <Paperclip className='h-3 w-3 shrink-0 text-primary' />
+              <span className='truncate'>{p.split('/').pop() ?? p}</span>
+            </span>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              className='h-8 w-8 p-0 shrink-0'
+              onClick={() => handleRemoveNew(p)}
+              aria-label='Remove attachment'
+            >
+              <X className='h-3.5 w-3.5' />
+            </Button>
+          </div>
+        ))}
+
+        {/* Add more button */}
         <Button
+          type='button'
           variant='outline'
           size='sm'
           className='h-8 w-full justify-start text-xs text-muted-foreground font-normal'
+          onClick={handleBrowseDocument}
         >
-          <Paperclip className='h-3.5 w-3.5 mr-2 shrink-0' />
-          {values.documentPath ?? 'Browse file…'}
+          <Plus className='h-3.5 w-3.5 mr-2 shrink-0' />
+          Add document…
         </Button>
       </div>
     </div>

@@ -14,6 +14,83 @@ use std::{
 };
 use ulid::Ulid;
 
+/// Maximum allowed attachment file size (2 MB).
+const MAX_ATTACHMENT_BYTES: u64 = 2 * 1024 * 1024;
+
+/// File extensions accepted as contract attachments.
+const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "txt", "md", "png", "jpg", "jpeg"];
+
+/// Returns the directory where attachment files for a contract are stored.
+/// Mirrors the convention in `FsContractRepo::attachments_dir`.
+fn attachments_dir(collection_root: &Path, contract_id: Ulid) -> PathBuf {
+    collection_root
+        .join(".rocket")
+        .join("contracts")
+        .join("attachments")
+        .join(contract_id.to_string())
+}
+
+/// Validate and copy a list of absolute source paths into the contract's
+/// attachments directory. Returns the relative paths stored in the contract.
+///
+/// Relative paths are relative to `collection_root`, so they are stable
+/// across machines when the collection is shared via git.
+fn copy_attachments(
+    collection_root: &Path,
+    contract_id: Ulid,
+    absolute_paths: &[PathBuf],
+) -> ContractResult<Vec<PathBuf>> {
+    if absolute_paths.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let dest_dir = attachments_dir(collection_root, contract_id);
+    std::fs::create_dir_all(&dest_dir)?;
+
+    let mut relative_paths = Vec::with_capacity(absolute_paths.len());
+
+    for src in absolute_paths {
+        // Validate extension.
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(ContractError::Internal(format!(
+                "Unsupported file type '.{}'. Allowed: {}",
+                ext,
+                ALLOWED_EXTENSIONS.join(", ")
+            )));
+        }
+
+        // Validate size.
+        let size = std::fs::metadata(src)?.len();
+        if size > MAX_ATTACHMENT_BYTES {
+            let mb = size as f64 / (1024.0 * 1024.0);
+            return Err(ContractError::Internal(format!(
+                "'{}' is {:.1} MB — attachments must be 2 MB or smaller.",
+                src.file_name().unwrap_or_default().to_string_lossy(),
+                mb
+            )));
+        }
+
+        let file_name = src
+            .file_name()
+            .ok_or_else(|| ContractError::Internal("Attachment has no filename.".into()))?;
+        let dest = dest_dir.join(file_name);
+        std::fs::copy(src, &dest)?;
+
+        // Store relative path so it is portable across machines.
+        let rel = dest
+            .strip_prefix(collection_root)
+            .map_err(|_| ContractError::Internal("Attachment dest is outside collection root.".into()))?;
+        relative_paths.push(rel.to_path_buf());
+    }
+
+    Ok(relative_paths)
+}
+
 pub struct ContractService {
     repo: Arc<dyn ContractRepository>,
     collection_repo: Arc<dyn CollectionRepository>,
@@ -29,16 +106,18 @@ impl ContractService {
 
     /// Create a new contract and take a baseline snapshot of every covered request.
     ///
-    /// The service walks the full collection tree via `CollectionRepository`,
-    /// filters by `contract.scope`, and builds a `RequestSignatureSnapshot` for
-    /// each covered request. `initial_snapshots` from the caller are merged
-    /// on top so explicit overrides still win.
+    /// `attachment_sources` is a list of absolute paths chosen by the user via
+    /// the OS file picker. Each file is validated (type + 2 MB limit) and copied
+    /// into `<collection_root>/.rocket/contracts/attachments/<id>/` so the
+    /// attachments travel with the collection and are tracked by git. The stored
+    /// `document_paths` on the returned contract are relative to `collection_root`.
     pub fn attach_contract(
         &self,
         collection_root: &Path,
         collection_name: &str,
         mut contract: Contract,
         initial_snapshots: Vec<RequestSignatureSnapshot>,
+        attachment_sources: Vec<PathBuf>,
     ) -> ContractResult<Contract> {
         contract.id = Ulid::new();
         // Force Informational — Model B variants not yet UI-reachable.
@@ -69,12 +148,62 @@ impl ContractService {
             snapshot.upsert(snap);
         }
 
+        // Copy attachments into the collection before writing the contract YAML
+        // so the relative paths are ready. If copy fails, no contract file is
+        // written and no orphan is left behind.
+        contract.document_paths = copy_attachments(collection_root, contract.id, &attachment_sources)?;
+
         // Only now write the contract, its baseline, and the empty changelog.
         self.repo.save_contract(collection_root, &contract)?;
         self.repo.save_snapshot(collection_root, &snapshot)?;
         let changelog = ContractChangelog::new(contract.id);
         self.repo.append_changelog(collection_root, &changelog)?;
 
+        Ok(contract)
+    }
+
+    /// Update metadata fields of an existing contract (title, parties, project,
+    /// version, dates, document_paths). Scope, snapshots, and changelog are
+    /// intentionally preserved — changing scope would invalidate the baseline.
+    ///
+    /// `attachment_sources` contains absolute paths for *new* files to add.
+    /// `kept_paths` contains relative paths (already stored) the user wants to
+    /// retain. Files not in `kept_paths` are deleted from disk.
+    pub fn update_contract(
+        &self,
+        collection_root: &Path,
+        mut contract: Contract,
+        attachment_sources: Vec<PathBuf>,
+        kept_paths: Vec<PathBuf>,
+    ) -> ContractResult<Contract> {
+        // Confirm the contract exists before overwriting.
+        self.repo.load_contract(collection_root, contract.id)?;
+
+        // Remove attachment files the user explicitly de-listed.
+        let attach_dir = attachments_dir(collection_root, contract.id);
+        if attach_dir.exists() {
+            for entry in std::fs::read_dir(&attach_dir)? {
+                let entry = entry?;
+                let rel = entry
+                    .path()
+                    .strip_prefix(collection_root)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|_| entry.path());
+                if !kept_paths.contains(&rel) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        // Copy newly added attachments.
+        let mut new_relative = copy_attachments(collection_root, contract.id, &attachment_sources)?;
+
+        // Merge: kept existing paths + newly copied paths.
+        let mut merged = kept_paths;
+        merged.append(&mut new_relative);
+        contract.document_paths = merged;
+
+        self.repo.save_contract(collection_root, &contract)?;
         Ok(contract)
     }
 
@@ -416,7 +545,7 @@ mod tests {
             version: "v1.0".into(),
             effective_date: Utc::now().date_naive(),
             expiry_date: None,
-            document_path: None,
+            document_paths: vec![],
             enforcement_mode: ContractEnforcementMode::Informational,
             scope: ContractScope::Collection,
         }
@@ -460,7 +589,7 @@ mod tests {
     fn attach_and_list() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
             .unwrap();
         let list = svc.list_contracts(root()).unwrap();
         assert_eq!(list.len(), 1);
@@ -472,7 +601,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         svc.on_request_saved(root(), snap).unwrap();
         let log = svc.get_changelog(root(), contract.id).unwrap();
@@ -484,7 +613,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         let mut changed = snap;
         changed.method = "POST".into();
@@ -498,7 +627,7 @@ mod tests {
     fn delete_removes_all_files() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
             .unwrap();
         svc.delete_contract(root(), contract.id).unwrap();
         assert!(svc.get_contract(root(), contract.id).is_err());
@@ -514,7 +643,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
@@ -541,7 +670,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![])
+            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
             .unwrap();
 
         // Simulate the save hook emitting a changed shape for the nested
@@ -587,6 +716,7 @@ mod tests {
                 COLLECTION_NAME,
                 make_contract(),
                 vec![override_snap],
+                vec![],
             )
             .unwrap();
 
@@ -630,7 +760,7 @@ mod tests {
         contract.scope = ContractScope::Folder { rel_path: PathBuf::from("a") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![])
+            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -657,7 +787,7 @@ mod tests {
         contract.scope = ContractScope::Request { rel_path: PathBuf::from("foo.yml") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![])
+            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -677,7 +807,7 @@ mod tests {
             Arc::new(MockCollectionRepo::failing()),
         );
 
-        let result = svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![]);
+        let result = svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![]);
 
         match result {
             Err(ContractError::Internal(_)) => {}

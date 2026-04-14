@@ -5,8 +5,10 @@ import {
   deleteContract as apiDelete,
   getContractChangelog as apiGetChangelog,
   listContracts as apiList,
+  updateContract as apiUpdate,
   type Contract,
   type ContractChangelog,
+  type UpdateContractInput,
 } from '@/lib/tauri-api';
 
 export type ContractStatus = 'active' | 'expiring' | 'expired';
@@ -23,6 +25,7 @@ interface ContractState {
 
   loadContracts: (collectionRoot: string) => Promise<void>;
   attachContract: (collectionRoot: string, input: AttachContractInput) => Promise<Contract>;
+  updateContract: (collectionRoot: string, input: UpdateContractInput) => Promise<Contract>;
   removeContract: (collectionRoot: string, contractId: string) => Promise<void>;
   loadChangelog: (collectionRoot: string, contractId: string) => Promise<void>;
 
@@ -82,6 +85,20 @@ export const useContractStore = create<ContractState>((set, get) => ({
         contractsByRoot: {
           ...s.contractsByRoot,
           [collectionRoot]: [...existing, contract],
+        },
+      };
+    });
+    return contract;
+  },
+
+  updateContract: async (collectionRoot, input) => {
+    const contract = await apiUpdate(collectionRoot, input);
+    set((s) => {
+      const existing = s.contractsByRoot[collectionRoot] ?? [];
+      return {
+        contractsByRoot: {
+          ...s.contractsByRoot,
+          [collectionRoot]: existing.map((c) => (c.id === contract.id ? contract : c)),
         },
       };
     });

@@ -26,7 +26,9 @@ pub struct AttachContractInput {
     pub version: String,
     pub effective_date: String,
     pub expiry_date: Option<String>,
-    pub document_path: Option<PathBuf>,
+    /// Absolute paths chosen by the file picker on the user's machine.
+    /// The service validates, copies, and converts them to relative paths.
+    pub document_paths: Vec<PathBuf>,
     pub scope: ContractScope,
     pub initial_snapshots: Vec<RequestSignatureSnapshot>,
 }
@@ -69,13 +71,75 @@ pub fn attach_contract(
         version: input.version,
         effective_date,
         expiry_date,
-        document_path: input.document_path,
+        // Populated by the service after copying files; empty here.
+        document_paths: vec![],
         // Forced to Informational inside the service; set here for shape only.
         enforcement_mode: ContractEnforcementMode::Informational,
         scope: input.scope,
     };
 
-    svc.attach_contract(&root, &collection_name, contract, input.initial_snapshots)
+    svc.attach_contract(&root, &collection_name, contract, input.initial_snapshots, input.document_paths)
+        .map_err(|e| e.to_string())
+}
+
+/// Input DTO for updating contract metadata. Does not touch scope, snapshots,
+/// or changelog — those are immutable once a contract is attached.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateContractInput {
+    pub contract_id: String,
+    pub title: String,
+    pub provider: String,
+    pub consumer: String,
+    pub project: String,
+    pub version: String,
+    pub effective_date: String,
+    pub expiry_date: Option<String>,
+    /// Absolute paths for newly added attachments (not yet copied).
+    pub new_document_paths: Vec<PathBuf>,
+    /// Relative paths of existing attachments the user wants to keep.
+    pub kept_document_paths: Vec<PathBuf>,
+}
+
+#[tauri::command]
+pub fn update_contract(
+    collection_root: String,
+    input: UpdateContractInput,
+    svc: State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let root = PathBuf::from(&collection_root);
+
+    let id = Ulid::from_string(&input.contract_id).map_err(|e| e.to_string())?;
+
+    let effective_date = chrono::NaiveDate::parse_from_str(&input.effective_date, "%Y-%m-%d")
+        .map_err(|e| format!("invalid effectiveDate: {}", e))?;
+
+    let expiry_date = input
+        .expiry_date
+        .as_deref()
+        .map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d"))
+        .transpose()
+        .map_err(|e| format!("invalid expiryDate: {}", e))?;
+
+    // Load existing contract to preserve scope and enforcement_mode.
+    let existing = svc.get_contract(&root, id).map_err(|e| e.to_string())?;
+
+    let updated = Contract {
+        id,
+        title: input.title,
+        provider: input.provider,
+        consumer: input.consumer,
+        project: input.project,
+        version: input.version,
+        effective_date,
+        expiry_date,
+        // Merged inside the service from kept_document_paths + new_document_paths.
+        document_paths: vec![],
+        enforcement_mode: existing.enforcement_mode,
+        scope: existing.scope,
+    };
+
+    svc.update_contract(&root, updated, input.new_document_paths, input.kept_document_paths)
         .map_err(|e| e.to_string())
 }
 

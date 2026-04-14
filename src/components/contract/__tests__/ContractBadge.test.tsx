@@ -31,7 +31,7 @@ function makeContract(overrides: Partial<Contract> = {}): Contract {
     version: 'v1',
     effectiveDate: '2026-01-01',
     expiryDate: null,
-    documentPath: null,
+    documentPaths: [],
     enforcementMode: 'warn',
     scope: collectionScope,
     ...overrides,

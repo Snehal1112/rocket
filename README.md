@@ -28,6 +28,7 @@
 - **Authentication** support for Basic, Bearer, API Key, OAuth 2.0, and AWS SigV4
 - **Load testing** with concurrent request execution and percentile latency stats
 - **Monaco editor** for JSON/XML/text bodies with syntax highlighting and theme sync
+- **Contract Lock** — attach SLA/API contracts to collections or folders, track changes, and preview PDFs natively
 - **Light/dark theme** with system preference detection
 - **Cross-platform** native desktop app (Linux, macOS, Windows)
 - **No cloud, no account** — your data stays on your machine
@@ -91,7 +92,7 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
 | Crate | Role |
 |---|---|
 | `rocket-shared` | Common types, errors, events |
-| `rocket-collection` | Collection/folder/request domain model |
+| `rocket-collection` | Collection/folder/request domain model + contract types |
 | `rocket-environment` | Environment variables and `{{var}}` resolution |
 | `rocket-history` | Request execution history |
 | `rocket-workspace` | Workspace domain model |
@@ -126,12 +127,36 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
         get-users.yml          # Request files
         auth/
           login.yml
+        .rocket/
+          contracts/
+            <id>.yml           # Contract definition (git-tracked)
+            attachments/
+              <id>/
+                document.pdf  # Attached files (max 2 MB each)
     environments/
       production.yml
       staging.yml
     history/
     cookies/
 ```
+
+## Contract Lock
+
+Contract Lock lets you attach formal agreements (SLAs, API contracts) to a collection or any folder within it, track changes over time, and surface violations directly in your workspace.
+
+### Key capabilities
+
+- Attach one or more reference documents (PDF, DOCX, TXT, Markdown, PNG/JPG) up to 2 MB each
+- Scope a contract to the entire collection, a specific folder, or a single request
+- Track provider, consumer, project, version, effective date, and optional expiry
+- Automatic status badges: **Active**, **Expiring soon** (≤ 30 days), **Expired**
+- Changelog records API drift against the locked baseline
+- Click a `.pdf` attachment to open it in a native preview window
+- Attachment files are copied into `.rocket/contracts/attachments/<id>/` inside the collection — fully git-portable, deleted automatically when the contract is removed
+
+### Storage
+
+Contracts are stored as YAML files under `.rocket/contracts/` inside the collection directory. Because the `.rocket/` folder lives alongside your request files, it is committed alongside them in any git workflow.
 
 ## Project Structure
 
@@ -140,6 +165,7 @@ src/                           # React frontend
   components/
     collections/               # Collection sidebar tree
     editor/                    # Monaco wrapper and themes
+    contract/                  # Contract Lock UI
     git/                       # Git UI panel
     layout/                    # App shell, sidebar, status bar
     panes/                     # Tab system and editor groups

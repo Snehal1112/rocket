@@ -30,7 +30,7 @@ pub trait ContractRepository: Send + Sync {
     /// List all contracts for a collection.
     fn list_contracts(&self, collection_root: &Path) -> ContractResult<Vec<Contract>>;
 
-    /// Delete contract + its snapshot + its changelog.
+    /// Delete contract + its snapshot + its changelog + its attachments directory.
     fn delete_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<()>;
 
     /// Persist snapshot (overwrite — snapshot always tracks latest state).

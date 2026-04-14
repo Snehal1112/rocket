@@ -27,7 +27,7 @@ export function ContractLivePreview({ values, collectionRoot }: ContractLivePrev
     version: values.version || 'v1.0',
     effectiveDate: values.effectiveDate || new Date().toISOString().split('T')[0],
     expiryDate: values.expiryDate || null,
-    documentPath: values.documentPath,
+    documentPaths: [...values.existingDocumentPaths, ...values.newDocumentPaths],
     enforcementMode: 'informational',
     scope,
   };

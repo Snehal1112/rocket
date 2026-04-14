@@ -26,6 +26,10 @@ impl FsContractRepo {
         Self::contracts_dir(collection_root).join(format!("{}-changelog.yml", id))
     }
 
+    pub fn attachments_dir(collection_root: &Path, id: Ulid) -> std::path::PathBuf {
+        Self::contracts_dir(collection_root).join("attachments").join(id.to_string())
+    }
+
     fn ensure_dir(collection_root: &Path) -> ContractResult<()> {
         std::fs::create_dir_all(Self::contracts_dir(collection_root))?;
         Ok(())
@@ -76,6 +80,11 @@ impl ContractRepository for FsContractRepo {
         let _ = std::fs::remove_file(Self::contract_path(collection_root, id));
         let _ = std::fs::remove_file(Self::snapshot_path(collection_root, id));
         let _ = std::fs::remove_file(Self::changelog_path(collection_root, id));
+        // Remove the entire attachments directory for this contract.
+        let attachments = Self::attachments_dir(collection_root, id);
+        if attachments.exists() {
+            std::fs::remove_dir_all(attachments)?;
+        }
         Ok(())
     }
 

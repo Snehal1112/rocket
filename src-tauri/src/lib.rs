@@ -313,6 +313,7 @@ pub fn run() {
             commands::import::import_bruno,
             commands::import::import_bruno_zip,
             commands::contract::attach_contract,
+            commands::contract::update_contract,
             commands::contract::list_contracts,
             commands::contract::get_contract,
             commands::contract::delete_contract,

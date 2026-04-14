@@ -14,7 +14,11 @@ pub struct Contract {
     pub version: String,
     pub effective_date: NaiveDate,
     pub expiry_date: Option<NaiveDate>,
-    pub document_path: Option<PathBuf>,
+    /// Relative paths to attachment files stored inside the collection.
+    /// Stored under `.rocket/contracts/attachments/<id>/`.
+    /// `default` handles old YAML files that pre-date this field.
+    #[serde(default)]
+    pub document_paths: Vec<PathBuf>,
     pub enforcement_mode: ContractEnforcementMode,
     pub scope: ContractScope,
 }

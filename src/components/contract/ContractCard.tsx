@@ -1,4 +1,6 @@
-import { Trash2 } from 'lucide-react';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { openPath } from '@tauri-apps/plugin-opener';
+import { Paperclip, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -16,7 +18,7 @@ interface ContractCardProps {
 
 export function ContractCard({
   contract,
-  collectionRoot: _collectionRoot,
+  collectionRoot,
   preview = false,
   onViewChangelog,
   onEdit,
@@ -40,6 +42,36 @@ export function ContractCard({
         : `Request: ${contract.scope.rel_path}`;
 
   const changeCount = changelogs[contract.id]?.entries.length ?? 0;
+
+  // Resolve a stored relative path to an absolute path under the collection root.
+  function resolveDocPath(relPath: string): string {
+    return `${collectionRoot}/${relPath}`;
+  }
+
+  // Opens a PDF in a native webview window; all other types go to the OS default app.
+  function openDocument(docPath: string, title: string) {
+    const absPath = resolveDocPath(docPath);
+    if (absPath.toLowerCase().endsWith('.pdf')) {
+      // Use a stable label derived from the contract id so re-clicking focuses the same window.
+      const label = `pdf-${contract.id}`;
+      const existing = WebviewWindow.getByLabel(label);
+      existing.then((win) => {
+        if (win) {
+          win.setFocus();
+        } else {
+          new WebviewWindow(label, {
+            url: `file://${absPath}`,
+            title,
+            width: 900,
+            height: 1100,
+            resizable: true,
+          });
+        }
+      });
+    } else {
+      openPath(absPath);
+    }
+  }
 
   return (
     <div
@@ -88,6 +120,33 @@ export function ContractCard({
           {scopeLabel}
         </span>
       </div>
+
+      {/* Attached documents — guard against undefined for pre-migration contracts */}
+      {(contract.documentPaths ?? []).length > 0 && (
+        <div className='flex flex-col gap-1'>
+          {(contract.documentPaths ?? []).map((p) =>
+            preview ? (
+              <span
+                key={p}
+                className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'
+              >
+                <Paperclip className='h-3 w-3 shrink-0' />
+                <span className='truncate'>{p.split('/').pop() ?? p}</span>
+              </span>
+            ) : (
+              <button
+                key={p}
+                type='button'
+                className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
+                onClick={() => openDocument(p, contract.title)}
+              >
+                <Paperclip className='h-3 w-3 shrink-0' />
+                <span className='truncate'>{p.split('/').pop() ?? p}</span>
+              </button>
+            ),
+          )}
+        </div>
+      )}
 
       {/* Footer action row — hidden in preview mode */}
       {!preview && (

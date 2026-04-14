@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { AttachContractInput, CollectionItem } from '@/lib/tauri-api';
+import type { AttachContractInput, CollectionItem, UpdateContractInput } from '@/lib/tauri-api';
 import { getCollection } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
@@ -52,7 +52,8 @@ const EMPTY_FORM: ContractFormValues = {
   expiryDate: '',
   scopeType: 'collection',
   scopePath: '',
-  documentPath: null,
+  existingDocumentPaths: [],
+  newDocumentPaths: [],
 };
 
 interface ContractTabProps {
@@ -64,6 +65,7 @@ export function ContractTab({ tab }: ContractTabProps) {
   const changelogs = useContractStore((s) => s.changelogs);
   const loadContracts = useContractStore((s) => s.loadContracts);
   const attachContract = useContractStore((s) => s.attachContract);
+  const updateContract = useContractStore((s) => s.updateContract);
   const removeContract = useContractStore((s) => s.removeContract);
   const loadChangelog = useContractStore((s) => s.loadChangelog);
 
@@ -124,7 +126,8 @@ export function ContractTab({ tab }: ContractTabProps) {
       expiryDate: c.expiryDate ?? '',
       scopeType,
       scopePath: c.scope.type !== 'collection' ? c.scope.rel_path : '',
-      documentPath: c.documentPath,
+      existingDocumentPaths: c.documentPaths,
+      newDocumentPaths: [],
     });
     setView({ type: 'edit', contractId });
     setError(null);
@@ -157,27 +160,42 @@ export function ContractTab({ tab }: ContractTabProps) {
     setError(null);
 
     try {
-      const scope =
-        form.scopeType === 'folder'
-          ? { type: 'folder' as const, rel_path: form.scopePath }
-          : form.scopeType === 'request'
-            ? { type: 'request' as const, rel_path: form.scopePath }
-            : { type: 'collection' as const };
+      if (view.type === 'edit') {
+        const input: UpdateContractInput = {
+          contractId: view.contractId,
+          title: form.title,
+          provider: form.provider,
+          consumer: form.consumer,
+          project: form.project,
+          version: form.version,
+          effectiveDate: form.effectiveDate,
+          expiryDate: form.expiryDate || null,
+          newDocumentPaths: form.newDocumentPaths,
+          keptDocumentPaths: form.existingDocumentPaths,
+        };
+        await updateContract(tab.collectionRoot, input);
+      } else {
+        const scope =
+          form.scopeType === 'folder'
+            ? { type: 'folder' as const, rel_path: form.scopePath }
+            : form.scopeType === 'request'
+              ? { type: 'request' as const, rel_path: form.scopePath }
+              : { type: 'collection' as const };
 
-      const input: AttachContractInput = {
-        title: form.title,
-        provider: form.provider,
-        consumer: form.consumer,
-        project: form.project,
-        version: form.version,
-        effectiveDate: form.effectiveDate,
-        expiryDate: form.expiryDate || null,
-        documentPath: form.documentPath,
-        scope,
-        initialSnapshots: [],
-      };
-
-      await attachContract(tab.collectionRoot, input);
+        const input: AttachContractInput = {
+          title: form.title,
+          provider: form.provider,
+          consumer: form.consumer,
+          project: form.project,
+          version: form.version,
+          effectiveDate: form.effectiveDate,
+          expiryDate: form.expiryDate || null,
+          documentPaths: form.newDocumentPaths,
+          scope,
+          initialSnapshots: [],
+        };
+        await attachContract(tab.collectionRoot, input);
+      }
       goList();
     } catch (e) {
       setError(String(e));
