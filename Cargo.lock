@@ -3967,6 +3967,7 @@ dependencies = [
  "dirs 5.0.1",
  "reqwest 0.12.28",
  "rocket-app",
+ "rocket-audit",
  "rocket-collection",
  "rocket-environment",
  "rocket-git",
@@ -4004,6 +4005,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "rocket-audit",
  "rocket-collection",
  "rocket-environment",
  "rocket-git",
@@ -4016,6 +4018,20 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "rocket-audit"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rocket-shared",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
  "ulid",
 ]
 
@@ -4115,6 +4131,7 @@ dependencies = [
  "dirs 5.0.1",
  "notify",
  "reqwest 0.12.28",
+ "rocket-audit",
  "rocket-collection",
  "rocket-environment",
  "rocket-history",

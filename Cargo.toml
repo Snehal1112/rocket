@@ -50,6 +50,7 @@ rocket-environment = { path = "crates/rocket-environment" }
 rocket-http = { path = "crates/rocket-http" }
 rocket-history = { path = "crates/rocket-history" }
 rocket-app = { path = "crates/rocket-app" }
+rocket-audit = { path = "crates/rocket-audit" }
 rocket-infra = { path = "crates/rocket-infra" }
 rocket-git = { path = "crates/rocket-git" }
 rocket-workspace = { path = "crates/rocket-workspace" }

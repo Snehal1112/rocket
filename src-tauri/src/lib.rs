@@ -1,3 +1,4 @@
+mod audit_bridge;
 mod commands;
 mod tauri_event_bus;
 
@@ -6,12 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use rocket_app::{
     CollectionService, ContractService, CookieService, GitAppService,
-    HistoryService, RequestExecutionService, TemplateService, WorkspaceService,
+    HistoryService, RequestExecutionService, SecurityAuditService, TemplateService,
+    WorkspaceService,
 };
+use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_infra::{
-    FsCollectionRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo,
-    FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo, NotifyFileWatcher, ReqwestExecutor,
-    SharedPathCollectionRepo,
+    FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo, FsContractRepo, FsCookieRepo,
+    FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo,
+    NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
 };
 use rocket_workspace::WorkspaceConfigRepository;
 use rocket_shared::events::NullEventPublisher;
@@ -142,13 +145,35 @@ pub fn run() {
             let watcher_bus =
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
 
+            // Security audit: tamper-evident event log + compliance profile.
+            // Lives under data_dir (not workspace) so the log persists across
+            // workspace switches.
+            let audit_dir = data_dir.join("audit");
+            std::fs::create_dir_all(&audit_dir).ok();
+            let audit_log_repo = Arc::new(
+                FsAuditLogRepo::new(audit_dir.join("events.jsonl"))
+                    .expect("audit log init"),
+            );
+            let profile_repo = Arc::new(
+                FsComplianceProfileRepo::new(audit_dir.join("profile.yml"))
+                    .expect("compliance profile init"),
+            );
+            let audit_svc = Arc::new(
+                SecurityAuditService::new(audit_log_repo.clone(), profile_repo.clone())
+                    .expect("audit service init"),
+            );
+            let audit_publisher: Arc<dyn SecurityAuditPublisher> = Arc::new(
+                audit_bridge::ServiceBackedAuditPublisher::new(audit_svc.clone()),
+            );
+
             // Application services — no event publishing.
             // The file watcher is the single source of truth for sidebar updates.
             // SharedPathCollectionRepo resolves the base directory from
             // active_workspace_path at call time, so switching workspaces
             // automatically redirects all collection reads/writes.
-            let collection_svc = CollectionService::new(
+            let collection_svc = CollectionService::new_with_audit(
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                audit_publisher.clone(),
             );
             let history_svc = HistoryService::new(
                 Box::new(FsHistoryRepo::new(history_dir.clone())),
@@ -162,13 +187,14 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir.clone())),
                 Box::new(NullEventPublisher),
             );
-            let exec_svc = RequestExecutionService::new(
+            let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::new(environments_dir)),
                 Arc::new(ReqwestExecutor::new()),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(NullEventPublisher),
+                audit_publisher.clone(),
             );
 
             let git_svc = GitAppService::new(
@@ -182,9 +208,10 @@ pub fn run() {
             // A second SharedPathCollectionRepo sharing the same workspace
             // path lets the service walk collections at contract-attach time
             // without duplicating filesystem state.
-            let contract_svc = ContractService::new(
+            let contract_svc = ContractService::new_with_audit(
                 Arc::new(FsContractRepo),
                 Arc::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                audit_publisher.clone(),
             );
 
             // Register all services as Tauri managed state.
@@ -195,6 +222,7 @@ pub fn run() {
             app.manage(cookie_svc);
             app.manage(exec_svc);
             app.manage(git_svc);
+            app.manage(audit_svc);
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
 
