@@ -16,6 +16,7 @@ Read this first. It tells you where everything lives so you skip the exploration
 | How do I verify a change? | `.claude/rules/07-verification.md` |
 | Can I commit this? | `.claude/rules/08-commits.md` |
 | Am I over-engineering? | `.claude/rules/09-anti-patterns.md` |
+| Contract snapshot/changelog domain rules? | `.claude/rules/10-contract-audit-domain.md` |
 | Per-crate design details? | `crates/<name>/CLAUDE.md` (auto-loads) |
 
 ## Where project docs live
@@ -40,6 +41,12 @@ Read this first. It tells you where everything lives so you skip the exploration
 | `rocket-workflow` | DDD boundaries and verification commands |
 | `systematic-debugging` | For any unexpected behaviour or test failure |
 | `verification-before-completion` | Before claiming any work is done |
+
+## Agents
+
+| Agent | Use |
+|---|---|
+| `contract-audit-fix` | Fix C1/I1/I4 contract audit bugs (see `.claude/review-contract-lock.md`) |
 
 ## Commands
 
