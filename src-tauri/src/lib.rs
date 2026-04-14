@@ -140,7 +140,7 @@ pub fn run() {
 
             // Event buses — publish domain events to the frontend.
             let watcher_bus =
-                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle));
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
 
             // Application services — no event publishing.
             // The file watcher is the single source of truth for sidebar updates.
@@ -173,7 +173,7 @@ pub fn run() {
 
             let git_svc = GitAppService::new(
                 Box::new(rocket_git::Git2Service::new()),
-                Box::new(NullEventPublisher),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
             // Contract service — owns the save-hook audit log.

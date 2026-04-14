@@ -831,12 +831,26 @@ impl GitService for Git2Service {
 
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
-        let head_commit = repo
-            .head()
-            .and_then(|h| h.peel_to_commit())
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // HEAD must point to a commit; an unborn HEAD (no commits yet) cannot
+        // be used as a branch base.
+        let head_commit = repo.head().and_then(|h| h.peel_to_commit()).map_err(|_| {
+            DomainError::InvalidInput(
+                "Cannot create a branch: the repository has no commits yet. \
+                 Make an initial commit first."
+                    .to_string(),
+            )
+        })?;
+
         repo.branch(name, &head_commit, false)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Switch HEAD to the new branch immediately after creating it.
+        repo.set_head(&format!("refs/heads/{name}"))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
         Ok(())
     }
 

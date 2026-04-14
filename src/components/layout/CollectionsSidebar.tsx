@@ -238,12 +238,19 @@ export function CollectionsSidebar() {
   // filesystem changes collapse into one refresh.
   const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const envDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Separate debounce for git branch-switch events so that file-watcher
+  // collection-changed events fired during checkout cannot reset it and
+  // cause fetchCollections to run before git has finished writing all files.
+  const gitDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     void fetchCollections();
     let cancelled = false;
     const unlisteners: Array<() => void> = [];
 
     onCollectionChanged((event) => {
+      // Branch-switch events are already handled by the git-changed listener.
+      // Skipping here prevents a duplicate fetchCollections call.
+      if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
       if (listDebounce.current) clearTimeout(listDebounce.current);
       listDebounce.current = setTimeout(() => void fetchCollections(), 300);
 
@@ -273,9 +280,14 @@ export function CollectionsSidebar() {
     });
 
     // Reload when git operations change the branch (files on disk change).
+    // Uses its own debounce so concurrent file-watcher collection-changed
+    // events during checkout do not keep pushing this fetch further out.
+    // Also cancels listDebounce so file-watcher events that arrived during
+    // checkout do not trigger a second fetchCollections call.
     listen('git-changed', () => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
-      listDebounce.current = setTimeout(() => void fetchCollections(), 300);
+      if (gitDebounce.current) clearTimeout(gitDebounce.current);
+      gitDebounce.current = setTimeout(() => void fetchCollections(), 300);
     }).then((fn) => {
       if (cancelled) fn();
       else unlisteners.push(fn);
@@ -285,6 +297,7 @@ export function CollectionsSidebar() {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);
       if (envDebounce.current) clearTimeout(envDebounce.current);
+      if (gitDebounce.current) clearTimeout(gitDebounce.current);
       unlisteners.forEach((fn) => {
         fn();
       });

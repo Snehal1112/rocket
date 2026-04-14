@@ -121,7 +121,11 @@ export function CollectionNode({
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     onCollectionChanged((event) => {
-      const affected = event.collection ?? event.name;
+      // event.collection may be a full filesystem path (e.g. from git events).
+      // Extract just the last segment so it can be compared against the name.
+      const raw = event.collection ?? event.name;
+      const parts = raw?.includes('/') ? raw.split('/') : null;
+      const affected = parts ? parts[parts.length - 1] : raw;
       if (!affected || affected === summary.name) {
         if (treeDebounce.current) clearTimeout(treeDebounce.current);
         treeDebounce.current = setTimeout(() => refreshTree(), 300);

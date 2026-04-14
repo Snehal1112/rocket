@@ -1,5 +1,6 @@
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
-import { useCallback, useState } from 'react';
+import type * as monacoNs from 'monaco-editor';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
@@ -34,7 +35,21 @@ function getLanguage(filePath: string): string {
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
   const { themeName, defineThemes } = useMonacoTheme();
-  const handleDiffMount: DiffOnMount = (_editor, monaco) => {
+
+  // Hold the editor instance so we can dispose it explicitly before React
+  // unmounts the DOM, preventing "TextModel disposed before DiffEditorWidget
+  // model got reset" errors caused by Monaco's internal teardown order.
+  const editorRef = useRef<monacoNs.editor.IDiffEditor | null>(null);
+
+  useEffect(() => {
+    return () => {
+      editorRef.current?.dispose();
+      editorRef.current = null;
+    };
+  }, []);
+
+  const handleDiffMount: DiffOnMount = (editor, monaco) => {
+    editorRef.current = editor;
     defineThemes(monaco);
   };
 

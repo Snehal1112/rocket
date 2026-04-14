@@ -162,7 +162,13 @@ impl GitAppService {
     }
 
     pub fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
-        self.git.create_branch(path, name)
+        self.git.create_branch(path, name)?;
+        // Publish a switch event so the frontend updates its branch indicator.
+        self.events.publish(DomainEvent::BranchSwitched {
+            collection: path.to_string(),
+            branch: name.to_string(),
+        });
+        Ok(())
     }
 
     pub fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()> {

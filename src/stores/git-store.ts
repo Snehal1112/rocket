@@ -440,13 +440,13 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  // Create a new branch with the given name.
+  // Create a new branch with the given name and switch to it.
   createBranch: async (name) => {
     const { collectionPath } = get();
     if (!collectionPath) return;
     try {
       await gitCreateBranch(collectionPath, name);
-      await get().refreshBranches();
+      await Promise.all([get().refreshBranches(), get().refreshStatus()]);
     } catch (e) {
       set({ error: String(e) });
     }

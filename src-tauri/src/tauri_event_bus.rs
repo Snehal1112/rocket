@@ -53,5 +53,11 @@ impl EventPublisher for TauriEventBus {
             | DomainEvent::GitRemoteRemoved { .. } => "git-changed",
         };
         let _ = self.app.emit(event_name, &event);
+        // A branch switch replaces the working-tree content visible to the
+        // collection sidebar, so also fire "collection-changed" so that any
+        // expanded CollectionNode re-fetches its request tree.
+        if matches!(&event, DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. }) {
+            let _ = self.app.emit("collection-changed", &event);
+        }
     }
 }

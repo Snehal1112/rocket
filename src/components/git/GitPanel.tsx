@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, Package } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BranchSelector } from '@/components/git/BranchSelector';
 import { ConflictResolver } from '@/components/git/ConflictResolver';
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
@@ -48,6 +48,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
     refreshStatus,
     status,
   } = useGitStore();
+  const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
@@ -83,18 +84,38 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   }, [rightPanel.kind, refreshStashes]);
 
   // Refresh git status when collection files change (e.g. delete/rename in sidebar).
+  // Debounced so rapid file-watcher events during a branch checkout collapse into
+  // one call. Git operations are skipped — the store refreshes inline after each one.
+  const statusDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isRepo) return;
     let unlisten: (() => void) | undefined;
-    void onCollectionChanged(() => {
-      void refreshStatus();
+    void onCollectionChanged((event) => {
+      if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
+      if (statusDebounce.current) clearTimeout(statusDebounce.current);
+      statusDebounce.current = setTimeout(() => void refreshStatus(), 300);
     }).then((fn) => {
       unlisten = fn;
     });
     return () => {
       unlisten?.();
+      if (statusDebounce.current) clearTimeout(statusDebounce.current);
     };
   }, [isRepo, refreshStatus]);
+
+  // Return to the overview when the branch changes so stale diff/conflict views
+  // from the previous branch are not shown.
+  const prevBranchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      currentBranch !== null &&
+      prevBranchRef.current !== null &&
+      prevBranchRef.current !== currentBranch
+    ) {
+      setRightPanel({ kind: 'landing' });
+    }
+    prevBranchRef.current = currentBranch;
+  }, [currentBranch]);
 
   if (isRepo === null) {
     return (
