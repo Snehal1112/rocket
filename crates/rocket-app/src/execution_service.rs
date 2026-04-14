@@ -1,3 +1,7 @@
+use rocket_audit::{
+    event::AuditEventKind,
+    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
+};
 use rocket_collection::CollectionRepository;
 use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
 use rocket_history::{HistoryEntry, HistoryRepository};
@@ -39,6 +43,7 @@ pub struct RequestExecutionService {
     #[allow(dead_code)]
     cookie_repo: Box<dyn CookieRepository>,
     events: Box<dyn EventPublisher>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 }
 
 impl RequestExecutionService {
@@ -50,7 +55,35 @@ impl RequestExecutionService {
         cookie_repo: Box<dyn CookieRepository>,
         events: Box<dyn EventPublisher>,
     ) -> Self {
-        Self { env_repo, executor, history_repo, collection_repo, cookie_repo, events }
+        Self {
+            env_repo,
+            executor,
+            history_repo,
+            collection_repo,
+            cookie_repo,
+            events,
+            audit: Arc::new(NullSecurityAuditPublisher),
+        }
+    }
+
+    pub fn new_with_audit(
+        env_repo: Box<dyn EnvironmentRepository>,
+        executor: Arc<dyn HttpExecutor>,
+        history_repo: Box<dyn HistoryRepository>,
+        collection_repo: Box<dyn CollectionRepository>,
+        cookie_repo: Box<dyn CookieRepository>,
+        events: Box<dyn EventPublisher>,
+        audit: Arc<dyn SecurityAuditPublisher>,
+    ) -> Self {
+        Self {
+            env_repo,
+            executor,
+            history_repo,
+            collection_repo,
+            cookie_repo,
+            events,
+            audit,
+        }
     }
 
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
@@ -143,6 +176,22 @@ impl RequestExecutionService {
     )]
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
         let http_request = self.resolve_request(&input)?;
+
+        // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
+        // request carries a real credential (not None / Inherit). This captures
+        // the intent even if the network call itself fails.
+        if let Some(auth_type) = sensitive_auth_label(&http_request.auth) {
+            self.audit.publish(
+                "system".into(),
+                None,
+                AuditEventKind::SensitiveAuthUsed {
+                    auth_type: auth_type.to_string(),
+                    collection: input.collection.clone().unwrap_or_default(),
+                    request_path: input.request_path.clone().unwrap_or_default(),
+                },
+            );
+        }
+
         let response = self.executor.execute(&http_request).await?;
 
         tracing::info!(
@@ -186,6 +235,23 @@ impl RequestExecutionService {
         Ok(http_run_load_test(executor, &resolved, &config).await)
     }
 
+}
+
+/// Map an `Auth` variant to a short kebab-case label for audit events.
+/// Returns `None` for `Auth::None` and `Auth::Inherit` because those are not
+/// "sensitive auth used" — no credential is actually being sent on the wire.
+fn sensitive_auth_label(auth: &Auth) -> Option<&'static str> {
+    match auth {
+        Auth::None | Auth::Inherit => None,
+        Auth::Basic { .. } => Some("basic"),
+        Auth::Bearer { .. } => Some("bearer"),
+        Auth::ApiKey { .. } => Some("api-key"),
+        Auth::OAuth2(_) => Some("oauth2"),
+        Auth::AwsSigV4 { .. } => Some("aws-sig-v4"),
+        Auth::Wsse { .. } => Some("wsse"),
+        Auth::Digest { .. } => Some("digest"),
+        Auth::Ntlm { .. } => Some("ntlm"),
+    }
 }
 
 /// Use the collection auth when the request carries no auth of its own.
@@ -826,5 +892,75 @@ mod tests {
 
         let captured = exec_arc.last_auth.lock().unwrap().clone().unwrap();
         assert_eq!(captured, Auth::Bearer { token: "col_tok".into() });
+    }
+
+    struct CapturingAuditPublisher {
+        captured: Mutex<Vec<AuditEventKind>>,
+    }
+    impl SecurityAuditPublisher for CapturingAuditPublisher {
+        fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
+            self.captured.lock().unwrap().push(kind);
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_emits_security_audit_event_for_sensitive_auth() {
+        let publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        );
+
+        let mut input = sample_input("https://api.example.com/users", None);
+        input.auth = Auth::Bearer { token: "tok".into() };
+        input.collection = Some("my-api".into());
+        input.request_path = Some("users.yml".into());
+        svc.execute(input).await.unwrap();
+
+        let captured = publisher.captured.lock().unwrap();
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SensitiveAuthUsed { auth_type, collection, request_path }
+                    if auth_type == "bearer" && collection == "my-api" && request_path == "users.yml"
+            )),
+            "expected SensitiveAuthUsed bearer event, got {:?}",
+            *captured
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_does_not_emit_audit_for_none_or_inherit_auth() {
+        let publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        );
+
+        // Auth::None by default in sample_input.
+        svc.execute(sample_input("https://api.example.com/public", None))
+            .await
+            .unwrap();
+
+        let captured = publisher.captured.lock().unwrap();
+        assert!(
+            !captured
+                .iter()
+                .any(|k| matches!(k, AuditEventKind::SensitiveAuthUsed { .. })),
+            "Auth::None must not emit SensitiveAuthUsed, got {:?}",
+            *captured
+        );
     }
 }

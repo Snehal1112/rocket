@@ -1,15 +1,33 @@
+use rocket_audit::{
+    event::AuditEventKind,
+    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
+};
 use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
+use std::sync::Arc;
 
 pub struct EnvironmentService {
     repo: Box<dyn EnvironmentRepository>,
     events: Box<dyn EventPublisher>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 }
 
 impl EnvironmentService {
     pub fn new(repo: Box<dyn EnvironmentRepository>, events: Box<dyn EventPublisher>) -> Self {
-        Self { repo, events }
+        Self {
+            repo,
+            events,
+            audit: Arc::new(NullSecurityAuditPublisher),
+        }
+    }
+
+    pub fn new_with_audit(
+        repo: Box<dyn EnvironmentRepository>,
+        events: Box<dyn EventPublisher>,
+        audit: Arc<dyn SecurityAuditPublisher>,
+    ) -> Self {
+        Self { repo, events, audit }
     }
 
     pub fn list(&self) -> DomainResult<Vec<Environment>> {
@@ -21,8 +39,37 @@ impl EnvironmentService {
     }
 
     pub fn save(&self, env: &Environment) -> DomainResult<()> {
+        // Snapshot previous state so we can detect which secret values actually changed.
+        let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;
         self.events.publish(DomainEvent::EnvironmentSaved { name: env.name.clone() });
+
+        // Emit one SecretVariableWritten per secret whose value changed (or is new).
+        for var in &env.variables {
+            if !var.secret || var.value.is_empty() {
+                continue;
+            }
+            let changed = match &previous {
+                Some(prev) => prev
+                    .variables
+                    .iter()
+                    .find(|v| v.key == var.key)
+                    .map(|v| v.value != var.value || !v.secret)
+                    .unwrap_or(true),
+                None => true,
+            };
+            if changed {
+                self.audit.publish(
+                    "system".into(),
+                    None,
+                    AuditEventKind::SecretVariableWritten {
+                        environment: env.name.clone(),
+                        variable_key: var.key.clone(),
+                    },
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -36,6 +83,7 @@ impl EnvironmentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_environment::Variable;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use std::sync::Mutex;
@@ -81,6 +129,15 @@ mod tests {
         }
     }
 
+    struct CapturingPublisher {
+        captured: Mutex<Vec<AuditEventKind>>,
+    }
+    impl SecurityAuditPublisher for CapturingPublisher {
+        fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
+            self.captured.lock().unwrap().push(kind);
+        }
+    }
+
     fn make_service() -> EnvironmentService {
         EnvironmentService::new(Box::new(MockEnvRepo::new()), Box::new(NullEventPublisher))
     }
@@ -108,5 +165,38 @@ mod tests {
         svc.save(&Environment::new("temp")).unwrap();
         svc.delete("temp").unwrap();
         assert!(svc.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn save_emits_security_audit_event() {
+        let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
+        let svc = EnvironmentService::new_with_audit(
+            Box::new(MockEnvRepo::new()),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        );
+
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-12345"));
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        svc.save(&env).unwrap();
+
+        let captured = publisher.captured.lock().unwrap();
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SecretVariableWritten { environment, variable_key }
+                    if environment == "prod" && variable_key == "API_KEY"
+            )),
+            "expected SecretVariableWritten for API_KEY, got {:?}",
+            *captured
+        );
+        // Non-secret variables must not emit the event.
+        assert!(
+            !captured
+                .iter()
+                .any(|k| matches!(k, AuditEventKind::SecretVariableWritten { variable_key, .. } if variable_key == "HOST")),
+            "non-secret variables must not emit SecretVariableWritten"
+        );
     }
 }

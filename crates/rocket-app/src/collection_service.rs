@@ -1,14 +1,30 @@
+use rocket_audit::{
+    event::AuditEventKind,
+    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
+};
 use rocket_collection::{Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
+use std::sync::Arc;
 
 pub struct CollectionService {
     repo: Box<dyn CollectionRepository>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 }
 
 impl CollectionService {
     pub fn new(repo: Box<dyn CollectionRepository>) -> Self {
-        Self { repo }
+        Self {
+            repo,
+            audit: Arc::new(NullSecurityAuditPublisher),
+        }
+    }
+
+    pub fn new_with_audit(
+        repo: Box<dyn CollectionRepository>,
+        audit: Arc<dyn SecurityAuditPublisher>,
+    ) -> Self {
+        Self { repo, audit }
     }
 
     pub fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
@@ -25,7 +41,13 @@ impl CollectionService {
     }
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
-        self.repo.delete(name)
+        self.repo.delete(name)?;
+        self.audit.publish(
+            "system".into(),
+            None,
+            AuditEventKind::CollectionDeleted { collection: name.to_string() },
+        );
+        Ok(())
     }
 
     pub fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
@@ -256,5 +278,35 @@ mod tests {
     fn list_empty_initially() {
         let svc = make_service();
         assert!(svc.list().unwrap().is_empty());
+    }
+
+    struct CapturingPublisher {
+        captured: Mutex<Vec<AuditEventKind>>,
+    }
+    impl SecurityAuditPublisher for CapturingPublisher {
+        fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
+            self.captured.lock().unwrap().push(kind);
+        }
+    }
+
+    #[test]
+    fn delete_emits_security_audit_event() {
+        let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
+        let svc = CollectionService::new_with_audit(
+            Box::new(MockCollectionRepo::new()),
+            publisher.clone(),
+        );
+        svc.create("victim").unwrap();
+        svc.delete("victim").unwrap();
+
+        let captured = publisher.captured.lock().unwrap();
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::CollectionDeleted { collection } if collection == "victim"
+            )),
+            "expected CollectionDeleted, got {:?}",
+            *captured
+        );
     }
 }

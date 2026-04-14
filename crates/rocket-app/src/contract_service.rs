@@ -1,3 +1,7 @@
+use rocket_audit::{
+    event::AuditEventKind,
+    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
+};
 use rocket_collection::{
     contract::{
         changelog::{ChangelogEntry, ContractChangelog},
@@ -94,6 +98,7 @@ fn copy_attachments(
 pub struct ContractService {
     repo: Arc<dyn ContractRepository>,
     collection_repo: Arc<dyn CollectionRepository>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 }
 
 impl ContractService {
@@ -101,7 +106,19 @@ impl ContractService {
         repo: Arc<dyn ContractRepository>,
         collection_repo: Arc<dyn CollectionRepository>,
     ) -> Self {
-        Self { repo, collection_repo }
+        Self {
+            repo,
+            collection_repo,
+            audit: Arc::new(NullSecurityAuditPublisher),
+        }
+    }
+
+    pub fn new_with_audit(
+        repo: Arc<dyn ContractRepository>,
+        collection_repo: Arc<dyn CollectionRepository>,
+        audit: Arc<dyn SecurityAuditPublisher>,
+    ) -> Self {
+        Self { repo, collection_repo, audit }
     }
 
     /// Create a new contract and take a baseline snapshot of every covered request.
@@ -158,6 +175,16 @@ impl ContractService {
         self.repo.save_snapshot(collection_root, &snapshot)?;
         let changelog = ContractChangelog::new(contract.id);
         self.repo.append_changelog(collection_root, &changelog)?;
+
+        self.audit.publish(
+            "system".into(),
+            None,
+            AuditEventKind::ContractAttached {
+                contract_id: contract.id.to_string(),
+                collection: collection_name.to_string(),
+                scope: format!("{:?}", contract.scope),
+            },
+        );
 
         Ok(contract)
     }
@@ -216,7 +243,21 @@ impl ContractService {
     }
 
     pub fn delete_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<()> {
-        self.repo.delete_contract(collection_root, id)
+        self.repo.delete_contract(collection_root, id)?;
+        let collection = collection_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        self.audit.publish(
+            "system".into(),
+            None,
+            AuditEventKind::ContractDeleted {
+                contract_id: id.to_string(),
+                collection,
+            },
+        );
+        Ok(())
     }
 
     pub fn get_changelog(&self, collection_root: &Path, contract_id: Ulid) -> ContractResult<ContractChangelog> {
@@ -256,6 +297,19 @@ impl ContractService {
                     match contract.enforcement_mode {
                         ContractEnforcementMode::Informational => {
                             let entries: Vec<ChangelogEntry> = changes;
+                            // Emit one ContractViolation audit event per field change
+                            // before handing the entries to the changelog store.
+                            for entry in &entries {
+                                self.audit.publish(
+                                    "system".into(),
+                                    None,
+                                    AuditEventKind::ContractViolation {
+                                        contract_id: contract.id.to_string(),
+                                        request_path: entry.request_path.to_string_lossy().into_owned(),
+                                        field: entry.field.clone(),
+                                    },
+                                );
+                            }
                             let mut incoming = ContractChangelog::new(contract.id);
                             incoming.append(entries);
                             self.repo.append_changelog(collection_root, &incoming)?;
@@ -819,6 +873,39 @@ mod tests {
         assert!(
             contracts.is_empty(),
             "collection load failure must not leave an orphan contract behind"
+        );
+    }
+
+    struct CapturingPublisher {
+        captured: Mutex<Vec<AuditEventKind>>,
+    }
+    impl SecurityAuditPublisher for CapturingPublisher {
+        fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
+            self.captured.lock().unwrap().push(kind);
+        }
+    }
+
+    #[test]
+    fn attach_emits_security_audit_event() {
+        let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
+        let mut empty = Collection::new(COLLECTION_NAME);
+        empty.root.dir_name = Some(COLLECTION_NAME.into());
+        let svc = ContractService::new_with_audit(
+            Arc::new(MockContractRepo::default()),
+            Arc::new(MockCollectionRepo::with_collection(empty)),
+            publisher.clone(),
+        );
+
+        svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .unwrap();
+
+        let captured = publisher.captured.lock().unwrap();
+        assert!(
+            captured
+                .iter()
+                .any(|k| matches!(k, AuditEventKind::ContractAttached { .. })),
+            "expected ContractAttached, got {:?}",
+            *captured
         );
     }
 }
