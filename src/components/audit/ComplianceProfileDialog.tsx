@@ -86,20 +86,24 @@ export function ComplianceProfileDialog({ open, onOpenChange }: ComplianceProfil
             </p>
             <div className='grid grid-cols-1 gap-2'>
               {FRAMEWORKS.map((f) => (
-                <label
+                <div
                   key={f.value}
-                  className='flex cursor-pointer items-start gap-2.5 rounded-md border border-border px-3 py-2 hover:bg-muted/30'
+                  className='flex items-start gap-2.5 rounded-md border border-border px-3 py-2 hover:bg-muted/30'
                 >
                   <Checkbox
+                    id={`framework-${f.value}`}
                     checked={draft.activeFrameworks.includes(f.value)}
                     onCheckedChange={() => toggleFramework(f.value)}
                     className='mt-0.5'
                   />
-                  <div className='flex-1'>
+                  <Label
+                    htmlFor={`framework-${f.value}`}
+                    className='flex-1 cursor-pointer font-normal'
+                  >
                     <div className='text-sm font-medium'>{f.label}</div>
                     <div className='text-xs text-muted-foreground'>{f.hint}</div>
-                  </div>
-                </label>
+                  </Label>
+                </div>
               ))}
             </div>
           </div>
