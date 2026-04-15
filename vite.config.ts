@@ -2,6 +2,7 @@ import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { visualizer } from "rollup-plugin-visualizer";
 
 export const testConfig = {
   environment: 'jsdom',
@@ -37,7 +38,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [tailwindcss(), react()],
+  plugins: [tailwindcss(), react(), visualizer({ open: false, filename: "dist/stats.html", gzipSize: true, brotliSize: true })],
   test: testConfig,
 
   resolve: {
