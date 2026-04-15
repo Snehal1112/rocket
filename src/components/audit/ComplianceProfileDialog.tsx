@@ -28,7 +28,7 @@ const FRAMEWORKS: { value: Framework; label: string; hint: string }[] = [
   { value: 'soc2', label: 'SOC 2 Type 2', hint: 'Trust Services Criteria' },
   { value: 'iso27001', label: 'ISO 27001:2022', hint: 'Annex A controls' },
   { value: 'iso42001', label: 'ISO 42001:2023', hint: 'AI management' },
-  { value: 'csaStar', label: 'CSA STAR', hint: 'Cloud Controls Matrix' },
+  { value: 'csa_star', label: 'CSA STAR', hint: 'Cloud Controls Matrix' },
 ];
 
 const ENFORCEMENT: { value: EnforcementLevel; label: string; description: string }[] = [

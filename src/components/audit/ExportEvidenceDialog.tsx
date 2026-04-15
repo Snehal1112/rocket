@@ -1,5 +1,4 @@
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -12,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { exportAuditEvidence } from '@/lib/tauri-api';
+import { exportAuditEvidence, saveAuditEvidenceFile } from '@/lib/tauri-api';
 
 interface ExportEvidenceDialogProps {
   open: boolean;
@@ -41,7 +40,7 @@ export function ExportEvidenceDialog({ open, onOpenChange }: ExportEvidenceDialo
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (path) {
-        await writeTextFile(path, JSON.stringify(result, null, 2));
+        await saveAuditEvidenceFile(path, JSON.stringify(result, null, 2));
         toast.success(`Exported ${result.events.length} events`, {
           description: result.chainVerified ? 'Chain verified' : 'Chain verification failed',
         });

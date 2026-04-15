@@ -121,6 +121,11 @@ export function CollectionNode({
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     onCollectionChanged((event) => {
+      // Collection-level lifecycle events (delete/rename) are handled by the
+      // sidebar's own fetchCollections listener. Refreshing the tree here
+      // would call getCollection with a name that no longer exists on disk.
+      if (event.type === 'collectionDeleted' || event.type === 'collectionRenamed') return;
+
       // event.collection may be a full filesystem path (e.g. from git events).
       // Extract just the last segment so it can be compared against the name.
       const raw = event.collection ?? event.name;

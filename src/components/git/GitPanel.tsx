@@ -1,7 +1,12 @@
 import { AlertTriangle, ArrowLeft, Package } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { BranchSelector } from '@/components/git/BranchSelector';
-import { ConflictResolver } from '@/components/git/ConflictResolver';
+
+// Lazy-load ConflictResolver — it pulls in Monaco and only renders on merge conflicts.
+const ConflictResolver = lazy(() =>
+  import('@/components/git/ConflictResolver').then((m) => ({ default: m.ConflictResolver })),
+);
+
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
 import { GitCloneDialog } from '@/components/git/GitCloneDialog';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
@@ -47,6 +52,8 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
     refreshStashes,
     refreshStatus,
     status,
+    collectionPath: loadedPath,
+    isRepo: storeIsRepo,
   } = useGitStore();
   const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
@@ -70,8 +77,13 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   );
 
   useEffect(() => {
+    // Skip the round-trip if the store already has this collection loaded.
+    if (loadedPath === collectionPath) {
+      setIsRepo(storeIsRepo);
+      return;
+    }
     void checkAndLoad(collectionPath);
-  }, [collectionPath, checkAndLoad]);
+  }, [collectionPath, checkAndLoad, loadedPath, storeIsRepo]);
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
@@ -252,15 +264,17 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
               <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
             )}
             {rightPanel.kind === 'conflict' && (
-              <ConflictResolver
-                conflictState={{
-                  filePath: rightPanel.conflictFile.path,
-                  collectionPath: collectionPath,
-                  ours: rightPanel.conflictFile.ours,
-                  theirs: rightPanel.conflictFile.theirs,
-                  ancestor: rightPanel.conflictFile.ancestor ?? null,
-                }}
-              />
+              <Suspense fallback={null}>
+                <ConflictResolver
+                  conflictState={{
+                    filePath: rightPanel.conflictFile.path,
+                    collectionPath: collectionPath,
+                    ours: rightPanel.conflictFile.ours,
+                    theirs: rightPanel.conflictFile.theirs,
+                    ancestor: rightPanel.conflictFile.ancestor ?? null,
+                  }}
+                />
+              </Suspense>
             )}
             {rightPanel.kind === 'commits' && <GitCommitLog />}
             {rightPanel.kind === 'stashes' && (

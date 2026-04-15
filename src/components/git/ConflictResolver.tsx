@@ -1,4 +1,8 @@
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
+
+loader.config({ monaco });
+
 import { useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { Badge } from '@/components/ui/badge';

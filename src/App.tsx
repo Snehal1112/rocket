@@ -70,15 +70,6 @@ function App() {
     }
   }, []);
 
-  // Preload Monaco in the background after the app shell renders.
-  // requestIdleCallback is Chrome-only; setTimeout works in all WebViews.
-  useEffect(() => {
-    const id = setTimeout(() => {
-      void import('@/components/editor/MonacoWrapper');
-    }, 200);
-    return () => clearTimeout(id);
-  }, []);
-
   return (
     <div className='h-full flex flex-col overflow-hidden bg-background text-sm'>
       <TitleBar />

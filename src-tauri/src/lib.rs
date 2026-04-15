@@ -292,6 +292,7 @@ pub fn run() {
             commands::audit::get_compliance_profile,
             commands::audit::set_compliance_profile,
             commands::audit::export_audit_evidence,
+            commands::audit::save_audit_evidence_file,
             commands::oauth2::oauth2_auth_code_flow,
             commands::git::git_is_repo,
             commands::git::git_init,

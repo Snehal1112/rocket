@@ -1,9 +1,10 @@
 import { Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { FileStatus } from '@/lib/tauri-api';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
-import { DiffViewer } from './DiffViewer';
+
+const DiffViewer = lazy(() => import('./DiffViewer').then((m) => ({ default: m.DiffViewer })));
 
 interface DiffViewForFileProps {
   file: FileStatus;
@@ -66,5 +67,9 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
 
   if (!diffState) return null;
 
-  return <DiffViewer key={`${diffState.filePath}:${diffState.isStaged}`} diffState={diffState} />;
+  return (
+    <Suspense fallback={<Loader2 className='h-5 w-5 animate-spin text-muted-foreground m-auto' />}>
+      <DiffViewer key={`${diffState.filePath}:${diffState.isStaged}`} diffState={diffState} />
+    </Suspense>
+  );
 }

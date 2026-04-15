@@ -1,9 +1,17 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { AuditLogTab } from '@/components/audit/AuditLogTab';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { ContractTab } from '@/components/contract/ContractTab';
-import { ConflictResolver } from '@/components/git/ConflictResolver';
-import { DiffViewer } from '@/components/git/DiffViewer';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
+
+// Lazy-load Monaco-heavy git components so they don't load until a git tab opens.
+const ConflictResolver = lazy(() =>
+  import('@/components/git/ConflictResolver').then((m) => ({ default: m.ConflictResolver })),
+);
+const DiffViewer = lazy(() =>
+  import('@/components/git/DiffViewer').then((m) => ({ default: m.DiffViewer })),
+);
+
 import { GitPanel } from '@/components/git/GitPanel';
 import { RocketLaunch } from '@/components/illustrations';
 import { RequestPanel } from '@/components/request/RequestPanel';
@@ -93,9 +101,13 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       <div className='flex-1 overflow-hidden'>
         {activeTab ? (
           isConflictTab(activeTab) ? (
-            <ConflictResolver conflictState={activeTab.conflictState} />
+            <Suspense fallback={<EditorSkeleton />}>
+              <ConflictResolver conflictState={activeTab.conflictState} />
+            </Suspense>
           ) : isDiffTab(activeTab) ? (
-            <DiffViewer diffState={activeTab.diffState} />
+            <Suspense fallback={<EditorSkeleton />}>
+              <DiffViewer diffState={activeTab.diffState} />
+            </Suspense>
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (

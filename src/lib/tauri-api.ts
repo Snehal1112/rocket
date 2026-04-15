@@ -948,7 +948,7 @@ export const getContractChangelog = (collectionRoot: string, contractId: string)
 // Security audit / compliance
 // ============================================================
 
-export type Framework = 'soc2' | 'iso27001' | 'iso42001' | 'csaStar';
+export type Framework = 'soc2' | 'iso27001' | 'iso42001' | 'csa_star';
 export type EnforcementLevel = 'record' | 'warn' | 'block';
 
 export interface ControlId {
@@ -1006,3 +1006,6 @@ export const setComplianceProfile = (profile: ComplianceProfile) =>
 
 export const exportAuditEvidence = (start: string, end: string) =>
   invoke<EvidenceExport>('export_audit_evidence', { input: { start, end } });
+
+export const saveAuditEvidenceFile = (path: string, content: string) =>
+  invoke<void>('save_audit_evidence_file', { input: { path, content } });

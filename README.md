@@ -13,6 +13,7 @@
   <img alt="React" src="https://img.shields.io/badge/React_19-TypeScript-blue?logo=react" />
   <img alt="Platform" src="https://img.shields.io/badge/Platform-Linux_macOS_Windows-green" />
   <img alt="Offline" src="https://img.shields.io/badge/Offline-First-purple" />
+  <img alt="Memory" src="https://img.shields.io/badge/Runtime-Tauri_%2B_WebKitGTK-brightgreen" />
   <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow" />
 </p>
 
@@ -32,6 +33,28 @@
 - **Light/dark theme** with system preference detection
 - **Cross-platform** native desktop app (Linux, macOS, Windows)
 - **No cloud, no account** — your data stays on your machine
+
+## Why Rocket is Fast
+
+Most API clients are Electron apps — they ship a full copy of Chromium and a Node.js runtime with every install. That baseline alone costs 300–500 MB of RAM before you open a single request.
+
+Rocket is built differently:
+
+| | Rocket | Postman / Insomnia |
+|---|---|---|
+| **Runtime** | Rust + OS WebView | Electron (Chromium + Node.js) |
+| **Idle memory** | No bundled Chromium | ~400–600 MB RSS |
+| **Install size** | ~16 MB | ~300–500 MB |
+| **Background sync** | None | Cloud sync, telemetry, updater |
+| **Startup** | Fast (native binary) | Slow (JS engine warmup) |
+
+**How:**
+
+- **Tauri uses the OS WebView** — WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows. No bundled Chromium.
+- **Rust backend** — no garbage collector, no JVM, no Node runtime. Services are small structs wired via trait objects and dropped when not needed.
+- **No cloud, no polling** — there is no background process phoning home. Every I/O operation is triggered by user action, against local files only.
+
+> Rocket uses the OS WebView (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows) rather than bundling Chromium. Total memory depends on what WebKit processes the OS already has running.
 
 ## Quick Start
 

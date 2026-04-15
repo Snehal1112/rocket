@@ -1,4 +1,8 @@
-import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
+import { DiffEditor, type DiffOnMount, loader } from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
+
+loader.config({ monaco });
+
 import type * as monacoNs from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';

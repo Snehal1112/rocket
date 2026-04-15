@@ -73,3 +73,18 @@ pub fn export_audit_evidence(
         chain_verified,
     })
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveEvidenceInput {
+    pub path: String,
+    pub content: String,
+}
+
+/// Writes the evidence JSON to a user-chosen path on the native filesystem.
+/// Using a Rust command sidesteps the plugin-fs scope restrictions that block
+/// writes to arbitrary paths chosen via the save dialog.
+#[tauri::command]
+pub fn save_audit_evidence_file(input: SaveEvidenceInput) -> Result<(), String> {
+    std::fs::write(&input.path, &input.content).map_err(|e| e.to_string())
+}

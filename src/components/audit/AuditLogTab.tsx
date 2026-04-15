@@ -21,9 +21,10 @@ export function AuditLogTab() {
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
-    void loadEvents();
-    void loadProfile();
-  }, [loadEvents, loadProfile]);
+    // Only fetch if the store is empty — avoid re-fetching on every tab switch.
+    if (events.length === 0) void loadEvents();
+    if (!profile) void loadProfile();
+  }, [loadEvents, loadProfile, events.length, profile]);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return events;
