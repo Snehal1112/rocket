@@ -126,11 +126,11 @@ export function VariablePopover({
       // Prevent click inside popover from bubbling to EditorView and closing it.
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Value input */}
-      <div className='p-2'>
+      {/* Value input — borderless: the popover card is the chrome. */}
+      <div className='px-2 py-1.5'>
         <Input
           ref={inputRef}
-          className='h-7 text-xs font-mono'
+          className='h-7 border-0 bg-transparent px-2 text-xs font-mono shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent'
           value={entry?.secret ? '●●●●' : editValue}
           placeholder={entry ? 'Value' : 'Not set'}
           readOnly={readOnly}
