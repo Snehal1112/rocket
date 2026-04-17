@@ -49,6 +49,7 @@ export function MultiLineEditor({
 
   const resolvedLang = language ?? detectLanguage(bodyMode, contentType);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: recreate editor only when language or readOnly changes, value and variableContext are synced via separate effects below
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -99,7 +100,7 @@ export function MultiLineEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [resolvedLang, readOnly, value, variableContext]);
+  }, [resolvedLang, readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;
