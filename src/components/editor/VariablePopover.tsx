@@ -121,6 +121,7 @@ export function VariablePopover({
   return (
     <div
       role='dialog'
+      aria-label={`Edit variable ${varName}`}
       className='w-80 bg-popover text-popover-foreground rounded-md border shadow-md overflow-hidden'
       // Prevent click inside popover from bubbling to EditorView and closing it.
       onMouseDown={(e) => e.stopPropagation()}
