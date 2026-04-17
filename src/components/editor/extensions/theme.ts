@@ -33,6 +33,10 @@ export const rocketTheme = EditorView.theme({
     caretColor: 'hsl(var(--foreground))',
   },
   '.cm-line': {
+    // Flex-center so the placeholder widget and inline badges share
+    // the same vertical alignment as plain text.
+    display: 'flex',
+    alignItems: 'center',
     padding: '0 12px', // px-3
   },
   '.cm-cursor': {
