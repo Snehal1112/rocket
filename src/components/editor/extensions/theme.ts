@@ -20,8 +20,12 @@ export const rocketTheme = EditorView.theme({
     outline: 'none',
   },
   '.cm-scroller': {
+    // Vertically center the single line inside the h-8 wrapper so that
+    // variable badges and plain text share a baseline.
+    display: 'flex',
+    alignItems: 'center',
     overflow: 'hidden',
-    lineHeight: '30px', // Match h-8 (32px) minus 2px border.
+    lineHeight: '1',
     fontFamily: 'inherit',
   },
   '.cm-content': {
@@ -44,10 +48,11 @@ export const rocketTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground': {
     background: 'hsl(var(--primary) / 0.3) !important',
   },
-  // Variable token base styles.
+  // Variable token base styles. Horizontal padding only so the token
+  // does not extend beyond the line box height and shift the baseline.
   '.cm-var': {
     borderRadius: '3px',
-    padding: '1px 3px',
+    padding: '0 3px',
   },
   '.cm-var-environment': {
     background: 'rgba(234, 179, 8, 0.15)',
@@ -80,20 +85,20 @@ export const rocketTheme = EditorView.theme({
   // Path param token styles (URL bar only).
   '.cm-pathparam': {
     borderRadius: '3px',
-    padding: '1px 3px',
+    padding: '0 3px',
     background: 'rgba(139, 92, 246, 0.15)',
     color: 'rgb(109, 40, 217)', // violet-700
   },
   '.cm-pathparam-unresolved': {
     borderRadius: '3px',
-    padding: '1px 3px',
+    padding: '0 3px',
     background: 'hsl(var(--destructive) / 0.15)',
     color: 'hsl(var(--destructive))',
   },
   // Query key styles.
   '.cm-querykey': {
     borderRadius: '3px',
-    padding: '1px 3px',
+    padding: '0 3px',
     background: 'rgba(168, 85, 247, 0.1)',
     color: 'rgb(126, 34, 206)', // purple-700
   },
