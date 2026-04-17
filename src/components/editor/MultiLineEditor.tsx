@@ -6,15 +6,16 @@ import { useEffect, useRef } from 'react';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import {
+  detectLanguage,
+  getLanguageExtension,
+  multiLineTheme,
   rocketTheme,
   rocketThemeDark,
   setVariableContextEffect,
   variableContextFacet,
   variableHighlight,
+  variableHoverTooltip,
 } from './extensions';
-import { detectLanguage, getLanguageExtension } from './extensions/language-detect';
-import { multiLineTheme } from './extensions/multi-line-theme';
-import { variableHoverTooltip } from './extensions/variable-hover';
 
 export interface MultiLineEditorProps {
   value: string;
