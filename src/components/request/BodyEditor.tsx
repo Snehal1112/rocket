@@ -19,7 +19,7 @@ interface BodyEditorProps {
   body: BodyState;
   onChange: (body: BodyState) => void;
   variableContext?: Map<string, VariableScopeEntry>;
-  onNavigateToSource?: (source: VariableSource, key: string) => void;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 export function BodyEditor({

@@ -5,7 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { KeyValueEntry } from '@/types/pane-types';
-import { VariableAwareInput } from './VariableAwareInput';
+import { SingleLineEditor } from '@/components/editor';
 
 interface KeyValueEditorProps {
   entries: KeyValueEntry[];
@@ -15,7 +15,7 @@ interface KeyValueEditorProps {
   addLabel?: string;
   label?: string;
   variableContext?: Map<string, VariableScopeEntry>;
-  onNavigateToSource?: (source: VariableSource, key: string) => void;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 export function KeyValueEditor({
@@ -71,7 +71,7 @@ export function KeyValueEditor({
             onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
             className='flex-1 text-xs'
           />
-          <VariableAwareInput
+          <SingleLineEditor
             placeholder={valuePlaceholder}
             value={entry.value}
             onChange={(newVal) => updateEntry(entry.id, { value: newVal })}

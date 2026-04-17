@@ -6,7 +6,7 @@ interface HeadersEditorProps {
   headers: KeyValueEntry[];
   onChange: (headers: KeyValueEntry[]) => void;
   variableContext?: Map<string, VariableScopeEntry>;
-  onNavigateToSource?: (source: VariableSource, key: string) => void;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 export function HeadersEditor({

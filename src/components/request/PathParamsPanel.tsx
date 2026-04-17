@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { VariableAwareInput } from '@/components/request/VariableAwareInput';
+import { SingleLineEditor } from '@/components/editor';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
@@ -9,7 +9,7 @@ interface PathParamsPanelProps {
   params: KeyValueEntry[];
   onChange: (params: KeyValueEntry[]) => void;
   variableContext?: Map<string, VariableScopeEntry>;
-  onNavigateToSource?: (source: VariableSource, key: string) => void;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 /**
@@ -51,7 +51,7 @@ export function PathParamsPanel({
               tabIndex={-1}
               className='flex-1 text-xs bg-muted/50 cursor-default'
             />
-            <VariableAwareInput
+            <SingleLineEditor
               placeholder='Value'
               value={entry.value}
               onChange={(newVal) => updateEntry(entry.id, { value: newVal })}
