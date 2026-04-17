@@ -1,6 +1,6 @@
 import { defaultKeymap } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
-import { placeholder as cmPlaceholder, EditorView, keymap } from '@codemirror/view';
+import { placeholder as cmPlaceholder, EditorView, keymap, tooltips } from '@codemirror/view';
 import { type ReactPortal, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVariableCommit } from '@/hooks/useVariableCommit';
@@ -109,6 +109,9 @@ export function SingleLineEditor({
       rocketTheme,
       rocketThemeDark,
       keymap.of(defaultKeymap),
+      // Render tooltips at document root so the popover escapes
+      // our overflow-hidden editor wrapper and any transformed ancestors.
+      tooltips({ parent: document.body }),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !isSyncingRef.current) {
           onChangeRef.current(update.state.doc.toString());
@@ -221,14 +224,15 @@ export function SingleLineEditor({
     });
   }, [variableContext]);
 
-  // Observe tooltip DOM for popover portal.
+  // Observe tooltip DOM for popover portal. Tooltips are mounted into
+  // document.body via the tooltips() extension, so we watch the body root.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-setup when view is recreated via extensions dep.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
 
     const observer = new MutationObserver(() => {
-      const container = view.dom.querySelector('.cm-variable-popover-container');
+      const container = document.querySelector('.cm-variable-popover-container');
       const popover = getActivePopover(view);
       if (container && popover) {
         setPopoverContainer(container as HTMLElement);
@@ -239,12 +243,7 @@ export function SingleLineEditor({
       }
     });
 
-    // Observe the tooltip container area.
-    const tooltipParent = view.dom.querySelector('.cm-tooltip-section')?.parentElement ?? view.dom;
-    observer.observe(tooltipParent, { childList: true, subtree: true });
-
-    // Also observe the root in case tooltips are added at a higher level.
-    observer.observe(view.dom, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true });
 
     return () => observer.disconnect();
   }, [extensions]);
