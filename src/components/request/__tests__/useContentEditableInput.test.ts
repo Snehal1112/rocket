@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { saveCaret, restoreCaret, serializeToText } from '@/hooks/useContentEditableInput';
+import { act, renderHook } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  type EditorToken,
+  restoreCaret,
+  saveCaret,
+  serializeToText,
+  useContentEditableInput,
+} from '@/hooks/useContentEditableInput';
 
 function makeEditor(html: string): HTMLDivElement {
   const div = document.createElement('div');
@@ -13,6 +20,7 @@ function placeCaretAt(node: Node, offset: number) {
   const range = document.createRange();
   range.setStart(node, offset);
   range.collapse(true);
+  // biome-ignore lint/style/noNonNullAssertion: getSelection() is always non-null in jsdom
   const sel = window.getSelection()!;
   sel.removeAllRanges();
   sel.addRange(range);
@@ -35,6 +43,7 @@ describe('serializeToText', () => {
 describe('saveCaret', () => {
   it('returns flat offset in plain text node', () => {
     const el = makeEditor('hello world');
+    // biome-ignore lint/style/noNonNullAssertion: makeEditor always produces a text child node
     placeCaretAt(el.firstChild!, 5);
     expect(saveCaret(el)).toBe(5);
     el.remove();
@@ -43,6 +52,7 @@ describe('saveCaret', () => {
   it('returns flat offset past a badge span', () => {
     const el = makeEditor('ab<span data-badge>{{x}}</span>cd');
     // 'ab' = 2 chars, '{{x}}' = 5 chars, place caret at offset 1 in 'cd'
+    // biome-ignore lint/style/noNonNullAssertion: makeEditor with this html always has a trailing text node
     const cdNode = el.lastChild!;
     placeCaretAt(cdNode, 1);
     expect(saveCaret(el)).toBe(8); // 2 + 5 + 1
@@ -54,6 +64,7 @@ describe('restoreCaret', () => {
   it('places caret at correct offset in plain text', () => {
     const el = makeEditor('hello');
     restoreCaret(el, 3);
+    // biome-ignore lint/style/noNonNullAssertion: getSelection() is always non-null in jsdom
     const sel = window.getSelection()!;
     expect(sel.anchorOffset).toBe(3);
     el.remove();
@@ -63,6 +74,7 @@ describe('restoreCaret', () => {
     const el = makeEditor('ab<span data-badge>{{x}}</span>cd');
     // Offset 3 falls inside the badge (ab=2, then char 0 of {{x}})
     restoreCaret(el, 3);
+    // biome-ignore lint/style/noNonNullAssertion: getSelection() is always non-null in jsdom
     const sel = window.getSelection()!;
     // Caret should be at the text node 'ab', offset 2 (end of it)
     expect(sel.anchorNode?.textContent).toBe('ab');
@@ -70,10 +82,6 @@ describe('restoreCaret', () => {
     el.remove();
   });
 });
-
-import { renderHook, act } from '@testing-library/react';
-import { vi } from 'vitest';
-import { useContentEditableInput, type EditorToken } from '@/hooks/useContentEditableInput';
 
 describe('useContentEditableInput', () => {
   it('calls onChange when the user types', () => {
@@ -84,9 +92,7 @@ describe('useContentEditableInput', () => {
     const onChange = vi.fn();
     const tokens: EditorToken[] = [{ type: 'text', content: 'hello', rawLength: 5 }];
 
-    renderHook(() =>
-      useContentEditableInput({ editorEl: el, value: 'hello', onChange, tokens }),
-    );
+    renderHook(() => useContentEditableInput({ editorEl: el, value: 'hello', onChange, tokens }));
 
     // Simulate a user typing: modify DOM then fire input event.
     act(() => {
@@ -104,9 +110,7 @@ describe('useContentEditableInput', () => {
     document.body.appendChild(el);
 
     const onChange = vi.fn();
-    renderHook(() =>
-      useContentEditableInput({ editorEl: el, value: '', onChange, tokens: [] }),
-    );
+    renderHook(() => useContentEditableInput({ editorEl: el, value: '', onChange, tokens: [] }));
 
     act(() => {
       el.dispatchEvent(new CompositionEvent('compositionstart'));
@@ -144,10 +148,13 @@ describe('selectionchange caret guard', () => {
     );
 
     // Simulate caret landing inside the badge span.
+    // biome-ignore lint/style/noNonNullAssertion: badge is present in the innerHTML set above
     const badge = el.querySelector('[data-badge]')!;
     const range = document.createRange();
+    // biome-ignore lint/style/noNonNullAssertion: badge span always has a text child node
     range.setStart(badge.firstChild!, 1); // Inside '{{x}}', offset 1.
     range.collapse(true);
+    // biome-ignore lint/style/noNonNullAssertion: getSelection() is always non-null in jsdom
     const sel = window.getSelection()!;
     sel.removeAllRanges();
     sel.addRange(range);
@@ -158,6 +165,7 @@ describe('selectionchange caret guard', () => {
     // Wait one microtask for the guard to run.
     await new Promise((r) => setTimeout(r, 0));
 
+    // biome-ignore lint/style/noNonNullAssertion: getSelection() is always non-null in jsdom
     const finalSel = window.getSelection()!;
     // Caret must no longer be inside the badge span.
     const anchorNode = finalSel.anchorNode;

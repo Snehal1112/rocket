@@ -143,11 +143,7 @@ export interface EditorToken {
  * Unchanged nodes (same type and content) are left in place to preserve the
  * browser's internal caret tracking. After mutation, restores the caret to caretOffset.
  */
-export function renderTokens(
-  el: HTMLElement,
-  tokens: EditorToken[],
-  caretOffset: number,
-): void {
+export function renderTokens(el: HTMLElement, tokens: EditorToken[], caretOffset: number): void {
   const desired: Node[] = tokens.map((token) => {
     if (token.type === 'text') {
       return document.createTextNode(token.content);
@@ -188,7 +184,9 @@ export function renderTokens(
 
   // Remove extra nodes.
   while (el.childNodes.length > desired.length) {
-    el.removeChild(el.lastChild!);
+    const last = el.lastChild;
+    if (!last) break;
+    el.removeChild(last);
   }
 
   restoreCaret(el, caretOffset);

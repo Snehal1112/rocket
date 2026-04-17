@@ -1,10 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  type EditorToken,
-  useContentEditableInput,
-} from '@/hooks/useContentEditableInput';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { type EditorToken, useContentEditableInput } from '@/hooks/useContentEditableInput';
 import { parseTextTokens } from '@/lib/text-variables';
 import {
   sourceBadgeClass,
@@ -206,6 +203,7 @@ function VariableAwareInputInner({
   }, []);
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: wrapper intercepts badge mousedown before focus changes
     <div
       className={cn(
         'relative h-8 w-full rounded-md border border-input bg-background px-3 py-1',
@@ -225,7 +223,9 @@ function VariableAwareInputInner({
         </span>
       )}
 
-      {/* The contenteditable editor. */}
+      {/* The contenteditable editor — biome-ignore required because a native <input> cannot be contenteditable. */}
+      {/* biome-ignore lint/a11y/useFocusableInteractive: role=textbox on contenteditable is correct ARIA */}
+      {/* biome-ignore lint/a11y/useSemanticElements: no semantic element supports contenteditable with variable badges */}
       <div
         ref={(node) => {
           // Sync to both the mutable ref (for imperative access) and state (for hook re-run).
@@ -256,82 +256,82 @@ function VariableAwareInputInner({
       {(() => {
         let charOffset = 0;
         return rawTokens.map((token, idx) => {
-        const tokenStart = charOffset;
-        charOffset += token.rawLength;
-        if (token.type !== 'variable') return null;
-        const entry = variableContext.get(token.content);
-        const isReadOnly =
-          entry !== undefined && entry.source !== 'environment' && entry.source !== 'global';
-        const linkLabel = entry ? navLinkLabel(entry.source) : null;
+          const tokenStart = charOffset;
+          charOffset += token.rawLength;
+          if (token.type !== 'variable') return null;
+          const entry = variableContext.get(token.content);
+          const isReadOnly =
+            entry !== undefined && entry.source !== 'environment' && entry.source !== 'global';
+          const linkLabel = entry ? navLinkLabel(entry.source) : null;
 
-        return (
-          <Popover
-            key={`${token.content}-${tokenStart}`}
-            open={openTokenIdx === idx}
-            onOpenChange={(open) => {
-              if (!open) setOpenTokenIdx(null);
-            }}
-          >
-            <PopoverTrigger asChild>
-              <span style={{ display: 'none' }} />
-            </PopoverTrigger>
-            <PopoverContent className='w-80 p-0' side='bottom' align='start'>
-              <div className='p-2'>
-                <Input
-                  autoFocus
-                  className='h-7 text-xs font-mono'
-                  value={entry?.secret ? '●●●●' : editValue}
-                  placeholder={entry ? 'Value' : 'Not set'}
-                  readOnly={isReadOnly || entry?.secret}
-                  onChange={(e) => {
-                    if (isReadOnly || entry?.secret) return;
-                    setEditValue(e.target.value);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleCommitRef.current();
-                    if (e.key === 'Escape') {
-                      setOpenTokenIdx(null);
-                      setOpenVarKey(null);
-                    }
-                  }}
-                  onBlur={() => void handleCommitRef.current()}
-                />
-              </div>
-              {(entry || linkLabel) && (
-                <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
-                  {entry ? (
-                    <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
-                      <span
-                        className={cn(
-                          'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
-                          sourceBadgeClass(entry.source),
-                        )}
-                      >
-                        {entry.source.charAt(0).toUpperCase()}
-                      </span>
-                      <span>{entry.label}</span>
-                    </div>
-                  ) : (
-                    <div className='text-2xs text-muted-foreground'>Unresolved</div>
-                  )}
-                  {onNavigateToSource && entry && linkLabel && (
-                    <button
-                      type='button'
-                      className='text-2xs text-primary hover:underline cursor-pointer'
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={async () => {
-                        await handleCommitRef.current();
-                        onNavigateToSource(entry.source, token.content);
-                      }}
-                    >
-                      {linkLabel}
-                    </button>
-                  )}
+          return (
+            <Popover
+              key={`${token.content}-${tokenStart}`}
+              open={openTokenIdx === idx}
+              onOpenChange={(open) => {
+                if (!open) setOpenTokenIdx(null);
+              }}
+            >
+              <PopoverTrigger asChild>
+                <span style={{ display: 'none' }} />
+              </PopoverTrigger>
+              <PopoverContent className='w-80 p-0' side='bottom' align='start'>
+                <div className='p-2'>
+                  <Input
+                    autoFocus
+                    className='h-7 text-xs font-mono'
+                    value={entry?.secret ? '●●●●' : editValue}
+                    placeholder={entry ? 'Value' : 'Not set'}
+                    readOnly={isReadOnly || entry?.secret}
+                    onChange={(e) => {
+                      if (isReadOnly || entry?.secret) return;
+                      setEditValue(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void handleCommitRef.current();
+                      if (e.key === 'Escape') {
+                        setOpenTokenIdx(null);
+                        setOpenVarKey(null);
+                      }
+                    }}
+                    onBlur={() => void handleCommitRef.current()}
+                  />
                 </div>
-              )}
-            </PopoverContent>
-          </Popover>
-        );
+                {(entry || linkLabel) && (
+                  <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
+                    {entry ? (
+                      <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
+                        <span
+                          className={cn(
+                            'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
+                            sourceBadgeClass(entry.source),
+                          )}
+                        >
+                          {entry.source.charAt(0).toUpperCase()}
+                        </span>
+                        <span>{entry.label}</span>
+                      </div>
+                    ) : (
+                      <div className='text-2xs text-muted-foreground'>Unresolved</div>
+                    )}
+                    {onNavigateToSource && entry && linkLabel && (
+                      <button
+                        type='button'
+                        className='text-2xs text-primary hover:underline cursor-pointer'
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={async () => {
+                          await handleCommitRef.current();
+                          onNavigateToSource(entry.source, token.content);
+                        }}
+                      >
+                        {linkLabel}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+          );
         });
       })()}
     </div>

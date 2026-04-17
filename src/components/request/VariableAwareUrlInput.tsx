@@ -1,10 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  type EditorToken,
-  useContentEditableInput,
-} from '@/hooks/useContentEditableInput';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { type EditorToken, useContentEditableInput } from '@/hooks/useContentEditableInput';
 import { type ParsedCurl, parseCurl } from '@/lib/curl-parser';
 import {
   parseUrlTokens,
@@ -272,10 +269,8 @@ export function VariableAwareUrlInput({
   handleCommitRef.current = handleCommit;
 
   return (
-    <div
-      className={cn('relative flex-1 h-8', className)}
-      onMouseDown={handleBadgeMouseDown}
-    >
+    // biome-ignore lint/a11y/noStaticElementInteractions: wrapper intercepts badge mousedown before focus changes
+    <div className={cn('relative flex-1 h-8', className)} onMouseDown={handleBadgeMouseDown}>
       {value === '' && (
         <span
           aria-hidden
@@ -285,6 +280,8 @@ export function VariableAwareUrlInput({
         </span>
       )}
 
+      {/* biome-ignore lint/a11y/useFocusableInteractive: role=textbox on contenteditable is correct ARIA */}
+      {/* biome-ignore lint/a11y/useSemanticElements: no semantic element supports contenteditable with variable badges */}
       <div
         ref={editorCallbackRef}
         contentEditable

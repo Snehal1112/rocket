@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { VariableAwareInput } from '../VariableAwareInput';
@@ -17,8 +17,8 @@ vi.mock('@/stores/env-store', () => ({
       activeEnvId: null,
       environments: [],
       globalEnv: null,
-      updateEnvironment: async () => {},
-      updateGlobalEnvironment: async () => {},
+      updateEnvironment: vi.fn(),
+      updateGlobalEnvironment: vi.fn(),
     }),
 }));
 
@@ -71,8 +71,8 @@ describe('VariableAwareInput', () => {
         variableContext={makeContext({})}
       />,
     );
-    const editor = document.querySelector('[contenteditable]')!;
-    expect(editor.textContent).toBe('plain text');
+    const editor = document.querySelector('[contenteditable]');
+    expect(editor?.textContent).toBe('plain text');
   });
 
   it('renders a badge span for a resolved variable', () => {
@@ -105,11 +105,7 @@ describe('VariableAwareInput', () => {
   it('calls onChange when the editor content changes', () => {
     const onChange = vi.fn();
     render(
-      <VariableAwareInput
-        value='hello'
-        onChange={onChange}
-        variableContext={makeContext({})}
-      />,
+      <VariableAwareInput value='hello' onChange={onChange} variableContext={makeContext({})} />,
     );
     const editor = document.querySelector('[contenteditable]') as HTMLElement;
     editor.textContent = 'hello!';
