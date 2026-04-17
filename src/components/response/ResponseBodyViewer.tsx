@@ -9,10 +9,10 @@ import { ResponseHeadersTable } from './ResponseHeadersTable';
 
 type ViewTab = ResponseState['activeView'];
 
-// Lazy-load the editor so it stays out of the initial JS bundle.
-const MultiLineEditor = lazy(() =>
-  import('@/components/editor/MultiLineEditor').then((m) => ({
-    default: m.MultiLineEditor,
+// Lazy-load Monaco so it stays out of the initial JS bundle.
+const MonacoWrapper = lazy(() =>
+  import('@/components/editor/MonacoWrapper').then((m) => ({
+    default: m.MonacoWrapper,
   })),
 );
 
@@ -116,18 +116,13 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           {response.status === 0 ? 'ERR' : response.status} {response.statusText}
         </span>
 
-        {/* Time badges — TTFB and total duration, color-coded by total. */}
+        {/* Time badge with clock icon, color-coded. */}
         {response.durationMs > 0 && (
           <span
             className={`inline-flex items-center gap-1 text-xs font-medium ${timeColor(response.durationMs)}`}
           >
             <Clock className='h-3.5 w-3.5 text-muted-foreground' />
             {formatDuration(response.durationMs)}
-          </span>
-        )}
-        {response.ttfbMs > 0 && response.ttfbMs !== response.durationMs && (
-          <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
-            TTFB {formatDuration(response.ttfbMs)}
           </span>
         )}
 
@@ -181,7 +176,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         {activeView === 'pretty' &&
           (response.body ? (
             <Suspense fallback={<EditorSkeleton />}>
-              <MultiLineEditor value={prettyBody} language={language} readOnly height='100%' />
+              <MonacoWrapper value={prettyBody} language={language} readOnly height='100%' />
             </Suspense>
           ) : (
             <div className='flex items-center justify-center h-32 text-muted-foreground text-xs'>
@@ -192,7 +187,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         {activeView === 'raw' &&
           (response.body ? (
             <Suspense fallback={<EditorSkeleton />}>
-              <MultiLineEditor value={response.body} language='plaintext' readOnly height='100%' />
+              <MonacoWrapper value={response.body} language='plaintext' readOnly height='100%' />
             </Suspense>
           ) : (
             <div className='flex items-center justify-center h-32 text-muted-foreground text-xs'>
