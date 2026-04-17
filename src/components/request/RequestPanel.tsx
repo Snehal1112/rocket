@@ -1,6 +1,7 @@
 import { Braces, Clock, Loader2, RotateCw, Send, ShieldCheck, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { SingleLineEditor } from '@/components/editor';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 import { RocketLiftOff } from '@/components/illustrations';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
@@ -57,7 +58,6 @@ import { RequestDocsPanel } from './RequestDocsPanel';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { SaveRequestButton } from './SaveRequestButton';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
-import { VariableAwareUrlInput } from './VariableAwareUrlInput';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
@@ -104,7 +104,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
-  const [collectionVars, setCollectionVars] = useState<Record<string, string>>({});
   const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
   const [requestVarCount, setRequestVarCount] = useState(0);
@@ -132,24 +131,17 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return () => window.removeEventListener('rocket:save-to-collection', handler);
   }, [tab.id]);
 
-  // Fetch collection variables for URL input overlay.
+  // Fetch collection variables for the scoped variable context.
   useEffect(() => {
     if (!tab.source?.collection) {
-      setCollectionVars({});
       setCollectionVariables([]);
       return;
     }
     getCollectionSettings(tab.source.collection)
       .then((s) => {
-        const vars: Record<string, string> = {};
-        for (const v of s.variables) {
-          if (v.enabled) vars[v.key] = v.value || v.initialValue;
-        }
-        setCollectionVars(vars);
         setCollectionVariables(s.variables);
       })
       .catch(() => {
-        setCollectionVars({});
         setCollectionVariables([]);
       });
   }, [tab.source?.collection]);
@@ -461,7 +453,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   // Adapter for editors: they pass (source, key) but navigation only uses source.
   const handleEditorNavigateToSource = useCallback(
-    (source: VariableSource, _key: string) => {
+    (source: VariableSource | 'pathParam', _key: string) => {
       handleNavigateToSource(source);
     },
     [handleNavigateToSource],
@@ -682,17 +674,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </SelectContent>
           </Select>
 
-          <VariableAwareUrlInput
+          <SingleLineEditor
             value={request.url}
             onChange={(val) => {
               setUrlError('');
               handleUrlChange(val);
             }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') send(request);
-            }}
+            onSubmit={() => send(request)}
             onCurlImport={handleCurlImport}
-            collectionVariables={collectionVars}
+            variableContext={scopedContext}
             pathParams={pathParamMap}
             queryParams={queryParamMap}
             onPathParamChange={(key, val) => {
@@ -701,9 +691,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               );
               updateRequest(tab.id, { pathParams: updated });
             }}
-            onNavigateToSource={handleNavigateToSource}
+            onNavigateToSource={handleEditorNavigateToSource}
             placeholder='Enter URL or paste a cURL request'
-            scopedContext={scopedContext}
+            className='flex-1'
           />
 
           <Button
