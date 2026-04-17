@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { VariableAwareInput } from '../VariableAwareInput';
@@ -17,12 +17,8 @@ vi.mock('@/stores/env-store', () => ({
       activeEnvId: null,
       environments: [],
       globalEnv: null,
-      updateEnvironment: async () => {
-        /* no-op */
-      },
-      updateGlobalEnvironment: async () => {
-        /* no-op */
-      },
+      updateEnvironment: async () => {},
+      updateGlobalEnvironment: async () => {},
     }),
 }));
 
@@ -33,13 +29,26 @@ function makeContext(entries: Record<string, VariableScopeEntry>): Map<string, V
 describe('VariableAwareInput', () => {
   it('renders a plain input when variableContext is undefined', () => {
     render(<VariableAwareInput value='hello' onChange={vi.fn()} />);
-    const input = screen.getByRole('textbox');
-    expect(input).toBeDefined();
-    // No overlay present when no context.
-    expect(document.querySelector('[aria-hidden="true"]')).toBeNull();
+    // Plain <input> renders as textbox; no contenteditable present.
+    expect(screen.getByRole('textbox')).toBeDefined();
+    expect(document.querySelector('[contenteditable]')).toBeNull();
   });
 
-  it('renders overlay when variableContext is provided', () => {
+  it('renders a plain input for type=password even with variableContext', () => {
+    render(
+      <VariableAwareInput
+        value='secret'
+        onChange={vi.fn()}
+        type='password'
+        variableContext={makeContext({})}
+      />,
+    );
+    const input = document.querySelector('input[type="password"]');
+    expect(input).not.toBeNull();
+    expect(document.querySelector('[contenteditable]')).toBeNull();
+  });
+
+  it('renders a contenteditable editor when variableContext is provided', () => {
     render(
       <VariableAwareInput
         value='Bearer {{token}}'
@@ -49,10 +58,24 @@ describe('VariableAwareInput', () => {
         })}
       />,
     );
-    expect(document.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    expect(document.querySelector('[contenteditable]')).not.toBeNull();
+    // No overlay div with aria-hidden.
+    expect(document.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
-  it('renders resolved variable with source color span', () => {
+  it('renders plain text content in the editor', () => {
+    render(
+      <VariableAwareInput
+        value='plain text'
+        onChange={vi.fn()}
+        variableContext={makeContext({})}
+      />,
+    );
+    const editor = document.querySelector('[contenteditable]')!;
+    expect(editor.textContent).toBe('plain text');
+  });
+
+  it('renders a badge span for a resolved variable', () => {
     render(
       <VariableAwareInput
         value='{{token}}'
@@ -62,14 +85,12 @@ describe('VariableAwareInput', () => {
         })}
       />,
     );
-    const overlay = document.querySelector('[aria-hidden="true"]');
-    expect(overlay?.textContent).toContain('{{token}}');
-    // The variable span should have a highlight class.
-    const span = overlay?.querySelector('.rounded-sm');
-    expect(span).not.toBeNull();
+    const badge = document.querySelector('[data-badge]');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe('{{token}}');
   });
 
-  it('renders unresolved variable with destructive color span', () => {
+  it('renders a badge span with destructive class for an unresolved variable', () => {
     render(
       <VariableAwareInput
         value='{{missing}}'
@@ -77,21 +98,22 @@ describe('VariableAwareInput', () => {
         variableContext={makeContext({})}
       />,
     );
-    const overlay = document.querySelector('[aria-hidden="true"]');
-    const span = overlay?.querySelector('.text-destructive');
-    expect(span).not.toBeNull();
+    const badge = document.querySelector('[data-badge]');
+    expect(badge?.className).toContain('text-destructive');
   });
 
-  it('renders plain text in overlay when value has no variables', () => {
+  it('calls onChange when the editor content changes', () => {
+    const onChange = vi.fn();
     render(
       <VariableAwareInput
-        value='plain text'
-        onChange={vi.fn()}
+        value='hello'
+        onChange={onChange}
         variableContext={makeContext({})}
       />,
     );
-    const overlay = document.querySelector('[aria-hidden="true"]');
-    // Overlay renders but contains only a text span.
-    expect(overlay?.textContent).toBe('plain text');
+    const editor = document.querySelector('[contenteditable]') as HTMLElement;
+    editor.textContent = 'hello!';
+    fireEvent(editor, new Event('input', { bubbles: true }));
+    expect(onChange).toHaveBeenCalledWith('hello!');
   });
 });

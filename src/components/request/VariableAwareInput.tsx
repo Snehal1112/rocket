@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Input } from '@/components/ui/input';
+import {
+  type EditorToken,
+  useContentEditableInput,
+} from '@/hooks/useContentEditableInput';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
 import { parseTextTokens } from '@/lib/text-variables';
 import {
   sourceBadgeClass,
@@ -21,19 +25,7 @@ export interface VariableAwareInputProps {
   onNavigateToSource?: (source: VariableSource, key: string) => void;
 }
 
-// Human-readable label and badge icon for a resolved scope entry.
-function sourceMeta(entry: VariableScopeEntry) {
-  return {
-    icon: entry.source.charAt(0).toUpperCase(),
-    iconClass: cn(
-      'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
-      sourceBadgeClass(entry.source),
-    ),
-    label: entry.label,
-  };
-}
-
-// Navigation link label for a given variable source, or null when no nav is available.
+// Navigation link label for a variable source.
 function navLinkLabel(source: VariableSource): string | null {
   switch (source) {
     case 'request':
@@ -46,7 +38,7 @@ function navLinkLabel(source: VariableSource): string | null {
     case 'collection':
       return 'Collection Variables \u2192';
     default:
-      return null; // folder, process — no navigation available
+      return null;
   }
 }
 
@@ -60,8 +52,8 @@ export function VariableAwareInput({
   variableContext,
   onNavigateToSource,
 }: VariableAwareInputProps) {
-  // No variableContext: render a plain Input to avoid unnecessary overhead.
-  if (!variableContext) {
+  // No variableContext or password field: render a plain input.
+  if (!variableContext || type === 'password') {
     return (
       <Input
         type={type}
@@ -81,56 +73,91 @@ export function VariableAwareInput({
       placeholder={placeholder}
       className={className}
       disabled={disabled}
-      type={type}
       variableContext={variableContext}
       onNavigateToSource={onNavigateToSource}
     />
   );
 }
 
-// Inner component holds all hooks, separated so the outer component can do an early return.
+// Inner component holds hooks; separated so the outer can do an early return.
 function VariableAwareInputInner({
   value,
   onChange,
   placeholder,
   className,
   disabled,
-  type = 'text',
   variableContext,
   onNavigateToSource,
 }: Required<Pick<VariableAwareInputProps, 'variableContext'>> &
-  Omit<VariableAwareInputProps, 'variableContext'>) {
+  Omit<VariableAwareInputProps, 'variableContext' | 'type'>) {
   const environments = useEnvStore((s) => s.environments);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
   const globalEnv = useEnvStore((s) => s.globalEnv);
   const updateGlobalEnvironment = useEnvStore((s) => s.updateGlobalEnvironment);
 
-  // Index of the token whose popover is currently open. Using index (not variable name) prevents
-  // duplicate variable names (e.g., "{{token}} {{token}}") from opening two popovers at once.
+  const editorRef = useRef<HTMLDivElement>(null);
+  // Store the element in state so the hook re-runs its effect after mount.
+  const [editorEl, setEditorEl] = useState<HTMLDivElement | null>(null);
+
+  // Index of the token whose popover is currently open.
   const [openTokenIdx, setOpenTokenIdx] = useState<number | null>(null);
   const [openVarKey, setOpenVarKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  // Tracks the scope of the variable being edited so handleCommit saves to the right store.
   const editingScopeRef = useRef<VariableSource | null>(null);
 
-  const tokens = useMemo(() => parseTextTokens(value), [value]);
+  // Parse value into tokens and build EditorToken list for the hook.
+  const rawTokens = useMemo(() => parseTextTokens(value), [value]);
 
-  const handleTokenHover = useCallback(
-    (idx: number, varKey: string, entry: VariableScopeEntry | undefined) => {
+  const tokens: EditorToken[] = useMemo(
+    () =>
+      rawTokens.map((token, idx) => {
+        if (token.type === 'text') {
+          return { type: 'text' as const, content: token.content, rawLength: token.rawLength };
+        }
+        const entry = variableContext.get(token.content);
+        const badgeClass = cn(
+          'rounded-sm px-0.5 cursor-pointer',
+          entry ? sourceBadgeClass(entry.source) : 'bg-destructive/15 text-destructive',
+        );
+        return {
+          type: 'badge' as const,
+          content: `{{${token.content}}}`,
+          rawLength: token.rawLength,
+          badgeClass,
+          tokenIdx: idx,
+        };
+      }),
+    [rawTokens, variableContext],
+  );
+
+  const { onInput, onCompositionStart, onCompositionEnd, onPaste } = useContentEditableInput({
+    editorEl,
+    value,
+    onChange,
+    tokens,
+  });
+
+  const handleBadgeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      const span = (e.target as Element).closest('[data-badge]');
+      if (!span) return;
+      e.preventDefault(); // Prevents caret jumping into the span.
+      const idx = Number(span.getAttribute('data-token-idx'));
+      const rawToken = rawTokens[idx];
+      if (!rawToken || rawToken.type !== 'variable') return;
+      const entry = variableContext.get(rawToken.content);
       setOpenTokenIdx(idx);
-      setOpenVarKey(varKey);
+      setOpenVarKey(rawToken.content);
       setEditValue(entry?.secret ? '' : (entry?.value ?? ''));
       editingScopeRef.current = entry?.source ?? null;
     },
-    [],
+    [rawTokens, variableContext],
   );
 
-  // Persist the edited value to the appropriate environment store.
   const handleCommit = useCallback(async () => {
     if (!openVarKey) return;
     const scope = editingScopeRef.current;
-
     if (scope === 'global' && globalEnv) {
       const vars = globalEnv.variables.map((v) =>
         v.key === openVarKey ? { ...v, value: editValue } : v,
@@ -151,7 +178,6 @@ function VariableAwareInputInner({
         await updateEnvironment({ ...env, variables: vars });
       }
     }
-
     setOpenTokenIdx(null);
     setOpenVarKey(null);
   }, [
@@ -164,131 +190,150 @@ function VariableAwareInputInner({
     updateGlobalEnvironment,
   ]);
 
-  // Stable ref so inline event handlers always call the latest version.
   const handleCommitRef = useRef(handleCommit);
   handleCommitRef.current = handleCommit;
 
+  // Badge ref map for popover anchoring — refreshed after each DOM mutation.
+  const badgeRefsMap = useRef<Map<number, HTMLSpanElement>>(new Map());
+
+  const refreshBadgeRefs = useCallback(() => {
+    if (!editorRef.current) return;
+    badgeRefsMap.current.clear();
+    for (const span of Array.from(editorRef.current.querySelectorAll('[data-badge]'))) {
+      const idx = Number((span as HTMLElement).getAttribute('data-token-idx'));
+      badgeRefsMap.current.set(idx, span as HTMLSpanElement);
+    }
+  }, []);
+
   return (
-    <div className={cn('relative', className)}>
-      {/* Transparent real input receives keystrokes and shows the text caret. */}
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={cn(
-          'h-8 w-full rounded-md border border-input bg-background px-3 py-1 font-mono text-xs',
-          'text-transparent caret-foreground outline-none ring-ring/50 pointer-events-auto',
-          'focus-visible:ring-[3px] focus-visible:border-ring',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-        )}
+    <div
+      className={cn(
+        'relative h-8 w-full rounded-md border border-input bg-background px-3 py-1',
+        'font-mono text-xs ring-ring/50 focus-within:ring-[3px] focus-within:border-ring',
+        disabled && 'opacity-50 pointer-events-none cursor-not-allowed',
+        className,
+      )}
+      onMouseDown={handleBadgeMouseDown}
+    >
+      {/* Placeholder shown when value is empty. */}
+      {value === '' && (
+        <span
+          aria-hidden
+          className='absolute inset-0 flex items-center px-3 py-1 text-muted-foreground pointer-events-none'
+        >
+          {placeholder}
+        </span>
+      )}
+
+      {/* The contenteditable editor. */}
+      <div
+        ref={(node) => {
+          // Sync to both the mutable ref (for imperative access) and state (for hook re-run).
+          (editorRef as { current: HTMLDivElement | null }).current = node;
+          if (node && node !== editorEl) setEditorEl(node);
+        }}
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        role='textbox'
+        aria-label={placeholder}
+        aria-multiline={false}
+        aria-disabled={disabled}
+        spellCheck={false}
+        className='outline-none h-full flex items-center'
+        onInput={() => {
+          onInput();
+          refreshBadgeRefs();
+        }}
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={() => {
+          onCompositionEnd();
+          refreshBadgeRefs();
+        }}
+        onPaste={(e) => onPaste(e.nativeEvent as ClipboardEvent)}
       />
 
-      {/* Overlay renders token highlights; pointer events disabled except on variable buttons. */}
-      <div
-        className='absolute inset-0 flex items-center px-3 py-1 font-mono text-xs pointer-events-none overflow-hidden whitespace-nowrap'
-        aria-hidden='true'
-      >
-        {tokens.length > 0 ? (
-          tokens.map((token, idx) => {
-            if (token.type === 'text') {
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
-                <span key={idx}>
-                  {type === 'password' ? '●'.repeat(token.content.length) : token.content}
-                </span>
-              );
-            }
+      {/* Popovers rendered as siblings, outside the contenteditable div. */}
+      {(() => {
+        let charOffset = 0;
+        return rawTokens.map((token, idx) => {
+        const tokenStart = charOffset;
+        charOffset += token.rawLength;
+        if (token.type !== 'variable') return null;
+        const entry = variableContext.get(token.content);
+        const isReadOnly =
+          entry !== undefined && entry.source !== 'environment' && entry.source !== 'global';
+        const linkLabel = entry ? navLinkLabel(entry.source) : null;
 
-            const entry = variableContext.get(token.content);
-            const badgeClass = entry
-              ? sourceBadgeClass(entry.source)
-              : 'bg-destructive/15 text-destructive';
-
-            // Editable: environment vars, global vars, and unresolved vars (entry === undefined).
-            const isReadOnly =
-              entry !== undefined && entry.source !== 'environment' && entry.source !== 'global';
-
-            const linkLabel = entry ? navLinkLabel(entry.source) : null;
-            const meta = entry ? sourceMeta(entry) : null;
-
-            return (
-              <Popover
-                // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
-                key={idx}
-                open={openTokenIdx === idx}
-                onOpenChange={(open) => {
-                  if (!open) setOpenTokenIdx(null);
-                }}
-              >
-                <PopoverTrigger asChild>
-                  <button
-                    type='button'
-                    className={cn(
-                      'rounded-sm px-0.5 cursor-pointer pointer-events-auto bg-transparent border-0',
-                      badgeClass,
-                    )}
-                    onMouseEnter={() => handleTokenHover(idx, token.content, entry)}
-                    onClick={() => handleTokenHover(idx, token.content, entry)}
-                  >
-                    {`{{${token.content}}}`}
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className='w-80 p-0' side='bottom' align='start'>
-                  <div className='p-2'>
-                    <Input
-                      autoFocus
-                      className='h-7 text-xs font-mono'
-                      value={entry?.secret ? '●●●●' : editValue}
-                      placeholder={entry ? 'Value' : 'Not set'}
-                      readOnly={isReadOnly || entry?.secret}
-                      onChange={(e) => {
-                        if (isReadOnly || entry?.secret) return;
-                        setEditValue(e.target.value);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') void handleCommitRef.current();
-                        if (e.key === 'Escape') {
-                          setOpenTokenIdx(null);
-                          setOpenVarKey(null);
-                        }
-                      }}
-                      onBlur={() => void handleCommitRef.current()}
-                    />
-                  </div>
-                  <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
-                    {meta ? (
-                      <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
-                        <span className={meta.iconClass}>{meta.icon}</span>
-                        <span>{meta.label}</span>
-                      </div>
-                    ) : (
-                      <div className='text-2xs text-muted-foreground'>Unresolved</div>
-                    )}
-                    {onNavigateToSource && entry && linkLabel && (
-                      <button
-                        type='button'
-                        className='text-2xs text-primary hover:underline cursor-pointer'
-                        // Prevent input blur before click handler can commit — avoids potential double-save.
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={async () => {
-                          await handleCommitRef.current();
-                          onNavigateToSource(entry.source, token.content);
-                        }}
+        return (
+          <Popover
+            key={`${token.content}-${tokenStart}`}
+            open={openTokenIdx === idx}
+            onOpenChange={(open) => {
+              if (!open) setOpenTokenIdx(null);
+            }}
+          >
+            <PopoverTrigger asChild>
+              <span style={{ display: 'none' }} />
+            </PopoverTrigger>
+            <PopoverContent className='w-80 p-0' side='bottom' align='start'>
+              <div className='p-2'>
+                <Input
+                  autoFocus
+                  className='h-7 text-xs font-mono'
+                  value={entry?.secret ? '●●●●' : editValue}
+                  placeholder={entry ? 'Value' : 'Not set'}
+                  readOnly={isReadOnly || entry?.secret}
+                  onChange={(e) => {
+                    if (isReadOnly || entry?.secret) return;
+                    setEditValue(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleCommitRef.current();
+                    if (e.key === 'Escape') {
+                      setOpenTokenIdx(null);
+                      setOpenVarKey(null);
+                    }
+                  }}
+                  onBlur={() => void handleCommitRef.current()}
+                />
+              </div>
+              {(entry || linkLabel) && (
+                <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
+                  {entry ? (
+                    <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
+                      <span
+                        className={cn(
+                          'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
+                          sourceBadgeClass(entry.source),
+                        )}
                       >
-                        {linkLabel}
-                      </button>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            );
-          })
-        ) : (
-          <span className='text-muted-foreground'>{placeholder}</span>
-        )}
-      </div>
+                        {entry.source.charAt(0).toUpperCase()}
+                      </span>
+                      <span>{entry.label}</span>
+                    </div>
+                  ) : (
+                    <div className='text-2xs text-muted-foreground'>Unresolved</div>
+                  )}
+                  {onNavigateToSource && entry && linkLabel && (
+                    <button
+                      type='button'
+                      className='text-2xs text-primary hover:underline cursor-pointer'
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={async () => {
+                        await handleCommitRef.current();
+                        onNavigateToSource(entry.source, token.content);
+                      }}
+                    >
+                      {linkLabel}
+                    </button>
+                  )}
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+        );
+        });
+      })()}
     </div>
   );
 }
