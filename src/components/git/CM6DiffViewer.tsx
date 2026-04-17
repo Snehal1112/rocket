@@ -18,12 +18,9 @@ interface CM6DiffViewerProps {
 
 export function CM6DiffViewer({ oldContent, newContent, filePath }: CM6DiffViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mergeViewRef = useRef<MergeView | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
-
-    containerRef.current.innerHTML = '';
 
     const sharedExtensions = [
       basicSetup,
@@ -53,11 +50,8 @@ export function CM6DiffViewer({ oldContent, newContent, filePath }: CM6DiffViewe
       collapseUnchanged: { margin: 3, minSize: 4 },
     });
 
-    mergeViewRef.current = mv;
-
     return () => {
       mv.destroy();
-      mergeViewRef.current = null;
     };
   }, [oldContent, newContent, filePath]);
 
