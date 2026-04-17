@@ -1,13 +1,7 @@
-import { DiffEditor, type DiffOnMount, loader } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-
-loader.config({ monaco });
-
-import type * as monacoNs from 'monaco-editor';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
+import { useCallback, useState } from 'react';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
+import { CM6DiffViewer } from './CM6DiffViewer';
 import { DiffHeader } from './DiffHeader';
 import { VisualDiffView } from './VisualDiffView';
 
@@ -15,47 +9,9 @@ interface DiffViewerProps {
   diffState: DiffState;
 }
 
-// Maps file extension to a Monaco language identifier.
-function getLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    json: 'json',
-    js: 'javascript',
-    ts: 'typescript',
-    tsx: 'typescript',
-    jsx: 'javascript',
-    md: 'markdown',
-    yaml: 'yaml',
-    yml: 'yaml',
-    xml: 'xml',
-    html: 'html',
-    css: 'css',
-    bru: 'plaintext',
-  };
-  return map[ext] ?? 'plaintext';
-}
-
-// Renders a side-by-side Monaco diff or visual structured diff for a single file.
+// Renders a side-by-side CM6 diff or visual structured diff for a single file.
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
-  const { themeName, defineThemes } = useMonacoTheme();
-
-  // Hold the editor instance so we can dispose it explicitly before React
-  // unmounts the DOM, preventing "TextModel disposed before DiffEditorWidget
-  // model got reset" errors caused by Monaco's internal teardown order.
-  const editorRef = useRef<monacoNs.editor.IDiffEditor | null>(null);
-
-  useEffect(() => {
-    return () => {
-      editorRef.current?.dispose();
-      editorRef.current = null;
-    };
-  }, []);
-
-  const handleDiffMount: DiffOnMount = (editor, monaco) => {
-    editorRef.current = editor;
-    defineThemes(monaco);
-  };
 
   // Persist mode preference across sessions.
   const [mode, setMode] = useState<'text' | 'visual'>(() => {
@@ -88,7 +44,6 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
 
   // Visual mode is only available for JSON request files.
   const canShowVisual = diffState.filePath.endsWith('.yml');
-  const language = getLanguage(diffState.filePath);
 
   return (
     <div className='flex flex-col h-full'>
@@ -103,19 +58,10 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
         <VisualDiffView oldContent={diffState.oldContent} newContent={diffState.newContent} />
       ) : (
         <div className='flex-1'>
-          <DiffEditor
-            original={diffState.oldContent}
-            modified={diffState.newContent}
-            language={language}
-            theme={themeName}
-            onMount={handleDiffMount}
-            options={{
-              readOnly: true,
-              renderSideBySide: true,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              fontSize: 12,
-            }}
+          <CM6DiffViewer
+            oldContent={diffState.oldContent}
+            newContent={diffState.newContent}
+            filePath={diffState.filePath}
           />
         </div>
       )}
