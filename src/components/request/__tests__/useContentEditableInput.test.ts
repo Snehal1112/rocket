@@ -70,3 +70,57 @@ describe('restoreCaret', () => {
     el.remove();
   });
 });
+
+import { renderHook, act } from '@testing-library/react';
+import { vi } from 'vitest';
+import { useContentEditableInput, type EditorToken } from '@/hooks/useContentEditableInput';
+
+describe('useContentEditableInput', () => {
+  it('calls onChange when the user types', () => {
+    const el = document.createElement('div');
+    el.contentEditable = 'true';
+    document.body.appendChild(el);
+
+    const onChange = vi.fn();
+    const tokens: EditorToken[] = [{ type: 'text', content: 'hello', rawLength: 5 }];
+
+    renderHook(() =>
+      useContentEditableInput({ editorEl: el, value: 'hello', onChange, tokens }),
+    );
+
+    // Simulate a user typing: modify DOM then fire input event.
+    act(() => {
+      el.textContent = 'hello!';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(onChange).toHaveBeenCalledWith('hello!');
+    el.remove();
+  });
+
+  it('does not call onChange during IME composition', () => {
+    const el = document.createElement('div');
+    el.contentEditable = 'true';
+    document.body.appendChild(el);
+
+    const onChange = vi.fn();
+    renderHook(() =>
+      useContentEditableInput({ editorEl: el, value: '', onChange, tokens: [] }),
+    );
+
+    act(() => {
+      el.dispatchEvent(new CompositionEvent('compositionstart'));
+      el.textContent = 'interim';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      el.dispatchEvent(new CompositionEvent('compositionend'));
+    });
+
+    expect(onChange).toHaveBeenCalledWith('interim');
+    el.remove();
+  });
+});

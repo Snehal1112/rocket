@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 /**
  * Converts the browser's current cursor position inside `el` to a flat
  * character offset, treating the whole subtree as a plain-text stream.
@@ -123,4 +125,165 @@ export function serializeToText(el: HTMLElement): string {
     result += node.textContent ?? '';
   }
   return result;
+}
+
+export interface EditorToken {
+  type: 'text' | 'badge';
+  /** Display text — for badge tokens this is the full `{{name}}` or `:param` string. */
+  content: string;
+  rawLength: number;
+  /** CSS classes applied to the badge span. Only present when type === 'badge'. */
+  badgeClass?: string;
+  /** Index stored as data-token-idx on the span, for popover targeting. */
+  tokenIdx?: number;
+}
+
+/**
+ * Imperatively diffs el.childNodes against tokens and mutates the DOM to match.
+ * Unchanged nodes (same type and content) are left in place to preserve the
+ * browser's internal caret tracking. After mutation, restores the caret to caretOffset.
+ */
+export function renderTokens(
+  el: HTMLElement,
+  tokens: EditorToken[],
+  caretOffset: number,
+): void {
+  const desired: Node[] = tokens.map((token) => {
+    if (token.type === 'text') {
+      return document.createTextNode(token.content);
+    }
+    const span = document.createElement('span');
+    span.setAttribute('data-badge', '');
+    span.setAttribute('data-token-idx', String(token.tokenIdx ?? 0));
+    if (token.badgeClass) span.className = token.badgeClass;
+    span.textContent = token.content;
+    return span;
+  });
+
+  const current = Array.from(el.childNodes);
+
+  // Replace or insert nodes that differ.
+  desired.forEach((node, i) => {
+    const existing = current[i];
+    if (!existing) {
+      el.appendChild(node);
+      return;
+    }
+    const sameType =
+      node.nodeType === existing.nodeType &&
+      (node.nodeType !== Node.ELEMENT_NODE ||
+        (node as Element).tagName === (existing as Element).tagName);
+    const sameContent = node.textContent === existing.textContent;
+    const sameClass =
+      node.nodeType !== Node.ELEMENT_NODE ||
+      (node as Element).className === (existing as Element).className;
+    const sameTokenIdx =
+      node.nodeType !== Node.ELEMENT_NODE ||
+      (node as Element).getAttribute('data-token-idx') ===
+        (existing as Element).getAttribute('data-token-idx');
+
+    if (sameType && sameContent && sameClass && sameTokenIdx) return; // Unchanged — leave it alone.
+    el.replaceChild(node, existing);
+  });
+
+  // Remove extra nodes.
+  while (el.childNodes.length > desired.length) {
+    el.removeChild(el.lastChild!);
+  }
+
+  restoreCaret(el, caretOffset);
+}
+
+export interface UseContentEditableInputOptions {
+  /** The editor div DOM element (must be stable across renders — use a ref). */
+  editorEl: HTMLElement | null;
+  value: string;
+  onChange: (value: string) => void;
+  tokens: EditorToken[];
+  /** Called before the hook's paste handler. Return true if the event was fully handled. */
+  onBeforePaste?: (e: ClipboardEvent) => boolean;
+}
+
+/**
+ * Wires a contenteditable div to a React-controlled string value.
+ * Also returns event handlers for use with React's synthetic event system.
+ */
+export function useContentEditableInput({
+  editorEl,
+  value,
+  onChange,
+  tokens,
+  onBeforePaste,
+}: UseContentEditableInputOptions) {
+  const isComposing = useRef(false);
+  // Keep a stable ref to onChange so event listeners don't need re-registration.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const onBeforePasteRef = useRef(onBeforePaste);
+  onBeforePasteRef.current = onBeforePaste;
+
+  // Sync DOM → state when the user types (not during IME composition).
+  function onInput() {
+    if (isComposing.current) return;
+    if (!editorEl) return;
+    onChangeRef.current(serializeToText(editorEl));
+  }
+
+  function onCompositionStart() {
+    isComposing.current = true;
+  }
+
+  function onCompositionEnd() {
+    isComposing.current = false;
+    if (!editorEl) return;
+    onChangeRef.current(serializeToText(editorEl));
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    if (onBeforePasteRef.current?.(e)) return; // Caller handled it (e.g. cURL import).
+    e.preventDefault();
+    const plain = e.clipboardData?.getData('text/plain') ?? '';
+    // insertText is the standard cross-browser way to insert at caret in contenteditable.
+    document.execCommand('insertText', false, plain);
+    if (!editorEl) return;
+    onChangeRef.current(serializeToText(editorEl));
+  }
+
+  // Keep a stable ref to the handlers so DOM listeners always call the latest versions.
+  const handlersRef = useRef({ onInput, onCompositionStart, onCompositionEnd, onPaste });
+  handlersRef.current = { onInput, onCompositionStart, onCompositionEnd, onPaste };
+
+  // Attach DOM event listeners so raw DOM events (e.g. from tests) also work.
+  useEffect(() => {
+    if (!editorEl) return;
+
+    const listener_input = () => handlersRef.current.onInput();
+    const listener_compositionstart = () => handlersRef.current.onCompositionStart();
+    const listener_compositionend = () => handlersRef.current.onCompositionEnd();
+    const listener_paste = (e: Event) => handlersRef.current.onPaste(e as ClipboardEvent);
+
+    editorEl.addEventListener('input', listener_input);
+    editorEl.addEventListener('compositionstart', listener_compositionstart);
+    editorEl.addEventListener('compositionend', listener_compositionend);
+    editorEl.addEventListener('paste', listener_paste);
+
+    return () => {
+      editorEl.removeEventListener('input', listener_input);
+      editorEl.removeEventListener('compositionstart', listener_compositionstart);
+      editorEl.removeEventListener('compositionend', listener_compositionend);
+      editorEl.removeEventListener('paste', listener_paste);
+    };
+  }, [editorEl]);
+
+  // Sync state → DOM when value changes from outside. The equality guard
+  // prevents a DOM rewrite (and caret reset) when the change originated
+  // from onInput — in that case the DOM is already correct.
+  useEffect(() => {
+    if (!editorEl) return;
+    if (serializeToText(editorEl) === value) return;
+    const offset = saveCaret(editorEl);
+    renderTokens(editorEl, tokens, offset);
+  }, [value, tokens, editorEl]);
+
+  return { onInput, onCompositionStart, onCompositionEnd, onPaste };
 }
