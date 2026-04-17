@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { hoverTooltip, type Tooltip } from '@codemirror/view';
+import { type EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
 import { variableContextFacet } from './variable-context-facet';
 
 const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
@@ -17,7 +17,7 @@ function findVarAt(
   while (match !== null) {
     const from = match.index;
     const to = from + match[0].length;
-    if (pos >= from && pos <= to) {
+    if (pos >= from && pos < to) {
       return { varName: match[1], from, to };
     }
     match = VAR_REGEX.exec(doc);
@@ -43,7 +43,7 @@ export function variableHoverTooltip(): Extension {
       pos: token.from,
       end: token.to,
       above: true,
-      create: () => {
+      create: (_view: EditorView) => {
         const dom = document.createElement('div');
         dom.className = 'cm-var-hover';
 
