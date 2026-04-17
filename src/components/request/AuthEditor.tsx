@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, Key, Lock, User } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { VariableAwareInput } from '@/components/request/VariableAwareInput';
+import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -22,7 +22,7 @@ interface AuthEditorProps {
   auth: AuthState;
   onChange: (auth: AuthState) => void;
   variableContext?: Map<string, VariableScopeEntry>;
-  onNavigateToSource?: (source: VariableSource, key: string) => void;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null): string {
@@ -258,7 +258,7 @@ export function AuthEditor({
         <div className='space-y-2'>
           <div className='flex items-center gap-2'>
             <User className='h-3.5 w-3.5 text-muted-foreground' />
-            <VariableAwareInput
+            <SingleLineEditor
               placeholder='Username'
               className='flex-1 text-sm'
               value={auth.basic.username}
@@ -274,9 +274,9 @@ export function AuthEditor({
           </div>
           <div className='flex items-center gap-2'>
             <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-            <VariableAwareInput
+            <SingleLineEditor
               placeholder='Password'
-              type='password'
+              isSecret
               className='flex-1 text-sm'
               value={auth.basic.password}
               onChange={(newVal) =>
@@ -296,8 +296,9 @@ export function AuthEditor({
       {auth.authType === 'bearer' && auth.bearer && (
         <div className='flex items-center gap-2'>
           <Key className='h-3.5 w-3.5 text-muted-foreground' />
-          <VariableAwareInput
+          <SingleLineEditor
             placeholder='Token'
+            isSecret
             className='flex-1 text-sm'
             value={auth.bearer.token}
             onChange={(newVal) =>
@@ -315,7 +316,7 @@ export function AuthEditor({
       {/* API Key: plain inputs + select. */}
       {auth.authType === 'api-key' && auth.apiKey && (
         <div className='space-y-2'>
-          <VariableAwareInput
+          <SingleLineEditor
             placeholder='Key'
             className='text-sm'
             value={auth.apiKey.key}
@@ -328,7 +329,7 @@ export function AuthEditor({
             variableContext={variableContext}
             onNavigateToSource={onNavigateToSource}
           />
-          <VariableAwareInput
+          <SingleLineEditor
             placeholder='Value'
             className='text-sm'
             value={auth.apiKey.value}
@@ -406,7 +407,7 @@ export function AuthEditor({
               {(o.grantType === 'authorization_code' || o.grantType === 'implicit') && (
                 <div>
                   <Label className='mb-1 block'>Authorization URL</Label>
-                  <VariableAwareInput
+                  <SingleLineEditor
                     className='text-sm font-mono'
                     placeholder='https://auth.example.com/authorize'
                     value={o.authorizationUrl}
@@ -421,7 +422,7 @@ export function AuthEditor({
               {o.grantType !== 'implicit' && (
                 <div>
                   <Label className='mb-1 block'>Token URL</Label>
-                  <VariableAwareInput
+                  <SingleLineEditor
                     className='text-sm font-mono'
                     placeholder='https://auth.example.com/token'
                     value={o.tokenUrl}
@@ -438,7 +439,7 @@ export function AuthEditor({
                   <div>
                     <Label className='mb-1 block'>Callback URL</Label>
                     <div className='flex gap-1.5'>
-                      <VariableAwareInput
+                      <SingleLineEditor
                         className='text-sm font-mono flex-1'
                         value={o.callbackUrl}
                         onChange={(newVal) => patchOAuth2({ callbackUrl: newVal })}
@@ -458,7 +459,7 @@ export function AuthEditor({
                   </div>
                   <div>
                     <Label className='mb-1 block'>State</Label>
-                    <VariableAwareInput
+                    <SingleLineEditor
                       className='text-sm'
                       placeholder='Leave empty for auto-generated'
                       value={o.state}
@@ -474,7 +475,7 @@ export function AuthEditor({
               <div className={o.grantType === 'implicit' ? '' : 'grid grid-cols-2 gap-2'}>
                 <div>
                   <Label className='mb-1 block'>Client ID</Label>
-                  <VariableAwareInput
+                  <SingleLineEditor
                     className='text-sm'
                     placeholder='client-id'
                     value={o.clientId}
@@ -486,9 +487,9 @@ export function AuthEditor({
                 {o.grantType !== 'implicit' && (
                   <div>
                     <Label className='mb-1 block'>Client Secret</Label>
-                    <VariableAwareInput
+                    <SingleLineEditor
                       className='text-sm'
-                      type='password'
+                      isSecret
                       placeholder='client-secret'
                       value={o.clientSecret}
                       onChange={(newVal) => patchOAuth2({ clientSecret: newVal })}
@@ -502,7 +503,7 @@ export function AuthEditor({
               {/* Scope — always visible. */}
               <div>
                 <Label className='mb-1 block'>Scope</Label>
-                <VariableAwareInput
+                <SingleLineEditor
                   className='text-sm'
                   placeholder='read write'
                   value={o.scope}
@@ -517,7 +518,7 @@ export function AuthEditor({
                 <div className='grid grid-cols-2 gap-2'>
                   <div>
                     <Label className='mb-1 block'>Username</Label>
-                    <VariableAwareInput
+                    <SingleLineEditor
                       className='text-sm'
                       placeholder='user@example.com'
                       value={o.username}
@@ -528,9 +529,9 @@ export function AuthEditor({
                   </div>
                   <div>
                     <Label className='mb-1 block'>Password</Label>
-                    <VariableAwareInput
+                    <SingleLineEditor
                       className='text-sm'
-                      type='password'
+                      isSecret
                       value={o.password}
                       onChange={(newVal) => patchOAuth2({ password: newVal })}
                       variableContext={variableContext}
@@ -581,7 +582,7 @@ export function AuthEditor({
                     </div>
                     <div>
                       <Label className='mb-1 block'>Header Prefix</Label>
-                      <VariableAwareInput
+                      <SingleLineEditor
                         className='text-sm'
                         value={o.headerPrefix}
                         onChange={(newVal) => patchOAuth2({ headerPrefix: newVal })}
@@ -705,7 +706,7 @@ export function AuthEditor({
         <div className='space-y-3'>
           <div>
             <Label className='mb-1 block'>Access Key</Label>
-            <VariableAwareInput
+            <SingleLineEditor
               className='text-sm'
               placeholder='AKIAIOSFODNN7EXAMPLE'
               value={auth.awsSigV4.accessKey}
@@ -717,9 +718,9 @@ export function AuthEditor({
 
           <div>
             <Label className='mb-1 block'>Secret Key</Label>
-            <VariableAwareInput
+            <SingleLineEditor
               className='text-sm'
-              type='password'
+              isSecret
               placeholder='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
               value={auth.awsSigV4.secretKey}
               onChange={(newVal) => patchAWS({ secretKey: newVal })}
@@ -731,7 +732,7 @@ export function AuthEditor({
           <div className='grid grid-cols-2 gap-2'>
             <div>
               <Label className='mb-1 block'>Region</Label>
-              <VariableAwareInput
+              <SingleLineEditor
                 className='text-sm'
                 placeholder='us-east-1'
                 value={auth.awsSigV4.region}
@@ -742,7 +743,7 @@ export function AuthEditor({
             </div>
             <div>
               <Label className='mb-1 block'>Service</Label>
-              <VariableAwareInput
+              <SingleLineEditor
                 className='text-sm'
                 placeholder='execute-api'
                 value={auth.awsSigV4.service}
@@ -755,7 +756,7 @@ export function AuthEditor({
 
           <div>
             <Label className='mb-1 block'>Session Token</Label>
-            <VariableAwareInput
+            <SingleLineEditor
               className='text-sm'
               placeholder='(optional)'
               value={auth.awsSigV4.sessionToken}
