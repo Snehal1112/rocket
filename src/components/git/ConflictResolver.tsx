@@ -1,10 +1,6 @@
-import Editor, { loader, type OnMount } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-
-loader.config({ monaco });
-
 import { useState } from 'react';
-import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
+
+import { MultiLineEditor } from '@/components/editor/MultiLineEditor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { gitResolveConflict } from '@/lib/tauri-api';
@@ -19,10 +15,6 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
   const { refreshStatus, abortMerge } = useGitStore();
-  const { themeName, defineThemes } = useMonacoTheme();
-  const handleMount: OnMount = (_editor, monaco) => {
-    defineThemes(monaco);
-  };
 
   const handleAbort = async () => {
     await abortMerge();
@@ -76,12 +68,11 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           </div>
         </div>
         <div className='flex-1'>
-          <Editor
+          <MultiLineEditor
             value={manualContent}
-            onChange={(v) => setManualContent(v ?? '')}
-            theme={themeName}
-            onMount={handleMount}
-            options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
+            onChange={(v) => setManualContent(v)}
+            height='100%'
+            language='yaml'
           />
         </div>
       </div>
@@ -110,33 +101,13 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
         <div className='flex-1 flex flex-col border-r'>
           <div className='px-2 py-1 text-sm font-medium text-muted-foreground border-b'>Ours</div>
           <div className='flex-1'>
-            <Editor
-              value={conflictState.ours}
-              theme={themeName}
-              onMount={handleMount}
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 12,
-                scrollBeyondLastLine: false,
-              }}
-            />
+            <MultiLineEditor value={conflictState.ours} readOnly height='100%' language='yaml' />
           </div>
         </div>
         <div className='flex-1 flex flex-col'>
           <div className='px-2 py-1 text-sm font-medium text-muted-foreground border-b'>Theirs</div>
           <div className='flex-1'>
-            <Editor
-              value={conflictState.theirs}
-              theme={themeName}
-              onMount={handleMount}
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 12,
-                scrollBeyondLastLine: false,
-              }}
-            />
+            <MultiLineEditor value={conflictState.theirs} readOnly height='100%' language='yaml' />
           </div>
         </div>
       </div>
