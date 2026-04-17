@@ -331,6 +331,7 @@ export function AuthEditor({
           />
           <SingleLineEditor
             placeholder='Value'
+            isSecret
             className='text-sm'
             value={auth.apiKey.value}
             onChange={(newVal) =>
@@ -758,6 +759,7 @@ export function AuthEditor({
             <Label className='mb-1 block'>Session Token</Label>
             <SingleLineEditor
               className='text-sm'
+              isSecret
               placeholder='(optional)'
               value={auth.awsSigV4.sessionToken}
               onChange={(newVal) => patchAWS({ sessionToken: newVal })}
