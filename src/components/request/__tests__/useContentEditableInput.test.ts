@@ -124,3 +124,50 @@ describe('useContentEditableInput', () => {
     el.remove();
   });
 });
+
+describe('selectionchange caret guard', () => {
+  it('ejects caret from inside a badge span when selection moves into it', async () => {
+    const el = document.createElement('div');
+    el.contentEditable = 'true';
+    el.innerHTML = 'ab<span data-badge data-token-idx="0">{{x}}</span>cd';
+    document.body.appendChild(el);
+
+    const onChange = vi.fn();
+    const tokens: EditorToken[] = [
+      { type: 'text', content: 'ab', rawLength: 2 },
+      { type: 'badge', content: '{{x}}', rawLength: 5, tokenIdx: 0 },
+      { type: 'text', content: 'cd', rawLength: 2 },
+    ];
+
+    renderHook(() =>
+      useContentEditableInput({ editorEl: el, value: 'ab{{x}}cd', onChange, tokens }),
+    );
+
+    // Simulate caret landing inside the badge span.
+    const badge = el.querySelector('[data-badge]')!;
+    const range = document.createRange();
+    range.setStart(badge.firstChild!, 1); // Inside '{{x}}', offset 1.
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Fire a selectionchange event to trigger the guard.
+    document.dispatchEvent(new Event('selectionchange'));
+
+    // Wait one microtask for the guard to run.
+    await new Promise((r) => setTimeout(r, 0));
+
+    const finalSel = window.getSelection()!;
+    // Caret must no longer be inside the badge span.
+    const anchorNode = finalSel.anchorNode;
+    const isInsideBadge =
+      anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? (anchorNode as Element).hasAttribute('data-badge') ||
+          (anchorNode as Element).closest('[data-badge]') !== null
+        : anchorNode?.parentElement?.closest('[data-badge]') !== null;
+    expect(isInsideBadge).toBe(false);
+
+    el.remove();
+  });
+});

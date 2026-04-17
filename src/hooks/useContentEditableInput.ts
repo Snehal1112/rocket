@@ -249,6 +249,43 @@ export function useContentEditableInput({
     onChangeRef.current(serializeToText(editorEl));
   }
 
+  // Ejects the caret from badge spans when arrow-key navigation moves it inside one.
+  useEffect(() => {
+    const el = editorEl;
+    if (!el) return;
+
+    const onSelectionChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      // Only act when the selection is inside this specific editor element.
+      if (!sel.anchorNode || !el.contains(sel.anchorNode)) return;
+      const anchor = sel.anchorNode;
+      // Check if the anchor is inside a [data-badge] span.
+      const badge =
+        anchor.nodeType === Node.ELEMENT_NODE
+          ? (anchor as Element).closest('[data-badge]')
+          : anchor.parentElement?.closest('[data-badge]');
+      if (!badge) return;
+      // Eject: place caret at end of preceding text node.
+      let prev = badge.previousSibling;
+      while (prev && prev.nodeType !== Node.TEXT_NODE) {
+        prev = prev.previousSibling;
+      }
+      if (prev) {
+        const range = document.createRange();
+        range.setStart(prev, (prev as Text).length);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    };
+
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+    };
+  }, [editorEl]);
+
   // Keep a stable ref to the handlers so DOM listeners always call the latest versions.
   const handlersRef = useRef({ onInput, onCompositionStart, onCompositionEnd, onPaste });
   handlersRef.current = { onInput, onCompositionStart, onCompositionEnd, onPaste };
