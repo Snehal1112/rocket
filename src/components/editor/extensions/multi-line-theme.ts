@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 export const multiLineTheme = EditorView.theme({
   '&': {
     fontSize: '13px',
-    fontFamily: "'JetBrains Mono', monospace",
+    fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
     height: '100%',
   },
   '&.cm-focused': {
