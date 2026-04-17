@@ -9,10 +9,10 @@ import { ResponseHeadersTable } from './ResponseHeadersTable';
 
 type ViewTab = ResponseState['activeView'];
 
-// Lazy-load Monaco so it stays out of the initial JS bundle.
-const MonacoWrapper = lazy(() =>
-  import('@/components/editor/MonacoWrapper').then((m) => ({
-    default: m.MonacoWrapper,
+// Lazy-load the editor so it stays out of the initial JS bundle.
+const MultiLineEditor = lazy(() =>
+  import('@/components/editor/MultiLineEditor').then((m) => ({
+    default: m.MultiLineEditor,
   })),
 );
 
@@ -176,7 +176,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         {activeView === 'pretty' &&
           (response.body ? (
             <Suspense fallback={<EditorSkeleton />}>
-              <MonacoWrapper value={prettyBody} language={language} readOnly height='100%' />
+              <MultiLineEditor value={prettyBody} language={language} readOnly height='100%' />
             </Suspense>
           ) : (
             <div className='flex items-center justify-center h-32 text-muted-foreground text-xs'>
@@ -187,7 +187,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         {activeView === 'raw' &&
           (response.body ? (
             <Suspense fallback={<EditorSkeleton />}>
-              <MonacoWrapper value={response.body} language='plaintext' readOnly height='100%' />
+              <MultiLineEditor value={response.body} language='plaintext' readOnly height='100%' />
             </Suspense>
           ) : (
             <div className='flex items-center justify-center h-32 text-muted-foreground text-xs'>
