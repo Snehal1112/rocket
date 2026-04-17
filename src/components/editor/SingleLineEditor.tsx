@@ -13,8 +13,10 @@ import {
   type PopoverState,
   rocketTheme,
   rocketThemeDark,
+  secretMask,
   setVariableContextEffect,
   singleLineFilter,
+  urlTokens,
   variableAutocomplete,
   variableContextFacet,
   variableHighlight,
@@ -73,11 +75,11 @@ export function SingleLineEditor({
   disabled,
   variableContext,
   onNavigateToSource,
-  isSecret: _isSecret,
-  pathParams: _pathParams,
-  queryParams: _queryParams,
+  isSecret,
+  pathParams,
+  queryParams,
   onPathParamChange,
-  onCurlImport: _onCurlImport,
+  onCurlImport,
   onSubmit,
   onKeyDown: _onKeyDown,
 }: SingleLineEditorProps) {
@@ -145,10 +147,33 @@ export function SingleLineEditor({
       exts.push(EditorState.readOnly.of(true));
     }
 
-    // TODO: Plan 05 will add url-tokens and secret-mask extensions here.
+    // URL-specific extensions (only for URL bar).
+    if (pathParams || queryParams || onCurlImport) {
+      exts.push(
+        urlTokens({
+          pathParams,
+          queryParams,
+          onCurlImport,
+        }),
+      );
+    }
+
+    // Secret masking (bearer tokens, passwords).
+    if (isSecret) {
+      exts.push(secretMask());
+    }
 
     return exts;
-  }, [!!variableContext, !!onSubmit, !!disabled, placeholder]);
+  }, [
+    !!variableContext,
+    !!onSubmit,
+    !!disabled,
+    placeholder,
+    !!pathParams,
+    !!queryParams,
+    !!onCurlImport,
+    !!isSecret,
+  ]);
 
   // Create the EditorView on mount.
   // biome-ignore lint/correctness/useExhaustiveDependencies: initial doc only — live sync is in the value-sync effect below.
