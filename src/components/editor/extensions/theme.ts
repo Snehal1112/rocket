@@ -45,6 +45,9 @@ export const rocketTheme = EditorView.theme({
   '.cm-placeholder': {
     color: 'hsl(var(--muted-foreground))',
     fontStyle: 'normal',
+    // Override CM6 base theme (vertical-align: top) so the placeholder
+    // shares the flex-center baseline of .cm-line.
+    verticalAlign: 'middle',
   },
   '.cm-selectionBackground': {
     background: 'hsl(var(--primary) / 0.2) !important',
