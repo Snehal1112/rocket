@@ -1,8 +1,8 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateField } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
-import { variableContextFacet } from '../variable-context-facet';
+import { setVariableContextEffect, variableContextFacet } from '../variable-context-facet';
 import { variableHighlight } from '../variable-highlight';
 
 function makeContext(
@@ -29,10 +29,24 @@ function createView(doc: string, context: Map<string, VariableScopeEntry>) {
   // Attach to document.body so querySelectorAll can find rendered decorations.
   container = document.createElement('div');
   document.body.appendChild(container);
+
+  // StateField that bridges setVariableContextEffect into variableContextFacet
+  // so context updates propagate to the highlight plugin.
+  const contextField = StateField.define<Map<string, VariableScopeEntry>>({
+    create: () => context,
+    update: (value, tr) => {
+      for (const effect of tr.effects) {
+        if (effect.is(setVariableContextEffect)) return effect.value;
+      }
+      return value;
+    },
+    provide: (f) => variableContextFacet.from(f),
+  });
+
   view = new EditorView({
     state: EditorState.create({
       doc,
-      extensions: [variableContextFacet.of(context), variableHighlight()],
+      extensions: [contextField, variableHighlight()],
     }),
     parent: container,
   });
@@ -77,5 +91,17 @@ describe('variableHighlight', () => {
     const ctx = makeContext({ 'process.env.API_KEY': { source: 'process', value: 'sk-123' } });
     createView('key={{process.env.API_KEY}}', ctx);
     expect(document.querySelectorAll('.cm-var-process').length).toBe(1);
+  });
+
+  it('rebuilds decorations when setVariableContextEffect is dispatched', () => {
+    const localView = createView('value={{foo}}', new Map());
+    expect(document.querySelectorAll('.cm-var-unresolved').length).toBe(1);
+    expect(document.querySelectorAll('.cm-var-environment').length).toBe(0);
+
+    const newCtx = makeContext({ foo: { source: 'environment', value: 'bar' } });
+    localView.dispatch({ effects: setVariableContextEffect.of(newCtx) });
+
+    expect(document.querySelectorAll('.cm-var-unresolved').length).toBe(0);
+    expect(document.querySelectorAll('.cm-var-environment').length).toBe(1);
   });
 });
