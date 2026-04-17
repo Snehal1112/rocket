@@ -55,7 +55,7 @@ function scopeBadge(source: VariableSource): string {
  * Accepting a completion inserts the variable name and appends `}}`
  * if not already present after the cursor.
  */
-const variableCompletionSource: CompletionSource = (context: CompletionContext) => {
+export const variableCompletionSource: CompletionSource = (context: CompletionContext) => {
   // Match `{{` optionally followed by partial variable name chars.
   const before = context.matchBefore(/\{\{[\w.-]*/);
   if (!before) return null;
@@ -73,22 +73,19 @@ const variableCompletionSource: CompletionSource = (context: CompletionContext) 
       type: 'variable',
       boost: SCOPE_BOOST[entry.source] ?? 0,
       apply: (view, _completion, from, to) => {
-        // `from` points to the start of `{{...`. We want to replace from `{{` onward.
         // Insert the key. If `}}` doesn't already follow, append it.
         const afterCursor = view.state.sliceDoc(to, to + 2);
         const insert = afterCursor === '}}' ? key : `${key}}}`;
-        // Replace from after `{{` to current cursor position.
-        const insertFrom = from + 2;
         view.dispatch({
-          changes: { from: insertFrom, to, insert },
-          selection: { anchor: insertFrom + insert.length },
+          changes: { from, to, insert },
+          selection: { anchor: from + insert.length },
         });
       },
     });
   }
 
   return {
-    from: before.from,
+    from: before.from + 2, // Start after `{{` so CM6 matches labels against the bare prefix.
     options,
     filter: true, // CM6 handles fuzzy filtering.
   };

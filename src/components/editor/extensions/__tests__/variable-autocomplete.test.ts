@@ -1,12 +1,10 @@
-import { CompletionContext } from '@codemirror/autocomplete';
+import { type Completion, CompletionContext } from '@codemirror/autocomplete';
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
+import { variableCompletionSource } from '../variable-autocomplete';
 import { variableContextFacet } from '../variable-context-facet';
-
-// We test the completion source directly by importing and calling it.
-// The actual source is not exported — we'll test through the autocomplete extension.
-// Instead, we test the matching logic using CompletionContext.
 
 function makeContext(
   entries: Record<string, { source: VariableSource; value: string }>,
@@ -69,6 +67,52 @@ describe('variableAutocomplete', () => {
     expect(match).not.toBeNull();
     if (match) {
       expect(match.text).toBe('{{process.env.');
+    }
+  });
+
+  it('returns from = position after {{ so CM6 matches bare key prefix', () => {
+    const ctx = makeContext({ baseUrl: { source: 'environment', value: 'x' } });
+    const state = createState('{{', ctx);
+    const completionCtx = new CompletionContext(state, 2, false);
+    const result = variableCompletionSource(completionCtx);
+    expect(result).not.toBeNull();
+    if (result && !(result instanceof Promise)) {
+      // from must skip '{{' so CM6 filters against the bare prefix, not '{{...'.
+      expect(result.from).toBe(2);
+    }
+  });
+
+  it('apply inserts key and }} at the correct position', () => {
+    const ctx = makeContext({ baseUrl: { source: 'environment', value: 'x' } });
+    const state = createState('{{', ctx);
+    const completionCtx = new CompletionContext(state, 2, false);
+    const result = variableCompletionSource(completionCtx);
+    expect(result).not.toBeNull();
+    if (!result || result instanceof Promise) throw new Error('sync result expected');
+
+    const option = result.options.find((o) => o.label === 'baseUrl');
+    if (!option || typeof option.apply !== 'function') throw new Error('option.apply missing');
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const view = new EditorView({
+      state: EditorState.create({ doc: '{{', extensions: [variableContextFacet.of(ctx)] }),
+      parent: container,
+    });
+    try {
+      // from = 2 (after '{{'), to = 2 (cursor at end of doc).
+      (option.apply as (v: EditorView, c: Completion, from: number, to: number) => void)(
+        view,
+        option,
+        2,
+        2,
+      );
+      expect(view.state.doc.toString()).toBe('{{baseUrl}}');
+      // No `}}` was present, so insert = 'baseUrl}}'. Cursor lands after the inserted text.
+      expect(view.state.selection.main.head).toBe(2 + 'baseUrl}}'.length);
+    } finally {
+      view.destroy();
+      container.remove();
     }
   });
 });
