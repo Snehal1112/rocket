@@ -65,6 +65,10 @@ const popoverTooltip = showTooltip.computeN([activePopoverField], (state) => {
     create: () => {
       const dom = document.createElement('div');
       dom.className = 'cm-variable-popover-container';
+      // Reserve space so CM6 can measure the tooltip height before React
+      // paints the portal content. Without this, height=0 causes wrong placement.
+      dom.style.minWidth = '320px';
+      dom.style.minHeight = '72px';
       // The React wrapper will find this element and portal into it.
       // We store metadata as data attributes so the wrapper can read them.
       dom.dataset.varName = popover.varName;
@@ -102,6 +106,26 @@ function findVarTokenAt(
 }
 
 /**
+ * Returns true if the mouse event coordinates fall within the rendered pixel
+ * bounds of the token at [from, to). Uses coordsAtPos to get the actual glyph
+ * rect rather than relying on posAtCoords snapping, which can map clicks in
+ * the editor padding to position 0 and falsely hit a token that starts there.
+ */
+function clickIsInsideToken(
+  view: EditorView,
+  event: MouseEvent,
+  from: number,
+  to: number,
+): boolean {
+  const start = view.coordsAtPos(from);
+  const end = view.coordsAtPos(to);
+  if (!start || !end) return false;
+  const x = event.clientX;
+  const y = event.clientY;
+  return x >= start.left && x <= end.right && y >= start.top && y <= end.bottom;
+}
+
+/**
  * ViewPlugin that handles click events on {{variable}} tokens.
  * When a click lands inside a variable token, it opens the popover.
  */
@@ -129,7 +153,7 @@ export function variablePopoverExtension(): Extension {
           const doc = view.state.doc.toString();
           const token = findVarTokenAt(doc, pos);
 
-          if (token) {
+          if (token && clickIsInsideToken(view, event, token.from, token.to)) {
             const context = view.state.facet(variableContextFacet);
             const entry = context.get(token.varName);
 

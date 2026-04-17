@@ -1,11 +1,11 @@
 import { Plus, X } from 'lucide-react';
 import { useCallback } from 'react';
+import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { KeyValueEntry } from '@/types/pane-types';
-import { SingleLineEditor } from '@/components/editor';
 
 interface KeyValueEditorProps {
   entries: KeyValueEntry[];
