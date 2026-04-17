@@ -1,7 +1,7 @@
 // Reads the version from package.json and writes it to tauri.conf.json.
 // Run automatically via release-it's after:bump hook.
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 
@@ -10,6 +10,6 @@ const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
 
 tauriConf.version = pkg.version;
 
-fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n');
+fs.writeFileSync(tauriConfPath, `${JSON.stringify(tauriConf, null, 2)}\n`);
 
 console.log(`tauri.conf.json synced to v${pkg.version}`);

@@ -4,7 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import { variableCompletionSource } from '../variable-autocomplete';
-import { variableContextFacet } from '../variable-context-facet';
+import { setVariableContextEffect, variableContextField } from '../variable-context-facet';
 
 function makeContext(
   entries: Record<string, { source: VariableSource; value: string }>,
@@ -17,10 +17,20 @@ function makeContext(
 }
 
 function createState(doc: string, context: Map<string, VariableScopeEntry>) {
-  return EditorState.create({
+  const state = EditorState.create({
     doc,
-    extensions: [variableContextFacet.of(context)],
+    extensions: [variableContextField],
   });
+  // Create a throwaway view to dispatch the initial context effect.
+  const container = document.createElement('div');
+  const view = new EditorView({ state, parent: container });
+  if (context.size > 0) {
+    view.dispatch({ effects: setVariableContextEffect.of(context) });
+  }
+  const result = view.state;
+  view.destroy();
+  container.remove();
+  return result;
 }
 
 describe('variableAutocomplete', () => {
@@ -84,22 +94,23 @@ describe('variableAutocomplete', () => {
 
   it('apply inserts key and }} at the correct position', () => {
     const ctx = makeContext({ baseUrl: { source: 'environment', value: 'x' } });
-    const state = createState('{{', ctx);
-    const completionCtx = new CompletionContext(state, 2, false);
-    const result = variableCompletionSource(completionCtx);
-    expect(result).not.toBeNull();
-    if (!result || result instanceof Promise) throw new Error('sync result expected');
-
-    const option = result.options.find((o) => o.label === 'baseUrl');
-    if (!option || typeof option.apply !== 'function') throw new Error('option.apply missing');
-
     const container = document.createElement('div');
     document.body.appendChild(container);
     const view = new EditorView({
-      state: EditorState.create({ doc: '{{', extensions: [variableContextFacet.of(ctx)] }),
+      state: EditorState.create({ doc: '{{', extensions: [variableContextField] }),
       parent: container,
     });
+    view.dispatch({ effects: setVariableContextEffect.of(ctx) });
+
     try {
+      const completionCtx = new CompletionContext(view.state, 2, false);
+      const result = variableCompletionSource(completionCtx);
+      expect(result).not.toBeNull();
+      if (!result || result instanceof Promise) throw new Error('sync result expected');
+
+      const option = result.options.find((o) => o.label === 'baseUrl');
+      if (!option || typeof option.apply !== 'function') throw new Error('option.apply missing');
+
       // from = 2 (after '{{'), to = 2 (cursor at end of doc).
       (option.apply as (v: EditorView, c: Completion, from: number, to: number) => void)(
         view,

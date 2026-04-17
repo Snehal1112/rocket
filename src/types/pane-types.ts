@@ -198,6 +198,7 @@ export interface ResponseState {
   headers: KeyValueEntry[];
   body: string;
   durationMs: number;
+  ttfbMs: number;
   sizeBytes: number;
   activeView: 'pretty' | 'raw' | 'preview' | 'headers';
 }

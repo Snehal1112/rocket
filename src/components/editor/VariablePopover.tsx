@@ -122,7 +122,7 @@ export function VariablePopover({
     <div
       role='dialog'
       aria-label={`Edit variable ${varName}`}
-      className='w-80 bg-popover text-popover-foreground rounded-md border shadow-md overflow-hidden'
+      className='w-80 bg-popover/95 backdrop-blur-sm text-popover-foreground rounded-sm border border-border/60 shadow-[0_2px_8px_rgba(0,0,0,0.16)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] overflow-hidden'
       // Prevent click inside popover from bubbling to EditorView and closing it.
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -139,9 +139,7 @@ export function VariablePopover({
             setEditValue(e.target.value);
           }}
           onKeyDown={handleKeyDown}
-          onBlur={() => {
-            handleCommit();
-          }}
+          onBlur={() => void handleCommit()}
         />
       </div>
 

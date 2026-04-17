@@ -13,12 +13,13 @@ import {
   type PopoverState,
   rocketTheme,
   rocketThemeDark,
+  rocketTooltipBase,
   secretMask,
   setVariableContextEffect,
   singleLineFilter,
   urlTokens,
   variableAutocomplete,
-  variableContextFacet,
+  variableContextField,
   variableHighlight,
   variablePopoverExtension,
 } from './extensions';
@@ -94,6 +95,9 @@ export function SingleLineEditor({
   // Popover portal state.
   const [popoverState, setPopoverState] = useState<PopoverState | null>(null);
   const [popoverContainer, setPopoverContainer] = useState<HTMLElement | null>(null);
+  // Ref always holds the latest popover state so the commit callback doesn't capture
+  // a stale null after React re-renders between mousedown and blur.
+  const popoverStateRef = useRef<PopoverState | null>(null);
 
   const commitVariable = useVariableCommit();
 
@@ -108,6 +112,7 @@ export function SingleLineEditor({
       singleLineFilter,
       rocketTheme,
       rocketThemeDark,
+      rocketTooltipBase,
       keymap.of(defaultKeymap),
       // Render tooltips at document root so the popover escapes
       // our overflow-hidden editor wrapper and any transformed ancestors.
@@ -139,7 +144,7 @@ export function SingleLineEditor({
 
     if (variableContext) {
       exts.push(
-        variableContextFacet.of(variableContext),
+        variableContextField,
         variableHighlight(),
         variableAutocomplete(),
         variablePopoverExtension(),
@@ -178,6 +183,11 @@ export function SingleLineEditor({
     !!isSecret,
   ]);
 
+  // Stable ref so the creation effect can read the current context without
+  // being in its dependency list (creation runs only when extensions rebuild).
+  const variableContextRef = useRef(variableContext);
+  variableContextRef.current = variableContext;
+
   // Create the EditorView on mount.
   // biome-ignore lint/correctness/useExhaustiveDependencies: initial doc only — live sync is in the value-sync effect below.
   useEffect(() => {
@@ -192,6 +202,11 @@ export function SingleLineEditor({
       state,
       parent: containerRef.current,
     });
+
+    // Seed the variable context field with the value available at creation time.
+    if (variableContextRef.current) {
+      view.dispatch({ effects: setVariableContextEffect.of(variableContextRef.current) });
+    }
 
     viewRef.current = view;
 
@@ -215,7 +230,7 @@ export function SingleLineEditor({
     }
   }, [value]);
 
-  // Update the variable context facet when it changes.
+  // Update the variable context field when it changes.
   useEffect(() => {
     const view = viewRef.current;
     if (!view || !variableContext) return;
@@ -235,9 +250,11 @@ export function SingleLineEditor({
       const container = document.querySelector('.cm-variable-popover-container');
       const popover = getActivePopover(view);
       if (container && popover) {
+        popoverStateRef.current = popover;
         setPopoverContainer(container as HTMLElement);
         setPopoverState(popover);
       } else {
+        popoverStateRef.current = null;
         setPopoverContainer(null);
         setPopoverState(null);
       }
@@ -248,23 +265,26 @@ export function SingleLineEditor({
     return () => observer.disconnect();
   }, [extensions]);
 
-  // Popover commit handler.
+  // Popover commit handler — reads from ref to avoid stale closure when React
+  // re-renders between mousedown (which clears popoverState) and the subsequent blur.
   const handlePopoverCommit = useCallback(
     async (newValue: string) => {
-      if (!popoverState) return;
-      if (popoverState.tokenType === 'pathParam' && onPathParamChange) {
-        onPathParamChange(popoverState.varName, newValue);
+      const ps = popoverStateRef.current;
+      if (!ps) return;
+      if (ps.tokenType === 'pathParam' && onPathParamChange) {
+        onPathParamChange(ps.varName, newValue);
       } else {
-        await commitVariable(popoverState.varName, newValue, popoverState.entry?.source ?? null);
+        await commitVariable(ps.varName, newValue, ps.entry?.source ?? null);
       }
     },
-    [popoverState, commitVariable, onPathParamChange],
+    [commitVariable, onPathParamChange],
   );
 
   // Close popover handler.
   const handlePopoverClose = useCallback(() => {
     const view = viewRef.current;
     if (view) closePopover(view);
+    popoverStateRef.current = null;
     setPopoverContainer(null);
     setPopoverState(null);
   }, []);

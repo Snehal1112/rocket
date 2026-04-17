@@ -8,7 +8,10 @@ pub struct HttpResponse {
     pub status_text: String,
     pub headers: Vec<Header>,
     pub body: String,
+    /// Total time from request sent to body fully received, in milliseconds.
     pub duration_ms: u64,
+    /// Time from request sent to first byte of the response headers, in milliseconds.
+    pub ttfb_ms: u64,
     pub size_bytes: usize,
 }
 
@@ -52,6 +55,7 @@ mod tests {
             headers: vec![Header::new("content-type", "application/json")],
             body: "{}".into(),
             duration_ms: 150,
+            ttfb_ms: 80,
             size_bytes: 2,
         }
     }
@@ -103,6 +107,7 @@ mod tests {
             headers: vec![],
             body: String::new(),
             duration_ms: 5,
+            ttfb_ms: 5,
             size_bytes: 0,
         };
         assert!(resp.content_type().is_none());
@@ -119,6 +124,7 @@ mod tests {
             ],
             body: String::new(),
             duration_ms: 1,
+            ttfb_ms: 1,
             size_bytes: 0,
         };
         assert_eq!(resp.header_value("x-custom"), Some("first"));

@@ -2,7 +2,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
-import { variableContextFacet } from '../variable-context-facet';
+import { setVariableContextEffect, variableContextField } from '../variable-context-facet';
 import { variableHoverTooltip } from '../variable-hover';
 
 let view: EditorView | null = null;
@@ -29,13 +29,14 @@ function makeContext(
 
 function createView(doc: string, context: Map<string, VariableScopeEntry>) {
   const container = document.createElement('div');
-  view = new EditorView({
-    state: EditorState.create({
-      doc,
-      extensions: [variableContextFacet.of(context), variableHoverTooltip()],
-    }),
-    parent: container,
+  const state = EditorState.create({
+    doc,
+    extensions: [variableContextField, variableHoverTooltip()],
   });
+  view = new EditorView({ state, parent: container });
+  if (context.size > 0) {
+    view.dispatch({ effects: setVariableContextEffect.of(context) });
+  }
   return view;
 }
 

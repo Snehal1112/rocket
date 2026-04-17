@@ -307,6 +307,7 @@ mod tests {
                     headers: vec![],
                     body: "{}".into(),
                     duration_ms: 50,
+                    ttfb_ms: 50,
                     size_bytes: 2,
                 },
             }
@@ -861,6 +862,7 @@ mod tests {
                     headers: vec![],
                     body: "{}".into(),
                     duration_ms: 1,
+                    ttfb_ms: 1,
                     size_bytes: 2,
                 })
             }

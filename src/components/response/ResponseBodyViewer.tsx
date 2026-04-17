@@ -116,13 +116,18 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           {response.status === 0 ? 'ERR' : response.status} {response.statusText}
         </span>
 
-        {/* Time badge with clock icon, color-coded. */}
+        {/* Time badges — TTFB and total duration, color-coded by total. */}
         {response.durationMs > 0 && (
           <span
             className={`inline-flex items-center gap-1 text-xs font-medium ${timeColor(response.durationMs)}`}
           >
             <Clock className='h-3.5 w-3.5 text-muted-foreground' />
             {formatDuration(response.durationMs)}
+          </span>
+        )}
+        {response.ttfbMs > 0 && response.ttfbMs !== response.durationMs && (
+          <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
+            TTFB {formatDuration(response.ttfbMs)}
           </span>
         )}
 

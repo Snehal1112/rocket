@@ -31,7 +31,13 @@ import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { findTabInTree } from '@/lib/pane-utils';
-import { type CollectionVariable, getCollectionSettings, updateRequestDocs } from '@/lib/tauri-api';
+import {
+  type CollectionVariable,
+  getCollectionSettings,
+  getFolderVariables,
+  getRequestVariables,
+  updateRequestDocs,
+} from '@/lib/tauri-api';
 import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
 import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
@@ -105,6 +111,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
+  const [folderVariables, setFolderVariables] = useState<CollectionVariable[]>([]);
+  const [requestVariables, setRequestVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
   const [requestVarCount, setRequestVarCount] = useState(0);
 
@@ -145,6 +153,31 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         setCollectionVariables([]);
       });
   }, [tab.source?.collection]);
+
+  // Fetch request-scoped and folder-scoped variables for the variable context.
+  useEffect(() => {
+    const collection = tab.source?.collection;
+    const requestPath = tab.source?.path;
+    if (!collection || !requestPath) {
+      setRequestVariables([]);
+      setFolderVariables([]);
+      return;
+    }
+    // Derive folder path: parent directory of the request file.
+    const folderPath = requestPath.includes('/')
+      ? requestPath.slice(0, requestPath.lastIndexOf('/'))
+      : '';
+    getRequestVariables(collection, requestPath)
+      .then(setRequestVariables)
+      .catch(() => setRequestVariables([]));
+    if (folderPath) {
+      getFolderVariables(collection, folderPath)
+        .then(setFolderVariables)
+        .catch(() => setFolderVariables([]));
+    } else {
+      setFolderVariables([]);
+    }
+  }, [tab.source?.collection, tab.source?.path]);
 
   // Drag handle for request/response split.
   const handleSeparatorDown = useCallback(
@@ -300,11 +333,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const globalEnv = useEnvStore((s) => s.globalEnv);
   const processEnvVars = useEnvStore((s) => s.processEnvVars);
 
-  // Build the scope-aware variable context for the URL input overlay.
-  // folderVars and requestVars are intentionally omitted: the Tauri commands for
-  // reading per-folder and per-request variables at render time are not yet
-  // implemented (deferred per the variables spec). They will be wired in once
-  // the corresponding backend commands exist.
+  // Build the scope-aware variable context for all editors in this panel.
   const scopedContext = useMemo(() => {
     const envVars: Record<string, string> = {};
     if (activeEnvIdForScope) {
@@ -322,8 +351,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       globalVars,
       processEnvVars,
       collectionVars: collectionVariables,
+      folderVars: folderVariables,
+      requestVars: requestVariables,
     });
-  }, [activeEnvIdForScope, environments, globalEnv, processEnvVars, collectionVariables]);
+  }, [
+    activeEnvIdForScope,
+    environments,
+    globalEnv,
+    processEnvVars,
+    collectionVariables,
+    folderVariables,
+    requestVariables,
+  ]);
 
   const authTypeOptions = useMemo(
     () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),

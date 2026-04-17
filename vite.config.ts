@@ -32,10 +32,6 @@ export const testConfig = {
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// CSP note: tauri.conf.json includes 'unsafe-eval' in script-src because the
-// Monaco editor workers evaluate code at runtime. cdn.jsdelivr.net is NOT in
-// the CSP because @monaco-editor/react is bundled entirely via Vite.
-
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [tailwindcss(), react(), visualizer({ open: false, filename: "dist/stats.html", gzipSize: true, brotliSize: true })],
@@ -63,7 +59,6 @@ export default defineConfig(async () => ({
             '@radix-ui/react-tabs',
             '@radix-ui/react-tooltip',
           ],
-          'vendor-monaco': ['monaco-editor'],
         },
       },
     },

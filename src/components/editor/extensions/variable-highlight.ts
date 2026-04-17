@@ -6,7 +6,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
-import { setVariableContextEffect, variableContextFacet } from './variable-context-facet';
+import { setVariableContextEffect, variableContextField } from './variable-context-facet';
 
 const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
 
@@ -38,7 +38,7 @@ class VariableHighlightPlugin {
 
 function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  const context = view.state.facet(variableContextFacet);
+  const context = view.state.field(variableContextField);
   const doc = view.state.doc.toString();
 
   // Reset lastIndex for global regex reuse.
@@ -62,7 +62,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 /**
  * Extension that highlights {{variable}} tokens with scope-colored CSS classes.
- * Requires the variableContextFacet to be provided in the editor state.
+ * Requires the variableContextField to be included in the editor state.
  */
 export function variableHighlight(): Extension {
   return ViewPlugin.fromClass(VariableHighlightPlugin, {

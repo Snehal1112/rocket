@@ -321,12 +321,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         const cachedAuth = useCollectionAuthStore.getState().getCollectionAuth(collectionName);
         if (
           diskAuth.authType === 'oauth2' &&
-          !diskAuth.oauth2?.accessToken &&
+          diskAuth.oauth2 &&
+          !diskAuth.oauth2.accessToken &&
           cachedAuth?.authType === 'oauth2' &&
           cachedAuth.oauth2?.accessToken
         ) {
           diskAuth.oauth2 = {
-            ...diskAuth.oauth2!,
+            ...diskAuth.oauth2,
             accessToken: cachedAuth.oauth2.accessToken,
             refreshToken: cachedAuth.oauth2.refreshToken ?? '',
             expiresIn: cachedAuth.oauth2.expiresIn ?? null,

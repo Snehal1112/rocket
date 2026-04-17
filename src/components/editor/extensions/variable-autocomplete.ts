@@ -6,7 +6,7 @@ import {
 } from '@codemirror/autocomplete';
 import type { Extension } from '@codemirror/state';
 import type { VariableSource } from '@/lib/url-variables';
-import { variableContextFacet } from './variable-context-facet';
+import { variableContextField } from './variable-context-facet';
 
 /**
  * Boost values for autocomplete ranking. Higher = ranked first.
@@ -60,7 +60,7 @@ export const variableCompletionSource: CompletionSource = (context: CompletionCo
   const before = context.matchBefore(/\{\{[\w.-]*/);
   if (!before) return null;
 
-  const varContext = context.state.facet(variableContextFacet);
+  const varContext = context.state.field(variableContextField);
   if (varContext.size === 0) return null;
 
   const options: Completion[] = [];
@@ -93,7 +93,7 @@ export const variableCompletionSource: CompletionSource = (context: CompletionCo
 
 /**
  * Extension that provides {{variable}} autocomplete.
- * Requires the variableContextFacet to be provided in the editor state.
+ * Requires the variableContextField to be included in the editor state.
  *
  * Ctrl+Space triggers completions manually (built into @codemirror/autocomplete).
  */

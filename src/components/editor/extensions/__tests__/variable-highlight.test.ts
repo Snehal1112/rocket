@@ -1,8 +1,8 @@
-import { EditorState, StateField } from '@codemirror/state';
+import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
-import { setVariableContextEffect, variableContextFacet } from '../variable-context-facet';
+import { setVariableContextEffect, variableContextField } from '../variable-context-facet';
 import { variableHighlight } from '../variable-highlight';
 
 function makeContext(
@@ -26,30 +26,20 @@ afterEach(() => {
 });
 
 function createView(doc: string, context: Map<string, VariableScopeEntry>) {
-  // Attach to document.body so querySelectorAll can find rendered decorations.
   container = document.createElement('div');
   document.body.appendChild(container);
 
-  // StateField that bridges setVariableContextEffect into variableContextFacet
-  // so context updates propagate to the highlight plugin.
-  const contextField = StateField.define<Map<string, VariableScopeEntry>>({
-    create: () => context,
-    update: (value, tr) => {
-      for (const effect of tr.effects) {
-        if (effect.is(setVariableContextEffect)) return effect.value;
-      }
-      return value;
-    },
-    provide: (f) => variableContextFacet.from(f),
+  const state = EditorState.create({
+    doc,
+    extensions: [variableContextField, variableHighlight()],
   });
 
-  view = new EditorView({
-    state: EditorState.create({
-      doc,
-      extensions: [contextField, variableHighlight()],
-    }),
-    parent: container,
-  });
+  view = new EditorView({ state, parent: container });
+
+  if (context.size > 0) {
+    view.dispatch({ effects: setVariableContextEffect.of(context) });
+  }
+
   return view;
 }
 

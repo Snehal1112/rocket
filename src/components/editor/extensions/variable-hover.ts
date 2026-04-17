@@ -1,6 +1,6 @@
 import type { Extension } from '@codemirror/state';
 import { type EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
-import { variableContextFacet } from './variable-context-facet';
+import { variableContextField } from './variable-context-facet';
 
 const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
 
@@ -31,7 +31,7 @@ export function variableHoverTooltip(): Extension {
     const token = findVarAt(doc, pos);
     if (!token) return null;
 
-    const context = view.state.facet(variableContextFacet);
+    const context = view.state.field(variableContextField);
     const entry = context.get(token.varName);
 
     const sourceLabel = entry

@@ -271,6 +271,7 @@ describe('pane-store', () => {
       headers: [],
       body: '{"ok":true}',
       durationMs: 123,
+      ttfbMs: 0,
       sizeBytes: 11,
       activeView: 'pretty',
     };

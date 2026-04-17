@@ -7,7 +7,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import type { VariableScopeEntry } from '@/lib/url-variables';
-import { variableContextFacet } from './variable-context-facet';
+import { variableContextField } from './variable-context-facet';
 
 const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
 
@@ -154,7 +154,7 @@ export function variablePopoverExtension(): Extension {
           const token = findVarTokenAt(doc, pos);
 
           if (token && clickIsInsideToken(view, event, token.from, token.to)) {
-            const context = view.state.facet(variableContextFacet);
+            const context = view.state.field(variableContextField);
             const entry = context.get(token.varName);
 
             // Prevent default so the click doesn't reposition the cursor

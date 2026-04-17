@@ -12,7 +12,7 @@ import {
   rocketTheme,
   rocketThemeDark,
   setVariableContextEffect,
-  variableContextFacet,
+  variableContextField,
   variableHighlight,
   variableHoverTooltip,
 } from './extensions';
@@ -50,6 +50,9 @@ export function MultiLineEditor({
 
   const resolvedLang = language ?? detectLanguage(bodyMode, contentType);
 
+  const variableContextRef = useRef(variableContext);
+  variableContextRef.current = variableContext;
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: recreate editor only when language or readOnly changes, value and variableContext are synced via separate effects below
   useEffect(() => {
     if (!containerRef.current) return;
@@ -66,11 +69,7 @@ export function MultiLineEditor({
     if (langExt) extensions.push(langExt);
 
     if (variableContext) {
-      extensions.push(
-        variableContextFacet.of(variableContext),
-        variableHighlight(),
-        variableHoverTooltip(),
-      );
+      extensions.push(variableContextField, variableHighlight(), variableHoverTooltip());
     }
 
     if (readOnly) {
@@ -94,6 +93,11 @@ export function MultiLineEditor({
       state,
       parent: containerRef.current,
     });
+
+    // Seed the variable context field with the value available at creation time.
+    if (variableContextRef.current) {
+      view.dispatch({ effects: setVariableContextEffect.of(variableContextRef.current) });
+    }
 
     viewRef.current = view;
 

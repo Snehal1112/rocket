@@ -168,6 +168,7 @@ mod tests {
                 headers: vec![],
                 body: "ok".into(),
                 duration_ms: 10,
+                ttfb_ms: 10,
                 size_bytes: 2,
             })
         }
@@ -185,6 +186,7 @@ mod tests {
                 headers: vec![],
                 body: "".into(),
                 duration_ms: 5,
+                ttfb_ms: 5,
                 size_bytes: 0,
             })
         }
@@ -321,6 +323,7 @@ mod tests {
                     headers: vec![],
                     body: "".into(),
                     duration_ms,
+                    ttfb_ms: duration_ms,
                     size_bytes: 0,
                 })
             }

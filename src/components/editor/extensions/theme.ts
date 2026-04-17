@@ -20,12 +20,10 @@ export const rocketTheme = EditorView.theme({
     outline: 'none',
   },
   '.cm-scroller': {
-    // Vertically center the single line inside the h-8 wrapper so that
-    // variable badges and plain text share a baseline.
-    display: 'flex',
-    alignItems: 'center',
+    // line-height equal to the inner height of the h-8 wrapper (32px − 2px border)
+    // naturally centers the single text line and the placeholder widget.
     overflow: 'hidden',
-    lineHeight: '1',
+    lineHeight: '30px',
     fontFamily: 'inherit',
   },
   '.cm-content': {
@@ -33,10 +31,6 @@ export const rocketTheme = EditorView.theme({
     caretColor: 'hsl(var(--foreground))',
   },
   '.cm-line': {
-    // Flex-center so the placeholder widget and inline badges share
-    // the same vertical alignment as plain text.
-    display: 'flex',
-    alignItems: 'center',
     padding: '0 12px', // px-3
   },
   '.cm-cursor': {
@@ -45,8 +39,7 @@ export const rocketTheme = EditorView.theme({
   '.cm-placeholder': {
     color: 'hsl(var(--muted-foreground))',
     fontStyle: 'normal',
-    // Override CM6 base theme (vertical-align: top) so the placeholder
-    // shares the flex-center baseline of .cm-line.
+    // Override CM6 base theme which sets vertical-align: top.
     verticalAlign: 'middle',
   },
   '.cm-selectionBackground': {
@@ -113,6 +106,75 @@ export const rocketTheme = EditorView.theme({
   '.cm-secret-mask': {
     letterSpacing: '1px',
   },
+
+  // Autocomplete dropdown — matches shadcn DropdownMenuContent tokens exactly.
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    border: '1px solid hsl(var(--border) / 0.6)',
+    borderRadius: 'calc(var(--radius) - 4px)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
+    background: 'hsl(var(--popover) / 0.95)',
+    overflow: 'hidden',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '12px',
+    background: 'transparent',
+    maxHeight: '200px',
+    minWidth: '200px',
+    padding: '4px',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+    borderRadius: '0',
+    padding: '4px 12px',
+    lineHeight: '1.5',
+    color: 'hsl(var(--popover-foreground))',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+    background: 'hsl(var(--accent))',
+    color: 'hsl(var(--accent-foreground))',
+  },
+  '.cm-completionLabel': {
+    flex: '1',
+  },
+  '.cm-completionDetail': {
+    marginLeft: '8px',
+    fontSize: '10px',
+    fontStyle: 'normal',
+    color: 'hsl(var(--muted-foreground))',
+    opacity: '1',
+  },
+  // Info panel (resolved value tooltip).
+  '.cm-tooltip.cm-completionInfo': {
+    border: '1px solid hsl(var(--border) / 0.6)',
+    borderRadius: 'calc(var(--radius) - 4px)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
+    background: 'hsl(var(--popover) / 0.95)',
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '11px',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    padding: '4px 8px',
+    maxWidth: '300px',
+  },
+});
+
+/**
+ * Base theme override to strip CM6's hardcoded grey border and background from
+ * ALL .cm-tooltip elements. Must use EditorView.baseTheme() (not .theme()) because
+ * CM6's own base theme uses &light/.cm-tooltip selectors that .theme() cannot override.
+ * The variable popover React card provides its own border; the autocomplete dropdown
+ * re-applies its border via .cm-tooltip-autocomplete below.
+ */
+export const rocketTooltipBase = EditorView.baseTheme({
+  '&light .cm-tooltip': {
+    border: 'none',
+    background: 'transparent',
+  },
+  '&dark .cm-tooltip': {
+    border: 'none',
+    background: 'transparent',
+  },
 });
 
 /**
@@ -122,6 +184,12 @@ export const rocketTheme = EditorView.theme({
  */
 export const rocketThemeDark = EditorView.theme(
   {
+    '.cm-tooltip.cm-tooltip-autocomplete': {
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+    },
+    '.cm-tooltip.cm-completionInfo': {
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+    },
     '.cm-var-environment': {
       color: 'rgb(253, 224, 71)', // amber-300
     },

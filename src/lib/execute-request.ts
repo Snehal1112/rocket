@@ -231,6 +231,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       })),
       body: result.body,
       durationMs: result.durationMs,
+      ttfbMs: result.ttfbMs,
       sizeBytes: result.sizeBytes,
       activeView: 'pretty',
     };
@@ -255,6 +256,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       headers: [],
       body: msg,
       durationMs: 0,
+      ttfbMs: 0,
       sizeBytes: msg.length,
       activeView: 'raw',
     });

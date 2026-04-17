@@ -171,6 +171,7 @@ export interface HttpResponse {
   headers: Header[];
   body: string;
   durationMs: number;
+  ttfbMs: number;
   sizeBytes: number;
 }
 

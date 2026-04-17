@@ -99,7 +99,8 @@ impl HttpExecutor for ReqwestExecutor {
             .await
             .map_err(|e| DomainError::Http(e.to_string()))?;
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        // TTFB: time from request sent to headers received (first byte of response).
+        let ttfb_ms = start.elapsed().as_millis() as u64;
         let status = response.status().as_u16();
         let status_text = response
             .status()
@@ -118,6 +119,7 @@ impl HttpExecutor for ReqwestExecutor {
             .await
             .map_err(|e| DomainError::Http(e.to_string()))?;
 
+        let duration_ms = start.elapsed().as_millis() as u64;
         let size_bytes = body_bytes.len();
         let body = String::from_utf8_lossy(&body_bytes).to_string();
 
@@ -127,6 +129,7 @@ impl HttpExecutor for ReqwestExecutor {
             headers,
             body,
             duration_ms,
+            ttfb_ms,
             size_bytes,
         })
     }
