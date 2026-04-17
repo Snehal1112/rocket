@@ -8,10 +8,10 @@ import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { KeyValueEditor } from './KeyValueEditor';
 
-// Lazy-load Monaco so it stays out of the initial JS bundle.
-const MonacoWrapper = lazy(() =>
-  import('@/components/editor/MonacoWrapper').then((m) => ({
-    default: m.MonacoWrapper,
+// Lazy-load the editor so it stays out of the initial JS bundle.
+const MultiLineEditor = lazy(() =>
+  import('@/components/editor/MultiLineEditor').then((m) => ({
+    default: m.MultiLineEditor,
   })),
 );
 
@@ -69,7 +69,7 @@ export function BodyEditor({
       {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
         <div className='flex-1 border rounded min-h-[200px]'>
           <Suspense fallback={<EditorSkeleton />}>
-            <MonacoWrapper
+            <MultiLineEditor
               value={body.content}
               onChange={(val) => setContent(val)}
               bodyMode={body.mode}
