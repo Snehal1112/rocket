@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::atomic_write;
+
 pub struct FsHistoryRepo {
     dir: PathBuf,
 }
@@ -56,7 +58,7 @@ impl HistoryRepository for FsHistoryRepo {
         fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(entry)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
-        fs::write(self.file_path(&entry.id), yaml)?;
+        atomic_write(&self.file_path(&entry.id), yaml.as_bytes())?;
         Ok(())
     }
 

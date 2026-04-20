@@ -7,6 +7,8 @@ use rocket_collection::contract::{
 use std::path::Path;
 use ulid::Ulid;
 
+use crate::atomic_write;
+
 pub struct FsContractRepo;
 
 impl FsContractRepo {
@@ -41,7 +43,7 @@ impl ContractRepository for FsContractRepo {
         Self::ensure_dir(collection_root)?;
         let path = Self::contract_path(collection_root, contract.id);
         let yaml = serde_yaml::to_string(contract)?;
-        std::fs::write(path, yaml)?;
+        atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
 
@@ -92,7 +94,7 @@ impl ContractRepository for FsContractRepo {
         Self::ensure_dir(collection_root)?;
         let path = Self::snapshot_path(collection_root, snapshot.contract_id);
         let yaml = serde_yaml::to_string(snapshot)?;
-        std::fs::write(path, yaml)?;
+        atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
 
@@ -117,7 +119,7 @@ impl ContractRepository for FsContractRepo {
         };
         existing.append(incoming.entries.clone());
         let yaml = serde_yaml::to_string(&existing)?;
-        std::fs::write(path, yaml)?;
+        atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
 

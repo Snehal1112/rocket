@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::atomic_write;
 use crate::opencollection::OcEnvironment;
 
 pub struct FsEnvironmentRepo {
@@ -60,7 +61,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         let oc: OcEnvironment = env.clone().into();
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize environment: {e}")))?;
-        fs::write(self.file_path(&env.name), yaml)?;
+        atomic_write(&self.file_path(&env.name), yaml.as_bytes())?;
         Ok(())
     }
 

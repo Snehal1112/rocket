@@ -1,3 +1,4 @@
+mod atomic_write;
 pub mod file_watcher;
 pub(crate) mod migration;
 pub mod oc_conversions;
@@ -16,6 +17,7 @@ pub mod reqwest_executor;
 pub mod shared_path_collection_repo;
 mod tauri_tracing_layer;
 
+pub use atomic_write::atomic_write;
 pub use file_watcher::NotifyFileWatcher;
 pub use fs_audit_log_repo::FsAuditLogRepo;
 pub use fs_collection_repo::FsCollectionRepo;

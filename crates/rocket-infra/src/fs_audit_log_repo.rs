@@ -51,8 +51,10 @@ impl AuditLogRepository for FsAuditLogRepo {
             .append(true)
             .open(&self.path)?;
         let line = serde_json::to_string(event)?;
-        file.write_all(line.as_bytes())?;
-        file.write_all(b"\n")?;
+        // Write the JSON line and newline in one call to avoid a partial-line on crash.
+        let mut record = line.into_bytes();
+        record.push(b'\n');
+        file.write_all(&record)?;
         file.sync_data()?;
         Ok(())
     }

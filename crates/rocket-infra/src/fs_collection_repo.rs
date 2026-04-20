@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::atomic_write;
+
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable, Folder,
 };
@@ -33,7 +35,7 @@ fn read_uid_from_yaml(dir: &Path) -> String {
                 let uid = read_legacy_uid(dir);
                 oc.uid = Some(uid.clone());
                 if let Ok(yaml) = serde_yaml::to_string(&oc) {
-                    if fs::write(&oc_path, yaml).is_ok() {
+                    if atomic_write(&oc_path, yaml.as_bytes()).is_ok() {
                         cleanup_legacy_uid(dir);
                     }
                 }
@@ -55,7 +57,7 @@ fn read_uid_from_yaml(dir: &Path) -> String {
                 let uid = read_legacy_uid(dir);
                 info.uid = Some(uid.clone());
                 if let Ok(yaml) = serde_yaml::to_string(&info) {
-                    if fs::write(&folder_path, yaml).is_ok() {
+                    if atomic_write(&folder_path, yaml.as_bytes()).is_ok() {
                         cleanup_legacy_uid(dir);
                     }
                 }
@@ -235,7 +237,7 @@ impl CollectionRepository for FsCollectionRepo {
         };
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
-        fs::write(path.join("opencollection.yml"), yaml)?;
+        atomic_write(&path.join("opencollection.yml"), yaml.as_bytes())?;
 
         Ok(Collection::new(name))
     }
@@ -340,7 +342,7 @@ impl CollectionRepository for FsCollectionRepo {
         let oc = request_to_oc_http_request(request.clone());
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
-        fs::write(&file_path, yaml)?;
+        atomic_write(&file_path, yaml.as_bytes())?;
 
         // Return the actual filename relative to the collection directory.
         let actual = file_path
@@ -395,7 +397,7 @@ impl CollectionRepository for FsCollectionRepo {
         };
         let yaml = serde_yaml::to_string(&info)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-        fs::write(dir_path.join("folder.yml"), yaml)?;
+        atomic_write(&dir_path.join("folder.yml"), yaml.as_bytes())?;
 
         Ok(())
     }
@@ -448,7 +450,7 @@ impl CollectionRepository for FsCollectionRepo {
                     info.name = new_name;
                     let yaml = serde_yaml::to_string(&info)
                         .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-                    fs::write(&folder_yml, yaml)?;
+                    atomic_write(&folder_yml, yaml.as_bytes())?;
                 }
             }
         }
@@ -468,7 +470,7 @@ impl CollectionRepository for FsCollectionRepo {
         }
         let yaml = serde_yaml::to_string(ordered_names)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize order: {e}")))?;
-        fs::write(dir.join("_order.yml"), yaml)?;
+        atomic_write(&dir.join("_order.yml"), yaml.as_bytes())?;
         Ok(())
     }
 
@@ -578,7 +580,7 @@ impl CollectionRepository for FsCollectionRepo {
 
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
-        fs::write(&path, yaml)?;
+        atomic_write(&path, yaml.as_bytes())?;
 
         // Clean up legacy collection.json.
         let legacy = self.collection_path(name).join("collection.json");
@@ -661,7 +663,7 @@ impl CollectionRepository for FsCollectionRepo {
         });
         let yaml = serde_yaml::to_string(&info)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-        fs::write(&folder_yml_path, yaml)?;
+        atomic_write(&folder_yml_path, yaml.as_bytes())?;
         Ok(())
     }
 
@@ -732,7 +734,7 @@ impl CollectionRepository for FsCollectionRepo {
         });
         let yaml = serde_yaml::to_string(&req)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request file: {e}")))?;
-        fs::write(&file_path, yaml)?;
+        atomic_write(&file_path, yaml.as_bytes())?;
         Ok(())
     }
 }

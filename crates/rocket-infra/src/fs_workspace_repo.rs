@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_workspace::{WorkspaceRegistry, WorkspaceRepository};
 
+use crate::atomic_write;
+
 pub struct FsWorkspaceRepo {
     registry_path: PathBuf,
     default_workspace_path: PathBuf,
@@ -50,7 +52,7 @@ impl WorkspaceRepository for FsWorkspaceRepo {
             DomainError::InvalidInput(format!("Failed to serialize workspaces.yml: {e}"))
         })?;
 
-        fs::write(&self.registry_path, content).map_err(|e| {
+        atomic_write(&self.registry_path, content.as_bytes()).map_err(|e| {
             DomainError::Io(format!("Failed to write workspaces.yml: {e}"))
         })
     }

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use rocket_http::{CookieJar, CookieRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::atomic_write;
+
 pub struct FsCookieRepo {
     dir: PathBuf,
 }
@@ -54,7 +56,7 @@ impl CookieRepository for FsCookieRepo {
         fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(jar)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
-        fs::write(self.file_path(&jar.domain), yaml)?;
+        atomic_write(&self.file_path(&jar.domain), yaml.as_bytes())?;
         Ok(())
     }
 
