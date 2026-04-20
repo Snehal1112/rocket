@@ -101,7 +101,7 @@ export function CollectionVariablesEditor({
                     placeholder='Default value'
                     value={v.initialValue}
                     onChange={(e) => updateVar(i, { initialValue: e.target.value })}
-                    className='text-sm'
+                    className='text-sm font-mono'
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>
@@ -113,7 +113,7 @@ export function CollectionVariablesEditor({
                     placeholder='Current value'
                     value={v.value}
                     onChange={(e) => updateVar(i, { value: e.target.value })}
-                    className='text-sm'
+                    className='text-sm font-mono'
                     type={v.secret ? 'password' : 'text'}
                   />
                 </TableCell>

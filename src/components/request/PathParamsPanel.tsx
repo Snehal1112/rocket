@@ -49,7 +49,7 @@ export function PathParamsPanel({
               value={entry.key}
               readOnly
               tabIndex={-1}
-              className='flex-1 text-xs bg-muted/50 cursor-default'
+              className='flex-1 text-xs bg-muted/50 cursor-default font-mono'
             />
             <SingleLineEditor
               placeholder='Value'

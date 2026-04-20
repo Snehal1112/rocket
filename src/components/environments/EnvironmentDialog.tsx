@@ -236,7 +236,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           placeholder='Key'
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
-                          className='flex-1 text-sm'
+                          className='flex-1 text-sm font-mono'
                           aria-label={`Variable key ${idx + 1}`}
                         />
                         <Input
@@ -244,7 +244,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
-                          className='flex-1 text-sm'
+                          className='flex-1 text-sm font-mono'
                           aria-label={`Variable value ${idx + 1}`}
                         />
                         <Button

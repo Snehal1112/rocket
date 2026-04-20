@@ -39,6 +39,7 @@
     --chart-4: 283 52% 49%;
     --chart-5: 343 74% 52%;
     --radius: 0.7rem;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
     --background: 0 0% 12%;

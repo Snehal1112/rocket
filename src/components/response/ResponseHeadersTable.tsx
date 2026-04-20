@@ -69,7 +69,7 @@ export function ResponseHeadersTable({ headers }: ResponseHeadersTableProps) {
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: headers may share names so index is needed for uniqueness
                 <TableRow key={`${h.key}-${i}`}>
-                  <TableCell className='px-2 py-1.5 text-xs font-semibold text-foreground'>
+                  <TableCell className='px-2 py-1.5 text-xs font-semibold font-mono text-foreground'>
                     {h.key}
                   </TableCell>
                   <TableCell className='break-all px-2 py-1.5 font-mono text-xs text-muted-foreground'>

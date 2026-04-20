@@ -663,7 +663,11 @@ export function AuthEditor({
                   <div>
                     <Label className='mb-1 block'>Refresh Token</Label>
                     <div className='flex gap-1.5'>
-                      <Input className='flex-1 text-sm truncate' readOnly value={o.refreshToken} />
+                      <Input
+                        className='flex-1 text-sm truncate font-mono'
+                        readOnly
+                        value={o.refreshToken}
+                      />
                       <Button
                         variant='outline'
                         size='sm'
