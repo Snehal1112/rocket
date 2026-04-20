@@ -76,6 +76,7 @@ export function GitToolbarButton() {
       onClick={() => void handleClick()}
       disabled={!activeCollection}
       title='Open Git panel'
+      aria-label='Open Git panel'
     >
       <GitBranch className='h-3.5 w-3.5 text-muted-foreground' />
     </Button>

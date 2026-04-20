@@ -14,6 +14,8 @@ export function RocketLiftOff({ className = '' }: Props) {
       fill='none'
       xmlns='http://www.w3.org/2000/svg'
       className={`mx-auto opacity-80 drop-shadow-lg ${className}`}
+      aria-hidden='true'
+      focusable='false'
     >
       {/* Exhaust glow */}
       <ellipse cx='60' cy='108' rx='12' ry='4' className='fill-primary/15' />

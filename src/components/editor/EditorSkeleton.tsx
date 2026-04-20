@@ -11,12 +11,12 @@ export function EditorSkeleton() {
       {/* Line numbers column. */}
       <div className='flex w-10 shrink-0 flex-col gap-3 border-r border-border px-2 pt-3'>
         {[0, 1, 2, 3].map((n) => (
-          <div key={n} className='h-2 w-6 animate-pulse rounded-sm bg-muted' />
+          <div key={n} className='h-2 w-6 motion-safe:animate-pulse rounded-sm bg-muted' />
         ))}
       </div>
 
       {/* Code content area with shimmer lines. */}
-      <div className='flex flex-1 animate-pulse flex-col gap-3 p-3'>
+      <div className='flex flex-1 motion-safe:animate-pulse flex-col gap-3 p-3'>
         {LINE_WIDTHS.map((width) => (
           <div key={width} className={cn('h-2 rounded-sm bg-muted/50', width)} />
         ))}

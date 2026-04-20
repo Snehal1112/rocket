@@ -7,7 +7,14 @@ interface Props {
 
 export function RocketError({ className = '' }: Props) {
   return (
-    <svg viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg' className={className}>
+    <svg
+      viewBox='0 0 200 200'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      className={className}
+      aria-hidden='true'
+      focusable='false'
+    >
       {/* Background danger glow. */}
       <circle cx='100' cy='105' r='75' className='fill-destructive/5' />
 

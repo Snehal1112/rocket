@@ -177,9 +177,9 @@ export function FolderNode({
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? (
-                  <FolderOpen strokeWidth={10} className='h-5 w-5 shrink-0' />
+                  <FolderOpen aria-hidden='true' strokeWidth={10} className='h-5 w-5 shrink-0' />
                 ) : (
-                  <Folder strokeWidth={10} className='h-5 w-5 shrink-0 ' />
+                  <Folder aria-hidden='true' strokeWidth={10} className='h-5 w-5 shrink-0 ' />
                 )}
                 {isRenaming ? (
                   <Input
@@ -216,7 +216,7 @@ export function FolderNode({
                   className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <MoreHorizontal className='h-3 w-3' />
+                  <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>

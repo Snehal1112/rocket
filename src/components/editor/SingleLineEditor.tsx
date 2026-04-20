@@ -60,6 +60,8 @@ export interface SingleLineEditorProps {
   onSubmit?: () => void;
   /** Raw keydown handler for additional shortcuts. */
   onKeyDown?: (event: KeyboardEvent) => void;
+  /** Accessible label forwarded to the CodeMirror contenteditable element. */
+  'aria-label'?: string;
 }
 
 /**
@@ -83,6 +85,7 @@ export function SingleLineEditor({
   onCurlImport,
   onSubmit,
   onKeyDown: _onKeyDown,
+  'aria-label': ariaLabel,
 }: SingleLineEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -122,6 +125,8 @@ export function SingleLineEditor({
           onChangeRef.current(update.state.doc.toString());
         }
       }),
+      // Forward aria-label to the CM contenteditable element when provided.
+      ...(ariaLabel ? [EditorView.contentAttributes.of({ 'aria-label': ariaLabel })] : []),
     ];
 
     if (placeholder) {
@@ -181,6 +186,7 @@ export function SingleLineEditor({
     !!queryParams,
     !!onCurlImport,
     !!isSecret,
+    ariaLabel,
   ]);
 
   // Stable ref so the creation effect can read the current context without

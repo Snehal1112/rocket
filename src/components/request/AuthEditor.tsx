@@ -260,6 +260,7 @@ export function AuthEditor({
             <User className='h-3.5 w-3.5 text-muted-foreground' />
             <SingleLineEditor
               placeholder='Username'
+              aria-label='Username'
               className='flex-1 text-sm'
               value={auth.basic.username}
               onChange={(newVal) =>
@@ -276,6 +277,7 @@ export function AuthEditor({
             <Lock className='h-3.5 w-3.5 text-muted-foreground' />
             <SingleLineEditor
               placeholder='Password'
+              aria-label='Password'
               isSecret
               className='flex-1 text-sm'
               value={auth.basic.password}
@@ -298,6 +300,7 @@ export function AuthEditor({
           <Key className='h-3.5 w-3.5 text-muted-foreground' />
           <SingleLineEditor
             placeholder='Token'
+            aria-label='Bearer token'
             isSecret
             className='flex-1 text-sm'
             value={auth.bearer.token}
@@ -318,6 +321,7 @@ export function AuthEditor({
         <div className='space-y-2'>
           <SingleLineEditor
             placeholder='Key'
+            aria-label='API key name'
             className='text-sm'
             value={auth.apiKey.key}
             onChange={(newVal) =>
@@ -331,6 +335,7 @@ export function AuthEditor({
           />
           <SingleLineEditor
             placeholder='Value'
+            aria-label='API key value'
             isSecret
             className='text-sm'
             value={auth.apiKey.value}
@@ -616,12 +621,12 @@ export function AuthEditor({
                     </div>
                     <div className='flex items-center gap-2'>
                       <Checkbox
-                        id='verify-ssl'
+                        id='oauth2-verify-ssl'
                         checked={o.verifySsl}
                         onCheckedChange={(checked) => patchOAuth2({ verifySsl: !!checked })}
                       />
                       <Label
-                        htmlFor='verify-ssl'
+                        htmlFor='oauth2-verify-ssl'
                         className='text-xs text-muted-foreground cursor-pointer'
                       >
                         Verify SSL certificates

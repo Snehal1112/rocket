@@ -7,7 +7,14 @@ interface Props {
 
 export function RocketCloud({ className = '' }: Props) {
   return (
-    <svg viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg' className={className}>
+    <svg
+      viewBox='0 0 200 200'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      className={className}
+      aria-hidden='true'
+      focusable='false'
+    >
       {/* Sky glow. */}
       <circle cx='100' cy='80' r='70' className='fill-primary/5' />
 

@@ -108,7 +108,12 @@ export function EnvironmentSwitcher() {
     <>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger asChild>
-          <Button variant='ghost' size='sm' className='h-7 gap-2.5 px-2 text-xs'>
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-7 gap-2.5 px-2 text-xs'
+            aria-label='Switch environment'
+          >
             {activeEnvId && (
               <span className='flex items-center gap-1'>
                 <Database className='h-3 w-3 text-muted-foreground shrink-0' />
@@ -124,7 +129,7 @@ export function EnvironmentSwitcher() {
             {!activeEnvId && !globalEnvName && (
               <span className='text-muted-foreground'>No Environment</span>
             )}
-            <ChevronDown className='h-3 w-3 opacity-50' />
+            <ChevronDown className='h-3 w-3 opacity-50' aria-hidden='true' />
           </Button>
         </PopoverTrigger>
         <PopoverContent align='start' className='w-56 p-0'>
@@ -179,9 +184,12 @@ export function EnvironmentSwitcher() {
                 </div>
               ) : (
                 <>
-                  <div className='py-1'>
+                  <div className='py-1' role='radiogroup' aria-label='Active environment'>
+                    {/* biome-ignore lint/a11y/useSemanticElements: styled button with click handler, not a native radio */}
                     <button
                       type='button'
+                      role='radio'
+                      aria-checked={activeEnvId === null}
                       className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                       onClick={() => {
                         setActiveEnv(null);
@@ -190,13 +198,17 @@ export function EnvironmentSwitcher() {
                     >
                       <Check
                         className='h-3 w-3 shrink-0'
+                        aria-hidden='true'
                         style={{ opacity: activeEnvId === null ? 1 : 0 }}
                       />
                       <span className='text-muted-foreground'>No Environment</span>
                     </button>
                     {environments.map((env) => (
+                      // biome-ignore lint/a11y/useSemanticElements: styled button with click handler
                       <button
                         type='button'
+                        role='radio'
+                        aria-checked={activeEnvId === env.name}
                         key={env.name}
                         className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                         onClick={() => {
@@ -206,6 +218,7 @@ export function EnvironmentSwitcher() {
                       >
                         <Check
                           className='h-3 w-3 shrink-0'
+                          aria-hidden='true'
                           style={{ opacity: activeEnvId === env.name ? 1 : 0 }}
                         />
                         <span className='flex-1 text-left truncate'>{env.name}</span>
@@ -248,6 +261,7 @@ export function EnvironmentSwitcher() {
                         type='button'
                         className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer'
                         onClick={() => setIsCreatingCollection(true)}
+                        aria-label='Add collection environment'
                       >
                         <Plus className='h-3 w-3' />
                       </button>
@@ -288,9 +302,12 @@ export function EnvironmentSwitcher() {
                 </div>
               ) : (
                 <>
-                  <div className='py-1'>
+                  <div className='py-1' role='radiogroup' aria-label='Active global environment'>
+                    {/* biome-ignore lint/a11y/useSemanticElements: styled button with click handler */}
                     <button
                       type='button'
+                      role='radio'
+                      aria-checked={globalEnvName === null}
                       className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                       onClick={() => {
                         void setGlobalEnv(null);
@@ -299,13 +316,17 @@ export function EnvironmentSwitcher() {
                     >
                       <Check
                         className='h-3 w-3 shrink-0'
+                        aria-hidden='true'
                         style={{ opacity: globalEnvName === null ? 1 : 0 }}
                       />
                       <span className='text-muted-foreground'>No Global Environment</span>
                     </button>
                     {globalEnvironments.map((env) => (
+                      // biome-ignore lint/a11y/useSemanticElements: styled button with click handler
                       <button
                         type='button'
+                        role='radio'
+                        aria-checked={globalEnvName === env.name}
                         key={env.name}
                         className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                         onClick={() => {
@@ -315,6 +336,7 @@ export function EnvironmentSwitcher() {
                       >
                         <Check
                           className='h-3 w-3 shrink-0'
+                          aria-hidden='true'
                           style={{ opacity: globalEnvName === env.name ? 1 : 0 }}
                         />
                         <span className='flex-1 text-left truncate'>{env.name}</span>
@@ -354,6 +376,7 @@ export function EnvironmentSwitcher() {
                         type='button'
                         className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer'
                         onClick={() => setIsCreatingGlobal(true)}
+                        aria-label='Add global environment'
                       >
                         <Plus className='h-3 w-3' />
                       </button>

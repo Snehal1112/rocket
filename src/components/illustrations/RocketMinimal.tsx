@@ -8,7 +8,14 @@ interface Props {
 
 export function RocketMinimal({ className = '' }: Props) {
   return (
-    <svg viewBox='0 0 120 160' fill='none' xmlns='http://www.w3.org/2000/svg' className={className}>
+    <svg
+      viewBox='0 0 120 160'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      className={className}
+      aria-hidden='true'
+      focusable='false'
+    >
       {/* Shadow / ground reflection. */}
       <ellipse cx='60' cy='152' rx='22' ry='4' className='fill-muted-foreground/10' />
 

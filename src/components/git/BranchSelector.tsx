@@ -110,6 +110,7 @@ export function BranchSelector() {
               setSwitchError(null);
             }}
             className='h-7 text-sm'
+            aria-label='Search branches'
           />
         </div>
         <Separator />
@@ -210,6 +211,7 @@ export function BranchSelector() {
               }}
               className='h-7 text-sm'
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              aria-label='New branch name'
             />
             <Button
               variant='outline'
@@ -217,6 +219,7 @@ export function BranchSelector() {
               className='h-7 shrink-0'
               onClick={handleCreate}
               disabled={!newBranchName.trim()}
+              aria-label='Create branch'
             >
               <Plus className='h-3.5 w-3.5' />
             </Button>

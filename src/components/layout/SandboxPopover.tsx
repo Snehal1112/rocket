@@ -11,7 +11,13 @@ export function SandboxPopover() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant='ghost' size='icon' className='h-7 w-7' title='JavaScript Sandbox'>
+        <Button
+          variant='ghost'
+          size='icon'
+          className='h-7 w-7'
+          title='JavaScript Sandbox'
+          aria-label='JavaScript Sandbox'
+        >
           <ShieldCheck
             fill='currentColor'
             className={cn(

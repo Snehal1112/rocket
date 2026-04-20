@@ -80,6 +80,7 @@ export function AuditLogTab() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           className='h-7 text-xs'
+          aria-label='Filter audit events'
         />
       </div>
 
@@ -105,10 +106,18 @@ export function AuditLogTab() {
           <table className='w-full text-left'>
             <thead className='text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 sticky top-0 bg-background'>
               <tr>
-                <th className='py-2 px-3 font-medium'>When</th>
-                <th className='py-2 px-3 font-medium'>Event</th>
-                <th className='py-2 px-3 font-medium'>Controls</th>
-                <th className='py-2 px-3 font-medium'>Hash</th>
+                <th scope='col' className='py-2 px-3 font-medium'>
+                  When
+                </th>
+                <th scope='col' className='py-2 px-3 font-medium'>
+                  Event
+                </th>
+                <th scope='col' className='py-2 px-3 font-medium'>
+                  Controls
+                </th>
+                <th scope='col' className='py-2 px-3 font-medium'>
+                  Hash
+                </th>
               </tr>
             </thead>
             <tbody>

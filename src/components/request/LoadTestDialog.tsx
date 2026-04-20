@@ -98,9 +98,9 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
         <div className='space-y-4 py-2'>
           <div className='grid grid-cols-2 gap-4'>
             <div className='space-y-1.5'>
-              <Label>Concurrent requests</Label>
+              <Label htmlFor='load-test-concurrency'>Concurrent requests</Label>
               <Select value={concurrency} onValueChange={setConcurrency} disabled={running}>
-                <SelectTrigger className='h-8 text-sm'>
+                <SelectTrigger id='load-test-concurrency' className='h-8 text-sm'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -113,8 +113,9 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
               </Select>
             </div>
             <div className='space-y-1.5'>
-              <Label>Total requests</Label>
+              <Label htmlFor='load-test-total'>Total requests</Label>
               <Input
+                id='load-test-total'
                 type='number'
                 min={1}
                 max={10000}
@@ -127,8 +128,9 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
           </div>
 
           <div className='space-y-1.5'>
-            <Label>Delay between requests (s)</Label>
+            <Label htmlFor='load-test-delay'>Delay between requests (s)</Label>
             <Input
+              id='load-test-delay'
               type='number'
               min={0}
               max={60}

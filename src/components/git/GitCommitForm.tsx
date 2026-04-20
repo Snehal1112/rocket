@@ -33,6 +33,7 @@ export function GitCommitForm() {
         }}
         className='text-sm min-h-[60px] resize-none'
         disabled={committing}
+        aria-label='Commit message'
       />
       <Button
         onClick={handleCommit}

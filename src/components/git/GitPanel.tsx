@@ -85,6 +85,17 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
     void checkAndLoad(collectionPath);
   }, [collectionPath, checkAndLoad, loadedPath, storeIsRepo]);
 
+  // Keyboard handler for the vertical separator: ArrowLeft/ArrowRight adjust width.
+  const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setLeftWidth((w) => Math.min(500, Math.max(200, w - 20)));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setLeftWidth((w) => Math.min(500, Math.max(200, w + 20)));
+    }
+  }, []);
+
   // Load the commit log when the commits view is opened.
   useEffect(() => {
     if (rightPanel.kind === 'commits') void refreshLog();
@@ -231,6 +242,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             window.addEventListener('pointermove', onMove);
             window.addEventListener('pointerup', onUp);
           }}
+          onKeyDown={handleSeparatorKeyDown}
         />
 
         {/* RIGHT PANEL */}

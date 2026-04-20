@@ -86,6 +86,7 @@ export function CollectionVariablesEditor({
                 {/* Key. */}
                 <TableCell className='px-1.5 py-1.5'>
                   <Input
+                    aria-label={`Variable name, row ${i + 1}`}
                     placeholder='VARIABLE_NAME'
                     value={v.key}
                     onChange={(e) => updateVar(i, { key: e.target.value })}
@@ -96,6 +97,7 @@ export function CollectionVariablesEditor({
                 {/* Initial value. */}
                 <TableCell className='px-1.5 py-1.5'>
                   <Input
+                    aria-label={`Initial value, row ${i + 1}`}
                     placeholder='Default value'
                     value={v.initialValue}
                     onChange={(e) => updateVar(i, { initialValue: e.target.value })}
@@ -107,6 +109,7 @@ export function CollectionVariablesEditor({
                 {/* Current value. */}
                 <TableCell className='px-1.5 py-1.5'>
                   <Input
+                    aria-label={`Current value, row ${i + 1}`}
                     placeholder='Current value'
                     value={v.value}
                     onChange={(e) => updateVar(i, { value: e.target.value })}
@@ -139,7 +142,7 @@ export function CollectionVariablesEditor({
                     size='icon'
                     className='h-6 w-6'
                     onClick={() => removeVar(i)}
-                    aria-label='Remove variable'
+                    aria-label={`Delete variable ${i + 1}`}
                   >
                     <X className='h-3.5 w-3.5' />
                   </Button>

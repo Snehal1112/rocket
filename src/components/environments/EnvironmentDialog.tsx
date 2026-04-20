@@ -200,6 +200,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 className='h-7 w-7'
                 onClick={() => setIsAddingEnv(true)}
                 title='Add environment'
+                aria-label='Add environment'
               >
                 <Plus className='h-3.5 w-3.5' />
               </Button>
@@ -210,6 +211,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 onClick={handleDeleteEnv}
                 disabled={!selectedName}
                 title='Delete environment'
+                aria-label='Delete environment'
               >
                 <Trash2 className='h-3.5 w-3.5' />
               </Button>
@@ -235,6 +237,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
                           className='flex-1 text-sm'
+                          aria-label={`Variable key ${idx + 1}`}
                         />
                         <Input
                           placeholder='Value'
@@ -242,6 +245,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
                           className='flex-1 text-sm'
+                          aria-label={`Variable value ${idx + 1}`}
                         />
                         <Button
                           variant='ghost'
@@ -261,6 +265,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           size='icon'
                           className='h-6 w-6 shrink-0'
                           onClick={() => removeVariable(idx)}
+                          aria-label={`Delete variable ${idx + 1}`}
                         >
                           <X className='h-3.5 w-3.5' />
                         </Button>

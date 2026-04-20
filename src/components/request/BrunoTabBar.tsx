@@ -14,11 +14,15 @@ interface BrunoTabBarProps {
 
 export function BrunoTabBar({ tabs, rightContent }: BrunoTabBarProps) {
   return (
-    <div className='flex items-center border-b border-border px-3 shrink-0'>
+    <div className='flex items-center border-b border-border px-3 shrink-0' role='tablist'>
       {tabs.map((tab) => (
         <button
           key={tab.value}
           type='button'
+          role='tab'
+          id={`tab-${tab.value}`}
+          aria-selected={tab.isActive}
+          aria-controls={`panel-${tab.value}`}
           onClick={tab.onClick}
           className={cn(
             'py-2 mr-4 text-sm border-b-2 -mb-px transition-colors',

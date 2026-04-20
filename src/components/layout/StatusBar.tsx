@@ -28,6 +28,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         onClick={toggleTheme}
         className='h-5 w-5'
         title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {isDark ? (
           <Sun className='h-3.5 w-3.5 text-muted-foreground' />

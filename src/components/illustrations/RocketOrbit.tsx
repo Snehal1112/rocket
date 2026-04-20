@@ -7,7 +7,14 @@ interface Props {
 
 export function RocketOrbit({ className = '' }: Props) {
   return (
-    <svg viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg' className={className}>
+    <svg
+      viewBox='0 0 200 200'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      className={className}
+      aria-hidden='true'
+      focusable='false'
+    >
       {/* Planet. */}
       <circle cx='100' cy='110' r='40' className='fill-muted/80' />
       <ellipse cx='90' cy='105' rx='20' ry='25' className='fill-muted-foreground/8' />

@@ -306,7 +306,12 @@ export function CollectionsSidebar() {
   }, [fetchCollections]);
 
   return (
-    <div className='h-full flex flex-col bg-card/50 border-r border-border-70'>
+    // biome-ignore lint/a11y/useSemanticElements: existing div layout cannot change to nav without layout refactor
+    <div
+      className='h-full flex flex-col bg-card/50 border-r border-border-70'
+      role='navigation'
+      aria-label='Collections'
+    >
       <div className='flex-1 flex flex-col overflow-hidden'>
         {/* View tabs and action icons (Bruno-style). */}
         <div className='flex items-center justify-between px-3 pt-2.5 pb-1'>

@@ -179,6 +179,17 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     }
   }, [tab.source?.collection, tab.source?.path]);
 
+  // Keyboard handler for the separator: ArrowUp/ArrowDown adjust split in 5% steps.
+  const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setRequestHeight((h) => Math.min(90, Math.max(10, h - 5)));
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setRequestHeight((h) => Math.min(90, Math.max(10, h + 5)));
+    }
+  }, []);
+
   // Drag handle for request/response split.
   const handleSeparatorDown = useCallback(
     (e: React.PointerEvent) => {
@@ -769,8 +780,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             className='h-7'
             onClick={() => setShowLoadTest(true)}
             title='Load test'
+            aria-label='Load test'
           >
-            <Zap className='h-3.5 w-3.5' />
+            <Zap className='h-3.5 w-3.5' aria-hidden='true' />
           </Button>
 
           {!tab.source && (
@@ -922,7 +934,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                     <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
                     <div className='flex items-center gap-2.5 flex-1'>
                       <div className='flex-1'>
-                        <span className='text-sm'>Timeout</span>
+                        <label htmlFor='timeout-ms' className='text-sm'>
+                          Timeout
+                        </label>
                         <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
                           Max wait time before aborting the request.
                         </p>
@@ -966,10 +980,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       {/* ── Drag separator and response area — hidden on Docs/Settings tabs. ── */}
       {!expandFull && (
         <>
+          {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
           <div
+            role='separator'
+            tabIndex={0}
+            aria-orientation='horizontal'
+            aria-label='Resize request and response panels'
+            aria-valuemin={10}
+            aria-valuemax={90}
+            aria-valuenow={Math.round(requestHeight)}
             onPointerDown={handleSeparatorDown}
+            onKeyDown={handleSeparatorKeyDown}
             className={cn(
               'h-3 flex items-center justify-center cursor-row-resize select-none border-y transition-colors',
+              'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
               isDragging
                 ? 'bg-primary/15 border-primary/50'
                 : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',

@@ -7,7 +7,14 @@ interface Props {
 
 export function RocketClock({ className = '' }: Props) {
   return (
-    <svg viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg' className={className}>
+    <svg
+      viewBox='0 0 200 200'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      className={className}
+      aria-hidden='true'
+      focusable='false'
+    >
       <circle cx='100' cy='100' r='75' className='fill-primary/5' />
 
       {/* Clock. */}

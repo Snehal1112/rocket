@@ -130,6 +130,20 @@
   background: transparent;
 }
 
+/* Respect user's motion preference (WCAG 2.3.3 AAA). */
+@media (prefers-reduced-motion: reduce) {
+  @layer base {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms;
+      animation-iteration-count: 1;
+      transition-duration: 0.01ms;
+      scroll-behavior: auto;
+    }
+  }
+}
+
 /* Linux: transparent window with border and rounded corners.
    Body padding creates a visible gap for the border to render against the desktop. */
 html.linux body {
@@ -154,7 +168,8 @@ html.linux #root {
   display: none;
 }
 
-.git-file-row:hover .git-row-actions {
+.git-file-row:hover .git-row-actions,
+.git-file-row:focus-within .git-row-actions {
   display: flex;
 }
 
@@ -163,7 +178,8 @@ html.linux #root {
   display: none;
 }
 
-.branch-row:hover .branch-row-actions {
+.branch-row:hover .branch-row-actions,
+.branch-row:focus-within .branch-row-actions {
   display: flex;
 }
 
@@ -172,7 +188,8 @@ html.linux #root {
   display: none;
 }
 
-.stash-row:hover .stash-row-actions {
+.stash-row:hover .stash-row-actions,
+.stash-row:focus-within .stash-row-actions {
   display: flex;
 }
 
@@ -181,7 +198,8 @@ html.linux #root {
   display: none;
 }
 
-.remote-row:hover .remote-row-actions {
+.remote-row:hover .remote-row-actions,
+.remote-row:focus-within .remote-row-actions {
   display: flex;
 }
 
