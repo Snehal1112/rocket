@@ -673,7 +673,7 @@ impl GitService for Git2Service {
             } else {
                 conflicted.join(", ")
             };
-            return Err(DomainError::Internal(format!(
+            return Err(DomainError::Conflict(format!(
                 "merge conflict: resolve conflicts in {file_list} and commit to complete the pull"
             )));
         }

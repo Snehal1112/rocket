@@ -1,6 +1,26 @@
-use rocket_import::ImportService;
-use std::path::PathBuf;
+use rocket_import::{EnvironmentRepositoryFactory, ImportService};
+use rocket_environment::EnvironmentRepository;
+use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+struct FsEnvFactory(PathBuf);
+impl EnvironmentRepositoryFactory for FsEnvFactory {
+    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+        Box::new(FsEnvironmentRepo::new(
+            self.0.join("collections").join(collection_name).join("environments"),
+        ))
+    }
+}
+
+fn make_service(workspace_path: &Path) -> ImportService {
+    let path = workspace_path.to_path_buf();
+    ImportService::new(
+        path.clone(),
+        Box::new(FsCollectionRepo::new(path.join("collections"))),
+        Box::new(FsEnvFactory(path)),
+    )
+}
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/my-api")
@@ -13,7 +33,7 @@ fn workspace_fixture_path() -> PathBuf {
 #[test]
 fn imports_fixture_collection_successfully() {
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
 
     let report = service
         .import_collection(&fixture_path(), "default")
@@ -33,7 +53,7 @@ fn imports_fixture_collection_successfully() {
 #[test]
 fn import_report_counts_correctly() {
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
 
     let report = service.import_collection(&fixture_path(), "default").unwrap();
 
@@ -45,7 +65,7 @@ fn import_report_counts_correctly() {
 #[test]
 fn auto_renames_on_collection_name_conflict() {
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
 
     // First import.
     service.import_collection(&fixture_path(), "default").unwrap();
@@ -63,7 +83,7 @@ fn auto_renames_on_collection_name_conflict() {
 #[test]
 fn import_collection_fails_for_non_bruno_directory() {
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
 
     // workspace_dir itself has no bruno.json.
     let result = service.import_collection(workspace_dir.path(), "default");
@@ -92,7 +112,7 @@ fn import_workspace_imports_all_sub_collections() {
     std::fs::write(col_b.join("req.bru"), "meta {\n  name: Req B\n  type: http\n  seq: 1\n}\npost {\n  url: https://example.com/b\n}\n").unwrap();
 
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
     let report = service.import_workspace(ws_path, false, Some("default")).unwrap();
 
     assert_eq!(report.imported, 2, "expected 2 requests imported, got {}", report.imported);
@@ -114,7 +134,7 @@ fn parse_error_in_file_is_reported_as_skipped() {
     std::fs::write(col_dir.join("good.bru"), "meta {\n  name: Good\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n").unwrap();
 
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
     let report = service.import_collection(&col_dir, "default").unwrap();
 
     assert_eq!(report.total_files, 2);
@@ -165,7 +185,7 @@ fn import_auto_modern_collection_directory() {
     make_modern_collection_dir(&col_src, "my-col", 3);
 
     let ws = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws.path());
+    let service = make_service(ws.path());
     let report = service.import_auto(&col_src, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "collection");
@@ -189,7 +209,7 @@ fn import_auto_modern_workspace_directory() {
     make_modern_collection_dir(&col_b, "col-b", 1);
 
     let ws_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let service = make_service(ws_dir.path());
     let report = service.import_auto(&ws_src, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "workspace");
@@ -202,7 +222,7 @@ fn import_auto_modern_workspace_directory() {
 #[test]
 fn import_auto_legacy_collection_still_works() {
     let workspace_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(workspace_dir.path());
+    let service = make_service(workspace_dir.path());
 
     let report = service
         .import_auto(&fixture_path(), "default", false)
@@ -217,7 +237,7 @@ fn import_auto_legacy_collection_still_works() {
 fn import_auto_returns_error_for_non_bruno_dir() {
     let dir = TempDir::new().unwrap();
     let ws = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws.path());
+    let service = make_service(ws.path());
     let result = service.import_auto(dir.path(), "default", false);
     assert!(result.is_err(), "expected error for non-Bruno directory");
 }
@@ -241,7 +261,7 @@ fn import_auto_from_zip_modern_collection() {
     w.finish().unwrap();
 
     let ws_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let service = make_service(ws_dir.path());
     let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "collection");
@@ -270,7 +290,7 @@ fn import_flat_root_zip_uses_zip_filename_as_collection_name() {
     w.finish().unwrap();
 
     let ws_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let service = make_service(ws_dir.path());
     let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
 
     assert_eq!(report.detected_type, "collection");
@@ -306,7 +326,7 @@ fn import_workspace_mixed_modern_and_legacy_collections() {
     .unwrap();
 
     let ws_dir = TempDir::new().unwrap();
-    let service = ImportService::new_with_workspace_path(ws_dir.path());
+    let service = make_service(ws_dir.path());
     let report = service.import_workspace(ws_src, false, Some("default")).unwrap();
 
     assert_eq!(report.detected_type, "workspace");

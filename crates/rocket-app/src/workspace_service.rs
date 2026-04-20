@@ -37,18 +37,7 @@ impl WorkspaceService {
 
     pub fn create(&self, name: &str, path: PathBuf) -> DomainResult<Workspace> {
         Workspace::validate_name(name)?;
-        if !path.exists() {
-            fs::create_dir_all(&path).map_err(|e| {
-                DomainError::Io(format!("Failed to create workspace directory: {e}"))
-            })?;
-        }
-        // Create subdirectories.
-        fs::create_dir_all(path.join("collections")).map_err(|e| {
-            DomainError::Io(format!("Failed to create collections dir: {e}"))
-        })?;
-        fs::create_dir_all(path.join("environments")).map_err(|e| {
-            DomainError::Io(format!("Failed to create environments dir: {e}"))
-        })?;
+        self.repo.ensure_workspace_dirs(&path)?;
         // Write workspace.yml inside the workspace directory.
         let config = WorkspaceConfig::new(name);
         self.config_repo.save(&path, &config)?;
@@ -256,27 +245,21 @@ impl WorkspaceService {
     /// Link an external collection directory to a workspace.
     /// The directory must contain `opencollection.yml`.
     pub fn link_external_collection(&self, workspace_id: &str, collection_path: PathBuf) -> DomainResult<()> {
-        let oc_path = collection_path.join("opencollection.yml");
-        if !oc_path.exists() {
+        if !collection_path.join("opencollection.yml").exists() {
             return Err(DomainError::NotFound(
                 "opencollection.yml not found in the selected directory".into(),
             ));
         }
 
-        let oc_content = fs::read_to_string(&oc_path).map_err(|e| {
-            DomainError::Io(format!("Failed to read opencollection.yml: {e}"))
-        })?;
-        let oc_value: serde_yaml::Value = serde_yaml::from_str(&oc_content).map_err(|e| {
-            DomainError::InvalidInput(format!("Failed to parse opencollection.yml: {e}"))
-        })?;
-        let collection_name = oc_value.get("name")
-            .and_then(|v| v.as_str())
+        let collection_name = self.config_repo
+            .read_collection_name(&collection_path)?
             .unwrap_or_else(|| {
-                collection_path.file_name()
+                collection_path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("Untitled")
-            })
-            .to_string();
+                    .to_string()
+            });
 
         let registry = self.repo.load()?;
         let workspace = registry
@@ -358,6 +341,12 @@ mod tests {
             *self.registry.lock().unwrap() = registry.clone();
             Ok(())
         }
+        fn ensure_workspace_dirs(&self, path: &Path) -> DomainResult<()> {
+            for subdir in [path, &path.join("collections"), &path.join("environments")] {
+                std::fs::create_dir_all(subdir).map_err(|e| DomainError::Io(e.to_string()))?;
+            }
+            Ok(())
+        }
     }
 
     struct MockWorkspaceConfigRepo;
@@ -384,6 +373,16 @@ mod tests {
                 .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
             std::fs::write(workspace_path.join("workspace.yml"), content)
                 .map_err(|e| DomainError::Io(e.to_string()))
+        }
+        fn read_collection_name(&self, collection_dir: &Path) -> DomainResult<Option<String>> {
+            let oc = collection_dir.join("opencollection.yml");
+            if !oc.exists() {
+                return Ok(None);
+            }
+            let content = std::fs::read_to_string(&oc).map_err(|e| DomainError::Io(e.to_string()))?;
+            let v: serde_yaml::Value = serde_yaml::from_str(&content)
+                .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+            Ok(v.get("name").and_then(|x| x.as_str()).map(str::to_owned))
         }
     }
 

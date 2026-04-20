@@ -25,7 +25,6 @@ fn env_service_for(collection: &str, ws_path: &Path) -> Result<EnvironmentServic
         .join("collections")
         .join(collection)
         .join("environments");
-    std::fs::create_dir_all(&env_dir).ok();
     Ok(EnvironmentService::new(
         Box::new(FsEnvironmentRepo::new(env_dir)),
         Box::new(NullEventPublisher),
@@ -83,7 +82,10 @@ pub fn delete_environment(
 pub fn get_global_environment_name(
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<Option<String>, DomainError> {
-    workspace_svc.lock().expect("workspace service lock poisoned").get_global_environment_name()
+    workspace_svc
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .get_global_environment_name()
 }
 
 #[tauri::command]
@@ -91,13 +93,15 @@ pub fn set_global_environment(
     name: Option<String>,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    workspace_svc.lock().expect("workspace service lock poisoned").set_global_environment(name)
+    workspace_svc
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .set_global_environment(name)
 }
 
 /// Creates an `EnvironmentService` scoped to the workspace-level environments directory.
 fn global_env_service(ws_path: &Path) -> Result<EnvironmentService, DomainError> {
     let env_dir = ws_path.join("environments");
-    std::fs::create_dir_all(&env_dir).ok();
     Ok(EnvironmentService::new(
         Box::new(FsEnvironmentRepo::new(env_dir)),
         Box::new(NullEventPublisher),

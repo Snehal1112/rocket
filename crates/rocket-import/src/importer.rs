@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::EnvironmentRepository;
-use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
 
 use crate::bru;
 use crate::converter::{environment as env_converter, request as req_converter};
@@ -41,21 +40,45 @@ pub(crate) fn detect_collection(path: &Path) -> Option<BrunoFormat> {
 }
 
 /// Orchestrates the full Bruno import pipeline.
+/// Creates an `EnvironmentRepository` scoped to a single collection's `environments/` dir.
+pub trait EnvironmentRepositoryFactory: Send + Sync {
+    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository>;
+}
+
 pub struct ImportService {
     workspace_path: PathBuf,
+    collection_repo: Box<dyn CollectionRepository>,
+    env_factory: Box<dyn EnvironmentRepositoryFactory>,
 }
 
 impl ImportService {
-    /// Use the active workspace path from the environment, falling back to `.`.
-    pub fn new() -> Self {
-        Self {
-            workspace_path: default_workspace_path(),
-        }
+    pub fn new(
+        workspace_path: PathBuf,
+        collection_repo: Box<dyn CollectionRepository>,
+        env_factory: Box<dyn EnvironmentRepositoryFactory>,
+    ) -> Self {
+        Self { workspace_path, collection_repo, env_factory }
     }
 
-    /// Construct with an explicit workspace path (mainly for tests).
+    /// Test-only constructor — wires up `FsCollectionRepo` and `FsEnvironmentRepo` directly.
+    #[cfg(test)]
     pub fn new_with_workspace_path(path: &Path) -> Self {
-        Self { workspace_path: path.to_path_buf() }
+        use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
+
+        struct FsFactory(PathBuf);
+        impl EnvironmentRepositoryFactory for FsFactory {
+            fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+                Box::new(FsEnvironmentRepo::new(
+                    self.0.join("collections").join(collection_name).join("environments"),
+                ))
+            }
+        }
+
+        let workspace_path = path.to_path_buf();
+        let collection_repo =
+            Box::new(FsCollectionRepo::new(workspace_path.join("collections")));
+        let env_factory = Box::new(FsFactory(workspace_path.clone()));
+        Self { workspace_path, collection_repo, env_factory }
     }
 
     /// Import a single Bruno collection directory into the given workspace.
@@ -96,14 +119,12 @@ impl ImportService {
             .or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "imported".into());
 
-        let resolved_name = self.resolve_collection_name(&col_name);
-        let repo = self.make_collection_repo();
-
-        repo.create(&resolved_name).map_err(ImportError::DomainError)?;
+        let resolved_name = self.resolve_collection_name(&col_name)?;
+        self.collection_repo.create(&resolved_name).map_err(ImportError::DomainError)?;
         report.created_collections.push(resolved_name.clone());
 
         // Walk request files.
-        self.walk_requests(path, path, &resolved_name, &repo, &mut report)?;
+        self.walk_requests(path, path, &resolved_name, self.collection_repo.as_ref(), &mut report)?;
 
         // Import environments.
         let env_dir = path.join("environments");
@@ -328,7 +349,7 @@ impl ImportService {
         collection_name: &str,
         report: &mut ImportReport,
     ) -> ImportResult<()> {
-        let env_repo = self.make_env_repo(collection_name);
+        let env_repo = self.env_factory.make(collection_name);
         for entry in std::fs::read_dir(env_dir)? {
             let entry = entry?;
             let p = entry.path();
@@ -357,32 +378,25 @@ impl ImportService {
         Ok(())
     }
 
-    fn resolve_collection_name(&self, name: &str) -> String {
-        let col_dir = self.workspace_path.join("collections");
-        if !col_dir.join(name).exists() {
-            return name.to_string();
+    fn resolve_collection_name(&self, name: &str) -> ImportResult<String> {
+        let existing: std::collections::HashSet<String> = self
+            .collection_repo
+            .list()
+            .map_err(ImportError::DomainError)?
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        if !existing.contains(name) {
+            return Ok(name.to_string());
         }
         let mut i = 1u32;
         loop {
             let candidate = format!("{name}-{i}");
-            if !col_dir.join(&candidate).exists() {
-                return candidate;
+            if !existing.contains(&candidate) {
+                return Ok(candidate);
             }
             i += 1;
         }
-    }
-
-    fn make_collection_repo(&self) -> FsCollectionRepo {
-        FsCollectionRepo::new(self.workspace_path.join("collections"))
-    }
-
-    fn make_env_repo(&self, collection_name: &str) -> FsEnvironmentRepo {
-        FsEnvironmentRepo::new(
-            self.workspace_path
-                .join("collections")
-                .join(collection_name)
-                .join("environments"),
-        )
     }
 
     /// Import a Bruno 3.0+ (OpenCollection-compatible) collection by direct file copy.
@@ -402,10 +416,8 @@ impl ImportService {
             .or_else(|| src.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "imported".into());
 
-        let resolved_name = self.resolve_collection_name(&col_name);
-        let repo = self.make_collection_repo();
-
-        repo.create(&resolved_name).map_err(ImportError::DomainError)?;
+        let resolved_name = self.resolve_collection_name(&col_name)?;
+        self.collection_repo.create(&resolved_name).map_err(ImportError::DomainError)?;
         report.created_collections.push(resolved_name.clone());
 
         let dest_root = self.workspace_path.join("collections").join(&resolved_name);
@@ -470,11 +482,6 @@ impl ImportService {
     }
 }
 
-fn default_workspace_path() -> PathBuf {
-    PathBuf::from(
-        std::env::var("ROCKET_WORKSPACE_PATH").unwrap_or_else(|_| ".".into()),
-    )
-}
 
 #[cfg(test)]
 mod modern_tests {

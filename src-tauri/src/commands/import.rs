@@ -1,8 +1,27 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_import::{ImportReport, ImportService};
+use rocket_environment::EnvironmentRepository;
+use rocket_import::{EnvironmentRepositoryFactory, ImportReport, ImportService};
+use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
 use tauri::State;
+
+struct FsEnvFactory(PathBuf);
+impl EnvironmentRepositoryFactory for FsEnvFactory {
+    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+        Box::new(FsEnvironmentRepo::new(
+            self.0.join("collections").join(collection_name).join("environments"),
+        ))
+    }
+}
+
+fn make_import_service(base: PathBuf) -> ImportService {
+    ImportService::new(
+        base.clone(),
+        Box::new(FsCollectionRepo::new(base.join("collections"))),
+        Box::new(FsEnvFactory(base)),
+    )
+}
 
 /// Import a Bruno collection or workspace directory. Type is auto-detected from content.
 #[tauri::command]
@@ -12,9 +31,11 @@ pub async fn import_bruno(
     create_new_workspace: Option<bool>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<ImportReport, String> {
-    let base = workspace_path.lock().unwrap().clone();
-    let service = ImportService::new_with_workspace_path(&base);
-    service
+    let base = workspace_path
+        .lock()
+        .map_err(|_| "workspace path lock poisoned".to_string())?
+        .clone();
+    make_import_service(base)
         .import_auto(
             &PathBuf::from(&path),
             &target_workspace_id,
@@ -31,9 +52,11 @@ pub async fn import_bruno_zip(
     create_new_workspace: Option<bool>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<ImportReport, String> {
-    let base = workspace_path.lock().unwrap().clone();
-    let service = ImportService::new_with_workspace_path(&base);
-    service
+    let base = workspace_path
+        .lock()
+        .map_err(|_| "workspace path lock poisoned".to_string())?
+        .clone();
+    make_import_service(base)
         .import_auto_from_zip(
             &PathBuf::from(&zip_path),
             &target_workspace_id,

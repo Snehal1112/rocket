@@ -76,33 +76,61 @@ impl HistoryRepository for FsHistoryRepo {
     }
 
     fn search(&self, filter: &HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
-        let all = self.list(None)?;
-        Ok(all
-            .into_iter()
-            .filter(|entry| {
-                if let Some(method) = &filter.method {
-                    if !entry.method.eq_ignore_ascii_case(method) {
-                        return false;
-                    }
+        const SEARCH_LIMIT: usize = 200;
+
+        if !self.dir.exists() {
+            return Ok(vec![]);
+        }
+
+        // Collect and sort file paths by modified-time descending before reading,
+        // so we return the most-recent matches and can stop early once the cap is hit.
+        let mut paths: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
+        for entry in fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "yml") {
+                let mtime = entry.metadata()?.modified().unwrap_or(std::time::UNIX_EPOCH);
+                paths.push((mtime, path));
+            }
+        }
+        paths.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let mut results = Vec::new();
+        for (_, path) in paths {
+            if results.len() >= SEARCH_LIMIT {
+                break;
+            }
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let entry: HistoryEntry = match serde_yaml::from_str(&content) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if let Some(method) = &filter.method {
+                if !entry.method.eq_ignore_ascii_case(method) {
+                    continue;
                 }
-                if let Some(url_pattern) = &filter.url_contains {
-                    if !entry.url.contains(url_pattern.as_str()) {
-                        return false;
-                    }
+            }
+            if let Some(url_pattern) = &filter.url_contains {
+                if !entry.url.contains(url_pattern.as_str()) {
+                    continue;
                 }
-                if let Some(min) = filter.status_min {
-                    if entry.status < min {
-                        return false;
-                    }
+            }
+            if let Some(min) = filter.status_min {
+                if entry.status < min {
+                    continue;
                 }
-                if let Some(max) = filter.status_max {
-                    if entry.status > max {
-                        return false;
-                    }
+            }
+            if let Some(max) = filter.status_max {
+                if entry.status > max {
+                    continue;
                 }
-                true
-            })
-            .collect())
+            }
+            results.push(entry);
+        }
+        Ok(results)
     }
 }
 

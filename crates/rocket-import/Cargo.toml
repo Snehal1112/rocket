@@ -8,7 +8,6 @@ rocket-shared.workspace = true
 rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-workspace.workspace = true
-rocket-infra = { path = "../rocket-infra" }
 serde.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
@@ -17,3 +16,4 @@ tempfile = "3"
 zip = "2"
 
 [dev-dependencies]
+rocket-infra = { path = "../rocket-infra" }

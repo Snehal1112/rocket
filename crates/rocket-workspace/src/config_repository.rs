@@ -11,6 +11,10 @@ pub trait WorkspaceConfigRepository: Send + Sync {
 
     /// Save the workspace config to `workspace_path/workspace.yml`.
     fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()>;
+
+    /// Read the `name` field from `collection_dir/opencollection.yml`.
+    /// Returns `None` if the file is absent or has no `name` field.
+    fn read_collection_name(&self, collection_dir: &Path) -> DomainResult<Option<String>>;
 }
 
 #[cfg(test)]

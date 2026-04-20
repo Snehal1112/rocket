@@ -62,6 +62,20 @@ impl WorkspaceConfigRepository for FsWorkspaceConfigRepo {
             DomainError::Io(format!("Failed to write workspace.yml: {e}"))
         })
     }
+
+    fn read_collection_name(&self, collection_dir: &Path) -> DomainResult<Option<String>> {
+        let oc_path = collection_dir.join("opencollection.yml");
+        if !oc_path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&oc_path).map_err(|e| {
+            DomainError::Io(format!("Failed to read opencollection.yml: {e}"))
+        })?;
+        let value: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
+            DomainError::InvalidInput(format!("Failed to parse opencollection.yml: {e}"))
+        })?;
+        Ok(value.get("name").and_then(|v| v.as_str()).map(str::to_owned))
+    }
 }
 
 #[cfg(test)]

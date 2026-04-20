@@ -56,6 +56,15 @@ impl WorkspaceRepository for FsWorkspaceRepo {
             DomainError::Io(format!("Failed to write workspaces.yml: {e}"))
         })
     }
+
+    fn ensure_workspace_dirs(&self, path: &std::path::Path) -> DomainResult<()> {
+        for subdir in [path, &path.join("collections"), &path.join("environments")] {
+            fs::create_dir_all(subdir).map_err(|e| {
+                DomainError::Io(format!("Failed to create workspace dir: {e}"))
+            })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -23,6 +23,9 @@ pub enum DomainError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl From<std::io::Error> for DomainError {
