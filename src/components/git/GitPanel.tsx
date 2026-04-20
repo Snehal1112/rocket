@@ -20,7 +20,7 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
-import { gitInit, gitIsRepo, onCollectionChanged } from '@/lib/tauri-api';
+import { gitInit, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 
 type RightPanelView =
@@ -59,16 +59,15 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
-  // Check git repo status and initialize the git store when the path is known.
+  // Initialize the git store for the given path. setCollection handles the isRepo
+  // check internally, so we read back the result from the store rather than
+  // calling gitIsRepo a second time here.
   const checkAndLoad = useCallback(
     async (path: string) => {
       setIsRepo(null);
       try {
-        const repo = await gitIsRepo(path);
-        setIsRepo(repo);
-        if (repo) {
-          await setCollection(path);
-        }
+        await setCollection(path);
+        setIsRepo(useGitStore.getState().isRepo);
       } catch {
         setIsRepo(false);
       }

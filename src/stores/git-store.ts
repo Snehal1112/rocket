@@ -123,11 +123,13 @@ export const useGitStore = create<GitState>((set, get) => ({
       const isRepo = await gitIsRepo(path);
       set({ isRepo });
       if (isRepo) {
-        const status = await gitStatus(path);
+        const [status] = await Promise.all([
+          gitStatus(path),
+          get().refreshStashes(),
+          get().refreshBranches(),
+          get().refreshRemotes(),
+        ]);
         set({ status, loading: false });
-        await get().refreshStashes();
-        await get().refreshBranches();
-        await get().refreshRemotes();
       } else {
         set({ status: null, loading: false });
       }
