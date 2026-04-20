@@ -189,7 +189,7 @@ pub fn run() {
             );
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::new(environments_dir)),
-                Arc::new(ReqwestExecutor::new()),
+                Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),

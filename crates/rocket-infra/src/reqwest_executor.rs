@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -16,12 +16,72 @@ pub struct ReqwestExecutor {
     // query, timeout, auth) is applied per-request on the request builder.
     // At most 4 distinct keys can ever exist.
     clients: Mutex<HashMap<(bool, bool), Client>>,
+    /// When set, file reads in Binary/FormData bodies are confined to this directory.
+    /// Wrapped in Arc<Mutex<>> so workspace switches are reflected without rebuilding the executor.
+    allowed_base: Option<Arc<Mutex<std::path::PathBuf>>>,
 }
 
 impl ReqwestExecutor {
     pub fn new() -> Self {
         Self {
             clients: Mutex::new(HashMap::new()),
+            allowed_base: None,
+        }
+    }
+
+    /// Constructs an executor that restricts file reads to paths under `base`.
+    pub fn with_allowed_base(base: Arc<Mutex<std::path::PathBuf>>) -> Self {
+        Self {
+            clients: Mutex::new(HashMap::new()),
+            allowed_base: Some(base),
+        }
+    }
+
+    /// Rejects any path that resolves outside the allowed base directory.
+    /// When no base is configured (dev/test mode), all paths are permitted.
+    /// Uses ancestor-canonicalization so the target file need not exist yet.
+    fn validate_file_path(&self, path: &std::path::Path) -> DomainResult<()> {
+        let Some(ref base_lock) = self.allowed_base else {
+            return Ok(());
+        };
+        let base = base_lock
+            .lock()
+            .map_err(|_| DomainError::Internal("workspace path lock poisoned".into()))?;
+        let canonical_base = base.canonicalize().map_err(|e| {
+            DomainError::Internal(format!("Workspace base cannot be resolved: {e}"))
+        })?;
+
+        // Walk up to find the deepest ancestor that already exists, then
+        // canonicalize that and re-append the not-yet-existing suffix.
+        let mut existing = path;
+        while !existing.exists() {
+            match existing.parent() {
+                Some(p) if !p.as_os_str().is_empty() => existing = p,
+                _ => {
+                    return Err(DomainError::InvalidInput(format!(
+                        "File path '{}' cannot be resolved",
+                        path.display()
+                    )));
+                }
+            }
+        }
+        let canonical_existing = existing.canonicalize().map_err(|e| {
+            DomainError::InvalidInput(format!("File path cannot be resolved: {e}"))
+        })?;
+        let suffix = path.strip_prefix(existing).unwrap_or(std::path::Path::new(""));
+        let canonical_full = if suffix == std::path::Path::new("") {
+            canonical_existing
+        } else {
+            canonical_existing.join(suffix)
+        };
+
+        if canonical_full.starts_with(&canonical_base) {
+            Ok(())
+        } else {
+            Err(DomainError::InvalidInput(format!(
+                "File path '{}' is outside the workspace directory",
+                path.display()
+            )))
         }
     }
 
@@ -44,6 +104,109 @@ impl ReqwestExecutor {
     #[cfg(test)]
     pub fn cache_len(&self) -> usize {
         self.clients.lock().unwrap().len()
+    }
+
+    fn apply_body(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+        body: &Option<Body>,
+    ) -> DomainResult<reqwest::RequestBuilder> {
+        let Some(body) = body else {
+            return Ok(builder);
+        };
+
+        match &body.mode {
+            BodyMode::None => {}
+            BodyMode::Json => {
+                let content = body.content.as_deref().unwrap_or("");
+                builder = builder
+                    .header("Content-Type", "application/json")
+                    .body(content.to_string());
+            }
+            BodyMode::Xml => {
+                let content = body.content.as_deref().unwrap_or("");
+                builder = builder
+                    .header("Content-Type", "text/xml")
+                    .body(content.to_string());
+            }
+            BodyMode::Text => {
+                let content = body.content.as_deref().unwrap_or("");
+                builder = builder
+                    .header("Content-Type", "text/plain")
+                    .body(content.to_string());
+            }
+            BodyMode::Sparql => {
+                let content = body.content.as_deref().unwrap_or("");
+                builder = builder
+                    .header("Content-Type", "application/sparql-query")
+                    .body(content.to_string());
+            }
+            BodyMode::Binary => {
+                if let Some(file_path) = &body.file_path {
+                    let path = std::path::Path::new(file_path);
+                    self.validate_file_path(path)?;
+                    let data = std::fs::read(path)
+                        .map_err(|e| DomainError::Internal(format!("Failed to read file: {e}")))?;
+
+                    // Detect content type from the file extension.
+                    let content_type = match path.extension().and_then(|e| e.to_str()) {
+                        Some("json") => "application/json",
+                        Some("xml") => "application/xml",
+                        Some("png") => "image/png",
+                        Some("jpg" | "jpeg") => "image/jpeg",
+                        Some("gif") => "image/gif",
+                        Some("pdf") => "application/pdf",
+                        Some("zip") => "application/zip",
+                        _ => "application/octet-stream",
+                    };
+
+                    builder = builder
+                        .header("Content-Type", content_type)
+                        .body(data);
+                }
+            }
+            BodyMode::FormUrlEncoded => {
+                if let Some(entries) = &body.form_data {
+                    let params: Vec<(&str, &str)> = entries
+                        .iter()
+                        .filter(|e| e.enabled)
+                        .map(|e| (e.key.as_str(), e.value.as_str()))
+                        .collect();
+                    builder = builder.form(&params);
+                }
+            }
+            BodyMode::FormData => {
+                // Multipart form — send each part with proper MIME types.
+                if let Some(entries) = &body.form_data {
+                    use reqwest::multipart;
+                    let mut form = multipart::Form::new();
+                    for entry in entries.iter().filter(|e| e.enabled) {
+                        match entry.entry_type {
+                            rocket_shared::types::FormDataType::File => {
+                                let path = std::path::Path::new(&entry.value);
+                                if self.validate_file_path(path).is_ok() {
+                                    if let Ok(file_bytes) = std::fs::read(path) {
+                                        let file_name = path
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().into_owned())
+                                            .unwrap_or_default();
+                                        let part = multipart::Part::bytes(file_bytes)
+                                            .file_name(file_name);
+                                        form = form.part(entry.key.clone(), part);
+                                    }
+                                }
+                            }
+                            rocket_shared::types::FormDataType::Text => {
+                                form = form.text(entry.key.clone(), entry.value.clone());
+                            }
+                        }
+                    }
+                    builder = builder.multipart(form);
+                }
+            }
+        }
+
+        Ok(builder)
     }
 }
 
@@ -89,7 +252,7 @@ impl HttpExecutor for ReqwestExecutor {
         builder = apply_auth(builder, &request.auth, &request.method).await?;
 
         // Apply request body.
-        builder = apply_body(builder, &request.body)?;
+        builder = self.apply_body(builder, &request.body)?;
 
         // Per-request timeout overrides the client-level default.
         builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
@@ -331,105 +494,6 @@ async fn fetch_client_credentials_token(
         .ok_or_else(|| DomainError::Http("OAuth2 response missing access_token".into()))
 }
 
-fn apply_body(
-    mut builder: reqwest::RequestBuilder,
-    body: &Option<Body>,
-) -> DomainResult<reqwest::RequestBuilder> {
-    let Some(body) = body else {
-        return Ok(builder);
-    };
-
-    match &body.mode {
-        BodyMode::None => {}
-        BodyMode::Json => {
-            let content = body.content.as_deref().unwrap_or("");
-            builder = builder
-                .header("Content-Type", "application/json")
-                .body(content.to_string());
-        }
-        BodyMode::Xml => {
-            let content = body.content.as_deref().unwrap_or("");
-            builder = builder
-                .header("Content-Type", "text/xml")
-                .body(content.to_string());
-        }
-        BodyMode::Text => {
-            let content = body.content.as_deref().unwrap_or("");
-            builder = builder
-                .header("Content-Type", "text/plain")
-                .body(content.to_string());
-        }
-        BodyMode::Sparql => {
-            let content = body.content.as_deref().unwrap_or("");
-            builder = builder
-                .header("Content-Type", "application/sparql-query")
-                .body(content.to_string());
-        }
-        BodyMode::Binary => {
-            if let Some(file_path) = &body.file_path {
-                let path = std::path::Path::new(file_path);
-                let data = std::fs::read(path)
-                    .map_err(|e| DomainError::Internal(format!("Failed to read file: {e}")))?;
-
-                // Detect content type from the file extension.
-                let content_type = match path.extension().and_then(|e| e.to_str()) {
-                    Some("json") => "application/json",
-                    Some("xml") => "application/xml",
-                    Some("png") => "image/png",
-                    Some("jpg" | "jpeg") => "image/jpeg",
-                    Some("gif") => "image/gif",
-                    Some("pdf") => "application/pdf",
-                    Some("zip") => "application/zip",
-                    _ => "application/octet-stream",
-                };
-
-                builder = builder
-                    .header("Content-Type", content_type)
-                    .body(data);
-            }
-        }
-        BodyMode::FormUrlEncoded => {
-            if let Some(entries) = &body.form_data {
-                let params: Vec<(&str, &str)> = entries
-                    .iter()
-                    .filter(|e| e.enabled)
-                    .map(|e| (e.key.as_str(), e.value.as_str()))
-                    .collect();
-                builder = builder.form(&params);
-            }
-        }
-        BodyMode::FormData => {
-            // Multipart form — send each part with proper MIME types.
-            if let Some(entries) = &body.form_data {
-                use reqwest::multipart;
-                let mut form = multipart::Form::new();
-                for entry in entries.iter().filter(|e| e.enabled) {
-                    match entry.entry_type {
-                        rocket_shared::types::FormDataType::File => {
-                            let path = std::path::Path::new(&entry.value);
-                            if let Ok(file_bytes) = std::fs::read(path) {
-                                let file_name = path
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                let part = multipart::Part::bytes(file_bytes)
-                                    .file_name(file_name);
-                                form = form.part(entry.key.clone(), part);
-                            }
-                        }
-                        rocket_shared::types::FormDataType::Text => {
-                            form = form.text(entry.key.clone(), entry.value.clone());
-                        }
-                    }
-                }
-                builder = builder.multipart(form);
-            }
-        }
-    }
-
-    Ok(builder)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,10 +548,11 @@ mod tests {
 
     #[test]
     fn apply_body_none_leaves_builder_unchanged() {
+        let exec = ReqwestExecutor::new();
         let req = HttpRequest::new(HttpMethod::Get, "https://example.com");
         let client = Client::new();
         let builder = client.get("https://example.com");
-        let result = apply_body(builder, &req.body);
+        let result = exec.apply_body(builder, &req.body);
         assert!(result.is_ok());
     }
 
@@ -525,9 +590,10 @@ mod tests {
             file_path: Some(png_path.to_string_lossy().into_owned()),
         };
 
+        let exec = ReqwestExecutor::new();
         let client = Client::new();
         let builder = client.post("https://example.com");
-        let result = apply_body(builder, &Some(body));
+        let result = exec.apply_body(builder, &Some(body));
         assert!(result.is_ok());
     }
 
@@ -542,9 +608,10 @@ mod tests {
             file_path: Some("/nonexistent/path/file.bin".into()),
         };
 
+        let exec = ReqwestExecutor::new();
         let client = Client::new();
         let builder = client.post("https://example.com");
-        let result = apply_body(builder, &Some(body));
+        let result = exec.apply_body(builder, &Some(body));
         assert!(result.is_err());
     }
 
