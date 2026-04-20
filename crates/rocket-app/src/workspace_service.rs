@@ -73,9 +73,27 @@ impl WorkspaceService {
             .find_by_id(id)
             .cloned()
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
+
+        // Capture old path for rollback if persist fails.
+        let mut path_guard = self.active_path
+            .lock()
+            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?;
+        let old_path = path_guard.clone();
+
+        // Update in-memory state before persisting so live threads always see
+        // a consistent path. Roll back if the disk write fails.
+        *path_guard = workspace.path.clone();
+        drop(path_guard);
+
         registry.active_workspace_id = id.to_string();
-        self.repo.save(&registry)?;
-        *self.active_path.lock().expect("active workspace path lock poisoned") = workspace.path.clone();
+        if let Err(e) = self.repo.save(&registry) {
+            // Persist failed — roll back the mutex to the previous path.
+            if let Ok(mut guard) = self.active_path.lock() {
+                *guard = old_path;
+            }
+            return Err(e);
+        }
+
         self.publisher.publish(DomainEvent::WorkspaceSwitched {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
@@ -114,7 +132,9 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().expect("active workspace path lock poisoned") = registry.workspaces[0].path.clone();
+            *self.active_path.lock()
+                .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))? =
+                registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceClosed { id: id.to_string() });
@@ -207,12 +227,16 @@ impl WorkspaceService {
     }
 
     pub fn get_global_environment_name(&self) -> DomainResult<Option<String>> {
-        let path = self.active_path.lock().expect("active workspace path lock poisoned").clone();
+        let path = self.active_path.lock()
+            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
+            .clone();
         Ok(self.config_repo.load(&path)?.global_environment)
     }
 
     pub fn set_global_environment(&self, name: Option<String>) -> DomainResult<()> {
-        let path = self.active_path.lock().expect("active workspace path lock poisoned").clone();
+        let path = self.active_path.lock()
+            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
+            .clone();
         let mut config = self.config_repo.load(&path)?;
         config.global_environment = name;
         self.config_repo.save(&path, &config)
@@ -294,7 +318,9 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().expect("active workspace path lock poisoned") = registry.workspaces[0].path.clone();
+            *self.active_path.lock()
+                .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))? =
+                registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceDeleted { id: id.to_string() });
