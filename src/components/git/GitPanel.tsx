@@ -22,6 +22,7 @@ import { Separator } from '@/components/ui/separator';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
 import { gitInit, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
+import { GitPanelSkeleton } from '@/components/git/GitPanelSkeleton';
 
 type RightPanelView =
   | { kind: 'landing' }
@@ -140,11 +141,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   }, [currentBranch]);
 
   if (isRepo === null) {
-    return (
-      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
-        Loading...
-      </div>
-    );
+    return <GitPanelSkeleton />;
   }
 
   if (!isRepo) {
