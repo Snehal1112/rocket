@@ -93,7 +93,7 @@ pub fn run() {
 
             // Determine the application data directory.
             let data_dir = dirs::home_dir()
-                .expect("Home directory not found")
+                .ok_or("Home directory could not be determined")?
                 .join(".rocket-api");
             std::fs::create_dir_all(&data_dir).ok();
 
@@ -112,8 +112,8 @@ pub fn run() {
             // Bootstrap the active workspace path from persisted state.
             let active_ws = workspace_svc
                 .get_active()
-                .expect("failed to load active workspace on startup");
-            *active_workspace_path.lock().unwrap() = active_ws.path.clone();
+                .map_err(|e| format!("Failed to load active workspace: {e}"))?;
+            *active_workspace_path.lock().map_err(|e| format!("Workspace path lock poisoned: {e}"))? = active_ws.path.clone();
 
             // Ensure the default workspace has a workspace.yml on first launch.
             let ws_yml = active_ws.path.join("workspace.yml");
@@ -152,15 +152,15 @@ pub fn run() {
             std::fs::create_dir_all(&audit_dir).ok();
             let audit_log_repo = Arc::new(
                 FsAuditLogRepo::new(audit_dir.join("events.jsonl"))
-                    .expect("audit log init"),
+                    .map_err(|e| format!("Failed to initialise audit log: {e}"))?,
             );
             let profile_repo = Arc::new(
                 FsComplianceProfileRepo::new(audit_dir.join("profile.yml"))
-                    .expect("compliance profile init"),
+                    .map_err(|e| format!("Failed to initialise compliance profile: {e}"))?,
             );
             let audit_svc = Arc::new(
                 SecurityAuditService::new(audit_log_repo.clone(), profile_repo.clone())
-                    .expect("audit service init"),
+                    .map_err(|e| format!("Failed to initialise audit service: {e}"))?,
             );
             let audit_publisher: Arc<dyn SecurityAuditPublisher> = Arc::new(
                 audit_bridge::ServiceBackedAuditPublisher::new(audit_svc.clone()),
