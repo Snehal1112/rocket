@@ -314,40 +314,68 @@ impl CollectionRepository for FsCollectionRepo {
         };
         let mut file_path = self.validate_path(&collection_dir, Path::new(&base))?;
 
-        // Same duplicate-avoidance logic, but with .yml.
-        if request.uid.is_empty() && file_path.exists() {
-            let stem = Path::new(&base).file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let parent_rel = Path::new(&base).parent().unwrap_or(Path::new(""));
-            let mut counter = 1u32;
-            loop {
-                let candidate = if parent_rel.as_os_str().is_empty() {
-                    format!("{} {}.yml", stem, counter)
-                } else {
-                    format!("{}/{} {}.yml", parent_rel.display(), stem, counter)
-                };
-                let candidate_path = self.validate_path(&collection_dir, Path::new(&candidate))?;
-                if !candidate_path.exists() {
-                    file_path = candidate_path;
-                    break;
-                }
-                counter += 1;
-            }
-        }
-
-        if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        // Hoist these so the create_new retry loop can use them regardless of path.
+        let stem = Path::new(&base).file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let parent_rel = Path::new(&base).parent().unwrap_or(Path::new("")).to_path_buf();
+        let mut counter = 0u32;
 
         // Convert domain Request to OcHttpRequest, then serialize as YAML.
         let oc = request_to_oc_http_request(request.clone());
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
-        atomic_write(&file_path, yaml.as_bytes())?;
+
+        // When the request already has a UID the path is stable; overwrite atomically.
+        let actual_path = if !request.uid.is_empty() {
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            atomic_write(&file_path, yaml.as_bytes())?;
+            file_path
+        } else {
+            // No UID: pick a name that does not yet exist, then claim it atomically
+            // with create_new(true) to close the TOCTOU window.
+            loop {
+                if counter > 0 {
+                    // Advance to the next candidate name.
+                    let candidate = if parent_rel.as_os_str().is_empty() {
+                        format!("{} {}.yml", stem, counter)
+                    } else {
+                        format!("{}/{} {}.yml", parent_rel.display(), stem, counter)
+                    };
+                    file_path = self.validate_path(&collection_dir, Path::new(&candidate))?;
+                }
+                if let Some(parent) = file_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&file_path)
+                {
+                    Ok(mut f) => {
+                        use std::io::Write;
+                        f.write_all(yaml.as_bytes())
+                            .map_err(|e| DomainError::Io(e.to_string()))?;
+                        break file_path;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        counter += 1;
+                        if counter > 9_999 {
+                            return Err(DomainError::Io(
+                                "save_request: too many duplicate filenames (limit 9999)".into(),
+                            ));
+                        }
+                        // Another writer claimed this name concurrently; try next counter.
+                    }
+                    Err(e) => return Err(DomainError::Io(e.to_string())),
+                }
+            }
+        };
 
         // Return the actual filename relative to the collection directory.
-        let actual = file_path
+        let actual = actual_path
             .strip_prefix(&collection_dir)
-            .unwrap_or(&file_path)
+            .unwrap_or(&actual_path)
             .to_string_lossy()
             .to_string();
         Ok(actual)
