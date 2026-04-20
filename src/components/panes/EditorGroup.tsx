@@ -12,6 +12,7 @@ const DiffViewer = lazy(() =>
   import('@/components/git/DiffViewer').then((m) => ({ default: m.DiffViewer })),
 );
 
+import { MousePointer2 } from 'lucide-react';
 import { GitPanel } from '@/components/git/GitPanel';
 import { RocketLaunch } from '@/components/illustrations';
 import { RequestPanel } from '@/components/request/RequestPanel';
@@ -40,8 +41,53 @@ import {
 } from '@/types/pane-types';
 import { TabBar } from './TabBar';
 
-// Branded empty state shown when no tabs are open.
-function EmptyState() {
+type EmptyStateVariant = 'default' | 'active-split' | 'inactive-split';
+
+interface EmptyStateProps {
+  variant: EmptyStateVariant;
+  onActivate?: () => void;
+}
+
+// Shows context-aware guidance when no tabs are open in a pane.
+function EmptyState({ variant, onActivate }: EmptyStateProps) {
+  if (variant === 'inactive-split') {
+    return (
+      <button
+        type='button'
+        className='flex h-full w-full items-center justify-center bg-gradient-to-b from-background to-muted/20 cursor-pointer border-0 p-0'
+        onClick={onActivate}
+      >
+        <div className='flex flex-col items-center gap-4 text-center max-w-xs px-6'>
+          <MousePointer2 className='w-8 h-8 text-muted-foreground/50' />
+          <div className='space-y-1.5'>
+            <h2 className='text-sm font-semibold tracking-tight text-foreground'>
+              Pane not focused
+            </h2>
+            <p className='text-sm text-muted-foreground leading-relaxed'>
+              Click to focus this pane, then select a request from the sidebar.
+            </p>
+          </div>
+        </div>
+      </button>
+    );
+  }
+
+  if (variant === 'active-split') {
+    return (
+      <div className='flex h-full items-center justify-center bg-gradient-to-b from-background to-muted/20'>
+        <div className='flex flex-col items-center gap-4 text-center max-w-xs px-6'>
+          <div className='space-y-1.5'>
+            <h2 className='text-sm font-semibold tracking-tight text-foreground'>Pane ready</h2>
+            <p className='text-sm text-muted-foreground leading-relaxed'>
+              Select a request from the sidebar to open it here.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Default single-pane branded state.
   return (
     <div className='flex h-full items-center justify-center bg-gradient-to-b from-background to-muted/20'>
       <div className='flex flex-col items-center gap-8 text-center max-w-xs px-6'>
@@ -82,6 +128,22 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const hasTabs = node.tabs.length > 0;
 
   const closeTab = usePaneStore((s) => s.closeTab);
+  const setActiveGroup = usePaneStore((s) => s.setActiveGroup);
+  const activeGroupId = usePaneStore((s) => s.activeGroupId);
+  const root = usePaneStore((s) => s.root);
+
+  const isInSplitLayout = root.type === 'split';
+  const isActive = activeGroupId === node.groupId;
+  const isActivePaneInSplit = isInSplitLayout && isActive;
+  const isInactivePaneInSplit = isInSplitLayout && !isActive;
+
+  // Determine which empty-state variant to display.
+  const emptyStateVariant: EmptyStateVariant = isInactivePaneInSplit
+    ? 'inactive-split'
+    : isActivePaneInSplit
+      ? 'active-split'
+      : 'default';
+
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null);
 
   const handleCloseTab = (tabId: string) => {
@@ -96,8 +158,13 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   };
 
   return (
-    <div className='flex flex-col h-full'>
-      {hasTabs && <TabBar node={node} onCloseTab={handleCloseTab} />}
+    // onMouseDown here is intentional UX — tracks which pane the user is clicking into.
+    // biome-ignore lint/a11y/noStaticElementInteractions: pane focus tracking
+    <section
+      className={`flex flex-col h-full${isInSplitLayout && isActive ? ' ring-1 ring-primary/40' : ''}`}
+      onMouseDown={() => setActiveGroup(node.groupId)}
+    >
+      {(hasTabs || isInSplitLayout) && <TabBar node={node} onCloseTab={handleCloseTab} />}
       <div className='flex-1 overflow-hidden'>
         {activeTab ? (
           isConflictTab(activeTab) ? (
@@ -131,7 +198,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <CollectionOverviewTab tab={activeTab} />
           )
         ) : (
-          <EmptyState />
+          <EmptyState
+            variant={emptyStateVariant}
+            onActivate={isInactivePaneInSplit ? () => setActiveGroup(node.groupId) : undefined}
+          />
         )}
       </div>
       <AlertDialog
@@ -167,6 +237,6 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </section>
   );
 }

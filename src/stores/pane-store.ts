@@ -111,6 +111,9 @@ export interface PaneState {
   // Contract tab.
   openContractTab: (collectionName: string, collectionRoot: string) => void;
 
+  // Focus tracking.
+  setActiveGroup: (groupId: string) => void;
+
   // Utility.
   reset: () => void;
   closeAll: () => void;
@@ -306,6 +309,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   resizePane(splitId, sizes) {
     const { root } = get();
     set({ root: updateSplitSizes(root, splitId, sizes) });
+  },
+
+  setActiveGroup(groupId) {
+    set({ activeGroupId: groupId });
   },
 
   updateRequest(tabId, patch) {

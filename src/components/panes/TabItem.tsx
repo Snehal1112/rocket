@@ -1,4 +1,5 @@
 import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, ShieldCheck, X } from 'lucide-react';
+import { useState } from 'react';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
 import { isContractTab, isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
@@ -18,17 +19,34 @@ function getTabTitle(tab: Tab): string {
 interface TabItemProps {
   tab: Tab;
   isActive: boolean;
+  fromGroupId: string;
   onSelect: () => void;
   onClose: () => void;
   onDoubleClick?: () => void;
 }
 
-export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: TabItemProps) {
+export function TabItem({
+  tab,
+  isActive,
+  fromGroupId,
+  onSelect,
+  onClose,
+  onDoubleClick,
+}: TabItemProps) {
+  const [isDragging, setIsDragging] = useState(false);
+
   return (
     <div
       role='tab'
       tabIndex={0}
       aria-selected={isActive}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({ tabId: tab.id, fromGroupId }));
+        setIsDragging(true);
+      }}
+      onDragEnd={() => setIsDragging(false)}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       onKeyDown={(e) => {
@@ -37,7 +55,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           onSelect();
         }
       }}
-      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${
+      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${isDragging ? 'opacity-50' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
         isActive
           ? 'bg-background/95 border-b-2 border-b-primary -mb-px text-foreground'
           : 'hover:bg-accent/50 text-muted-foreground'
@@ -50,26 +68,32 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           {tab.request.method}
         </span>
       ) : isGitTab(tab) ? (
-        <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+        <GitBranch aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
       ) : isWorkspaceTab(tab) ? (
         <>
           {tab.activeSection === 'overview' && (
-            <LayoutDashboard className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+            <LayoutDashboard
+              aria-hidden='true'
+              className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+            />
           )}
           {tab.activeSection === 'environments' && (
-            <Globe className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+            <Globe aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
           )}
           {tab.activeSection === 'git' && (
-            <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+            <GitBranch aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
           )}
           {tab.activeSection === 'audit' && (
-            <ShieldCheck className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+            <ShieldCheck
+              aria-hidden='true'
+              className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+            />
           )}
         </>
       ) : isContractTab(tab) ? (
-        <FileLock className='h-4 w-4 shrink-0' />
+        <FileLock aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : (
-        <BoxIcon className='h-4 w-4 shrink-0' />
+        <BoxIcon aria-hidden='true' className='h-4 w-4 shrink-0' />
       )}
       <span className='truncate'>{getTabTitle(tab)}</span>
       {tab.isDirty && (
@@ -89,7 +113,7 @@ export function TabItem({ tab, isActive, onSelect, onClose, onDoubleClick }: Tab
           }}
           className='shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity'
         >
-          <X className='h-3.5 w-3.5' />
+          <X aria-hidden='true' className='h-3.5 w-3.5' />
         </button>
       )}
     </div>

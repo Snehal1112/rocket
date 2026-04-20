@@ -6,13 +6,22 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { usePaneStore } from '@/stores/pane-store';
-import type { LeafNode } from '@/types/pane-types';
+import type { LeafNode, PaneNode } from '@/types/pane-types';
 import { isWorkspaceTab } from '@/types/pane-types';
 import { TabItem } from './TabItem';
+
+// Collect all leaf groupIds from a pane tree recursively.
+function collectLeafGroupIds(node: PaneNode): string[] {
+  if (node.type === 'leaf') return [node.groupId];
+  return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
+}
 
 // Request tab bar matching legacy RequestTabs styling.
 export function TabBar({
@@ -25,11 +34,17 @@ export function TabBar({
   const setActiveTab = usePaneStore((s) => s.setActiveTab);
   const closeTab = usePaneStore((s) => s.closeTab);
   const splitGroup = usePaneStore((s) => s.splitGroup);
+  const moveTab = usePaneStore((s) => s.moveTab);
+  const root = usePaneStore((s) => s.root);
   const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
   const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
 
+  // Other panes available for moving tabs into.
+  const otherGroupIds = collectLeafGroupIds(root).filter((id) => id !== node.groupId);
+
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
   function commitRename(tabId: string, fallback: string) {
     if (renamingTabId !== tabId) return;
@@ -38,8 +53,34 @@ export function TabBar({
     updateTabTitle(tabId, newTitle);
   }
 
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(false);
+    try {
+      const { tabId, fromGroupId } = JSON.parse(e.dataTransfer.getData('text/plain')) as {
+        tabId: string;
+        fromGroupId: string;
+      };
+      // Skip if dropped onto the same pane.
+      if (fromGroupId === node.groupId) return;
+      usePaneStore.getState().moveTab(tabId, fromGroupId, node.groupId);
+    } catch {
+      // Ignore malformed drag data from other sources.
+    }
+  }
+
   return (
-    <div className='flex items-center border-b border-border/70 bg-card/70 backdrop-blur-sm overflow-x-auto overflow-y-hidden shrink-0'>
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for tab drag-and-drop
+    <div
+      className={`flex items-center border-b border-border/70 bg-card/70 backdrop-blur-sm overflow-x-auto overflow-y-hidden shrink-0 ${isDragOver ? 'ring-2 ring-primary/60 ring-inset' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setIsDragOver(true);
+      }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={handleDrop}
+    >
       {node.tabs.map((tab) => (
         <ContextMenu key={tab.id}>
           <ContextMenuTrigger asChild>
@@ -64,6 +105,7 @@ export function TabBar({
                 <TabItem
                   tab={tab}
                   isActive={tab.id === node.activeTabId}
+                  fromGroupId={node.groupId}
                   onSelect={() => setActiveTab(tab.id, node.groupId)}
                   onClose={() => (onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId))}
                   onDoubleClick={() => {
@@ -121,6 +163,46 @@ export function TabBar({
             </ContextMenuItem>
             <ContextMenuItem onClick={() => splitGroup(node.groupId, 'vertical')}>
               <PanelBottom className='h-3.5 w-3.5 mr-2' /> Split Down
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            {otherGroupIds.length === 1 && (
+              <ContextMenuItem onClick={() => moveTab(tab.id, node.groupId, otherGroupIds[0])}>
+                Move to other pane
+              </ContextMenuItem>
+            )}
+            {otherGroupIds.length > 1 && (
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>Move to other pane</ContextMenuSubTrigger>
+                <ContextMenuSubContent>
+                  {otherGroupIds.map((id, i) => (
+                    <ContextMenuItem key={id} onClick={() => moveTab(tab.id, node.groupId, id)}>
+                      Pane {i + 2}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            )}
+            <ContextMenuItem
+              onClick={() => {
+                const beforeIds = collectLeafGroupIds(usePaneStore.getState().root);
+                splitGroup(node.groupId, 'horizontal');
+                const afterIds = collectLeafGroupIds(usePaneStore.getState().root);
+                const newId = afterIds.find((id) => !beforeIds.includes(id));
+                if (newId) moveTab(tab.id, node.groupId, newId);
+              }}
+            >
+              Move to new split right
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                const beforeIds = collectLeafGroupIds(usePaneStore.getState().root);
+                splitGroup(node.groupId, 'vertical');
+                const afterIds = collectLeafGroupIds(usePaneStore.getState().root);
+                const newId = afterIds.find((id) => !beforeIds.includes(id));
+                if (newId) moveTab(tab.id, node.groupId, newId);
+              }}
+            >
+              Move to new split below
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

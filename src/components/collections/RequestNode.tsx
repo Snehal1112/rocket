@@ -30,11 +30,17 @@ import { renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
-import type { RequestState, RequestTab } from '@/types/pane-types';
+import type { PaneNode, RequestState, RequestTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
 
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
+
+// Collects all leaf groupIds from the pane tree.
+function collectLeafGroupIds(node: PaneNode): string[] {
+  if (node.type === 'leaf') return [node.groupId];
+  return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
+}
 
 interface RequestNodeProps {
   uid: string;
@@ -69,6 +75,9 @@ export function RequestNode({
   onDuplicate,
 }: RequestNodeProps) {
   const root = usePaneStore((s) => s.root);
+  const activeGroupId = usePaneStore((s) => s.activeGroupId);
+  const openTab = usePaneStore((s) => s.openTab);
+  const splitGroup = usePaneStore((s) => s.splitGroup);
   const active = isActiveRequest(root, uid);
   const contractsForScope = useContractStore((s) => s.contractsForScope);
   const scopedContracts = contractsForScope(collectionRoot, 'request', path) ?? EMPTY_CONTRACTS;
@@ -94,10 +103,10 @@ export function RequestNode({
     }
   };
 
-  function handleClick() {
-    if (isRenaming) return;
+  // Builds a RequestTab without opening it.
+  function createTab(): RequestTab {
     const request: RequestState = mapApiRequestToState(itemData, true);
-    const tab: RequestTab = {
+    return {
       id: uid,
       title: name,
       tabType: 'request',
@@ -106,8 +115,25 @@ export function RequestNode({
       isDirty: false,
       source: { collection: collectionName, path },
     };
-    usePaneStore.getState().openTab(tab);
   }
+
+  function handleClick() {
+    if (isRenaming) return;
+    openTab(createTab());
+  }
+
+  // Opens the tab in a new pane created by splitting in the given direction.
+  function openInSplit(direction: 'horizontal' | 'vertical') {
+    const allCurrentIds = collectLeafGroupIds(root);
+    splitGroup(activeGroupId, direction);
+    const newRoot = usePaneStore.getState().root;
+    const newIds = collectLeafGroupIds(newRoot);
+    const newGroupId = newIds.find((id) => !allCurrentIds.includes(id));
+    if (newGroupId) openTab(createTab(), newGroupId);
+  }
+
+  const allLeafIds = collectLeafGroupIds(root);
+  const otherGroupIds = allLeafIds.filter((id) => id !== activeGroupId);
 
   return (
     <ContextMenu>
@@ -160,12 +186,12 @@ export function RequestNode({
                 className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
-                <MoreHorizontal className='h-3 w-3' />
+                <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
-                <Copy className='h-3.5 w-3.5 mr-2' /> Duplicate
+                <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
@@ -193,13 +219,38 @@ export function RequestNode({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
+              {/* Pane-targeting actions. */}
+              {otherGroupIds.length === 1 && (
+                <DropdownMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
+                  Open in other pane
+                </DropdownMenuItem>
+              )}
+              {otherGroupIds.length > 1 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Open in other pane</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className='w-48'>
+                    {otherGroupIds.map((gid) => (
+                      <DropdownMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
+                        Pane {allLeafIds.indexOf(gid) + 1}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
+              <DropdownMenuItem onClick={() => openInSplit('horizontal')}>
+                Open to right
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openInSplit('vertical')}>
+                Open below
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 className='text-destructive'
                 onClick={() =>
                   onDelete({ type: 'request', collection: collectionName, path, name })
                 }
               >
-                <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
+                <Trash2 aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -234,6 +285,27 @@ export function RequestNode({
             {summaries.length === 0 && <ContextMenuItem disabled>No collections</ContextMenuItem>}
           </ContextMenuSubContent>
         </ContextMenuSub>
+        <ContextMenuSeparator />
+        {/* Pane-targeting actions. */}
+        {otherGroupIds.length === 1 && (
+          <ContextMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
+            Open in other pane
+          </ContextMenuItem>
+        )}
+        {otherGroupIds.length > 1 && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>Open in other pane</ContextMenuSubTrigger>
+            <ContextMenuSubContent className='w-48'>
+              {otherGroupIds.map((gid) => (
+                <ContextMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
+                  Pane {allLeafIds.indexOf(gid) + 1}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+        <ContextMenuItem onClick={() => openInSplit('horizontal')}>Open to right</ContextMenuItem>
+        <ContextMenuItem onClick={() => openInSplit('vertical')}>Open below</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           className='text-destructive'
