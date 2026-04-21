@@ -301,7 +301,7 @@ export function CollectionNode({
                     />
                   )}
                   {summary.refType === 'external' && (
-                    <span className='ml-auto shrink-0 text-2xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+                    <span className='ml-auto shrink-0 text-2xs text-foreground bg-muted px-1.5 py-0.5 rounded'>
                       ext
                     </span>
                   )}
@@ -315,7 +315,7 @@ export function CollectionNode({
               <button
                 type='button'
                 aria-label={`Actions for ${summary.name}`}
-                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-muted-foreground'
+                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
