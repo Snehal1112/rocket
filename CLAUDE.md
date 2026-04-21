@@ -69,3 +69,37 @@ Rules live in `.claude/rules/` — one file per concern, numbered by read order.
 ## Frontend-specific notes
 
 See `.claude/frontend.md` for Zustand stores, tab system, keyboard shortcuts, sandbox mode, and UI state persistence. See `.claude/tauri-commands.md` for IPC command modules and service wiring.
+
+---
+
+## OpenCollection Spec Reference — Injection Rule
+
+When writing a plan using the `writing-plans` skill, inspect every task before finalising it.
+
+**If the task touches ANY of the following:**
+- `.yml` files (read or write)
+- Rust backend crates (`rocket-collection`, `rocket-environment`, `rocket-http`, `rocket-import`, `rocket-workspace`, `rocket-infra`)
+- `FsCollectionRepo` or `FsEnvironmentRepo`
+- Collection, folder, request, or environment data models
+- Variable resolution or scope logic
+- Auth configuration
+- Any Tauri IPC command that deals with collections or environments
+
+**Then prepend this line as the first step of that task:**
+
+> 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`.
+
+This applies to every affected task in the plan — not just the first one.
+
+---
+
+## Hard Rules (always enforced)
+
+- All UI components use **shadcn/ui primitives only** — no raw `<button>`, `<input>`, `<dialog>`, `<select>`, `<form>`
+- Icons: `lucide-react` only — no inline SVGs
+- Single-line variable-aware fields: `SingleLineEditor` (CodeMirror 6) — never Monaco
+- Multi-line editors: Monaco only
+- Zustand: never fully destructure store state at component top level
+- Rust: never `unwrap()` in production paths, never shell out to `git` CLI (use `git2` crate)
+- Commits: conventional commits format (`feat:`, `fix:`, `chore:`, etc.)
+- Serde: `#[serde(rename_all = "camelCase")]` on IPC DTOs only — never on persistence structs
