@@ -324,6 +324,68 @@ impl OAuth2Service {
         Self::post_token_request(&url, &form, &extra_headers, verify_ssl).await
     }
 
+    /// Builds the form body for exchanging an authorization code for a token.
+    /// Called by the Tauri command after the browser flow returns a code.
+    pub(crate) fn build_code_exchange_form(
+        config: &ResolvedOAuth2Config,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+    ) -> Vec<(String, String)> {
+        let mut form: Vec<(String, String)> = vec![
+            ("grant_type".into(), "authorization_code".into()),
+            ("code".into(), code.into()),
+            ("redirect_uri".into(), redirect_uri.into()),
+        ];
+
+        if let Some(verifier) = code_verifier {
+            form.push(("code_verifier".into(), verifier.into()));
+        }
+
+        // Client authentication: when `header`, credentials go in an HTTP Basic header;
+        // when `body`, they go in the form body here.
+        if config.client_authentication != "header" {
+            form.push(("client_id".into(), config.client_id.clone()));
+            form.push(("client_secret".into(), config.client_secret.clone()));
+        }
+
+        if let Some(scope) = &config.scope {
+            form.push(("scope".into(), scope.clone()));
+        }
+
+        // Additional body-type token params (e.g. `resource`).
+        apply_params_to_body(&mut form, &config.token_params);
+
+        form
+    }
+
+    /// Exchanges an authorization code for a token.
+    /// Called by the Tauri command after the browser/webview flow completes.
+    pub async fn exchange_code_for_token(
+        &self,
+        config: &ResolvedOAuth2Config,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+    ) -> DomainResult<OAuthToken> {
+        if config.token_url.is_empty() {
+            return Err(DomainError::InvalidInput("Token URL is required.".into()));
+        }
+
+        let form = Self::build_code_exchange_form(config, code, redirect_uri, code_verifier);
+        let url = apply_params_to_url(&config.token_url, &config.token_params);
+
+        let mut extra_headers: Vec<(String, String)> = vec![];
+        if config.client_authentication == "header" {
+            use base64::Engine;
+            let creds = format!("{}:{}", config.client_id, config.client_secret);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+            extra_headers.push(("Authorization".into(), format!("Basic {encoded}")));
+        }
+
+        Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
+    }
+
     /// Resolves all {{variables}} in the get-token request fields.
     pub fn resolve_get_token_request(
         &self,
@@ -647,5 +709,79 @@ mod tests {
         assert!(form
             .iter()
             .any(|(k, v)| k == "password" && v == "p@ssw0rd"));
+    }
+
+    #[test]
+    fn build_code_exchange_form() {
+        let config = ResolvedOAuth2Config {
+            grant_type: "authorization_code".into(),
+            authorization_url: "https://auth.example.com/authorize".into(),
+            token_url: "https://auth.example.com/token".into(),
+            callback_url: "http://localhost:9876/callback".into(),
+            client_id: "my-client".into(),
+            client_secret: "my-secret".into(),
+            scope: Some("openid".into()),
+            state: None,
+            username: String::new(),
+            password: String::new(),
+            client_authentication: "body".into(),
+            use_pkce: true,
+            use_system_browser: false,
+            verify_ssl: true,
+            auth_params: vec![],
+            token_params: vec![AdditionalParam {
+                key: "resource".into(),
+                value: "https://api.example.com".into(),
+                send_in: "body".into(),
+                enabled: true,
+            }],
+            refresh_params: vec![],
+        };
+        let form = OAuth2Service::build_code_exchange_form(
+            &config,
+            "AUTH_CODE_123",
+            "http://localhost:9876/callback",
+            Some("verifier_abc"),
+        );
+        assert!(form.iter().any(|(k, v)| k == "grant_type" && v == "authorization_code"));
+        assert!(form.iter().any(|(k, v)| k == "code" && v == "AUTH_CODE_123"));
+        assert!(form.iter().any(|(k, v)| k == "redirect_uri" && v == "http://localhost:9876/callback"));
+        assert!(form.iter().any(|(k, v)| k == "code_verifier" && v == "verifier_abc"));
+        assert!(form.iter().any(|(k, v)| k == "client_id" && v == "my-client"));
+        assert!(form.iter().any(|(k, v)| k == "resource" && v == "https://api.example.com"));
+    }
+
+    #[test]
+    fn build_code_exchange_form_no_pkce_header_auth() {
+        let config = ResolvedOAuth2Config {
+            grant_type: "authorization_code".into(),
+            authorization_url: String::new(),
+            token_url: "https://auth.example.com/token".into(),
+            callback_url: String::new(),
+            client_id: "my-client".into(),
+            client_secret: "my-secret".into(),
+            scope: None,
+            state: None,
+            username: String::new(),
+            password: String::new(),
+            client_authentication: "header".into(),
+            use_pkce: false,
+            use_system_browser: false,
+            verify_ssl: true,
+            auth_params: vec![],
+            token_params: vec![],
+            refresh_params: vec![],
+        };
+        let form = OAuth2Service::build_code_exchange_form(
+            &config,
+            "CODE",
+            "http://localhost/cb",
+            None,
+        );
+        // No PKCE verifier when None passed.
+        assert!(!form.iter().any(|(k, _)| k == "code_verifier"));
+        // Header auth: client_id/secret NOT in form.
+        assert!(!form.iter().any(|(k, _)| k == "client_id"));
+        assert!(!form.iter().any(|(k, _)| k == "client_secret"));
     }
 }
