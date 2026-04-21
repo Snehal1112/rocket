@@ -1,7 +1,7 @@
 use rocket_git::service::GitService;
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution,
-    FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
+    FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -134,7 +134,7 @@ impl GitAppService {
         Ok(())
     }
 
-    pub fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+    pub fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
         self.git.fetch(path, remote, creds)
     }
 

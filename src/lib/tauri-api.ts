@@ -308,6 +308,12 @@ export interface RemoteInfo {
   url: string;
 }
 
+export interface FetchResult {
+  updatedRefs: string[];
+  receivedObjects: number;
+  receivedBytes: number;
+}
+
 export interface CollectionScanResult {
   name: string;
   path: string;
@@ -554,7 +560,7 @@ export const gitPull = (collectionPath: string, remote: string, creds: GitCreden
   invoke<void>('git_pull', { collectionPath, remote, creds });
 
 export const gitFetch = (collectionPath: string, remote: string, creds: GitCredentials) =>
-  invoke<void>('git_fetch', { collectionPath, remote, creds });
+  invoke<FetchResult>('git_fetch', { collectionPath, remote, creds });
 
 export const gitBranches = (collectionPath: string) =>
   invoke<BranchList>('git_branches', { collectionPath });

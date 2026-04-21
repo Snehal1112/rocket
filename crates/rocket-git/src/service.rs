@@ -4,7 +4,7 @@ use crate::{
     commit::CommitInfo, stash::StashEntry,
     conflict::{ConflictFile, ConflictResolution},
     credentials::GitCredentials,
-    remote::RemoteInfo,
+    remote::{FetchResult, RemoteInfo},
 };
 
 pub trait GitService: Send + Sync {
@@ -36,7 +36,7 @@ pub trait GitService: Send + Sync {
     // Remote
     fn push(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()>;
     fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()>;
-    fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()>;
+    fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult>;
 
     // Branches
     fn branches(&self, path: &str) -> DomainResult<BranchList>;

@@ -1,7 +1,7 @@
 use rocket_app::GitAppService;
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution,
-    FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
+    FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainError;
 use tauri::State;
@@ -75,7 +75,7 @@ pub fn git_pull(collection_path: String, remote: String, creds: GitCredentials, 
 }
 
 #[tauri::command]
-pub fn git_fetch(collection_path: String, remote: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
+pub fn git_fetch(collection_path: String, remote: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<FetchResult, DomainError> {
     svc.fetch(&collection_path, &remote, &creds)
 }
 

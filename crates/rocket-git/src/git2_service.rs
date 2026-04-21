@@ -10,7 +10,7 @@ use crate::conflict::{ConflictFile, ConflictResolution};
 use crate::credentials::GitCredentials;
 use crate::diff::{DiffHunk, DiffLine, FileDiff, LineType};
 use crate::service::GitService;
-use crate::remote::RemoteInfo;
+use crate::remote::{FetchResult, RemoteInfo};
 use crate::stash::StashEntry;
 use crate::status::{FileStatus, GitStatus, RepoStatus};
 
@@ -715,20 +715,49 @@ impl GitService for Git2Service {
     }
 
     #[tracing::instrument(name = "git_fetch", skip(self, creds), fields(repo_path = %path, remote = %remote))]
-    fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+    fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
         let repo = open_repo(path)?;
         let mut remote_obj = repo
             .find_remote(remote)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-        let callbacks = build_callbacks(creds);
+        let updated_refs = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let received_objects = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+        let received_bytes = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+
+        let refs_clone = updated_refs.clone();
+        let objs_clone = received_objects.clone();
+        let bytes_clone = received_bytes.clone();
+
+        let mut callbacks = build_callbacks(creds);
+        callbacks.update_tips(move |refname, _old, _new| {
+            if let Ok(mut v) = refs_clone.lock() {
+                v.push(refname.to_owned());
+            }
+            true
+        });
+        callbacks.transfer_progress(move |stats| {
+            if let Ok(mut n) = objs_clone.lock() {
+                *n = stats.received_objects();
+            }
+            if let Ok(mut b) = bytes_clone.lock() {
+                *b = stats.received_bytes();
+            }
+            true
+        });
+
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
 
         remote_obj
             .fetch::<&str>(&[], Some(&mut fetch_opts), None)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        Ok(())
+
+        Ok(FetchResult {
+            updated_refs: updated_refs.lock().map(|v| v.clone()).unwrap_or_default(),
+            received_objects: received_objects.lock().map(|n| *n).unwrap_or(0),
+            received_bytes: received_bytes.lock().map(|b| *b).unwrap_or(0),
+        })
     }
 
     fn branches(&self, path: &str) -> DomainResult<BranchList> {
