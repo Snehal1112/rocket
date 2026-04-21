@@ -872,6 +872,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 onChange={handleAuthChange}
                 variableContext={scopedContext}
                 onNavigateToSource={handleEditorNavigateToSource}
+                collection={tab.source?.collection}
+                environmentName={activeEnvIdForScope ?? undefined}
+                requestPath={tab.source?.path}
               />
             )}
             {activeSection === 'variables' &&
