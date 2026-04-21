@@ -303,6 +303,8 @@ pub fn run() {
             commands::audit::save_audit_evidence_file,
             commands::oauth2::oauth2_auth_code_flow,
             commands::oauth2::oauth2_decode_jwt,
+            commands::oauth2::oauth2_get_token,
+            commands::oauth2::oauth2_refresh_token,
             commands::git::git_is_repo,
             commands::git::git_init,
             commands::git::git_clone,
