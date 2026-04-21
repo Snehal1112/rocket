@@ -286,6 +286,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Stage every modified file that is not yet staged.
   stageAll: async () => {
+    // Always refresh before reading so we never stage from a stale cache
+    // that could contain directory-level entries (trailing '/') from an
+    // older status response.
+    await get().refreshStatus();
     const { status } = get();
     if (!status) return;
     const unstaged = status.files

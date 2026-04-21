@@ -432,15 +432,13 @@ impl GitService for Git2Service {
         let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
         let workdir = repo.workdir()
             .ok_or_else(|| DomainError::Internal("No working directory".into()))?;
+        // Collect directory paths separately — index.add_path() rejects them.
+        // Use index.add_all() with the directory as a pathspec instead.
+        let mut dir_specs: Vec<&str> = Vec::new();
         for file in files {
-            // Directory paths (trailing '/') cannot be added via add_path.
-            // They should never appear here after the status fix, but guard
-            // defensively so we fail with a clear message instead of a
-            // cryptic libgit2 index error.
             if file.ends_with('/') {
-                return Err(DomainError::Internal(format!(
-                    "cannot stage a directory path directly: '{file}'; stage individual files instead"
-                )));
+                dir_specs.push(file);
+                continue;
             }
             let file_path = workdir.join(file);
             if file_path.exists() {
@@ -452,6 +450,11 @@ impl GitService for Git2Service {
                 index.remove_path(Path::new(file))
                     .map_err(|e| DomainError::Internal(e.to_string()))?;
             }
+        }
+        if !dir_specs.is_empty() {
+            // Stage all files under each directory pathspec.
+            index.add_all(dir_specs.iter().copied(), git2::IndexAddOption::DEFAULT, None)
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
         }
         index.write().map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
@@ -1406,6 +1409,47 @@ mod tests {
         svc.stage(&path, &["test.bru"]).unwrap();
         let status2 = svc.status(&path).unwrap();
         assert!(status2.files.iter().any(|f| f.path == "test.bru" && f.staged));
+    }
+
+    #[test]
+    fn status_untracked_directory_emits_files_not_dir_entry() {
+        // Reproduces: "invalid path: 'collections/e4a-rest/'; class=Index (10)"
+        // An untracked directory must appear as individual file entries in
+        // status, never as a single directory entry with a trailing '/'.
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let sub = dir.path().join("collections").join("e4a-rest");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("get-users.yml"), "name: get-users").unwrap();
+        let status = svc.status(&path).unwrap();
+        // No entry should have a trailing '/'.
+        for f in &status.files {
+            assert!(
+                !f.path.ends_with('/'),
+                "status returned directory entry: '{}'", f.path
+            );
+        }
+        // The file inside the directory must appear.
+        assert!(
+            status.files.iter().any(|f| f.path == "collections/e4a-rest/get-users.yml"),
+            "expected file entry not found; got: {:?}", status.files.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn stage_untracked_directory_succeeds() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let sub = dir.path().join("collections").join("e4a-rest");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("get-users.yml"), "name: get-users").unwrap();
+        let status = svc.status(&path).unwrap();
+        let paths: Vec<&str> = status.files.iter().map(|f| f.path.as_str()).collect();
+        svc.stage(&path, &paths).unwrap();
+        let status2 = svc.status(&path).unwrap();
+        assert!(
+            status2.files.iter().any(|f| f.path.contains("get-users.yml") && f.staged)
+        );
     }
 
     #[test]
