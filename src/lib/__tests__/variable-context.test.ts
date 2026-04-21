@@ -64,3 +64,58 @@ describe('resolveWithContext', () => {
       resolveWithContext('{{oidc-baseurl}}/api', { 'oidc-baseurl': 'https://auth.local' }),
     ).toBe('https://auth.local/api'));
 });
+
+describe('dynamic variables', () => {
+  it('resolves {{$guid}} to a valid UUID', () => {
+    const result = resolveWithContext('{{$guid}}', {});
+    expect(result).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  it('resolves {{$randomInt}} to a number string', () => {
+    const result = resolveWithContext('{{$randomInt}}', {});
+    const num = parseInt(result, 10);
+    expect(num).toBeGreaterThanOrEqual(0);
+    expect(num).toBeLessThanOrEqual(1000);
+  });
+
+  it('does not shadow dynamic vars with user vars', () => {
+    const result = resolveWithContext('{{$guid}}', { $guid: 'user-override' });
+    expect(result).not.toBe('user-override');
+    // Starts like a UUID.
+    expect(result).toMatch(/^[0-9a-f]{8}-/i);
+  });
+
+  it('leaves unknown $vars unresolved', () => {
+    const result = resolveWithContext('{{$doesNotExist}}', {});
+    expect(result).toBe('{{$doesNotExist}}');
+  });
+
+  it('resolves mixed dynamic and regular vars', () => {
+    const result = resolveWithContext('{{baseUrl}}/users/{{$randomUUID}}', {
+      baseUrl: 'https://api.test',
+    });
+    expect(result).toMatch(/^https:\/\/api\.test\/users\/[0-9a-f]{8}-/i);
+  });
+
+  it('resolves {{$timestamp}} to a unix epoch', () => {
+    const result = resolveWithContext('{{$timestamp}}', {});
+    const num = parseInt(result, 10);
+    expect(num).toBeGreaterThan(1000000000);
+  });
+
+  it('resolves with whitespace: {{ $guid }}', () => {
+    const result = resolveWithContext('{{ $guid }}', {});
+    expect(result).toMatch(/^[0-9a-f]{8}-/i);
+  });
+
+  it('two $guid in same template produce different values', () => {
+    const result = resolveWithContext('{{$guid}}|{{$guid}}', {});
+    const [a, b] = result.split('|');
+    expect(a).toMatch(/^[0-9a-f]{8}-/i);
+    expect(b).toMatch(/^[0-9a-f]{8}-/i);
+    // Probabilistic — UUIDs are essentially never identical.
+    expect(a).not.toBe(b);
+  });
+});
