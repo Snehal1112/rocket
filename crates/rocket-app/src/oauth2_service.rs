@@ -206,41 +206,25 @@ impl OAuth2Service {
         (form, headers)
     }
 
-    /// Executes client_credentials or password grant synchronously against the token endpoint.
-    pub async fn get_token_direct(
-        &self,
-        config: &ResolvedOAuth2Config,
+    /// Shared HTTP dispatch for all OAuth2 token endpoint POSTs.
+    /// Builds the reqwest client, posts the form, and parses the OAuthToken response.
+    async fn post_token_request(
+        url: &str,
+        form: &[(String, String)],
+        extra_headers: &[(String, String)],
+        verify_ssl: bool,
     ) -> DomainResult<OAuthToken> {
-        if config.token_url.is_empty() {
-            return Err(DomainError::InvalidInput("Token URL is required.".into()));
-        }
-
-        let (form, extra_headers) = Self::build_token_request_parts(config);
-
-        // Apply queryparam-type extra token params to the URL.
-        let url = apply_params_to_url(&config.token_url, &config.token_params);
-
         let client = reqwest::ClientBuilder::new()
-            .danger_accept_invalid_certs(!config.verify_ssl)
+            .danger_accept_invalid_certs(!verify_ssl)
             .build()
             .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}")))?;
 
-        let mut request = client
-            .post(&url)
-            .header("Content-Type", "application/x-www-form-urlencoded");
-
-        for (key, value) in &extra_headers {
+        let mut request = client.post(url).form(form);
+        for (key, value) in extra_headers {
             request = request.header(key, value);
         }
 
-        let body = form
-            .iter()
-            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-            .collect::<Vec<_>>()
-            .join("&");
-
         let resp = request
-            .body(body)
             .send()
             .await
             .map_err(|e| DomainError::Internal(format!("Token request failed: {e}")))?;
@@ -256,6 +240,21 @@ impl OAuth2Service {
         resp.json::<OAuthToken>()
             .await
             .map_err(|e| DomainError::Internal(format!("Failed to parse token response: {e}")))
+    }
+
+    /// Executes client_credentials or password grant against the token endpoint.
+    pub async fn get_token_direct(
+        &self,
+        config: &ResolvedOAuth2Config,
+    ) -> DomainResult<OAuthToken> {
+        if config.token_url.is_empty() {
+            return Err(DomainError::InvalidInput("Token URL is required.".into()));
+        }
+
+        let (form, extra_headers) = Self::build_token_request_parts(config);
+        // Apply queryparam-type extra token params to the URL (body-type were added to `form`).
+        let url = apply_params_to_url(&config.token_url, &config.token_params);
+        Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
     }
 
     /// Refreshes an OAuth2 token.
@@ -274,7 +273,7 @@ impl OAuth2Service {
         let refresh_url = req
             .refresh_token_url
             .as_deref()
-            .map(|u| r(u))
+            .map(r)
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| token_url.clone());
         let client_id = r(&req.client_id);
@@ -287,7 +286,6 @@ impl OAuth2Service {
             .unwrap_or_else(|| "body".into());
         let verify_ssl = req.verify_ssl.unwrap_or(true);
 
-        // Resolve per-refresh additional params.
         let refresh_params: Vec<AdditionalParam> = req
             .refresh_params
             .as_deref()
@@ -301,7 +299,6 @@ impl OAuth2Service {
             })
             .collect();
 
-        // Build form body.
         let mut form: Vec<(String, String)> = vec![
             ("grant_type".into(), "refresh_token".into()),
             ("refresh_token".into(), refresh_token),
@@ -324,42 +321,7 @@ impl OAuth2Service {
         apply_params_to_body(&mut form, &refresh_params);
         let url = apply_params_to_url(&refresh_url, &refresh_params);
 
-        let client = reqwest::ClientBuilder::new()
-            .danger_accept_invalid_certs(!verify_ssl)
-            .build()
-            .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}")))?;
-
-        let mut request = client
-            .post(&url)
-            .header("Content-Type", "application/x-www-form-urlencoded");
-
-        for (key, value) in &extra_headers {
-            request = request.header(key, value);
-        }
-
-        let body = form
-            .iter()
-            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-            .collect::<Vec<_>>()
-            .join("&");
-
-        let resp = request
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| DomainError::Internal(format!("Refresh token request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(DomainError::Internal(format!(
-                "Refresh endpoint returned {status}: {body}"
-            )));
-        }
-
-        resp.json::<OAuthToken>()
-            .await
-            .map_err(|e| DomainError::Internal(format!("Failed to parse refresh response: {e}")))
+        Self::post_token_request(&url, &form, &extra_headers, verify_ssl).await
     }
 
     /// Resolves all {{variables}} in the get-token request fields.
