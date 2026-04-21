@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
-use rocket_http::AdditionalParam;
+use rocket_http::{apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken};
+use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
 // ─── Input types ───────────────────────────────────────────────────
@@ -50,7 +51,6 @@ pub struct OAuth2GetTokenRequest {
 }
 
 /// Request to refresh an existing OAuth2 token.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuth2RefreshRequest {
@@ -168,6 +168,200 @@ impl OAuth2Service {
         ctx.flatten()
     }
 
+    /// Builds form body params and extra headers for a token request.
+    /// Used by client_credentials, password, and the code-exchange step of auth_code.
+    pub(crate) fn build_token_request_parts(
+        config: &ResolvedOAuth2Config,
+    ) -> (Vec<(String, String)>, Vec<(String, String)>) {
+        let mut form: Vec<(String, String)> = vec![
+            ("grant_type".into(), config.grant_type.clone()),
+        ];
+        let mut headers: Vec<(String, String)> = vec![];
+
+        // Scope (applied before client auth to keep ordering predictable).
+        if let Some(scope) = &config.scope {
+            form.push(("scope".into(), scope.clone()));
+        }
+
+        // Client authentication: header = HTTP Basic, body = form fields.
+        if config.client_authentication == "header" {
+            use base64::Engine;
+            let credentials = format!("{}:{}", config.client_id, config.client_secret);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
+            headers.push(("Authorization".into(), format!("Basic {encoded}")));
+        } else {
+            form.push(("client_id".into(), config.client_id.clone()));
+            form.push(("client_secret".into(), config.client_secret.clone()));
+        }
+
+        // Password grant fields.
+        if config.grant_type == "password" {
+            form.push(("username".into(), config.username.clone()));
+            form.push(("password".into(), config.password.clone()));
+        }
+
+        // Additional token params (body-type only).
+        apply_params_to_body(&mut form, &config.token_params);
+
+        (form, headers)
+    }
+
+    /// Executes client_credentials or password grant synchronously against the token endpoint.
+    pub async fn get_token_direct(
+        &self,
+        config: &ResolvedOAuth2Config,
+    ) -> DomainResult<OAuthToken> {
+        if config.token_url.is_empty() {
+            return Err(DomainError::InvalidInput("Token URL is required.".into()));
+        }
+
+        let (form, extra_headers) = Self::build_token_request_parts(config);
+
+        // Apply queryparam-type extra token params to the URL.
+        let url = apply_params_to_url(&config.token_url, &config.token_params);
+
+        let client = reqwest::ClientBuilder::new()
+            .danger_accept_invalid_certs(!config.verify_ssl)
+            .build()
+            .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}")))?;
+
+        let mut request = client
+            .post(&url)
+            .header("Content-Type", "application/x-www-form-urlencoded");
+
+        for (key, value) in &extra_headers {
+            request = request.header(key, value);
+        }
+
+        let body = form
+            .iter()
+            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+
+        let resp = request
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Token request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(DomainError::Internal(format!(
+                "Token endpoint returned {status}: {body}"
+            )));
+        }
+
+        resp.json::<OAuthToken>()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Failed to parse token response: {e}")))
+    }
+
+    /// Refreshes an OAuth2 token.
+    pub async fn refresh_token(
+        &self,
+        req: &OAuth2RefreshRequest,
+    ) -> DomainResult<OAuthToken> {
+        let vars = self.build_variable_context(
+            req.collection.as_deref(),
+            req.environment_name.as_deref(),
+            req.request_path.as_deref(),
+        );
+        let r = |s: &str| resolve(s, &vars).output;
+
+        let token_url = r(&req.token_url);
+        let refresh_url = req
+            .refresh_token_url
+            .as_deref()
+            .map(|u| r(u))
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| token_url.clone());
+        let client_id = r(&req.client_id);
+        let client_secret = r(req.client_secret.as_deref().unwrap_or_default());
+        let refresh_token = r(&req.refresh_token);
+        let scope = req.scope.as_deref().map(|s| r(s)).filter(|s| !s.is_empty());
+        let client_auth = req
+            .client_authentication
+            .clone()
+            .unwrap_or_else(|| "body".into());
+        let verify_ssl = req.verify_ssl.unwrap_or(true);
+
+        // Resolve per-refresh additional params.
+        let refresh_params: Vec<AdditionalParam> = req
+            .refresh_params
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|p| AdditionalParam {
+                key: r(&p.key),
+                value: r(&p.value),
+                send_in: p.send_in.clone(),
+                enabled: p.enabled,
+            })
+            .collect();
+
+        // Build form body.
+        let mut form: Vec<(String, String)> = vec![
+            ("grant_type".into(), "refresh_token".into()),
+            ("refresh_token".into(), refresh_token),
+        ];
+        if let Some(s) = &scope {
+            form.push(("scope".into(), s.clone()));
+        }
+
+        let mut extra_headers: Vec<(String, String)> = vec![];
+        if client_auth == "header" {
+            use base64::Engine;
+            let creds = format!("{client_id}:{client_secret}");
+            let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+            extra_headers.push(("Authorization".into(), format!("Basic {encoded}")));
+        } else {
+            form.push(("client_id".into(), client_id));
+            form.push(("client_secret".into(), client_secret));
+        }
+
+        apply_params_to_body(&mut form, &refresh_params);
+        let url = apply_params_to_url(&refresh_url, &refresh_params);
+
+        let client = reqwest::ClientBuilder::new()
+            .danger_accept_invalid_certs(!verify_ssl)
+            .build()
+            .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}")))?;
+
+        let mut request = client
+            .post(&url)
+            .header("Content-Type", "application/x-www-form-urlencoded");
+
+        for (key, value) in &extra_headers {
+            request = request.header(key, value);
+        }
+
+        let body = form
+            .iter()
+            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+
+        let resp = request
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Refresh token request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(DomainError::Internal(format!(
+                "Refresh endpoint returned {status}: {body}"
+            )));
+        }
+
+        resp.json::<OAuthToken>()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Failed to parse refresh response: {e}")))
+    }
+
     /// Resolves all {{variables}} in the get-token request fields.
     pub fn resolve_get_token_request(
         &self,
@@ -219,5 +413,277 @@ impl OAuth2Service {
             token_params: resolve_params(&req.token_params),
             refresh_params: resolve_params(&req.refresh_params),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket_collection::{
+        Collection, CollectionRepository, CollectionSettings, CollectionSummary,
+        CollectionVariable, Request as CollectionRequest,
+    };
+    use rocket_environment::{Environment, EnvironmentRepository, Variable};
+    use rocket_shared::error::{DomainError, DomainResult};
+
+    // ─── Stub repos ──────────────────────────────────────
+
+    struct StubEnvRepo {
+        env: Option<Environment>,
+    }
+
+    impl StubEnvRepo {
+        fn empty() -> Self {
+            Self { env: None }
+        }
+        fn with_vars(vars: &[(&str, &str)]) -> Self {
+            let mut env = Environment::new("test");
+            for (k, v) in vars {
+                env.set_variable(Variable::new(*k, *v));
+            }
+            Self { env: Some(env) }
+        }
+    }
+
+    impl EnvironmentRepository for StubEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(self.env.iter().cloned().collect())
+        }
+        fn get(&self, _name: &str) -> DomainResult<Environment> {
+            self.env
+                .clone()
+                .ok_or_else(|| DomainError::NotFound("env".into()))
+        }
+        fn save(&self, _env: &Environment) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _name: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    struct StubCollectionRepo;
+
+    impl CollectionRepository for StubCollectionRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            Ok(vec![])
+        }
+        fn get(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn create(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn save_request(
+            &self,
+            _: &str,
+            path: &str,
+            _: &CollectionRequest,
+        ) -> DomainResult<String> {
+            Ok(path.to_string())
+        }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
+            Ok(CollectionSettings::default())
+        }
+        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_folder_chain_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn get_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    #[allow(dead_code)]
+    fn make_service() -> OAuth2Service {
+        OAuth2Service::new(
+            Box::new(StubEnvRepo::empty()),
+            Box::new(StubCollectionRepo),
+        )
+    }
+
+    fn make_service_with_env(vars: &[(&str, &str)]) -> OAuth2Service {
+        OAuth2Service::new(
+            Box::new(StubEnvRepo::with_vars(vars)),
+            Box::new(StubCollectionRepo),
+        )
+    }
+
+    // ─── Tests ───────────────────────────────────────────
+
+    #[test]
+    fn resolve_replaces_variables_in_all_fields() {
+        let svc = make_service_with_env(&[
+            ("base_url", "https://auth.example.com"),
+            ("my_client", "client-123"),
+            ("my_secret", "secret-456"),
+        ]);
+        let req = OAuth2GetTokenRequest {
+            grant_type: "client_credentials".into(),
+            authorization_url: None,
+            token_url: Some("{{base_url}}/token".into()),
+            callback_url: None,
+            client_id: "{{my_client}}".into(),
+            client_secret: Some("{{my_secret}}".into()),
+            scope: Some("openid".into()),
+            state: None,
+            username: None,
+            password: None,
+            client_authentication: None,
+            use_pkce: None,
+            use_system_browser: None,
+            verify_ssl: None,
+            auth_params: None,
+            token_params: Some(vec![AdditionalParam {
+                key: "audience".into(),
+                value: "{{base_url}}/api".into(),
+                send_in: "body".into(),
+                enabled: true,
+            }]),
+            refresh_params: None,
+            collection: None,
+            environment_name: Some("test".into()),
+            request_path: None,
+        };
+        let resolved = svc.resolve_get_token_request(&req);
+        assert_eq!(resolved.token_url, "https://auth.example.com/token");
+        assert_eq!(resolved.client_id, "client-123");
+        assert_eq!(resolved.client_secret, "secret-456");
+        assert_eq!(resolved.token_params[0].value, "https://auth.example.com/api");
+    }
+
+    fn cc_config() -> ResolvedOAuth2Config {
+        ResolvedOAuth2Config {
+            grant_type: "client_credentials".into(),
+            authorization_url: String::new(),
+            token_url: "https://auth.example.com/token".into(),
+            callback_url: String::new(),
+            client_id: "my-client".into(),
+            client_secret: "my-secret".into(),
+            scope: Some("openid".into()),
+            state: None,
+            username: String::new(),
+            password: String::new(),
+            client_authentication: "body".into(),
+            use_pkce: false,
+            use_system_browser: false,
+            verify_ssl: true,
+            auth_params: vec![],
+            token_params: vec![AdditionalParam {
+                key: "audience".into(),
+                value: "api/v1".into(),
+                send_in: "body".into(),
+                enabled: true,
+            }],
+            refresh_params: vec![],
+        }
+    }
+
+    #[test]
+    fn build_client_credentials_form_body_auth() {
+        let (form, headers) = OAuth2Service::build_token_request_parts(&cc_config());
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "grant_type" && v == "client_credentials"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "client_id" && v == "my-client"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "client_secret" && v == "my-secret"));
+        assert!(form.iter().any(|(k, v)| k == "scope" && v == "openid"));
+        assert!(form.iter().any(|(k, v)| k == "audience" && v == "api/v1"));
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn build_client_credentials_header_auth() {
+        let mut config = cc_config();
+        config.client_authentication = "header".into();
+        config.scope = None;
+        config.token_params = vec![];
+        let (form, headers) = OAuth2Service::build_token_request_parts(&config);
+        assert!(!form.iter().any(|(k, _)| k == "client_id"));
+        assert!(!form.iter().any(|(k, _)| k == "client_secret"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v.starts_with("Basic ")));
+    }
+
+    #[test]
+    fn build_password_grant_includes_username_password() {
+        let mut config = cc_config();
+        config.grant_type = "password".into();
+        config.username = "user@example.com".into();
+        config.password = "p@ssw0rd".into();
+        config.scope = None;
+        config.token_params = vec![];
+        let (form, _) = OAuth2Service::build_token_request_parts(&config);
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "username" && v == "user@example.com"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "password" && v == "p@ssw0rd"));
     }
 }
