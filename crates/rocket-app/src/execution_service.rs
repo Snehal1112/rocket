@@ -86,24 +86,31 @@ impl RequestExecutionService {
         }
     }
 
-    /// Resolves all {{placeholders}} in `input` using the full variable precedence
-    /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
-    /// `run_load_test` so resolution logic is never duplicated.
-    fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
-        // Build variable map: collection < env < folder < request.
+    /// Builds a flattened variable map from all backend-accessible scopes
+    /// (collection, environment, folder-chain, request-level).
+    ///
+    /// Reused by `resolve_request()`, `run_load_test()`, and OAuth2 commands.
+    pub fn build_variable_context(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+    ) -> std::collections::HashMap<String, String> {
         let mut ctx = VariableContext::default();
 
-        // Scope: collection variables (lowest of the 4 backend-accessible scopes).
-        if let Some(col) = &input.collection {
+        if let Some(col) = collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
-                let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                let val = if cv.value.is_empty() {
+                    cv.initial_value.clone()
+                } else {
+                    cv.value.clone()
+                };
                 ctx.collection.insert(cv.key.clone(), val);
             }
         }
 
-        // Scope: environment variables override collection.
-        if let Some(name) = &input.environment_name {
+        if let Some(name) = environment_name {
             if let Ok(env) = self.env_repo.get(name) {
                 for (k, v) in env.enabled_variables() {
                     ctx.env.insert(k.to_string(), v.to_string());
@@ -111,27 +118,45 @@ impl RequestExecutionService {
             }
         }
 
-        // Scope: folder-chain variables (repo walks ancestors; inner folder wins).
-        if let (Some(col), Some(path)) = (&input.collection, &input.request_path) {
+        if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(folder_vars) = self.collection_repo.get_folder_chain_variables(col, path) {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
-                    let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                    let val = if cv.value.is_empty() {
+                        cv.initial_value.clone()
+                    } else {
+                        cv.value.clone()
+                    };
                     ctx.folder.insert(cv.key.clone(), val);
                 }
             }
         }
 
-        // Scope: request-level variables (highest priority on the backend).
-        if let (Some(col), Some(path)) = (&input.collection, &input.request_path) {
+        if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(request_vars) = self.collection_repo.get_request_variables(col, path) {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
-                    let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                    let val = if cv.value.is_empty() {
+                        cv.initial_value.clone()
+                    } else {
+                        cv.value.clone()
+                    };
                     ctx.request.insert(cv.key.clone(), val);
                 }
             }
         }
 
-        let vars = ctx.flatten();
+        ctx.flatten()
+    }
+
+    /// Resolves all {{placeholders}} in `input` using the full variable precedence
+    /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
+    /// `run_load_test` so resolution logic is never duplicated.
+    fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
+        // Build variable map: collection < env < folder < request.
+        let vars = self.build_variable_context(
+            input.collection.as_deref(),
+            input.environment_name.as_deref(),
+            input.request_path.as_deref(),
+        );
 
         // Merge collection auth and headers with request-level values.
         let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
