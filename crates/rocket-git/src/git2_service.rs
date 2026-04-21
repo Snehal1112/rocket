@@ -316,8 +316,16 @@ impl GitService for Git2Service {
         let branch = branch_name(&repo);
         let (ahead, behind) = ahead_behind(&repo);
 
+        // Recurse into untracked directories so each file is reported
+        // individually rather than as a single directory entry with a
+        // trailing '/'. Without this, staging an untracked folder fails
+        // because index.add_path() rejects directory paths.
+        let mut status_opts = git2::StatusOptions::new();
+        status_opts
+            .include_untracked(true)
+            .recurse_untracked_dirs(true);
         let statuses = repo
-            .statuses(None)
+            .statuses(Some(&mut status_opts))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
 
         let mut files = Vec::new();
@@ -425,6 +433,15 @@ impl GitService for Git2Service {
         let workdir = repo.workdir()
             .ok_or_else(|| DomainError::Internal("No working directory".into()))?;
         for file in files {
+            // Directory paths (trailing '/') cannot be added via add_path.
+            // They should never appear here after the status fix, but guard
+            // defensively so we fail with a clear message instead of a
+            // cryptic libgit2 index error.
+            if file.ends_with('/') {
+                return Err(DomainError::Internal(format!(
+                    "cannot stage a directory path directly: '{file}'; stage individual files instead"
+                )));
+            }
             let file_path = workdir.join(file);
             if file_path.exists() {
                 // File exists — add its current content to the index.
