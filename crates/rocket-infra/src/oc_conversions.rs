@@ -2228,6 +2228,60 @@ http:
     }
 
     #[test]
+    fn oauth2_auth_code_full_roundtrip() {
+        use rocket_shared::oauth2::{
+            OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials,
+            OAuth2Flow, OAuth2PKCE, OAuth2Settings, OAuth2TokenConfig, OAuth2TokenPlacement,
+        };
+
+        let original = Auth::OAuth2(OAuth2Flow::AuthorizationCode {
+            authorization_url: "https://auth.example.com/authorize".into(),
+            access_token_url: "https://auth.example.com/token".into(),
+            refresh_token_url: Some("https://auth.example.com/refresh".into()),
+            callback_url: Some("https://jwt.io/".into()),
+            credentials: OAuth2ClientCredentials {
+                client_id: "my-client".into(),
+                client_secret: "my-secret".into(),
+                placement: Some("basic_auth_header".into()),
+            },
+            scope: Some("openid email".into()),
+            state: Some("random-state".into()),
+            pkce: Some(OAuth2PKCE {
+                enabled: true,
+                method: Some("S256".into()),
+            }),
+            additional_parameters: Some(OAuth2AdditionalParameters {
+                authorization_request: Some(vec![OAuth2AdditionalParameter {
+                    name: "nonce".into(),
+                    value: "abc123".into(),
+                    placement: Some("query".into()),
+                }]),
+                access_token_request: Some(vec![OAuth2AdditionalParameter {
+                    name: "audience".into(),
+                    value: "api/v1".into(),
+                    placement: Some("body".into()),
+                }]),
+                refresh_token_request: None,
+            }),
+            token_config: Some(OAuth2TokenConfig {
+                id: Some("my-token".into()),
+                placement: Some(OAuth2TokenPlacement::Header {
+                    header: "Authorization".into(),
+                }),
+            }),
+            settings: Some(OAuth2Settings {
+                auto_fetch_token: Some(true),
+                auto_refresh_token: Some(false),
+                verify_ssl: Some(true),
+            }),
+        });
+
+        let oc: OcAuth = original.clone().into();
+        let back: Auth = oc.into();
+        assert_eq!(original, back);
+    }
+
+    #[test]
     fn settings_survive_roundtrip() {
         let yaml = r#"
 info:
