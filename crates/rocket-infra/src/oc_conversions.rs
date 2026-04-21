@@ -694,15 +694,13 @@ fn domain_number_to_inheritable(v: RequestSettingValue<f64>) -> InheritableNumbe
 // ============================================================
 
 /// Convert an OcVariable to a CollectionVariable.
-/// Both value and initial_value are set from the same OC source; they may
-/// diverge later when the user adds a local override.
+/// The persisted YAML value is loaded into both fields so the UI shows
+/// the saved value in both Initial and Current columns on reload.
 pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
     let val = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
     CollectionVariable {
         key:           v.name,
-        // initial_value is the git-committed baseline stored in YAML.
-        // value is a session-only override — starts empty so the UI shows no override on load.
-        value:         String::new(),
+        value:         val.clone(),
         initial_value: val,
         enabled:       !v.disabled.unwrap_or(false),
         secret:        false,
@@ -710,11 +708,13 @@ pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
 }
 
 /// Convert a CollectionVariable to an OcVariable.
-/// Persists initial_value (the git-committed baseline); current-value overrides are session-only.
+/// Persists the current value (value) when set, falling back to initial_value.
+/// This ensures whatever the user typed and saved in the UI is round-tripped correctly.
 pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable {
+    let persisted = if !cv.value.is_empty() { cv.value } else { cv.initial_value };
     OcVariable {
         name:        cv.key,
-        value:       if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
+        value:       if persisted.is_empty() { None } else { Some(VariableValue::simple(persisted)) },
         description: None,
         disabled:    if cv.enabled { None } else { Some(true) },
     }
@@ -1647,36 +1647,53 @@ mod tests {
     // ---- CollectionVariable tests ----
 
     #[test]
-    fn collection_variable_save_persists_initial_value_not_override() {
-        // Scenario: user has a variable with an initial value and a current override.
-        // On save, the YAML must preserve initial_value (git-committed), not the runtime override.
+    fn collection_variable_save_persists_current_value_over_initial() {
+        // Scenario: user has both a current value and an initial value set.
+        // On save, the current value (value) takes precedence and is persisted to YAML.
         let cv = CollectionVariable {
             key: "HOST".into(),
-            value: "http://production.com".into(),    // current session override
-            initial_value: "http://localhost".into(), // git-committed initial
+            value: "http://production.com".into(),    // current value — should win
+            initial_value: "http://localhost".into(), // initial value — lower priority
+            enabled: true,
+            secret: false,
+        };
+        let oc = collection_variable_to_oc_variable(cv);
+        assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://production.com"),
+            "YAML should store current value (value) when set");
+    }
+
+    #[test]
+    fn collection_variable_save_falls_back_to_initial_when_value_empty() {
+        // Scenario: user only filled in the initial value, leaving current value blank.
+        // The initial value should be persisted.
+        let cv = CollectionVariable {
+            key: "HOST".into(),
+            value: "".into(),
+            initial_value: "http://localhost".into(),
             enabled: true,
             secret: false,
         };
         let oc = collection_variable_to_oc_variable(cv);
         assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://localhost"),
-            "YAML should store initial_value, not the current override");
+            "YAML should store initial_value when current value is empty");
     }
 
     #[test]
-    fn collection_variable_roundtrip_preserves_initial_value() {
+    fn collection_variable_roundtrip_restores_value_in_both_fields() {
+        // After a save/load roundtrip the persisted value should appear in both
+        // initial_value and value so the UI shows it in both columns on reload.
         let cv = CollectionVariable {
             key: "BASE_URL".into(),
-            value: "http://override.com".into(),
+            value: "http://production.com".into(),
             initial_value: "http://localhost:8080".into(),
             enabled: true,
             secret: false,
         };
         let oc = collection_variable_to_oc_variable(cv);
         let back = oc_variable_to_collection_variable(oc);
-        // After roundtrip, initial_value should be the original initial_value.
-        assert_eq!(back.initial_value, "http://localhost:8080");
-        // Current value is session-only — starts empty after loading from YAML.
-        assert_eq!(back.value, "");
+        // current value wins on save, so both fields reflect it after reload.
+        assert_eq!(back.initial_value, "http://production.com");
+        assert_eq!(back.value, "http://production.com");
     }
 
     // ---- Variable tests ----

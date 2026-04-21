@@ -1468,16 +1468,16 @@ mod tests {
         repo.save_request("my-api", "get-users.yml", &req).unwrap();
 
         let vars = vec![
-            CollectionVariable { key: "PAGE".into(), value: "".into(), initial_value: "1".into(), enabled: true, secret: false },
+            CollectionVariable { key: "PAGE".into(), value: "2".into(), initial_value: "1".into(), enabled: true, secret: false },
         ];
         repo.save_request_variables("my-api", "get-users.yml", vars).unwrap();
 
         let loaded = repo.get_request_variables("my-api", "get-users.yml").unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].key, "PAGE");
-        assert_eq!(loaded[0].initial_value, "1");
-        // value is session-only — starts empty after loading from YAML.
-        assert_eq!(loaded[0].value, "");
+        // current value (value="2") wins on save; both fields reflect it after reload.
+        assert_eq!(loaded[0].initial_value, "2");
+        assert_eq!(loaded[0].value, "2");
     }
 
     #[test]
