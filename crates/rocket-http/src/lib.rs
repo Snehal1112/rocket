@@ -13,7 +13,7 @@ pub use cookie::{Cookie, CookieJar};
 pub use cookie_repository::CookieRepository;
 pub use executor::HttpExecutor;
 pub use load_test::{run_load_test, LoadTestConfig, LoadTestResult};
-pub use oauth2::{acquire_token, OAuthConfig, OAuthToken};
+pub use oauth2::{acquire_token, apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig, OAuthToken};
 pub use request::{HttpRequest, RequestOptions};
 pub use response::HttpResponse;
 pub use pkce::{generate_pkce, PkcePair};
