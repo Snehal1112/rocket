@@ -724,6 +724,8 @@ pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable 
     }
 }
 
+// For collection variables use oc_variable_to_collection_variable instead — this
+// impl is only for environment variables and silently drops the `initial` field.
 impl From<OcVariable> for Variable {
     fn from(oc: OcVariable) -> Self {
         Variable {
@@ -1673,7 +1675,7 @@ mod tests {
     #[test]
     fn collection_variable_save_omits_value_when_empty() {
         // Scenario: user only filled in the initial value, leaving current value blank.
-        // Only the initial field should appear in YAML; value should be None.
+        // The OcVariable struct should have value=None and initial=Some(...).
         let cv = CollectionVariable {
             key: "HOST".into(),
             value: "".into(),
