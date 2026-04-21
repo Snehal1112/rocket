@@ -8,8 +8,8 @@ use crate::bru::ast::BruKeyValue;
 pub fn convert_variables(vars: &[BruKeyValue]) -> Vec<CollectionVariable> {
     vars.iter().map(|kv| CollectionVariable {
         key: kv.key.clone(),
-        value: kv.value.clone(),
-        initial_value: String::new(),
+        value: String::new(),
+        initial_value: kv.value.clone(),
         enabled: !kv.disabled,
         secret: false,
     }).collect()
@@ -26,7 +26,8 @@ mod tests {
         let vars = convert_variables(&kvs);
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].key, "base");
-        assert_eq!(vars[0].value, "url");
+        assert_eq!(vars[0].initial_value, "url");
+        assert_eq!(vars[0].value, "");
         assert!(vars[0].enabled);
     }
 
