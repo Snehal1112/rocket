@@ -14,6 +14,7 @@ import { variableContextField } from './variable-context-facet';
  * would actually win appears first in the completion list.
  */
 const SCOPE_BOOST: Record<VariableSource, number> = {
+  dynamic: 7,
   runtime: 6,
   request: 5,
   folder: 4,
@@ -28,6 +29,8 @@ const SCOPE_BOOST: Record<VariableSource, number> = {
  */
 function scopeBadge(source: VariableSource): string {
   switch (source) {
+    case 'dynamic':
+      return 'D';
     case 'runtime':
       return 'R';
     case 'request':

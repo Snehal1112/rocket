@@ -1,7 +1,8 @@
 import type { CollectionVariable } from '@/lib/tauri-api';
+import { generateDynamicVar } from './dynamic-vars';
 
 // Matches {{variable.name}} style placeholders.
-const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
+const VAR_REGEX = /\{\{([$\w.-]+)\}\}/g;
 
 export type VariableSource =
   | 'runtime'
@@ -10,7 +11,8 @@ export type VariableSource =
   | 'environment'
   | 'collection'
   | 'global'
-  | 'process';
+  | 'process'
+  | 'dynamic';
 
 export interface VariableScopeEntry {
   value: string;
@@ -26,6 +28,9 @@ export function buildResolver(
 ): (text: string) => string {
   return (text: string) =>
     text.replace(VAR_REGEX, (match, key) => {
+      if (key.startsWith('$')) {
+        return generateDynamicVar(key.slice(1)) ?? match;
+      }
       if (key in envVariables) return envVariables[key];
       if (collectionVariables && key in collectionVariables) return collectionVariables[key];
       return match;
@@ -80,6 +85,7 @@ export function sourceBadgeClass(source: VariableSource): string {
     collection: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
     global: 'bg-teal-500/15 text-teal-700 dark:text-teal-400',
     process: 'bg-muted text-muted-foreground',
+    dynamic: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400',
   };
   return classes[source];
 }
