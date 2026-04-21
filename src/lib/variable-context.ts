@@ -1,6 +1,7 @@
 import type { CollectionVariable } from '@/lib/tauri-api';
+import { generateDynamicVar } from './dynamic-vars';
 
-const VAR_REGEX = /\{\{\s*([\w.-]+)\s*\}\}/g;
+const VAR_REGEX = /\{\{\s*([$\w.-]+)\s*\}\}/g;
 
 // Convert a CollectionVariable array into a plain key→value map, skipping
 // disabled entries and falling back to initialValue when value is empty.
@@ -42,7 +43,12 @@ export function buildVariableContext(params: {
 // Replace every {{var}} placeholder in template using the provided context.
 // Unknown placeholders are left unchanged.
 export function resolveWithContext(template: string, ctx: Record<string, string>): string {
-  return template.replace(VAR_REGEX, (match, key) => (key in ctx ? ctx[key] : match));
+  return template.replace(VAR_REGEX, (match, key) => {
+    if (key.startsWith('$')) {
+      return generateDynamicVar(key.slice(1)) ?? match;
+    }
+    return key in ctx ? ctx[key] : match;
+  });
 }
 
 // Resolve all values in a string→string map using the provided context.
