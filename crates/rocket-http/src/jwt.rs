@@ -29,6 +29,12 @@ pub struct JwtClaims {
 
 /// Decodes a JWT token WITHOUT signature verification.
 /// Used for display purposes only (showing token metadata in the UI).
+///
+/// # Security
+///
+/// The returned claims are unverified. They must NOT be used for
+/// authorization, access control, or any trust decision. Callers must
+/// assume the token could be forged.
 pub fn decode_jwt(token: &str) -> Result<JwtClaims, DomainError> {
     // Split the JWT into its 3 parts.
     let parts: Vec<&str> = token.split('.').collect();
