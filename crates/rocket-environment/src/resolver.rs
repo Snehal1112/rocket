@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::dynamic_vars;
 
 /// Result of variable resolution.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +40,18 @@ pub fn resolve(template: &str, variables: &HashMap<String, String>) -> ResolveRe
             let var_name_trimmed = var_name.trim().to_string();
 
             if found_closing {
-                if let Some(value) = variables.get(&var_name_trimmed) {
+                if let Some(stripped) = var_name_trimmed.strip_prefix('$') {
+                    // Dynamic variable — generate fresh value, never falls through to user vars.
+                    if let Some(generated) = dynamic_vars::generate(stripped) {
+                        output.push_str(&generated);
+                    } else {
+                        // Unknown $variable — leave as-is, mark unresolved.
+                        output.push_str("{{");
+                        output.push_str(&var_name);
+                        output.push_str("}}");
+                        unresolved.push(var_name_trimmed);
+                    }
+                } else if let Some(value) = variables.get(&var_name_trimmed) {
                     output.push_str(value);
                 } else {
                     // Leave as-is and record as unresolved.
@@ -118,5 +130,65 @@ mod tests {
         vars.insert("KEY".to_string(), "value".to_string());
         let result = resolve("{{ KEY }}", &vars);
         assert_eq!(result.output, "value");
+    }
+
+    #[test]
+    fn resolve_dynamic_var_guid() {
+        let vars = HashMap::new();
+        let result = resolve("{{$guid}}", &vars);
+        assert!(uuid::Uuid::parse_str(&result.output).is_ok(),
+            "{{{{$guid}}}} should resolve to a valid UUID, got: {}", result.output);
+        assert!(result.unresolved.is_empty());
+    }
+
+    #[test]
+    fn resolve_dynamic_var_not_shadowed_by_user_var() {
+        let mut vars = HashMap::new();
+        vars.insert("$guid".to_string(), "user-override".to_string());
+        let result = resolve("{{$guid}}", &vars);
+        // Dynamic var takes precedence — should NOT be "user-override"
+        assert_ne!(result.output, "user-override");
+        assert!(uuid::Uuid::parse_str(&result.output).is_ok());
+    }
+
+    #[test]
+    fn resolve_unknown_dynamic_var_left_as_is() {
+        let vars = HashMap::new();
+        let result = resolve("{{$unknownThing}}", &vars);
+        assert_eq!(result.output, "{{$unknownThing}}");
+        assert_eq!(result.unresolved, vec!["$unknownThing"]);
+    }
+
+    #[test]
+    fn resolve_mixed_dynamic_and_regular_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("baseUrl".to_string(), "https://api.test".to_string());
+        let result = resolve("{{baseUrl}}/users/{{$randomUUID}}", &vars);
+        assert!(result.output.starts_with("https://api.test/users/"));
+        let uuid_part = result.output.strip_prefix("https://api.test/users/").unwrap();
+        assert!(uuid::Uuid::parse_str(uuid_part).is_ok(),
+            "UUID portion '{}' is not valid", uuid_part);
+    }
+
+    #[test]
+    fn resolve_two_dynamic_vars_produce_different_values() {
+        let vars = HashMap::new();
+        let result = resolve("{{$guid}}-{{$guid}}", &vars);
+        // Two 36-char UUIDs separated by a literal '-' = 73 chars total.
+        assert_eq!(result.output.len(), 73, "Expected two UUIDs separated by dash, got: {}", result.output);
+        // Verify both halves are valid, distinct UUIDs.
+        let (first, rest) = result.output.split_at(36);
+        let second = &rest[1..]; // skip the separator dash
+        assert!(uuid::Uuid::parse_str(first).is_ok(), "first UUID invalid: {}", first);
+        assert!(uuid::Uuid::parse_str(second).is_ok(), "second UUID invalid: {}", second);
+        assert_ne!(first, second, "two $guid calls should produce different UUIDs");
+    }
+
+    #[test]
+    fn resolve_dynamic_var_with_whitespace() {
+        let vars = HashMap::new();
+        let result = resolve("{{ $guid }}", &vars);
+        assert!(uuid::Uuid::parse_str(&result.output).is_ok(),
+            "Whitespace around $guid should still resolve, got: {}", result.output);
     }
 }
