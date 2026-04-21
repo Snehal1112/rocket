@@ -168,6 +168,15 @@ impl OAuth2Service {
         ctx.flatten()
     }
 
+    /// Builds the `Authorization: Basic <base64(client_id:client_secret)>` header tuple
+    /// used for `client_authentication = "header"`.
+    fn basic_auth_header(client_id: &str, client_secret: &str) -> (String, String) {
+        use base64::Engine;
+        let creds = format!("{client_id}:{client_secret}");
+        let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
+        ("Authorization".into(), format!("Basic {encoded}"))
+    }
+
     /// Builds form body params and extra headers for a token request.
     /// Used by client_credentials, password, and the code-exchange step of auth_code.
     pub(crate) fn build_token_request_parts(
@@ -185,10 +194,7 @@ impl OAuth2Service {
 
         // Client authentication: header = HTTP Basic, body = form fields.
         if config.client_authentication == "header" {
-            use base64::Engine;
-            let credentials = format!("{}:{}", config.client_id, config.client_secret);
-            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials.as_bytes());
-            headers.push(("Authorization".into(), format!("Basic {encoded}")));
+            headers.push(Self::basic_auth_header(&config.client_id, &config.client_secret));
         } else {
             form.push(("client_id".into(), config.client_id.clone()));
             form.push(("client_secret".into(), config.client_secret.clone()));
@@ -309,10 +315,7 @@ impl OAuth2Service {
 
         let mut extra_headers: Vec<(String, String)> = vec![];
         if client_auth == "header" {
-            use base64::Engine;
-            let creds = format!("{client_id}:{client_secret}");
-            let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
-            extra_headers.push(("Authorization".into(), format!("Basic {encoded}")));
+            extra_headers.push(Self::basic_auth_header(&client_id, &client_secret));
         } else {
             form.push(("client_id".into(), client_id));
             form.push(("client_secret".into(), client_secret));
@@ -377,10 +380,7 @@ impl OAuth2Service {
 
         let mut extra_headers: Vec<(String, String)> = vec![];
         if config.client_authentication == "header" {
-            use base64::Engine;
-            let creds = format!("{}:{}", config.client_id, config.client_secret);
-            let encoded = base64::engine::general_purpose::STANDARD.encode(creds.as_bytes());
-            extra_headers.push(("Authorization".into(), format!("Basic {encoded}")));
+            extra_headers.push(Self::basic_auth_header(&config.client_id, &config.client_secret));
         }
 
         Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
