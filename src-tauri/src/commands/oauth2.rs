@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rocket_http::{acquire_token, generate_pkce, OAuthConfig, OAuthToken, PkcePair};
+use rocket_http::{acquire_token, decode_jwt, generate_pkce, JwtClaims, OAuthConfig, OAuthToken, PkcePair};
 use rocket_shared::error::DomainError;
 use tauri::{AppHandle, Manager};
 
@@ -228,4 +228,11 @@ fn urlencoding_encode(s: &str) -> String {
         }
     }
     result
+}
+
+/// Decodes a JWT token without signature verification.
+/// Used for displaying ID token metadata in the UI.
+#[tauri::command]
+pub fn oauth2_decode_jwt(token: String) -> Result<JwtClaims, DomainError> {
+    decode_jwt(&token)
 }

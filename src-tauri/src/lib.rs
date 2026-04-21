@@ -188,13 +188,20 @@ pub fn run() {
                 Box::new(NullEventPublisher),
             );
             let exec_svc = RequestExecutionService::new_with_audit(
-                Box::new(FsEnvironmentRepo::new(environments_dir)),
+                Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
                 Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(NullEventPublisher),
                 audit_publisher.clone(),
+            );
+
+            // OAuth2Service — stand-alone service for token acquisition flows.
+            // Uses its own repo instances pointed at the same paths as the exec service.
+            let oauth2_svc = rocket_app::oauth2_service::OAuth2Service::new(
+                Box::new(FsEnvironmentRepo::new(environments_dir)),
+                Box::new(FsCollectionRepo::new(collections_dir.clone())),
             );
 
             let git_svc = GitAppService::new(
@@ -221,6 +228,7 @@ pub fn run() {
             app.manage(template_svc);
             app.manage(cookie_svc);
             app.manage(exec_svc);
+            app.manage(oauth2_svc);
             app.manage(git_svc);
             app.manage(audit_svc);
             app.manage(Mutex::new(workspace_svc));
@@ -294,6 +302,7 @@ pub fn run() {
             commands::audit::export_audit_evidence,
             commands::audit::save_audit_evidence_file,
             commands::oauth2::oauth2_auth_code_flow,
+            commands::oauth2::oauth2_decode_jwt,
             commands::git::git_is_repo,
             commands::git::git_init,
             commands::git::git_clone,
