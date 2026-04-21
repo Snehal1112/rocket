@@ -61,7 +61,6 @@ import { HeadersEditor } from './HeadersEditor';
 import { PathParamsPanel } from './PathParamsPanel';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
-import { RequestVariablesDialog } from './RequestVariablesDialog';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { SaveRequestButton } from './SaveRequestButton';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
@@ -110,7 +109,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [showLoadTest, setShowLoadTest] = useState(false);
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
   const [envDialogOpen, setEnvDialogOpen] = useState(false);
-  const [requestVarsDialogOpen, setRequestVarsDialogOpen] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [collectionVariables, setCollectionVariables] = useState<CollectionVariable[]>([]);
   const [folderVariables, setFolderVariables] = useState<CollectionVariable[]>([]);
@@ -481,11 +479,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           break;
         case 'request':
         case 'runtime':
-          if (tab.source?.collection && tab.source?.path) {
-            setRequestVarsDialogOpen(true);
-          } else {
-            setActiveSection('variables');
-          }
+          setActiveSection('variables');
           break;
         case 'environment':
           setEnvDialogOpen(true);
@@ -591,16 +585,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             )}
           </>
         ),
-        isActive: tab.source?.collection && tab.source?.path
-          ? requestVarsDialogOpen
-          : activeSection === 'variables',
-        onClick: () => {
-          if (tab.source?.collection && tab.source?.path) {
-            setRequestVarsDialogOpen(true);
-          } else {
-            setActiveSection('variables');
-          }
-        },
+        isActive: activeSection === 'variables',
+        onClick: () => setActiveSection('variables'),
       },
       {
         value: 'docs',
@@ -1062,16 +1048,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         tabId={tab.id}
       />
       <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
-      {tab.source?.collection && tab.source?.path && (
-        <RequestVariablesDialog
-          open={requestVarsDialogOpen}
-          onClose={() => setRequestVarsDialogOpen(false)}
-          collection={tab.source.collection}
-          requestPath={tab.source.path}
-          requestName={tab.title}
-          onVarCountChange={setRequestVarCount}
-        />
-      )}
 
       {/* Unsaved changes dialog. */}
       <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
