@@ -591,8 +591,16 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             )}
           </>
         ),
-        isActive: activeSection === 'variables',
-        onClick: () => setActiveSection('variables'),
+        isActive: tab.source?.collection && tab.source?.path
+          ? requestVarsDialogOpen
+          : activeSection === 'variables',
+        onClick: () => {
+          if (tab.source?.collection && tab.source?.path) {
+            setRequestVarsDialogOpen(true);
+          } else {
+            setActiveSection('variables');
+          }
+        },
       },
       {
         value: 'docs',
