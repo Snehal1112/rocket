@@ -8,3 +8,7 @@ rocket-shared.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+fake = { version = "3", features = ["derive"] }
+rand = "0.8"

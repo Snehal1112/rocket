@@ -1,4 +1,5 @@
 pub mod context;
+pub mod dynamic_vars;
 pub mod environment;
 pub mod repository;
 pub mod resolver;
