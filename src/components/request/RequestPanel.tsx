@@ -412,6 +412,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           refreshToken: '',
           expiresIn: null,
           tokenAcquiredAt: null,
+          usePkce: true,
+          useSystemBrowser: false,
+          tokenSource: 'accessToken',
+          tokenId: '',
+          refreshTokenUrl: '',
+          autoFetchToken: true,
+          autoRefreshToken: false,
+          authParams: [],
+          tokenParams: [],
+          refreshParams: [],
+          idToken: '',
+          tokenType: '',
+          responseScope: '',
+          idTokenClaims: null,
         };
       if (authType === 'aws-sig-v4')
         next.awsSigV4 = {

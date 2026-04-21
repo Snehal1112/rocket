@@ -158,6 +158,25 @@ export interface BodyState {
   fileName?: string;
 }
 
+export interface OAuth2AdditionalParam {
+  key: string;
+  value: string;
+  sendIn: 'queryparams' | 'body';
+  enabled: boolean;
+}
+
+export interface OAuth2JwtClaims {
+  subject: string | null;
+  issuer: string | null;
+  audience: string | null;
+  expiry: number | null;
+  issuedAt: number | null;
+  scope: string | null;
+  tokenType: string | null;
+  algorithm: string | null;
+  rawPayload: string;
+}
+
 export interface AuthState {
   authType: 'inherit' | 'none' | 'basic' | 'bearer' | 'api-key' | 'oauth2' | 'aws-sig-v4';
   basic?: { username: string; password: string };
@@ -182,6 +201,32 @@ export interface AuthState {
     refreshToken: string;
     expiresIn: number | null;
     tokenAcquiredAt: number | null;
+
+    // Options
+    usePkce: boolean;
+    useSystemBrowser: boolean;
+
+    // Token section
+    tokenSource: 'accessToken' | 'idToken';
+    tokenId: string;
+
+    // Advanced
+    refreshTokenUrl: string;
+
+    // Settings
+    autoFetchToken: boolean;
+    autoRefreshToken: boolean;
+
+    // Additional parameters
+    authParams: OAuth2AdditionalParam[];
+    tokenParams: OAuth2AdditionalParam[];
+    refreshParams: OAuth2AdditionalParam[];
+
+    // Token response storage (ephemeral — NOT persisted).
+    idToken: string;
+    tokenType: string;
+    responseScope: string;
+    idTokenClaims: OAuth2JwtClaims | null;
   };
   awsSigV4?: {
     accessKey: string;

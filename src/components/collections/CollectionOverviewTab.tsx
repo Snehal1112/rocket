@@ -110,6 +110,24 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
         refreshToken: (a.refreshToken as string) ?? '',
         expiresIn: (a.expiresIn as number) ?? null,
         tokenAcquiredAt: (a.tokenAcquiredAt as number) ?? null,
+        usePkce: true,
+        useSystemBrowser: false,
+        tokenSource: 'accessToken',
+        tokenId: '',
+        refreshTokenUrl: (a.refreshTokenUrl as string) ?? '',
+        autoFetchToken:
+          ((a.settings as Record<string, unknown> | undefined)?.autoFetchToken as boolean) ??
+          true,
+        autoRefreshToken:
+          ((a.settings as Record<string, unknown> | undefined)?.autoRefreshToken as boolean) ??
+          false,
+        authParams: [],
+        tokenParams: [],
+        refreshParams: [],
+        idToken: '',
+        tokenType: '',
+        responseScope: '',
+        idTokenClaims: null,
       },
     };
   }
@@ -404,6 +422,20 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         refreshToken: '',
         expiresIn: null,
         tokenAcquiredAt: null,
+        usePkce: true,
+        useSystemBrowser: false,
+        tokenSource: 'accessToken',
+        tokenId: '',
+        refreshTokenUrl: '',
+        autoFetchToken: true,
+        autoRefreshToken: false,
+        authParams: [],
+        tokenParams: [],
+        refreshParams: [],
+        idToken: '',
+        tokenType: '',
+        responseScope: '',
+        idTokenClaims: null,
       };
     if (authType === 'aws-sig-v4')
       next.awsSigV4 = { accessKey: '', secretKey: '', region: '', service: '', sessionToken: '' };
