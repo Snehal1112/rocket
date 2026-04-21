@@ -292,8 +292,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         };
       }
 
-      // Sync query params from the parsed URL.
+      // Sync query and path params from the parsed URL.
       patch.queryParams = parseQueryParams(parsed.url);
+      patch.pathParams = extractPathParams(parsed.url).map((name) => ({
+        id: crypto.randomUUID(),
+        key: name,
+        value: '',
+        enabled: true,
+      }));
 
       updateRequest(tab.id, patch);
       setUrlError('');

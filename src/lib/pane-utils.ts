@@ -1,5 +1,5 @@
 import type { Request as ApiRequest } from '@/lib/tauri-api';
-import { parseQueryParams } from '@/lib/url-params';
+import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import type {
   AuthState,
   BodyState,
@@ -114,7 +114,12 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     method: req.method as RequestState['method'],
     url: req.url,
     queryParams: parseQueryParams(req.url),
-    pathParams: [],
+    pathParams: extractPathParams(req.url).map((name) => ({
+      id: crypto.randomUUID(),
+      key: name,
+      value: '',
+      enabled: true,
+    })),
     headers: req.headers.map((h) => ({
       id: crypto.randomUUID(),
       key: h.key,
