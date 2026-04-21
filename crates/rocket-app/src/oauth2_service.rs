@@ -31,6 +31,8 @@ pub struct OAuth2GetTokenRequest {
     pub password: Option<String>,
 
     // Options
+    /// How to send client credentials: "header" (HTTP Basic) or "body"
+    /// (form fields). Defaults to "body" when unset.
     pub client_authentication: Option<String>,
     pub use_pkce: Option<bool>,
     pub use_system_browser: Option<bool>,
@@ -58,6 +60,8 @@ pub struct OAuth2RefreshRequest {
     pub client_id: String,
     pub client_secret: Option<String>,
     pub scope: Option<String>,
+    /// How to send client credentials: "header" (HTTP Basic) or "body"
+    /// (form fields). Defaults to "body" when unset.
     pub client_authentication: Option<String>,
     pub verify_ssl: Option<bool>,
     pub refresh_params: Option<Vec<AdditionalParam>>,
@@ -191,6 +195,8 @@ impl OAuth2Service {
                 .collect()
         };
 
+        // Empty resolved scope/state are treated as absent (RFC 6749 §3.3: empty
+        // scope is equivalent to omitting the parameter).
         ResolvedOAuth2Config {
             grant_type: req.grant_type.clone(),
             authorization_url: r(req.authorization_url.as_deref().unwrap_or_default()),
