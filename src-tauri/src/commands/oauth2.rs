@@ -26,6 +26,9 @@ struct AuthCodeResult {
 /// 2. Opens an in-app webview to the authorization URL.
 /// 3. Intercepts the redirect via on_navigation.
 /// 4. Exchanges authorization code for access token.
+///
+/// DEPRECATED: prefer `oauth2_get_token` with grant_type "authorization_code".
+/// Kept for backward compatibility until the frontend migration completes.
 #[tauri::command]
 pub async fn oauth2_auth_code_flow(
     app: AppHandle,
