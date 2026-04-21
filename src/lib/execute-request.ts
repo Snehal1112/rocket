@@ -8,6 +8,8 @@ import {
   getFolderChainVariables,
   getRequestVariables,
   type Header,
+  oauth2GetToken,
+  oauth2RefreshToken,
 } from '@/lib/tauri-api';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
@@ -209,10 +211,147 @@ export async function resolveRequestFields(
   };
 }
 
+// Non-interactive grants — safe to silently fetch on send. Authorization Code
+// and Implicit pop a browser window, which would be surprising as a side effect
+// of hitting Send, so they're excluded from auto-fetch.
+const NON_INTERACTIVE_GRANTS = new Set(['client_credentials', 'password']);
+
+// Runs auto-refresh and auto-fetch for an OAuth2 auth state, persisting any new
+// token into the pane store before the request is built. Returns the (possibly
+// updated) request. Failures are logged but non-fatal — the original auth flows
+// through and the user sees the auth error in the response.
+async function maybeAutoRefreshOrFetchToken(
+  tabId: string,
+  request: RequestState,
+  collection: string | undefined,
+  environmentName: string | undefined,
+  requestPath: string | undefined,
+): Promise<RequestState> {
+  if (request.auth.authType !== 'oauth2' || !request.auth.oauth2) return request;
+  const oauth = request.auth.oauth2;
+  const now = Math.floor(Date.now() / 1000);
+  const tokenExpired =
+    oauth.expiresIn && oauth.tokenAcquiredAt
+      ? now >= oauth.tokenAcquiredAt + oauth.expiresIn
+      : false;
+
+  const applyToken = (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
+    const { updateRequest } = usePaneStore.getState();
+    updateRequest(tabId, {
+      auth: {
+        ...request.auth,
+        oauth2: { ...oauth, ...patch } as NonNullable<AuthState['oauth2']>,
+      },
+    });
+  };
+
+  // Auto-refresh takes precedence when a usable refresh token exists.
+  if (
+    oauth.autoRefreshToken &&
+    tokenExpired &&
+    oauth.refreshToken &&
+    (oauth.refreshTokenUrl || oauth.tokenUrl)
+  ) {
+    try {
+      const result = await oauth2RefreshToken({
+        refreshToken: oauth.refreshToken,
+        tokenUrl: oauth.tokenUrl,
+        refreshTokenUrl: oauth.refreshTokenUrl || undefined,
+        clientId: oauth.clientId,
+        clientSecret: oauth.clientSecret || undefined,
+        scope: oauth.scope || undefined,
+        clientAuthentication: oauth.clientAuthentication,
+        verifySsl: oauth.verifySsl,
+        refreshParams: oauth.refreshParams.length ? oauth.refreshParams : undefined,
+        collection,
+        environmentName,
+        requestPath,
+      });
+      applyToken({
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token || oauth.refreshToken,
+        expiresIn: typeof result.expires_in === 'number' ? result.expires_in : null,
+        tokenAcquiredAt: Math.floor(Date.now() / 1000),
+        idToken: result.id_token || oauth.idToken,
+        tokenType: result.token_type || oauth.tokenType,
+        responseScope: result.scope || oauth.responseScope,
+      });
+    } catch (err) {
+      console.warn('[OAuth2] Auto-refresh failed:', err);
+    }
+  } else if (
+    oauth.autoFetchToken &&
+    !oauth.accessToken &&
+    NON_INTERACTIVE_GRANTS.has(oauth.grantType)
+  ) {
+    // Auto-fetch is restricted to non-interactive grants. Opening the system
+    // browser or a webview as a side effect of Send would surprise the user.
+    try {
+      const result = await oauth2GetToken({
+        grantType: oauth.grantType,
+        authorizationUrl: oauth.authorizationUrl || undefined,
+        tokenUrl: oauth.tokenUrl || undefined,
+        callbackUrl: oauth.callbackUrl || undefined,
+        clientId: oauth.clientId,
+        clientSecret: oauth.clientSecret || undefined,
+        scope: oauth.scope || undefined,
+        state: oauth.state || undefined,
+        username: oauth.username || undefined,
+        password: oauth.password || undefined,
+        clientAuthentication: oauth.clientAuthentication,
+        usePkce: oauth.usePkce,
+        useSystemBrowser: oauth.useSystemBrowser,
+        verifySsl: oauth.verifySsl,
+        authParams: oauth.authParams.length ? oauth.authParams : undefined,
+        tokenParams: oauth.tokenParams.length ? oauth.tokenParams : undefined,
+        refreshParams: oauth.refreshParams.length ? oauth.refreshParams : undefined,
+        collection,
+        environmentName,
+        requestPath,
+      });
+      applyToken({
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token || '',
+        expiresIn: typeof result.expires_in === 'number' ? result.expires_in : null,
+        tokenAcquiredAt: Math.floor(Date.now() / 1000),
+        idToken: result.id_token || '',
+        tokenType: result.token_type || '',
+        responseScope: result.scope || '',
+      });
+    } catch (err) {
+      console.warn('[OAuth2] Auto-fetch failed:', err);
+    }
+  }
+
+  // Re-read the tab's request in case we just patched it; otherwise return as-is.
+  const { root } = usePaneStore.getState();
+  const refreshed = findTabInTree(root, tabId);
+  if (refreshed && (refreshed.tab.tabType === 'request' || refreshed.tab.tabType === 'history')) {
+    return refreshed.tab.request;
+  }
+  return request;
+}
+
 // Executes a request and writes the response into the pane store.
 // This is a plain async function so it can be called from both React
 // components and non-React contexts (e.g. keyboard shortcut handlers).
 export async function sendRequest(tabId: string, request: RequestState): Promise<void> {
+  // Resolve context once up-front so auto-fetch can pass it to the Tauri command
+  // without repeating the tab/env lookup.
+  const { root } = usePaneStore.getState();
+  const found = findTabInTree(root, tabId);
+  const preCollection = found?.tab.source?.collection;
+  const preRequestPath = found?.tab.source?.path;
+  const preEnvName = useEnvStore.getState().activeEnvId ?? undefined;
+
+  const effectiveRequest = await maybeAutoRefreshOrFetchToken(
+    tabId,
+    request,
+    preCollection,
+    preEnvName,
+    preRequestPath,
+  );
+
   const {
     url: resolvedUrl,
     headers: effectiveHeaders,
@@ -222,20 +361,20 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     collection,
     environmentName,
     requestPath,
-  } = await resolveRequestFields(tabId, request);
+  } = await resolveRequestFields(tabId, effectiveRequest);
 
   try {
     const result = await executeRequest({
-      method: request.method,
+      method: effectiveRequest.method,
       url: resolvedUrl,
       headers: effectiveHeaders,
       queryParams: resolvedQueryParams,
       body: resolvedBody,
       auth: resolvedAuth,
       options: {
-        followRedirects: request.settings?.followRedirects ?? true,
-        timeoutMs: request.settings?.timeoutMs ?? 30000,
-        verifySsl: request.settings?.verifySsl ?? true,
+        followRedirects: effectiveRequest.settings?.followRedirects ?? true,
+        timeoutMs: effectiveRequest.settings?.timeoutMs ?? 30000,
+        verifySsl: effectiveRequest.settings?.verifySsl ?? true,
       },
       collection: collection ?? undefined,
       environmentName,
@@ -269,7 +408,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       ...effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
     ];
     useConsoleStore.getState().addEntry({
-      method: request.method,
+      method: effectiveRequest.method,
       url: resolvedUrl,
       status: result.status,
       statusText: result.statusText,
@@ -293,7 +432,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       activeView: 'raw',
     });
     useConsoleStore.getState().addEntry({
-      method: request.method,
+      method: effectiveRequest.method,
       url: resolvedUrl,
       status: 0,
       statusText: 'Error',
