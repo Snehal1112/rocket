@@ -459,3 +459,133 @@ pub fn generate(name: &str) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// All known dynamic variable names — must match Bruno's complete list.
+    const ALL_DYNAMIC_VARS: &[&str] = &[
+        // Basic Data Types
+        "guid", "timestamp", "isoTimestamp", "randomUUID", "randomNanoId",
+        "randomAlphaNumeric", "randomBoolean", "randomInt", "randomColor",
+        "randomHexColor", "randomAbbreviation", "randomWord", "randomWords",
+        // Internet and Network
+        "randomIP", "randomIPV4", "randomIPV6", "randomMACAddress", "randomPassword",
+        "randomLocale", "randomUserAgent", "randomProtocol", "randomSemver",
+        "randomDomainName", "randomDomainSuffix", "randomDomainWord",
+        "randomExampleEmail", "randomEmail", "randomUserName", "randomUrl",
+        // Names
+        "randomFirstName", "randomLastName", "randomFullName", "randomNamePrefix",
+        "randomNameSuffix", "randomJobArea", "randomJobDescriptor", "randomJobTitle",
+        "randomJobType", "randomPhoneNumber", "randomPhoneNumberExt",
+        // Location
+        "randomCity", "randomStreetName", "randomStreetAddress", "randomCountry",
+        "randomCountryCode", "randomLatitude", "randomLongitude",
+        // Images
+        "randomAvatarImage", "randomImageUrl", "randomAbstractImage",
+        "randomAnimalsImage", "randomBusinessImage", "randomCatsImage",
+        "randomCityImage", "randomFoodImage", "randomNightlifeImage",
+        "randomFashionImage", "randomPeopleImage", "randomNatureImage",
+        "randomSportsImage", "randomTransportImage", "randomImageDataUri",
+        // Finance
+        "randomBankAccount", "randomBankAccountName", "randomCreditCardMask",
+        "randomBankAccountBic", "randomBankAccountIban", "randomTransactionType",
+        "randomCurrencyCode", "randomCurrencyName", "randomCurrencySymbol", "randomBitcoin",
+        // Business
+        "randomCompanyName", "randomCompanySuffix", "randomBs", "randomBsAdjective",
+        "randomBsBuzz", "randomBsNoun", "randomCatchPhrase", "randomCatchPhraseAdjective",
+        "randomCatchPhraseDescriptor", "randomCatchPhraseNoun",
+        // Database
+        "randomDatabaseColumn", "randomDatabaseType", "randomDatabaseCollation", "randomDatabaseEngine",
+        // Dates
+        "randomDateFuture", "randomDatePast", "randomDateRecent", "randomWeekday", "randomMonth",
+        // Files
+        "randomFileName", "randomFileType", "randomFileExt", "randomCommonFileName",
+        "randomCommonFileType", "randomCommonFileExt", "randomFilePath",
+        "randomDirectoryPath", "randomMimeType",
+        // Commerce
+        "randomPrice", "randomProduct", "randomProductAdjective", "randomProductMaterial",
+        "randomProductName", "randomDepartment",
+        // Hacker and Lorem
+        "randomNoun", "randomVerb", "randomIngverb", "randomAdjective", "randomPhrase",
+        "randomLoremWord", "randomLoremWords", "randomLoremSentence", "randomLoremSentences",
+        "randomLoremParagraph", "randomLoremParagraphs", "randomLoremText",
+        "randomLoremSlug", "randomLoremLines",
+    ];
+
+    #[test]
+    fn all_registered_names_generate_values() {
+        for name in ALL_DYNAMIC_VARS {
+            assert!(
+                generate(name).is_some(),
+                "dynamic var '{}' returned None — missing from match",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_name_returns_none() {
+        assert!(generate("doesNotExist").is_none());
+        assert!(generate("").is_none());
+        assert!(generate("GUID").is_none()); // case-sensitive
+    }
+
+    #[test]
+    fn is_dynamic_var_matches_generate() {
+        for name in ALL_DYNAMIC_VARS {
+            assert!(is_dynamic_var(name), "'{}' should be recognized", name);
+        }
+        assert!(!is_dynamic_var("unknownThing"));
+    }
+
+    #[test]
+    fn guid_is_valid_uuid() {
+        let val = generate("guid").unwrap();
+        assert!(uuid::Uuid::parse_str(&val).is_ok(), "guid '{}' is not valid UUID", val);
+    }
+
+    #[test]
+    fn random_uuid_is_valid_uuid() {
+        let val = generate("randomUUID").unwrap();
+        assert!(uuid::Uuid::parse_str(&val).is_ok(), "randomUUID '{}' is not valid UUID", val);
+    }
+
+    #[test]
+    fn timestamp_is_valid_i64() {
+        let val = generate("timestamp").unwrap();
+        assert!(val.parse::<i64>().is_ok(), "timestamp '{}' is not valid i64", val);
+    }
+
+    #[test]
+    fn iso_timestamp_is_valid_rfc3339() {
+        let val = generate("isoTimestamp").unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(&val).is_ok(),
+            "isoTimestamp '{}' is not valid RFC 3339", val);
+    }
+
+    #[test]
+    fn random_int_in_range() {
+        for _ in 0..20 {
+            let val: i32 = generate("randomInt").unwrap().parse().unwrap();
+            assert!((0..=1000).contains(&val), "randomInt {} out of range", val);
+        }
+    }
+
+    #[test]
+    fn random_boolean_valid() {
+        for _ in 0..20 {
+            let val = generate("randomBoolean").unwrap();
+            assert!(val == "true" || val == "false", "randomBoolean '{}' invalid", val);
+        }
+    }
+
+    #[test]
+    fn two_calls_produce_different_values() {
+        // Probabilistic: 10 GUIDs should not all be identical
+        let vals: Vec<String> = (0..10).map(|_| generate("guid").unwrap()).collect();
+        let first = &vals[0];
+        assert!(vals.iter().any(|v| v != first), "10 guid calls all returned same value");
+    }
+}
