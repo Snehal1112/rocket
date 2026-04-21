@@ -10,5 +10,5 @@ serde_json.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-fake = { version = "3", features = ["derive"] }
+fake = "3"
 rand = "0.8"

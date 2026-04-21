@@ -21,11 +21,8 @@ pub fn generate(name: &str) -> Option<String> {
             Some(id)
         }
         "randomAlphaNumeric" => {
-            let c = if rng.gen_bool(0.5) {
-                rng.gen_range(b'a'..=b'z') as char
-            } else {
-                rng.gen_range(b'0'..=b'9') as char
-            };
+            let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            let c = charset[rng.gen_range(0..charset.len())] as char;
             Some(c.to_string())
         }
         "randomBoolean" => Some(rng.gen_bool(0.5).to_string()),
@@ -235,7 +232,7 @@ pub fn generate(name: &str) -> Option<String> {
         }
         "randomBitcoin" => {
             let charset: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-            let len = rng.gen_range(26..=35);
+            let len = rng.gen_range(24..=33);
             let addr: String = (0..len).map(|_| charset[rng.gen_range(0..charset.len())] as char).collect();
             Some(format!("1{}", addr))
         }
