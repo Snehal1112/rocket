@@ -2,6 +2,7 @@ import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
 import * as monaco from 'monaco-editor';
 import { useEffect, useRef } from 'react';
+import { generateDynamicVar, isDynamicVar } from '@/lib/dynamic-vars';
 import { parseTextTokens } from '@/lib/text-variables';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { EditorSkeleton } from './EditorSkeleton';
@@ -80,6 +81,7 @@ const SOURCE_CLASS: Record<string, string> = {
   request: 'rocket-var-request',
   process: 'rocket-var-process',
   runtime: 'rocket-var-runtime',
+  dynamic: 'rocket-var-dynamic',
 };
 
 // Injects decoration styles once into the document head.
@@ -96,6 +98,7 @@ function ensureDecorationStyles() {
     .rocket-var-request { background: rgb(168 85 247 / 0.15); color: rgb(168 85 247); border-radius: 2px; }
     .rocket-var-process { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); border-radius: 2px; }
     .rocket-var-runtime { background: rgb(249 115 22 / 0.15); color: rgb(249 115 22); border-radius: 2px; }
+    .rocket-var-dynamic { background: rgb(6 182 212 / 0.15); color: rgb(6 182 212); border-radius: 2px; }
     .rocket-var-unresolved { background: hsl(var(--destructive)/0.15); color: hsl(var(--destructive)); border-radius: 2px; }
   `;
   document.head.appendChild(style);
@@ -160,10 +163,18 @@ export function MonacoWrapper({
         const end = charOffset + token.rawLength;
 
         if (token.type === 'variable') {
-          const entry = variableContextRef.current?.get(token.content);
-          const cssClass = entry
-            ? (SOURCE_CLASS[entry.source] ?? 'rocket-var-unresolved')
-            : 'rocket-var-unresolved';
+          let cssClass: string;
+          if (token.content.startsWith('$')) {
+            // Dynamic variable — cyan if known, unresolved if not.
+            cssClass = isDynamicVar(token.content.slice(1))
+              ? 'rocket-var-dynamic'
+              : 'rocket-var-unresolved';
+          } else {
+            const entry = variableContextRef.current?.get(token.content);
+            cssClass = entry
+              ? (SOURCE_CLASS[entry.source] ?? 'rocket-var-unresolved')
+              : 'rocket-var-unresolved';
+          }
 
           const startPos = m.getPositionAt(start);
           const endPos = m.getPositionAt(end);
@@ -202,8 +213,6 @@ export function MonacoWrapper({
         provideHover(hoverModel: monacoNs.editor.ITextModel, position: monacoNs.Position) {
           // Guard against hover events from a different editor instance using the same language.
           if (editor.getModel()?.id !== hoverModel.id) return null;
-          const ctx = variableContextRef.current;
-          if (!ctx) return null;
 
           const text = hoverModel.getValue();
           const offset = hoverModel.getOffsetAt(position);
@@ -215,6 +224,31 @@ export function MonacoWrapper({
             const tokenEnd = charPos + token.rawLength;
 
             if (token.type === 'variable' && offset >= tokenStart && offset < tokenEnd) {
+              const hoverRange = new monaco.Range(
+                hoverModel.getPositionAt(tokenStart).lineNumber,
+                hoverModel.getPositionAt(tokenStart).column,
+                hoverModel.getPositionAt(tokenEnd).lineNumber,
+                hoverModel.getPositionAt(tokenEnd).column,
+              );
+
+              // Dynamic variable ($-prefixed) — show a dedicated hover card.
+              if (token.content.startsWith('$')) {
+                const stripped = token.content.slice(1);
+                if (!isDynamicVar(stripped)) return null;
+                const preview = generateDynamicVar(stripped) ?? '';
+                return {
+                  range: hoverRange,
+                  contents: [
+                    { value: `**Dynamic Variable** \`{{$${stripped}}}\`` },
+                    { value: `Preview: \`${preview}\`` },
+                    { value: '_Generates a fresh value on each request send._' },
+                  ],
+                };
+              }
+
+              // Non-dynamic variable — look up in the scope context.
+              const ctx = variableContextRef.current;
+              if (!ctx) return null;
               const entry = ctx.get(token.content);
               const sourceLabel = entry
                 ? entry.source.charAt(0).toUpperCase() + entry.source.slice(1)
@@ -226,12 +260,7 @@ export function MonacoWrapper({
                 : '*(not set)*';
 
               return {
-                range: new monaco.Range(
-                  hoverModel.getPositionAt(tokenStart).lineNumber,
-                  hoverModel.getPositionAt(tokenStart).column,
-                  hoverModel.getPositionAt(tokenEnd).lineNumber,
-                  hoverModel.getPositionAt(tokenEnd).column,
-                ),
+                range: hoverRange,
                 contents: [
                   { value: `**\`{{${token.content}}}\`**` },
                   { value: `Source: ${sourceLabel}` },

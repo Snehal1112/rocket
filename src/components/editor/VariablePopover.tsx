@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
+import { generateDynamicVar, isDynamicVar } from '@/lib/dynamic-vars';
 import {
   sourceBadgeClass,
   type VariableScopeEntry,
@@ -63,7 +64,24 @@ export function VariablePopover({
   onClose,
   onNavigateToSource,
 }: VariablePopoverProps) {
-  const [editValue, setEditValue] = useState(entry?.secret ? '' : (entry?.value ?? ''));
+  // Synthesize an entry for $-prefixed dynamic variables. The scope map
+  // does not contain dynamic vars — they are generated fresh per-render.
+  let resolvedEntry = entry;
+  if (tokenType === 'variable' && varName.startsWith('$')) {
+    const stripped = varName.slice(1);
+    if (isDynamicVar(stripped)) {
+      resolvedEntry = {
+        value: generateDynamicVar(stripped) ?? '',
+        source: 'dynamic',
+        label: 'Dynamic',
+        secret: false,
+      };
+    }
+  }
+
+  const [editValue, setEditValue] = useState(
+    resolvedEntry?.secret ? '' : (resolvedEntry?.value ?? ''),
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const committedRef = useRef(false);
 
@@ -74,7 +92,7 @@ export function VariablePopover({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const readOnly = entry?.secret || !isEditable(entry);
+  const readOnly = resolvedEntry?.secret || !isEditable(resolvedEntry);
 
   const handleCommit = useCallback(async () => {
     if (committedRef.current || readOnly) return;
@@ -99,24 +117,32 @@ export function VariablePopover({
 
   // Scope badge + label
   const scopeSource: VariableSource | 'pathParam' | null =
-    tokenType === 'pathParam' ? 'pathParam' : (entry?.source ?? null);
+    tokenType === 'pathParam' ? 'pathParam' : (resolvedEntry?.source ?? null);
   const linkLabel = scopeSource !== null ? navLinkLabel(scopeSource) : null;
 
   const badgeIcon =
-    tokenType === 'pathParam' ? ':' : entry ? entry.source.charAt(0).toUpperCase() : '?';
+    tokenType === 'pathParam'
+      ? ':'
+      : resolvedEntry
+        ? resolvedEntry.source.charAt(0).toUpperCase()
+        : '?';
 
   const badgeClass =
     tokenType === 'pathParam'
       ? 'text-violet-500 font-bold text-xs'
-      : entry
+      : resolvedEntry
         ? cn(
             'rounded-full w-4 h-4 inline-flex items-center justify-center text-2xs font-bold',
-            sourceBadgeClass(entry.source),
+            sourceBadgeClass(resolvedEntry.source),
           )
         : 'text-muted-foreground';
 
   const scopeLabel =
-    tokenType === 'pathParam' ? 'Path Variable' : entry ? entry.label : 'Unresolved';
+    tokenType === 'pathParam'
+      ? 'Path Variable'
+      : resolvedEntry
+        ? resolvedEntry.label
+        : 'Unresolved';
 
   return (
     <div
@@ -131,8 +157,8 @@ export function VariablePopover({
         <Input
           ref={inputRef}
           className='h-7 border-0 bg-transparent px-2 text-xs font-mono shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent'
-          value={entry?.secret ? '●●●●' : editValue}
-          placeholder={entry ? 'Value' : 'Not set'}
+          value={resolvedEntry?.secret ? '●●●●' : editValue}
+          placeholder={resolvedEntry ? 'Value' : 'Not set'}
           readOnly={readOnly}
           onChange={(e) => {
             if (readOnly) return;

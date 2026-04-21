@@ -9,7 +9,7 @@ import {
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { variableContextField } from './variable-context-facet';
 
-const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
+const VAR_REGEX = /\{\{([$\w.-]+)\}\}/g;
 
 // ── State management ───────────────────────────────────────────
 
