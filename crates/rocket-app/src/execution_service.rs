@@ -96,17 +96,21 @@ impl RequestExecutionService {
         environment_name: Option<&str>,
         request_path: Option<&str>,
     ) -> std::collections::HashMap<String, String> {
+        // Precedence (lowest → highest): collection < env < folder < request.
         let mut ctx = VariableContext::default();
+
+        let effective_val = |cv: &rocket_collection::CollectionVariable| -> String {
+            if cv.value.is_empty() {
+                cv.initial_value.clone()
+            } else {
+                cv.value.clone()
+            }
+        };
 
         if let Some(col) = collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
-                let val = if cv.value.is_empty() {
-                    cv.initial_value.clone()
-                } else {
-                    cv.value.clone()
-                };
-                ctx.collection.insert(cv.key.clone(), val);
+                ctx.collection.insert(cv.key.clone(), effective_val(cv));
             }
         }
 
@@ -121,12 +125,7 @@ impl RequestExecutionService {
         if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(folder_vars) = self.collection_repo.get_folder_chain_variables(col, path) {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
-                    let val = if cv.value.is_empty() {
-                        cv.initial_value.clone()
-                    } else {
-                        cv.value.clone()
-                    };
-                    ctx.folder.insert(cv.key.clone(), val);
+                    ctx.folder.insert(cv.key.clone(), effective_val(cv));
                 }
             }
         }
@@ -134,12 +133,7 @@ impl RequestExecutionService {
         if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(request_vars) = self.collection_repo.get_request_variables(col, path) {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
-                    let val = if cv.value.is_empty() {
-                        cv.initial_value.clone()
-                    } else {
-                        cv.value.clone()
-                    };
-                    ctx.request.insert(cv.key.clone(), val);
+                    ctx.request.insert(cv.key.clone(), effective_val(cv));
                 }
             }
         }
