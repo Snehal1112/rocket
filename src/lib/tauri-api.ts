@@ -5,6 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { OAuth2AdditionalParam, OAuth2JwtClaims } from '@/types/pane-types';
 
 // ============================================================
 // Domain types (mirror Rust structs)
@@ -683,6 +684,67 @@ export const oauth2AuthCodeFlow = (
     callbackUrl,
     verifySsl,
   });
+
+// ============================================================
+// OAuth2 — unified commands (Phase 2)
+// ============================================================
+
+export interface OAuth2GetTokenRequest {
+  grantType: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  callbackUrl?: string;
+  clientId: string;
+  clientSecret?: string;
+  scope?: string;
+  state?: string;
+  username?: string;
+  password?: string;
+  clientAuthentication?: string;
+  usePkce?: boolean;
+  useSystemBrowser?: boolean;
+  verifySsl?: boolean;
+  authParams?: OAuth2AdditionalParam[];
+  tokenParams?: OAuth2AdditionalParam[];
+  refreshParams?: OAuth2AdditionalParam[];
+  collection?: string;
+  environmentName?: string;
+  requestPath?: string;
+}
+
+export interface OAuth2RefreshRequest {
+  refreshToken: string;
+  tokenUrl: string;
+  refreshTokenUrl?: string;
+  clientId: string;
+  clientSecret?: string;
+  scope?: string;
+  clientAuthentication?: string;
+  verifySsl?: boolean;
+  refreshParams?: OAuth2AdditionalParam[];
+  collection?: string;
+  environmentName?: string;
+  requestPath?: string;
+}
+
+// Matches the Rust `OAuthToken` struct — snake_case on the wire (no serde rename).
+export interface OAuth2TokenResult {
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+  id_token?: string;
+}
+
+export const oauth2GetToken = (request: OAuth2GetTokenRequest) =>
+  invoke<OAuth2TokenResult>('oauth2_get_token', { request });
+
+export const oauth2RefreshToken = (request: OAuth2RefreshRequest) =>
+  invoke<OAuth2TokenResult>('oauth2_refresh_token', { request });
+
+export const oauth2DecodeJwt = (token: string) =>
+  invoke<OAuth2JwtClaims>('oauth2_decode_jwt', { token });
 
 // ============================================================
 // Workspace commands
