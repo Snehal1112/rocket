@@ -1475,8 +1475,8 @@ mod tests {
         let loaded = repo.get_request_variables("my-api", "get-users.yml").unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].key, "PAGE");
-        // current value (value="2") wins on save; both fields reflect it after reload.
-        assert_eq!(loaded[0].initial_value, "2");
+        // Both initial and current values must survive the roundtrip independently.
+        assert_eq!(loaded[0].initial_value, "1");
         assert_eq!(loaded[0].value, "2");
     }
 

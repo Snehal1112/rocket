@@ -694,27 +694,31 @@ fn domain_number_to_inheritable(v: RequestSettingValue<f64>) -> InheritableNumbe
 // ============================================================
 
 /// Convert an OcVariable to a CollectionVariable.
-/// The persisted YAML value is loaded into both fields so the UI shows
-/// the saved value in both Initial and Current columns on reload.
+/// `value` maps to the current value; `initial` maps to the initial/default value.
+/// When `initial` is absent (old YAML files), falls back to `value` for backward compat.
 pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
-    let val = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
+    let current = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
+    // Fall back to the current value if initial is absent (backward compat with old files).
+    let initial = v.initial.as_ref()
+        .map(|vv| vv.data().to_string())
+        .unwrap_or_else(|| current.clone());
     CollectionVariable {
         key:           v.name,
-        value:         val.clone(),
-        initial_value: val,
+        value:         current,
+        initial_value: initial,
         enabled:       !v.disabled.unwrap_or(false),
         secret:        false,
     }
 }
 
 /// Convert a CollectionVariable to an OcVariable.
-/// Persists the current value (value) when set, falling back to initial_value.
-/// This ensures whatever the user typed and saved in the UI is round-tripped correctly.
+/// `value` stores the current/runtime value; `initial` stores the initial/default value.
+/// Empty strings are serialized as None to keep the YAML clean.
 pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable {
-    let persisted = if !cv.value.is_empty() { cv.value } else { cv.initial_value };
     OcVariable {
         name:        cv.key,
-        value:       if persisted.is_empty() { None } else { Some(VariableValue::simple(persisted)) },
+        value:       if cv.value.is_empty() { None } else { Some(VariableValue::simple(cv.value)) },
+        initial:     if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
         description: None,
         disabled:    if cv.enabled { None } else { Some(true) },
     }
@@ -739,6 +743,8 @@ impl From<Variable> for OcVariable {
         OcVariable {
             name: v.key,
             value: Some(VariableValue::simple(v.value)),
+            // Environment variables don't have a separate initial value concept.
+            initial: None,
             description: v.description,
             // Omit disabled entirely when enabled (cleaner YAML output).
             disabled: if v.enabled { None } else { Some(true) },
@@ -1647,25 +1653,27 @@ mod tests {
     // ---- CollectionVariable tests ----
 
     #[test]
-    fn collection_variable_save_persists_current_value_over_initial() {
+    fn collection_variable_save_persists_current_value_in_value_field() {
         // Scenario: user has both a current value and an initial value set.
-        // On save, the current value (value) takes precedence and is persisted to YAML.
+        // Both are saved separately: value → YAML `value`, initial_value → YAML `initial`.
         let cv = CollectionVariable {
             key: "HOST".into(),
-            value: "http://production.com".into(),    // current value — should win
-            initial_value: "http://localhost".into(), // initial value — lower priority
+            value: "http://production.com".into(),
+            initial_value: "http://localhost".into(),
             enabled: true,
             secret: false,
         };
         let oc = collection_variable_to_oc_variable(cv);
         assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://production.com"),
-            "YAML should store current value (value) when set");
+            "YAML `value` field should store the current value.");
+        assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
+            "YAML `initial` field should store the initial value.");
     }
 
     #[test]
-    fn collection_variable_save_falls_back_to_initial_when_value_empty() {
+    fn collection_variable_save_omits_value_when_empty() {
         // Scenario: user only filled in the initial value, leaving current value blank.
-        // The initial value should be persisted.
+        // Only the initial field should appear in YAML; value should be None.
         let cv = CollectionVariable {
             key: "HOST".into(),
             value: "".into(),
@@ -1674,14 +1682,15 @@ mod tests {
             secret: false,
         };
         let oc = collection_variable_to_oc_variable(cv);
-        assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://localhost"),
-            "YAML should store initial_value when current value is empty");
+        assert_eq!(oc.value, None,
+            "YAML `value` should be absent when current value is empty.");
+        assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
+            "YAML `initial` should be set from initial_value.");
     }
 
     #[test]
-    fn collection_variable_roundtrip_restores_value_in_both_fields() {
-        // After a save/load roundtrip the persisted value should appear in both
-        // initial_value and value so the UI shows it in both columns on reload.
+    fn collection_variable_roundtrip_preserves_both_fields_distinct() {
+        // After save/load both initial_value and value must be distinct and correct.
         let cv = CollectionVariable {
             key: "BASE_URL".into(),
             value: "http://production.com".into(),
@@ -1691,9 +1700,52 @@ mod tests {
         };
         let oc = collection_variable_to_oc_variable(cv);
         let back = oc_variable_to_collection_variable(oc);
-        // current value wins on save, so both fields reflect it after reload.
-        assert_eq!(back.initial_value, "http://production.com");
-        assert_eq!(back.value, "http://production.com");
+        assert_eq!(back.value, "http://production.com",
+            "current value must round-trip correctly.");
+        assert_eq!(back.initial_value, "http://localhost:8080",
+            "initial value must round-trip correctly.");
+    }
+
+    #[test]
+    fn collection_variable_backward_compat_old_yaml_without_initial() {
+        // Old YAML files only have `value`; `initial` is absent.
+        // On load, initial_value should fall back to the value field.
+        let oc = OcVariable {
+            name: "status".into(),
+            value: Some(VariableValue::simple("2")),
+            initial: None,
+            description: None,
+            disabled: None,
+        };
+        let cv = oc_variable_to_collection_variable(oc);
+        assert_eq!(cv.value, "2", "current value should be loaded from YAML `value`.");
+        assert_eq!(cv.initial_value, "2",
+            "initial_value should fall back to `value` when `initial` is absent.");
+    }
+
+    #[test]
+    fn collection_variable_both_values_distinct_yaml_roundtrip() {
+        // Full roundtrip: initial="default", current="override" →
+        // YAML has both fields → loaded back with both fields distinct.
+        let cv = CollectionVariable {
+            key: "status".into(),
+            value: "override".into(),
+            initial_value: "default".into(),
+            enabled: true,
+            secret: false,
+        };
+        let oc = collection_variable_to_oc_variable(cv);
+        // Verify YAML struct has both fields.
+        assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("override"));
+        assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("default"));
+        // Verify YAML string contains both fields.
+        let yaml_str = serde_yaml::to_string(&oc).unwrap();
+        assert!(yaml_str.contains("value:"), "YAML must contain `value` field.");
+        assert!(yaml_str.contains("initial:"), "YAML must contain `initial` field.");
+        // Verify loading back produces correct distinct values.
+        let back = oc_variable_to_collection_variable(oc);
+        assert_eq!(back.value, "override");
+        assert_eq!(back.initial_value, "default");
     }
 
     // ---- Variable tests ----
@@ -1703,6 +1755,7 @@ mod tests {
         let oc = OcVariable {
             name: "HOST".into(),
             value: Some(VariableValue::simple("localhost")),
+            initial: None,
             description: Some(Description::text("Server host")),
             disabled: Some(true),
         };
@@ -1746,7 +1799,7 @@ mod tests {
             color: Some("#FF0000".into()),
             description: Some(Description::text("Prod env")),
             variables: vec![
-                OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), description: None, disabled: None },
+                OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), initial: None, description: None, disabled: None },
             ],
             client_certificates: Vec::new(),
             extends: Some("base".into()),
