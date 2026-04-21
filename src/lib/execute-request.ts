@@ -16,6 +16,28 @@ import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
+// Returns the synthetic request header(s) that the Rust executor adds for a
+// given Auth value, so the console can show the full set of sent headers.
+// Only covers auth schemes that produce a deterministic header on the frontend;
+// AWS SigV4 signing happens in Rust so its headers are not included here.
+export function authToConsoleHeaders(auth: Auth): { key: string; value: string }[] {
+  switch (auth.authType) {
+    case 'bearer':
+      return [{ key: 'Authorization', value: `Bearer ${auth.token}` }];
+    case 'basic': {
+      const encoded = btoa(`${auth.username}:${auth.password}`);
+      return [{ key: 'Authorization', value: `Basic ${encoded}` }];
+    }
+    case 'api-key':
+      if (auth.placement === 'header') {
+        return [{ key: auth.key, value: auth.value }];
+      }
+      return [];
+    default:
+      return [];
+  }
+}
+
 export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
     case 'inherit':
@@ -236,6 +258,16 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       activeView: 'pretty',
     };
     usePaneStore.getState().setResponse(tabId, responseState);
+    // Merge auth-synthesized headers with explicit headers for the console.
+    // Auth headers (Bearer, Basic, API Key) are injected by reqwest at the Rust
+    // level and never appear in effectiveHeaders — add them here so the console
+    // shows the full set of headers actually sent on the wire.
+    const authHeaders = authToConsoleHeaders(resolvedAuth);
+    const explicitKeys = new Set(effectiveHeaders.map((h) => h.key.toLowerCase()));
+    const consoleRequestHeaders = [
+      ...authHeaders.filter((h) => !explicitKeys.has(h.key.toLowerCase())),
+      ...effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
+    ];
     useConsoleStore.getState().addEntry({
       method: request.method,
       url: resolvedUrl,
@@ -243,7 +275,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       statusText: result.statusText,
       durationMs: result.durationMs,
       sizeBytes: result.sizeBytes,
-      requestHeaders: effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
+      requestHeaders: consoleRequestHeaders,
       requestBody: resolvedBody?.content ?? '',
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
       responseBody: result.body,
