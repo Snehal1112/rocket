@@ -1,23 +1,10 @@
-import {
-  Box,
-  Check,
-  ExternalLink,
-  FileText,
-  FolderOpen,
-  Loader2,
-  MoreHorizontal,
-  Plus,
-  Save,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { RocketBook } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
 import {
   type CollectionSummary,
@@ -37,7 +23,6 @@ import {
   onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
-import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -350,94 +335,18 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
 
       {/* ── RIGHT COLUMN — Documentation ── */}
       <div className='flex-1 p-4 flex flex-col overflow-hidden'>
-        <Card className='flex-1 flex flex-col overflow-hidden'>
-          <CardHeader className='flex flex-row items-center justify-between py-2.5 px-4 shrink-0'>
-            <div className='flex items-center gap-2'>
-              <FileText className='h-3.5 w-3.5 text-muted-foreground' />
-              <span className='text-xs font-semibold text-muted-foreground'>Documentation</span>
-            </div>
-            <Tabs value={docMode} onValueChange={(v) => setDocMode(v as 'edit' | 'preview')}>
-              <TabsList className='h-6'>
-                <TabsTrigger value='edit' className='text-[10px] px-2.5 py-0.5'>
-                  Edit
-                </TabsTrigger>
-                <TabsTrigger value='preview' className='text-[10px] px-2.5 py-0.5'>
-                  Preview
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </CardHeader>
-
-          <CardContent className='flex-1 p-0 overflow-hidden flex flex-col'>
-            {/* Edit pane */}
-            {docMode === 'edit' && (
-              <div className='flex-1 flex flex-col overflow-hidden'>
-                <textarea
-                  className='flex-1 w-full bg-transparent border-none resize-none px-4 py-3.5 text-xs font-mono text-muted-foreground placeholder:text-muted-foreground/40 focus-visible:outline-none leading-relaxed'
-                  placeholder={'Add documentation...\n\nSupports **Markdown**'}
-                  value={docContent}
-                  onChange={(e) => setDocContent(e.target.value)}
-                  onBlur={() => {
-                    if (isDocDirty) void triggerSaveDoc();
-                  }}
-                />
-                <div className='flex justify-end items-center gap-2 px-3 py-2 border-t border-border shrink-0'>
-                  <span className='text-[10px] text-muted-foreground/50'>
-                    Markdown supported · saves on blur
-                  </span>
-                  <Button
-                    size='sm'
-                    className={cn(
-                      'h-6 text-[10px] px-3 gap-1',
-                      saveDocState === 'success' && 'text-green-600',
-                    )}
-                    onClick={() => void triggerSaveDoc()}
-                    disabled={!isDocDirty || saveDocState !== 'idle'}
-                  >
-                    {saveDocState === 'saving' ? (
-                      <Loader2 className='h-3 w-3 animate-spin' />
-                    ) : saveDocState === 'success' ? (
-                      <Check className='h-3 w-3' />
-                    ) : (
-                      <Save className='h-3 w-3' />
-                    )}
-                    {saveDocState === 'success' ? 'Saved' : 'Save'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Preview pane */}
-            {docMode === 'preview' && (
-              <div className='flex-1 overflow-y-auto px-4 py-3.5'>
-                {docContent.trim() ? (
-                  <div className='prose-doc text-xs leading-relaxed'>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{docContent}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className='h-full flex flex-col items-center justify-center gap-3 text-center py-8 '>
-                    <FileText className='w-9 h-9 text-muted-foreground/50' />
-                    <div className='space-y-1.5'>
-                      <p className='text-sm font-medium text-foreground'>No documentation yet</p>
-                      <p className='text-xs font-medium text-muted-foreground leading-relaxed'>
-                        Add an overview, setup instructions, or key workflows to help your team.
-                      </p>
-                    </div>
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      className='text-xs h-7'
-                      onClick={() => setDocMode('edit')}
-                    >
-                      <FileText className='h-3 w-3 mr-1.5' />
-                      Add Documentation
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <MarkdownEditor
+          value={docContent}
+          onChange={setDocContent}
+          mode={docMode}
+          onModeChange={setDocMode}
+          onSave={() => void triggerSaveDoc()}
+          saveState={saveDocState}
+          isDirty={isDocDirty}
+          onBlur={() => {
+            if (isDocDirty) void triggerSaveDoc();
+          }}
+        />
       </div>
     </div>
   );
