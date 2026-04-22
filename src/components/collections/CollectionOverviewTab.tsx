@@ -5,7 +5,7 @@ import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -188,8 +188,7 @@ const TABS: { label: string; value: CollectionSection }[] = [
   { label: 'Overview', value: 'overview' },
   { label: 'Authorization', value: 'auth' },
   { label: 'Variables', value: 'variables' },
-  { label: 'Readme', value: 'readme' },
-  { label: 'Tags', value: 'tags' },
+  { label: 'Documentation', value: 'documentation' },
 ];
 
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
@@ -204,18 +203,18 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Editable settings state.
-  const [description, setDescription] = useState('');
+  const [docs, setDocs] = useState('');
+  const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
-  const [readme, setReadme] = useState('');
   // True once the user edits any field; reset after successful save or reload.
   const [isDirty, setIsDirty] = useState(false);
   // Prevents the store-sync effect from firing with the empty initial auth
   // state before getCollection resolves, which would wipe a cached token.
   const [isLoaded, setIsLoaded] = useState(false);
   // Guard against stale section values from before the tab redesign.
-  const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
+  const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
     ? (tab.activeSection ?? 'overview')
     : 'overview';
@@ -231,9 +230,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const viewport = container.querySelector<HTMLElement>(
-      '[data-radix-scroll-area-viewport]',
-    );
+    const viewport = container.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
     if (!viewport) return;
     const handleScroll = () => setIsScrolled(viewport.scrollTop > 0);
     viewport.addEventListener('scroll', handleScroll, { passive: true });
@@ -245,11 +242,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     setLoading(true);
     setIsLoaded(false);
     setError(null);
+    setDocMode('preview');
     getCollection(collectionName)
       .then((col) => {
         setCollection(col);
         const s = col.settings;
-        setDescription(s.description ?? '');
 
         // Load auth from disk. For OAuth2 flows the access/refresh tokens are never
         // written to disk, so restore them from the in-memory store if available.
@@ -279,7 +276,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
         setHeaders(toKeyValueEntries(s.headers));
         setVariables(s.variables ?? []);
-        setReadme(s.readme ?? '');
+        setDocs(s.docs ?? '');
         setIsDirty(false);
         setIsLoaded(true);
       })
@@ -308,25 +305,33 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           value: h.value,
           enabled: h.enabled,
         })),
-      description: description || undefined,
-      readme: readme || undefined,
+      docs: docs || undefined,
       variables,
     });
     setIsDirty(false);
-  }, [collectionName, auth, headers, description, readme, variables]);
+  }, [collectionName, auth, headers, docs, variables]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
     saveSettings,
     'Failed to save settings',
   );
 
+  const saveDocFn = useCallback(async () => {
+    await saveCollectionSettings(collectionName, {
+      docs: docs.trim() || undefined,
+    });
+  }, [collectionName, docs]);
+
+  const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(
+    saveDocFn,
+    'Failed to save documentation',
+  );
+
   const handleAuthTypeChange = useCallback(
     (authType: AuthState['authType']) => {
       const next: AuthState = { authType };
-      if (authType === 'basic')
-        next.basic = auth.basic ?? { username: '', password: '' };
-      if (authType === 'bearer')
-        next.bearer = auth.bearer ?? { token: '' };
+      if (authType === 'basic') next.basic = auth.basic ?? { username: '', password: '' };
+      if (authType === 'bearer') next.bearer = auth.bearer ?? { token: '' };
       if (authType === 'api-key')
         next.apiKey = auth.apiKey ?? { key: '', value: '', addTo: 'header' };
       if (authType === 'oauth2')
@@ -400,6 +405,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const folderCount = countFolders(items);
   const statsLine = `${plural(reqCount, 'request', 'requests')} · ${plural(folderCount, 'folder', 'folders')}`;
 
+  const persistedDocs = collection.settings.docs ?? '';
+  const isDocDirty = docs !== persistedDocs;
+
   return (
     <div className='flex h-full flex-col overflow-hidden'>
       {/* Collection header. */}
@@ -445,48 +453,169 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             isScrolled ? 'opacity-100' : 'opacity-0',
           )}
         />
-        <ScrollArea className='h-full'>
-          <div className='p-6 max-w-3xl mx-auto space-y-6'>
-          {/* Overview tab. */}
-          {activeSection === 'overview' && (
-            <>
-              {/* Description. */}
-              <div className='space-y-1.5'>
-                <label
-                  className='text-sm font-medium text-muted-foreground'
-                  htmlFor='col-description'
-                >
-                  Description
-                </label>
-                <textarea
-                  id='col-description'
-                  rows={3}
-                  placeholder='Add a description...'
-                  value={description}
-                  onChange={(e) => {
-                    setDescription(e.target.value);
-                    setIsDirty(true);
-                  }}
-                  onBlur={() => {
-                    if (isDirty) void triggerSave();
-                  }}
-                  className='w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm resize-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                />
+
+        {/* Overview tab. */}
+        {activeSection === 'overview' && (
+          <div className='flex h-full overflow-hidden'>
+            {/* LEFT — scrollable cards */}
+            <div className='flex-1 border-r border-border overflow-hidden flex flex-col'>
+              <ScrollArea className='h-full'>
+                <div className='p-5 flex flex-col gap-5'>
+                  <MethodBreakdown items={items} />
+
+                  <Card>
+                    <CardHeader className='pb-2 pt-4 px-4'>
+                      <span className='text-sm font-medium'>Default Headers</span>
+                    </CardHeader>
+                    <CardContent className='px-4 pb-4'>
+                      <HeadersEditor
+                        headers={headers}
+                        onChange={(v) => {
+                          setHeaders(v);
+                          setIsDirty(true);
+                        }}
+                      />
+                      <div className='flex justify-end mt-3'>
+                        <Button
+                          size='sm'
+                          onClick={() => void triggerSave()}
+                          disabled={!isDirty || saveState !== 'idle'}
+                          className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                        >
+                          {saveState === 'saving' ? (
+                            <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                          ) : saveState === 'success' ? (
+                            <Check className='h-3.5 w-3.5' />
+                          ) : (
+                            <Save className='h-3.5 w-3.5' />
+                          )}
+                          {saveState === 'success' ? 'Saved' : 'Save'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className='pb-2 pt-4 px-4'>
+                      <span className='text-sm font-medium'>Requests</span>
+                    </CardHeader>
+                    <CardContent className='px-4 pb-4'>
+                      <RequestList items={items} collectionName={collectionName} />
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className='pb-2 pt-4 px-4'>
+                      <span className='text-sm font-medium'>Tags</span>
+                    </CardHeader>
+                    <CardContent className='px-4 pb-4'>
+                      <TagsList collection={collection} />
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* RIGHT — Documentation panel */}
+            <div className='w-80 flex-shrink-0 flex flex-col p-4'>
+              <MarkdownEditor
+                value={docs}
+                onChange={setDocs}
+                mode={docMode}
+                onModeChange={setDocMode}
+                onSave={() => void triggerSaveDoc()}
+                saveState={saveDocState}
+                isDirty={isDocDirty}
+                onBlur={() => {
+                  if (isDocDirty) void triggerSaveDoc();
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Authorization tab. */}
+        {activeSection === 'auth' && (
+          <ScrollArea className='h-full'>
+            <div className='p-6 max-w-3xl mx-auto space-y-6'>
+              <div className='space-y-4'>
+                <Card className='bg-muted/30'>
+                  <CardContent className='px-3 py-2.5'>
+                    <p className='text-xs text-muted-foreground'>
+                      This authorization method will be used for every request in this collection.
+                      You can override this by specifying one in the request.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className='space-y-4 p-4'>
+                    <div className='space-y-1.5'>
+                      <label
+                        htmlFor='col-auth-type'
+                        className='text-sm font-medium text-muted-foreground'
+                      >
+                        Auth Type
+                      </label>
+                      <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
+                        <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {COLLECTION_AUTH_TYPES.map((t) => (
+                            <SelectItem key={t.value} value={t.value}>
+                              {t.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <AuthEditor
+                      auth={auth}
+                      onChange={(v) => {
+                        setAuth(v);
+                        setIsDirty(true);
+                      }}
+                    />
+
+                    <div className='flex justify-end'>
+                      <Button
+                        size='sm'
+                        onClick={() => void triggerSave()}
+                        disabled={!isDirty || saveState !== 'idle'}
+                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                      >
+                        {saveState === 'saving' ? (
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                        ) : saveState === 'success' ? (
+                          <Check className='h-3.5 w-3.5' />
+                        ) : (
+                          <Save className='h-3.5 w-3.5' />
+                        )}
+                        {saveState === 'success' ? 'Saved' : 'Save'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
+            </div>
+          </ScrollArea>
+        )}
 
-              {/* Method breakdown. */}
-              <MethodBreakdown items={items} />
-
-              {/* Default headers. */}
-              <div className='space-y-2'>
-                <h3 className='text-sm font-medium text-muted-foreground'>Default Headers</h3>
-                <HeadersEditor
-                  headers={headers}
+        {/* Variables tab. */}
+        {activeSection === 'variables' && (
+          <ScrollArea className='h-full'>
+            <div className='p-6 max-w-3xl mx-auto space-y-6'>
+              <div className='space-y-4'>
+                <CollectionVariablesEditor
+                  variables={variables}
                   onChange={(v) => {
-                    setHeaders(v);
+                    setVariables(v);
                     setIsDirty(true);
                   }}
                 />
+
                 <div className='flex justify-end'>
                   <Button
                     size='sm'
@@ -505,152 +634,27 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   </Button>
                 </div>
               </div>
-
-              {/* Requests list. */}
-              <div className='space-y-2'>
-                <h3 className='text-sm font-medium text-muted-foreground'>Requests</h3>
-                <RequestList items={items} collectionName={collectionName} />
-              </div>
-            </>
-          )}
-
-          {/* Authorization tab. */}
-          {activeSection === 'auth' && (
-            <div className='space-y-4'>
-              <Card className='bg-muted/30'>
-                <CardContent className='px-3 py-2.5'>
-                  <p className='text-xs text-muted-foreground'>
-                    This authorization method will be used for every request in this collection. You
-                    can override this by specifying one in the request.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className='space-y-4 p-4'>
-                  <div className='space-y-1.5'>
-                    <label
-                      htmlFor='col-auth-type'
-                      className='text-sm font-medium text-muted-foreground'
-                    >
-                      Auth Type
-                    </label>
-                    <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
-                      <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {COLLECTION_AUTH_TYPES.map((t) => (
-                          <SelectItem key={t.value} value={t.value}>
-                            {t.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <AuthEditor
-                    auth={auth}
-                    onChange={(v) => {
-                      setAuth(v);
-                      setIsDirty(true);
-                    }}
-                  />
-
-                  <div className='flex justify-end'>
-                    <Button
-                      size='sm'
-                      onClick={() => void triggerSave()}
-                      disabled={!isDirty || saveState !== 'idle'}
-                      className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                    >
-                      {saveState === 'saving' ? (
-                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                      ) : saveState === 'success' ? (
-                        <Check className='h-3.5 w-3.5' />
-                      ) : (
-                        <Save className='h-3.5 w-3.5' />
-                      )}
-                      {saveState === 'success' ? 'Saved' : 'Save'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
-          )}
+          </ScrollArea>
+        )}
 
-          {/* Variables tab. */}
-          {activeSection === 'variables' && (
-            <div className='space-y-4'>
-              <CollectionVariablesEditor
-                variables={variables}
-                onChange={(v) => {
-                  setVariables(v);
-                  setIsDirty(true);
-                }}
-              />
-
-              <div className='flex justify-end'>
-                <Button
-                  size='sm'
-                  onClick={() => void triggerSave()}
-                  disabled={!isDirty || saveState !== 'idle'}
-                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                  ) : saveState === 'success' ? (
-                    <Check className='h-3.5 w-3.5' />
-                  ) : (
-                    <Save className='h-3.5 w-3.5' />
-                  )}
-                  {saveState === 'success' ? 'Saved' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Readme tab. */}
-          {activeSection === 'readme' && (
-            <div className='space-y-4'>
-              <MarkdownEditor
-                value={readme}
-                onChange={(v) => {
-                  setReadme(v);
-                  setIsDirty(true);
-                }}
-                onBlur={() => {
-                  if (isDirty) void triggerSave();
-                }}
-              />
-              <div className='flex justify-end'>
-                <Button
-                  size='sm'
-                  onClick={() => void triggerSave()}
-                  disabled={!isDirty || saveState !== 'idle'}
-                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                  ) : saveState === 'success' ? (
-                    <Check className='h-3.5 w-3.5' />
-                  ) : (
-                    <Save className='h-3.5 w-3.5' />
-                  )}
-                  {saveState === 'success' ? 'Saved' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Tags tab. */}
-          {activeSection === 'tags' && (
-            <div>
-              <TagsList collection={collection} />
-            </div>
-          )}
+        {/* Documentation tab. */}
+        {activeSection === 'documentation' && (
+          <div className='flex-1 flex flex-col p-6'>
+            <MarkdownEditor
+              value={docs}
+              onChange={setDocs}
+              mode={docMode}
+              onModeChange={setDocMode}
+              onSave={() => void triggerSave()}
+              saveState={saveState}
+              isDirty={isDirty}
+              onBlur={() => {
+                if (isDirty) void triggerSave();
+              }}
+            />
           </div>
-        </ScrollArea>
+        )}
       </div>
     </div>
   );
