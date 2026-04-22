@@ -1,6 +1,6 @@
-import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import './monaco-setup';
+import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
-import * as monaco from 'monaco-editor';
 import { useEffect, useRef } from 'react';
 import { generateDynamicVar, isDynamicVar } from '@/lib/dynamic-vars';
 import { parseTextTokens } from '@/lib/text-variables';
@@ -8,58 +8,6 @@ import type { VariableScopeEntry } from '@/lib/url-variables';
 import { EditorSkeleton } from './EditorSkeleton';
 import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
 import { useMonacoTheme } from './useMonacoTheme';
-
-// Wire the locally-bundled monaco-editor to @monaco-editor/react so it never
-// fetches from the CDN. Runs once when this module is first imported (i.e. when
-// the first editor tab opens), not at app startup.
-loader.config({ monaco });
-
-// Define custom themes synchronously before any editor mounts so the correct
-// theme is applied on the very first render with no flash of the default light theme.
-monaco.editor.defineTheme('rocket-light', {
-  base: 'vs',
-  inherit: true,
-  rules: [
-    { token: 'string', foreground: 'a31515' },
-    { token: 'string.key.json', foreground: '0451a5' },
-    { token: 'string.value.json', foreground: 'a31515' },
-    { token: 'number', foreground: '098658' },
-    { token: 'keyword', foreground: '0000ff' },
-    { token: 'comment', foreground: '008000' },
-    { token: 'type', foreground: '267f99' },
-    { token: 'variable', foreground: '001080' },
-    { token: 'constant', foreground: '0070c1' },
-  ],
-  colors: {
-    'editor.background': '#ffffff',
-    'editor.foreground': '#000000',
-    'editor.lineHighlightBackground': '#add6ff26',
-    'editorLineNumber.foreground': '#237893',
-    'editorLineNumber.activeForeground': '#0b216f',
-  },
-});
-
-monaco.editor.defineTheme('rocket-dark', {
-  base: 'vs-dark',
-  inherit: true,
-  rules: [
-    { token: 'string', foreground: 'ce9178' },
-    { token: 'string.key.json', foreground: '9cdcfe' },
-    { token: 'number', foreground: 'b5cea8' },
-    { token: 'keyword', foreground: '569cd6' },
-    { token: 'comment', foreground: '6a9955' },
-    { token: 'type', foreground: '4ec9b0' },
-    { token: 'variable', foreground: '9cdcfe' },
-    { token: 'constant', foreground: '4fc1ff' },
-  ],
-  colors: {
-    'editor.background': '#1f1f1f',
-    'editor.foreground': '#d4d4d4',
-    'editor.lineHighlightBackground': '#2a2d2e',
-    'editorLineNumber.foreground': '#858585',
-    'editorLineNumber.activeForeground': '#c6c6c6',
-  },
-});
 
 interface MonacoWrapperProps {
   value: string;
@@ -114,7 +62,7 @@ export function MonacoWrapper({
   height = '300px',
   variableContext,
 }: MonacoWrapperProps) {
-  const { themeName, defineThemes } = useMonacoTheme();
+  const { themeName } = useMonacoTheme();
   const resolvedLanguage = language ?? detectLanguage(bodyMode, contentType);
   const options = readOnly ? READONLY_OPTIONS : BASE_EDITOR_OPTIONS;
 
@@ -145,8 +93,6 @@ export function MonacoWrapper({
   }, []);
 
   const handleMount: OnMount = (editor, monaco) => {
-    defineThemes(monaco);
-
     const model = editor.getModel();
     if (!model) return;
 

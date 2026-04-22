@@ -1,8 +1,5 @@
-import { DiffEditor, type DiffOnMount, loader } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-
-loader.config({ monaco });
-
+import '@/components/editor/monaco-setup';
+import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
@@ -38,7 +35,7 @@ function getLanguage(filePath: string): string {
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
 export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
-  const { themeName, defineThemes } = useMonacoTheme();
+  const { themeName } = useMonacoTheme();
 
   // Hold the editor instance so we can dispose it explicitly before React
   // unmounts the DOM, preventing "TextModel disposed before DiffEditorWidget
@@ -52,9 +49,8 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
     };
   }, []);
 
-  const handleDiffMount: DiffOnMount = (editor, monaco) => {
+  const handleDiffMount: DiffOnMount = (editor) => {
     editorRef.current = editor;
-    defineThemes(monaco);
   };
 
   // Persist mode preference across sessions.

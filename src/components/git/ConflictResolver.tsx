@@ -1,8 +1,5 @@
-import Editor, { loader, type OnMount } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-
-loader.config({ monaco });
-
+import '@/components/editor/monaco-setup';
+import Editor from '@monaco-editor/react';
 import { useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { Badge } from '@/components/ui/badge';
@@ -19,10 +16,7 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
   const { refreshStatus, abortMerge } = useGitStore();
-  const { themeName, defineThemes } = useMonacoTheme();
-  const handleMount: OnMount = (_editor, monaco) => {
-    defineThemes(monaco);
-  };
+  const { themeName } = useMonacoTheme();
 
   const handleAbort = async () => {
     await abortMerge();
@@ -80,7 +74,6 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             value={manualContent}
             onChange={(v) => setManualContent(v ?? '')}
             theme={themeName}
-            onMount={handleMount}
             options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
           />
         </div>
@@ -113,7 +106,6 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             <Editor
               value={conflictState.ours}
               theme={themeName}
-              onMount={handleMount}
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
@@ -129,7 +121,6 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             <Editor
               value={conflictState.theirs}
               theme={themeName}
-              onMount={handleMount}
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
