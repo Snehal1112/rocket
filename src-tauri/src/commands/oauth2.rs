@@ -340,7 +340,9 @@ async fn auth_code_flow(
         .build()
         {
             let cleared = tmp.with_webview(|webview| {
-                use webkit2gtk::{WebViewExt, WebsiteDataManagerExt, WebsiteDataTypes};
+                use webkit2gtk::{
+                    gio, glib, WebViewExt, WebsiteDataManagerExtManual, WebsiteDataTypes,
+                };
                 let wv = webview.inner();
                 if let Some(dm) = wv.website_data_manager() {
                     dm.clear(
