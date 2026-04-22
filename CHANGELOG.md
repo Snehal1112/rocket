@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.3](https://github.com/Snehal1112/rocket/compare/v0.6.2...v0.6.3) (2026-04-22)
+
+### Features
+
+* **ui:** add icons to CollectionNode context menu and dropdown items ([d22d957](https://github.com/Snehal1112/rocket/commit/d22d957649afae6748ce1a793733a3bff8c32d18))
+* **ui:** add icons to FolderNode context menu items ([2035b76](https://github.com/Snehal1112/rocket/commit/2035b7664378c6c0c5403b9454f73d57b058e1b8))
+* **ui:** add icons to GitStashSection stash action dropdown ([0de7cd0](https://github.com/Snehal1112/rocket/commit/0de7cd09224555b69056fb208fa839963f0dafad))
+* **ui:** add icons to RequestNode menus ([765d8b2](https://github.com/Snehal1112/rocket/commit/765d8b20b9c6e1e8b1f35df43499e0c071d3cbc7))
+* **ui:** add icons to TabBar context menu items ([0c636aa](https://github.com/Snehal1112/rocket/commit/0c636aafb393f5449d7a291fc08b13d332f65bef))
+* **ui:** add icons to WorkspaceSwitcher per-workspace dropdown items ([d441e43](https://github.com/Snehal1112/rocket/commit/d441e438c89b0087346f13b3813fdcb6bc7ddce0))
+
+### Bug Fixes
+
+* **oauth2:** default to system browser on macOS and Windows for auth code flow ([e8165c3](https://github.com/Snehal1112/rocket/commit/e8165c343db0a310921322a5a65cd6884e35505d))
+* **oauth2:** disable auto-fetch when clearing token cache ([f108bde](https://github.com/Snehal1112/rocket/commit/f108bde9c5a8dafa6a2f84200314b6ad4e107c30))
+
 ## [0.6.2](https://github.com/Snehal1112/rocket/compare/v0.6.1...v0.6.2) (2026-04-22)
 
 ### Features
