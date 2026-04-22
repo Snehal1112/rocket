@@ -186,6 +186,9 @@ export function OAuth2AuthEditor({
       responseScope: '',
       idTokenClaims: null,
       accessTokenClaims: null,
+      // Disable auto-fetch so the next Send does not immediately re-populate
+      // the token the user just explicitly cleared.
+      autoFetchToken: false,
     });
     setTokenError('');
   }, []);
