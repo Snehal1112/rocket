@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { RocketBook } from '@/components/illustrations';
-import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
+import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
@@ -159,7 +159,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               {workspace?.name ?? 'Workspace'}
             </h2>
 
-            {/* Stats — plain Bruno style */}
+            {/* Stats */}
             <div className='flex gap-7 pb-4 border-b border-border'>
               <div className='flex flex-col gap-0.5'>
                 <span className='text-[22px] font-bold leading-tight tabular-nums'>
@@ -241,7 +241,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     onClick={() => setImportDialogOpen(true)}
                   >
                     <Upload className='h-3 w-3 mr-1.5' />
-                    Import from Bruno
+                    Import Collection
                   </Button>
                 </div>
               )}
@@ -341,7 +341,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
         </ScrollArea>
       </div>
 
-      <ImportBrunoDialog
+      <ImportCollectionDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
         workspaceId={workspaceId}

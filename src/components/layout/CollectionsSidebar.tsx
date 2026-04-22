@@ -5,7 +5,7 @@ import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
 import { RocketBook } from '@/components/illustrations';
-import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
+import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -313,7 +313,7 @@ export function CollectionsSidebar() {
       aria-label='Collections'
     >
       <div className='flex-1 flex flex-col overflow-hidden'>
-        {/* View tabs and action icons (Bruno-style). */}
+        {/* View tabs and action icons. */}
         <div className='flex items-center justify-between px-3 pt-2.5 pb-1'>
           <div
             role='tablist'
@@ -580,7 +580,7 @@ export function CollectionsSidebar() {
       </div>
 
       {activeWorkspaceId && (
-        <ImportBrunoDialog
+        <ImportCollectionDialog
           open={importDialogOpen}
           onOpenChange={setImportDialogOpen}
           workspaceId={activeWorkspaceId}

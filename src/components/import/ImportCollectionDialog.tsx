@@ -21,7 +21,7 @@ import {
   importBrunoZip,
 } from '@/lib/tauri-api';
 
-interface ImportBrunoDialogProps {
+interface ImportCollectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
@@ -39,13 +39,13 @@ interface SelectedSource {
   name: string;
 }
 
-export function ImportBrunoDialog({
+export function ImportCollectionDialog({
   open,
   onOpenChange,
   workspaceId,
   createWorkspace,
   onImportComplete,
-}: ImportBrunoDialogProps) {
+}: ImportCollectionDialogProps) {
   const [source, setSource] = useState<SelectedSource | null>(null);
   const [dialogState, setDialogState] = useState<DialogState>('picking');
   const [report, setReport] = useState<ImportReport | null>(null);
@@ -130,14 +130,14 @@ export function ImportBrunoDialog({
         if (!o) handleClose();
       }}
     >
-      <DialogContent className='sm:max-w-md'>
+      <DialogContent className='w-auto min-w-[28rem] max-w-[min(90vw,_42rem)]'>
         {dialogState === 'picking' && (
           <>
             <DialogHeader>
-              <DialogTitle>Import from Bruno</DialogTitle>
+              <DialogTitle>Import Collection</DialogTitle>
               <DialogDescription>
-                Supports Bruno 2.x and 3.x formats. Collection or workspace is detected
-                automatically.
+                Select a collection folder or ZIP archive to import. Collection or workspace is
+                detected automatically.
               </DialogDescription>
             </DialogHeader>
 
@@ -174,7 +174,7 @@ export function ImportBrunoDialog({
                       Drop a folder or ZIP here
                     </p>
                     <p className='mt-0.5 text-xs text-muted-foreground'>
-                      Bruno export or extracted directory
+                      Collection export or extracted directory
                     </p>
                   </>
                 )}

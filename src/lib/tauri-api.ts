@@ -840,7 +840,7 @@ export const updateRequestDocs = (
 ): Promise<void> => invoke<void>('update_request_docs', { collection, path, docs });
 
 // ============================================================
-// Bruno import
+// Collection import
 // ============================================================
 
 export type SkipReason =

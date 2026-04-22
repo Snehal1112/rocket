@@ -1,7 +1,7 @@
 import { faker } from '@faker-js/faker';
 
 /**
- * Registry of all Bruno-compatible dynamic variables.
+ * Registry of dynamic variables supported by Rocket.
  * Keys are variable names WITHOUT the $ prefix.
  * Each value is a generator function returning a fresh string.
  */

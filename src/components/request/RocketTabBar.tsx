@@ -1,18 +1,18 @@
 import { cn } from '@/lib/utils';
 
-export interface BrunoTabDef {
+export interface RocketTabDef {
   value: string;
   label: React.ReactNode;
   isActive: boolean;
   onClick: () => void;
 }
 
-interface BrunoTabBarProps {
-  tabs: BrunoTabDef[];
+interface RocketTabBarProps {
+  tabs: RocketTabDef[];
   rightContent?: React.ReactNode;
 }
 
-export function BrunoTabBar({ tabs, rightContent }: BrunoTabBarProps) {
+export function RocketTabBar({ tabs, rightContent }: RocketTabBarProps) {
   return (
     <div className='flex items-center border-b border-border px-3 shrink-0' role='tablist'>
       {tabs.map((tab) => (

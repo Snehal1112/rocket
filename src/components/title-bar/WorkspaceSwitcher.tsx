@@ -11,7 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
-import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
+import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -169,8 +169,8 @@ export function WorkspaceSwitcher() {
       {/* Create dialog */}
       <CreateWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
 
-      {/* Import from Bruno dialog */}
-      <ImportBrunoDialog
+      {/* Import collection dialog */}
+      <ImportCollectionDialog
         open={importOpen}
         onOpenChange={setImportOpen}
         workspaceId={activeId ?? 'default'}

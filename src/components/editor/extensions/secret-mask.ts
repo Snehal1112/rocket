@@ -40,7 +40,7 @@ class MaskWidget extends WidgetType {
  * Variable tokens remain visible and colored. The document content is
  * unchanged — only the visual presentation is masked.
  *
- * This matches Bruno's MaskedEditor behavior.
+ * Variable tokens remain visible; only literal content is hidden.
  */
 class SecretMaskPlugin {
   decorations: DecorationSet;

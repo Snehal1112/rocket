@@ -56,7 +56,7 @@ import type {
 import { isRequestTab } from '@/types/pane-types';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
-import { BrunoTabBar } from './BrunoTabBar';
+import { RocketTabBar } from './RocketTabBar';
 import { HeadersEditor } from './HeadersEditor';
 import { PathParamsPanel } from './PathParamsPanel';
 import { QueryParamsEditor } from './QueryParamsEditor';
@@ -833,7 +833,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
         {/* Section tabs. */}
         <div className='flex-1 flex flex-col min-h-0  bg-card/50'>
-          <BrunoTabBar tabs={tabDefs} rightContent={tabRightContent} />
+          <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
           <div className='flex-1 overflow-auto p-3 bg-card/65'>
             {activeSection === 'params' && (
               <div className='space-y-2'>
