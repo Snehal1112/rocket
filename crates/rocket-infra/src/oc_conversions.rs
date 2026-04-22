@@ -2439,7 +2439,6 @@ mod docs_roundtrip_tests {
     #[test]
     fn collection_docs_roundtrips_through_docs_field() {
         use crate::opencollection::OcCollection;
-        use rocket_collection::settings::CollectionSettings;
 
         let oc = OcCollection {
             opencollection: Some("1.0.0".into()),
