@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { cn } from '@/lib/utils';
 
@@ -64,7 +65,7 @@ export function MarkdownEditor({
       <CardContent className='flex-1 p-0 overflow-hidden flex flex-col'>
         {mode === 'edit' && (
           <div className='flex-1 flex flex-col overflow-hidden'>
-            <textarea
+            <Textarea
               className='flex-1 w-full bg-transparent border-none resize-none px-4 py-3.5 text-xs font-mono text-muted-foreground placeholder:text-muted-foreground/40 focus-visible:outline-none leading-relaxed'
               placeholder={'Add documentation...\n\nSupports **Markdown**'}
               value={value}

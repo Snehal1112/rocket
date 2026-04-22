@@ -1,9 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownEditor } from './MarkdownEditor';
 
 const baseProps = { value: '', onChange: vi.fn() };
+
+beforeEach(() => {
+  baseProps.onChange.mockClear();
+});
 
 describe('MarkdownEditor', () => {
   it('renders Documentation label', () => {
