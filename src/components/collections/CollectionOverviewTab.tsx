@@ -1,5 +1,5 @@
 import { BoxIcon, Check, Loader2, Save } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
@@ -200,6 +200,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Editable settings state.
   const [description, setDescription] = useState('');
@@ -221,9 +223,22 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const handleSectionChange = useCallback(
     (section: CollectionSection) => {
       updateCollectionSection(tab.id, section);
+      setIsScrolled(false);
     },
     [tab.id, updateCollectionSection],
   );
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const viewport = container.querySelector<HTMLElement>(
+      '[data-radix-scroll-area-viewport]',
+    );
+    if (!viewport) return;
+    const handleScroll = () => setIsScrolled(viewport.scrollTop > 0);
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
@@ -388,7 +403,12 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   return (
     <div className='flex h-full flex-col overflow-hidden'>
       {/* Collection header. */}
-      <div className='shrink-0 border-b border-border/70 px-6 pt-4 pb-0'>
+      <div
+        className={cn(
+          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-shadow duration-200',
+          isScrolled && 'shadow-[0_4px_16px_rgba(0,0,0,0.12)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.5)]',
+        )}
+      >
         <div className='flex items-center gap-2 mb-1'>
           <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
           <h1 className='text-lg font-semibold leading-tight truncate'>{collection.name}</h1>
@@ -420,8 +440,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       </div>
 
       {/* Tab content. */}
-      <ScrollArea className='flex-1'>
-        <div className='p-6 max-w-3xl mx-auto space-y-6'>
+      <div ref={scrollContainerRef} className='flex-1 min-h-0'>
+        <ScrollArea className='h-full'>
+          <div className='p-6 max-w-3xl mx-auto space-y-6'>
           {/* Overview tab. */}
           {activeSection === 'overview' && (
             <>
@@ -624,8 +645,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               <TagsList collection={collection} />
             </div>
           )}
-        </div>
-      </ScrollArea>
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   );
 }
