@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Copy, Key } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Key, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,6 +38,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
   // Start expanded whenever a token is present. User can collapse manually.
   const [accessOpen, setAccessOpen] = useState(!!o.accessToken);
   const [idOpen, setIdOpen] = useState(!!o.idToken);
+  const [showRawAccessPayload, setShowRawAccessPayload] = useState(false);
   const [showRawPayload, setShowRawPayload] = useState(false);
   const [, setTick] = useState(0);
   const [copied, setCopied] = useState<'access' | 'id' | null>(null);
@@ -107,7 +108,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
             </span>
           </button>
           {accessOpen && (
-            <div className='px-3 pb-3 pt-1'>
+            <div className='px-3 pb-3 pt-1 space-y-2'>
               <div className='flex gap-2 items-start'>
                 <Textarea
                   className='flex-1 text-xs font-mono resize-none min-h-[4.5rem] max-h-40'
@@ -129,6 +130,80 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                   )}
                 </Button>
               </div>
+              {o.accessTokenClaims && (
+                <div className='rounded border border-border/40 bg-muted/20 p-2.5 space-y-2'>
+                  <div className='flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-foreground/50'>
+                    <ShieldCheck className='h-3 w-3' aria-hidden='true' />
+                    Decoded Payload
+                  </div>
+                  <dl className='space-y-1.5'>
+                    {o.accessTokenClaims.subject && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Subject</dt>
+                        <dd className='font-mono truncate min-w-0'>
+                          {o.accessTokenClaims.subject}
+                        </dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.issuer && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Issuer</dt>
+                        <dd className='font-mono truncate min-w-0'>{o.accessTokenClaims.issuer}</dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.audience && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>
+                          Audience
+                        </dt>
+                        <dd className='font-mono truncate min-w-0'>
+                          {o.accessTokenClaims.audience}
+                        </dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.expiry && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Expires</dt>
+                        <dd>{formatTimestamp(o.accessTokenClaims.expiry)}</dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.issuedAt && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Issued</dt>
+                        <dd>{formatTimestamp(o.accessTokenClaims.issuedAt)}</dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.scope && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Scope</dt>
+                        <dd className='font-mono break-all min-w-0'>{o.accessTokenClaims.scope}</dd>
+                      </div>
+                    )}
+                    {o.accessTokenClaims.algorithm && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>
+                          Algorithm
+                        </dt>
+                        <dd>{o.accessTokenClaims.algorithm}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='text-sm mt-1 h-8 px-2'
+                    onClick={() => setShowRawAccessPayload((v) => !v)}
+                    aria-expanded={showRawAccessPayload}
+                  >
+                    {showRawAccessPayload ? 'Hide' : 'View'} Raw Payload
+                  </Button>
+                  {showRawAccessPayload && (
+                    <pre className='text-xs font-mono bg-muted/60 border border-border/40 p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
+                      {o.accessTokenClaims.rawPayload}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

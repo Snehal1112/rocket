@@ -254,6 +254,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             tokenAcquiredAt: cachedAuth.oauth2.tokenAcquiredAt ?? null,
             idToken: cachedAuth.oauth2.idToken ?? '',
             idTokenClaims: cachedAuth.oauth2.idTokenClaims ?? null,
+            accessTokenClaims: null,
             tokenType: cachedAuth.oauth2.tokenType ?? '',
             responseScope: cachedAuth.oauth2.responseScope ?? '',
           };
@@ -342,6 +343,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         tokenType: '',
         responseScope: '',
         idTokenClaims: null,
+        accessTokenClaims: null,
       };
     if (authType === 'aws-sig-v4')
       next.awsSigV4 = { accessKey: '', secretKey: '', region: '', service: '', sessionToken: '' };

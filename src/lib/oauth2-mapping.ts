@@ -228,6 +228,7 @@ export function apiAuthToOAuth2State(auth: ApiOAuth2Auth): OAuth2State {
     tokenType: '',
     responseScope: '',
     idTokenClaims: null as OAuth2JwtClaims | null,
+    accessTokenClaims: null as OAuth2JwtClaims | null,
   };
 
   switch (auth.flow) {

@@ -426,6 +426,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           tokenType: '',
           responseScope: '',
           idTokenClaims: null,
+          accessTokenClaims: null,
         };
       if (authType === 'aws-sig-v4')
         next.awsSigV4 = {

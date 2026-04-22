@@ -97,12 +97,19 @@ export function OAuth2AuthEditor({
         tokenType: result.token_type || '',
         responseScope: result.scope || '',
         idTokenClaims: null,
+        accessTokenClaims: null,
       });
       // Scroll the token card into view after React re-renders it.
       setTimeout(
         () => tokenDisplayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
         0,
       );
+      try {
+        const claims = await oauth2DecodeJwt(result.access_token);
+        patchOAuth2Ref.current({ accessTokenClaims: claims });
+      } catch {
+        // Opaque access tokens are fine — decode is best-effort.
+      }
       if (result.id_token) {
         try {
           const claims = await oauth2DecodeJwt(result.id_token);
@@ -145,7 +152,14 @@ export function OAuth2AuthEditor({
         idToken: result.id_token || o.idToken,
         tokenType: result.token_type || o.tokenType,
         responseScope: result.scope || o.responseScope,
+        accessTokenClaims: null,
       });
+      try {
+        const claims = await oauth2DecodeJwt(result.access_token);
+        patchOAuth2Ref.current({ accessTokenClaims: claims });
+      } catch {
+        // Opaque access tokens are fine — decode is best-effort.
+      }
       if (result.id_token) {
         try {
           const claims = await oauth2DecodeJwt(result.id_token);
@@ -171,6 +185,7 @@ export function OAuth2AuthEditor({
       tokenType: '',
       responseScope: '',
       idTokenClaims: null,
+      accessTokenClaims: null,
     });
     setTokenError('');
   }, []);
