@@ -254,7 +254,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             tokenAcquiredAt: cachedAuth.oauth2.tokenAcquiredAt ?? null,
             idToken: cachedAuth.oauth2.idToken ?? '',
             idTokenClaims: cachedAuth.oauth2.idTokenClaims ?? null,
-            accessTokenClaims: null,
+            accessTokenClaims: cachedAuth.oauth2.accessTokenClaims ?? null,
             tokenType: cachedAuth.oauth2.tokenType ?? '',
             responseScope: cachedAuth.oauth2.responseScope ?? '',
           };
