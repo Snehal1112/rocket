@@ -38,6 +38,7 @@ interface ApiOAuth2TokenPlacement {
 
 interface ApiOAuth2TokenConfig {
   id?: string | null;
+  source?: string | null;
   placement?: ApiOAuth2TokenPlacement | null;
 }
 
@@ -108,14 +109,18 @@ export function oauth2StateToApiAuth(state: OAuth2State): ApiOAuth2Auth {
   const tokenConfig: ApiOAuth2TokenConfig | null = (() => {
     const hasId = state.tokenId.trim() !== '';
     const hasPlacement = state.addTokenTo === 'queryParams' || state.headerPrefix !== 'Bearer';
-    if (!hasId && !hasPlacement) return null;
-    const placement: ApiOAuth2TokenPlacement =
+    const hasNonDefaultSource = state.tokenSource === 'idToken';
+    if (!hasId && !hasPlacement && !hasNonDefaultSource) return null;
+    const placement: ApiOAuth2TokenPlacement | undefined =
       state.addTokenTo === 'queryParams'
         ? { query: 'access_token' }
-        : { header: state.headerPrefix || 'Bearer' };
+        : state.addTokenTo === 'header'
+          ? { header: state.headerPrefix || 'Bearer' }
+          : undefined;
     return {
       id: hasId ? state.tokenId : null,
-      placement,
+      source: state.tokenSource !== 'accessToken' ? state.tokenSource : null,
+      placement: placement ?? null,
     };
   })();
 
@@ -211,7 +216,9 @@ export function apiAuthToOAuth2State(auth: ApiOAuth2Auth): OAuth2State {
     state: auth.state ?? '',
     usePkce: auth.pkce?.enabled ?? true,
     useSystemBrowser: settings?.useSystemBrowser ?? false,
-    tokenSource: 'accessToken' as const,
+    tokenSource: (tc?.source === 'idToken' ? 'idToken' : 'accessToken') as
+      | 'accessToken'
+      | 'idToken',
     tokenId: tc?.id ?? '',
     headerPrefix: tc?.placement?.header ?? 'Bearer',
     addTokenTo: (tc?.placement?.query ? 'queryParams' : 'header') as 'header' | 'queryParams',

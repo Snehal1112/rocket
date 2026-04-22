@@ -37,6 +37,8 @@ pub struct OAuth2TokenConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,  // "accessToken" | "idToken"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<OAuth2TokenPlacement>,
 }
 
@@ -199,6 +201,7 @@ mod tests {
     fn token_config_with_placement() {
         let tc = OAuth2TokenConfig {
             id: Some("my-token".into()),
+            source: None,
             placement: Some(OAuth2TokenPlacement::Header { header: "Authorization".into() }),
         };
         let json = serde_json::to_string(&tc).unwrap();

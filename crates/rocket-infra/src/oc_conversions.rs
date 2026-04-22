@@ -2265,6 +2265,7 @@ http:
             }),
             token_config: Some(OAuth2TokenConfig {
                 id: Some("my-token".into()),
+                source: None,
                 placement: Some(OAuth2TokenPlacement::Header {
                     header: "Authorization".into(),
                 }),
