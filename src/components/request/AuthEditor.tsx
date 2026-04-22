@@ -1,6 +1,7 @@
 import { Key, Lock, User } from 'lucide-react';
 import { useCallback } from 'react';
 import { SingleLineEditor } from '@/components/editor';
+import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -55,12 +56,14 @@ export function AuthEditor({
   return (
     <div className='space-y-4'>
       {auth.authType === 'inherit' && (
-        <div className='rounded-md border border-border bg-muted/50 px-3 py-2.5'>
-          <p className='text-xs text-muted-foreground'>
-            This request inherits authorization from the collection settings. To override, select a
-            different auth type above.
-          </p>
-        </div>
+        <Card className='bg-muted/50'>
+          <CardContent className='px-3 py-2.5'>
+            <p className='text-xs text-muted-foreground'>
+              This request inherits authorization from the collection settings. To override, select a
+              different auth type above.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {auth.authType === 'none' && (
@@ -68,122 +71,128 @@ export function AuthEditor({
       )}
 
       {auth.authType === 'basic' && auth.basic && (
-        <div className='space-y-2'>
-          <div className='flex items-center gap-2'>
-            <User className='h-3.5 w-3.5 text-muted-foreground' />
-            <SingleLineEditor
-              placeholder='Username'
-              aria-label='Username'
-              className='flex-1 text-sm'
-              value={auth.basic.username}
-              onChange={(newVal) =>
-                onChange({
-                  ...auth,
-                  basic: { ...auth.basic, username: newVal } as NonNullable<AuthState['basic']>,
-                })
-              }
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-          </div>
-          <div className='flex items-center gap-2'>
-            <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-            <SingleLineEditor
-              placeholder='Password'
-              aria-label='Password'
-              isSecret
-              className='flex-1 text-sm'
-              value={auth.basic.password}
-              onChange={(newVal) =>
-                onChange({
-                  ...auth,
-                  basic: { ...auth.basic, password: newVal } as NonNullable<AuthState['basic']>,
-                })
-              }
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-          </div>
-        </div>
+        <Card>
+          <CardContent className='space-y-2 p-4'>
+            <div className='flex items-center gap-2'>
+              <User className='h-3.5 w-3.5 text-muted-foreground' />
+              <SingleLineEditor
+                placeholder='Username'
+                aria-label='Username'
+                className='flex-1 text-sm'
+                value={auth.basic.username}
+                onChange={(newVal) =>
+                  onChange({
+                    ...auth,
+                    basic: { ...auth.basic, username: newVal } as NonNullable<AuthState['basic']>,
+                  })
+                }
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+            <div className='flex items-center gap-2'>
+              <Lock className='h-3.5 w-3.5 text-muted-foreground' />
+              <SingleLineEditor
+                placeholder='Password'
+                aria-label='Password'
+                isSecret
+                className='flex-1 text-sm'
+                value={auth.basic.password}
+                onChange={(newVal) =>
+                  onChange({
+                    ...auth,
+                    basic: { ...auth.basic, password: newVal } as NonNullable<AuthState['basic']>,
+                  })
+                }
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {auth.authType === 'bearer' && auth.bearer && (
-        <div className='flex items-center gap-2'>
-          <Key className='h-3.5 w-3.5 text-muted-foreground' />
-          <SingleLineEditor
-            placeholder='Token'
-            aria-label='Bearer token'
-            isSecret
-            className='flex-1 text-sm'
-            value={auth.bearer.token}
-            onChange={(newVal) =>
-              onChange({
-                ...auth,
-                bearer: { token: newVal },
-              })
-            }
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-        </div>
+        <Card>
+          <CardContent className='flex items-center gap-2 p-4'>
+            <Key className='h-3.5 w-3.5 text-muted-foreground' />
+            <SingleLineEditor
+              placeholder='Token'
+              aria-label='Bearer token'
+              isSecret
+              className='flex-1 text-sm'
+              value={auth.bearer.token}
+              onChange={(newVal) =>
+                onChange({
+                  ...auth,
+                  bearer: { token: newVal },
+                })
+              }
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
+            />
+          </CardContent>
+        </Card>
       )}
 
       {auth.authType === 'api-key' && auth.apiKey && (
-        <div className='space-y-2'>
-          <SingleLineEditor
-            placeholder='Key'
-            aria-label='API key name'
-            className='text-sm'
-            value={auth.apiKey.key}
-            onChange={(newVal) =>
-              onChange({
-                ...auth,
-                apiKey: { ...auth.apiKey, key: newVal } as NonNullable<AuthState['apiKey']>,
-              })
-            }
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-          <SingleLineEditor
-            placeholder='Value'
-            aria-label='API key value'
-            isSecret
-            className='text-sm'
-            value={auth.apiKey.value}
-            onChange={(newVal) =>
-              onChange({
-                ...auth,
-                apiKey: { ...auth.apiKey, value: newVal } as NonNullable<AuthState['apiKey']>,
-              })
-            }
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-          <Select
-            value={auth.apiKey.addTo}
-            onValueChange={(val) =>
-              onChange({
-                ...auth,
-                apiKey: {
-                  ...auth.apiKey,
-                  addTo: val as 'header' | 'query',
-                } as NonNullable<AuthState['apiKey']>,
-              })
-            }
-          >
-            <SelectTrigger className='w-30 text-sm'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='header' className='text-sm'>
-                Header
-              </SelectItem>
-              <SelectItem value='query' className='text-sm'>
-                Query Param
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <Card>
+          <CardContent className='space-y-2 p-4'>
+            <SingleLineEditor
+              placeholder='Key'
+              aria-label='API key name'
+              className='text-sm'
+              value={auth.apiKey.key}
+              onChange={(newVal) =>
+                onChange({
+                  ...auth,
+                  apiKey: { ...auth.apiKey, key: newVal } as NonNullable<AuthState['apiKey']>,
+                })
+              }
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
+            />
+            <SingleLineEditor
+              placeholder='Value'
+              aria-label='API key value'
+              isSecret
+              className='text-sm'
+              value={auth.apiKey.value}
+              onChange={(newVal) =>
+                onChange({
+                  ...auth,
+                  apiKey: { ...auth.apiKey, value: newVal } as NonNullable<AuthState['apiKey']>,
+                })
+              }
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
+            />
+            <Select
+              value={auth.apiKey.addTo}
+              onValueChange={(val) =>
+                onChange({
+                  ...auth,
+                  apiKey: {
+                    ...auth.apiKey,
+                    addTo: val as 'header' | 'query',
+                  } as NonNullable<AuthState['apiKey']>,
+                })
+              }
+            >
+              <SelectTrigger className='w-30 text-sm'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='header' className='text-sm'>
+                  Header
+                </SelectItem>
+                <SelectItem value='query' className='text-sm'>
+                  Query Param
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
       )}
 
       {auth.authType === 'oauth2' && auth.oauth2 && (
@@ -199,73 +208,83 @@ export function AuthEditor({
       )}
 
       {auth.authType === 'aws-sig-v4' && auth.awsSigV4 && (
-        <div className='space-y-3'>
-          <div>
-            <Label className='mb-1 block'>Access Key</Label>
-            <SingleLineEditor
-              className='text-sm'
-              placeholder='AKIAIOSFODNN7EXAMPLE'
-              value={auth.awsSigV4.accessKey}
-              onChange={(newVal) => patchAWS({ accessKey: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-          </div>
+        <>
+          <Card>
+            <CardContent className='space-y-3 p-4'>
+              <p className='text-xs font-medium text-muted-foreground'>Credentials</p>
+              <div>
+                <Label className='mb-1 block'>Access Key</Label>
+                <SingleLineEditor
+                  className='text-sm'
+                  placeholder='AKIAIOSFODNN7EXAMPLE'
+                  value={auth.awsSigV4.accessKey}
+                  onChange={(newVal) => patchAWS({ accessKey: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
+                />
+              </div>
 
-          <div>
-            <Label className='mb-1 block'>Secret Key</Label>
-            <SingleLineEditor
-              className='text-sm'
-              isSecret
-              placeholder='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
-              value={auth.awsSigV4.secretKey}
-              onChange={(newVal) => patchAWS({ secretKey: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-          </div>
+              <div>
+                <Label className='mb-1 block'>Secret Key</Label>
+                <SingleLineEditor
+                  className='text-sm'
+                  isSecret
+                  placeholder='wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+                  value={auth.awsSigV4.secretKey}
+                  onChange={(newVal) => patchAWS({ secretKey: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
+                />
+              </div>
 
-          <div className='grid grid-cols-2 gap-2'>
-            <div>
-              <Label className='mb-1 block'>Region</Label>
-              <SingleLineEditor
-                className='text-sm'
-                placeholder='us-east-1'
-                value={auth.awsSigV4.region}
-                onChange={(newVal) => patchAWS({ region: newVal })}
-                variableContext={variableContext}
-                onNavigateToSource={onNavigateToSource}
-              />
-            </div>
-            <div>
-              <Label className='mb-1 block'>Service</Label>
-              <SingleLineEditor
-                className='text-sm'
-                placeholder='execute-api'
-                value={auth.awsSigV4.service}
-                onChange={(newVal) => patchAWS({ service: newVal })}
-                variableContext={variableContext}
-                onNavigateToSource={onNavigateToSource}
-              />
-            </div>
-          </div>
+              <div>
+                <Label className='mb-1 block'>Session Token</Label>
+                <SingleLineEditor
+                  className='text-sm'
+                  isSecret
+                  placeholder='(optional)'
+                  value={auth.awsSigV4.sessionToken}
+                  onChange={(newVal) => patchAWS({ sessionToken: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
+                />
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  Only required for temporary credentials.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
 
-          <div>
-            <Label className='mb-1 block'>Session Token</Label>
-            <SingleLineEditor
-              className='text-sm'
-              isSecret
-              placeholder='(optional)'
-              value={auth.awsSigV4.sessionToken}
-              onChange={(newVal) => patchAWS({ sessionToken: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-            <p className='mt-1 text-xs text-muted-foreground'>
-              Session token is only required for temporary credentials.
-            </p>
-          </div>
-        </div>
+          <Card>
+            <CardContent className='space-y-3 p-4'>
+              <p className='text-xs font-medium text-muted-foreground'>Request Signing</p>
+              <div className='grid grid-cols-2 gap-2'>
+                <div>
+                  <Label className='mb-1 block'>Region</Label>
+                  <SingleLineEditor
+                    className='text-sm'
+                    placeholder='us-east-1'
+                    value={auth.awsSigV4.region}
+                    onChange={(newVal) => patchAWS({ region: newVal })}
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
+                  />
+                </div>
+                <div>
+                  <Label className='mb-1 block'>Service</Label>
+                  <SingleLineEditor
+                    className='text-sm'
+                    placeholder='execute-api'
+                    value={auth.awsSigV4.service}
+                    onChange={(newVal) => patchAWS({ service: newVal })}
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );

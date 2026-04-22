@@ -5,6 +5,7 @@ import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -304,52 +305,64 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     'Failed to save settings',
   );
 
-  const handleAuthTypeChange = useCallback((authType: AuthState['authType']) => {
-    const next: AuthState = { authType };
-    if (authType === 'basic') next.basic = { username: '', password: '' };
-    if (authType === 'bearer') next.bearer = { token: '' };
-    if (authType === 'api-key') next.apiKey = { key: '', value: '', addTo: 'header' };
-    if (authType === 'oauth2')
-      next.oauth2 = {
-        grantType: 'client_credentials',
-        authorizationUrl: '',
-        tokenUrl: '',
-        callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
-        clientId: '',
-        clientSecret: '',
-        scope: '',
-        state: '',
-        username: '',
-        password: '',
-        clientAuthentication: 'body',
-        headerPrefix: 'Bearer',
-        addTokenTo: 'header',
-        verifySsl: true,
-        accessToken: '',
-        refreshToken: '',
-        expiresIn: null,
-        tokenAcquiredAt: null,
-        usePkce: true,
-        useSystemBrowser: false,
-        tokenSource: 'accessToken',
-        tokenId: '',
-        refreshTokenUrl: '',
-        autoFetchToken: true,
-        autoRefreshToken: false,
-        authParams: [],
-        tokenParams: [],
-        refreshParams: [],
-        idToken: '',
-        tokenType: '',
-        responseScope: '',
-        idTokenClaims: null,
-        accessTokenClaims: null,
-      };
-    if (authType === 'aws-sig-v4')
-      next.awsSigV4 = { accessKey: '', secretKey: '', region: '', service: '', sessionToken: '' };
-    setAuth(next);
-    setIsDirty(true);
-  }, []);
+  const handleAuthTypeChange = useCallback(
+    (authType: AuthState['authType']) => {
+      const next: AuthState = { authType };
+      if (authType === 'basic')
+        next.basic = auth.basic ?? { username: '', password: '' };
+      if (authType === 'bearer')
+        next.bearer = auth.bearer ?? { token: '' };
+      if (authType === 'api-key')
+        next.apiKey = auth.apiKey ?? { key: '', value: '', addTo: 'header' };
+      if (authType === 'oauth2')
+        next.oauth2 = auth.oauth2 ?? {
+          grantType: 'client_credentials',
+          authorizationUrl: '',
+          tokenUrl: '',
+          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
+          clientId: '',
+          clientSecret: '',
+          scope: '',
+          state: '',
+          username: '',
+          password: '',
+          clientAuthentication: 'body',
+          headerPrefix: 'Bearer',
+          addTokenTo: 'header',
+          verifySsl: true,
+          accessToken: '',
+          refreshToken: '',
+          expiresIn: null,
+          tokenAcquiredAt: null,
+          usePkce: true,
+          useSystemBrowser: false,
+          tokenSource: 'accessToken',
+          tokenId: '',
+          refreshTokenUrl: '',
+          autoFetchToken: true,
+          autoRefreshToken: false,
+          authParams: [],
+          tokenParams: [],
+          refreshParams: [],
+          idToken: '',
+          tokenType: '',
+          responseScope: '',
+          idTokenClaims: null,
+          accessTokenClaims: null,
+        };
+      if (authType === 'aws-sig-v4')
+        next.awsSigV4 = auth.awsSigV4 ?? {
+          accessKey: '',
+          secretKey: '',
+          region: '',
+          service: '',
+          sessionToken: '',
+        };
+      setAuth(next);
+      setIsDirty(true);
+    },
+    [auth],
+  );
 
   if (loading) {
     return (
@@ -479,59 +492,65 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           {/* Authorization tab. */}
           {activeSection === 'auth' && (
             <div className='space-y-4'>
-              <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
-                <p className='text-xs text-muted-foreground'>
-                  This authorization method will be used for every request in this collection. You
-                  can override this by specifying one in the request.
-                </p>
-              </div>
+              <Card className='bg-muted/30'>
+                <CardContent className='px-3 py-2.5'>
+                  <p className='text-xs text-muted-foreground'>
+                    This authorization method will be used for every request in this collection. You
+                    can override this by specifying one in the request.
+                  </p>
+                </CardContent>
+              </Card>
 
-              <div className='space-y-1.5'>
-                <label
-                  htmlFor='col-auth-type'
-                  className='text-sm font-medium text-muted-foreground'
-                >
-                  Auth Type
-                </label>
-                <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
-                  <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COLLECTION_AUTH_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <Card>
+                <CardContent className='space-y-4 p-4'>
+                  <div className='space-y-1.5'>
+                    <label
+                      htmlFor='col-auth-type'
+                      className='text-sm font-medium text-muted-foreground'
+                    >
+                      Auth Type
+                    </label>
+                    <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
+                      <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COLLECTION_AUTH_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>
+                            {t.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <AuthEditor
-                auth={auth}
-                onChange={(v) => {
-                  setAuth(v);
-                  setIsDirty(true);
-                }}
-              />
+                  <AuthEditor
+                    auth={auth}
+                    onChange={(v) => {
+                      setAuth(v);
+                      setIsDirty(true);
+                    }}
+                  />
 
-              <div className='flex justify-end'>
-                <Button
-                  size='sm'
-                  onClick={() => void triggerSave()}
-                  disabled={!isDirty || saveState !== 'idle'}
-                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                  ) : saveState === 'success' ? (
-                    <Check className='h-3.5 w-3.5' />
-                  ) : (
-                    <Save className='h-3.5 w-3.5' />
-                  )}
-                  {saveState === 'success' ? 'Saved' : 'Save'}
-                </Button>
-              </div>
+                  <div className='flex justify-end'>
+                    <Button
+                      size='sm'
+                      onClick={() => void triggerSave()}
+                      disabled={!isDirty || saveState !== 'idle'}
+                      className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                    >
+                      {saveState === 'saving' ? (
+                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                      ) : saveState === 'success' ? (
+                        <Check className='h-3.5 w-3.5' />
+                      ) : (
+                        <Save className='h-3.5 w-3.5' />
+                      )}
+                      {saveState === 'success' ? 'Saved' : 'Save'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
 

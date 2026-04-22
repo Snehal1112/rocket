@@ -388,12 +388,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const handleAuthTypeChange = useCallback(
     (authType: AuthState['authType']) => {
+      const prev = request.auth;
       const next: AuthState = { authType };
-      if (authType === 'basic') next.basic = { username: '', password: '' };
-      if (authType === 'bearer') next.bearer = { token: '' };
-      if (authType === 'api-key') next.apiKey = { key: '', value: '', addTo: 'header' };
+      if (authType === 'basic') next.basic = prev.basic ?? { username: '', password: '' };
+      if (authType === 'bearer') next.bearer = prev.bearer ?? { token: '' };
+      if (authType === 'api-key')
+        next.apiKey = prev.apiKey ?? { key: '', value: '', addTo: 'header' };
       if (authType === 'oauth2')
-        next.oauth2 = {
+        next.oauth2 = prev.oauth2 ?? {
           grantType: 'client_credentials',
           authorizationUrl: '',
           tokenUrl: '',
@@ -429,7 +431,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           accessTokenClaims: null,
         };
       if (authType === 'aws-sig-v4')
-        next.awsSigV4 = {
+        next.awsSigV4 = prev.awsSigV4 ?? {
           accessKey: '',
           secretKey: '',
           region: '',
@@ -438,7 +440,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         };
       updateRequest(tab.id, { auth: next });
     },
-    [tab.id, updateRequest],
+    [tab.id, updateRequest, request.auth],
   );
 
   const handleHeadersChange = useCallback(
