@@ -280,7 +280,7 @@ pub async fn oauth2_get_token(
 
     match config.grant_type.as_str() {
         "client_credentials" | "password" => svc.get_token_direct(&config).await,
-        "authorization_code" => auth_code_flow(&app, &svc, &config).await,
+        "authorization_code" => auth_code_flow(&app, &svc, &config, config.force_reauth).await,
         "implicit" => implicit_flow(&app, &config).await,
         other => Err(DomainError::InvalidInput(format!(
             "Unsupported grant type: {other}"
@@ -293,6 +293,7 @@ async fn auth_code_flow(
     app: &AppHandle,
     svc: &OAuth2Service,
     config: &ResolvedOAuth2Config,
+    force_reauth: bool,
 ) -> Result<OAuthToken, DomainError> {
     let pkce: Option<PkcePair> = if config.use_pkce {
         Some(generate_pkce())
@@ -321,6 +322,40 @@ async fn auth_code_flow(
     // resolving — config.use_system_browser faithfully reflects the user's choice
     // (or the platform default when the user never touched the toggle).
     let use_system_browser = config.use_system_browser;
+
+    #[cfg(target_os = "linux")]
+    if force_reauth && !use_system_browser {
+        if let Some(existing) = app.get_webview_window("oauth2-auth") {
+            let _ = existing.close();
+        }
+        if let Ok(tmp) = tauri::WebviewWindowBuilder::new(
+            app,
+            "oauth2-auth-clear",
+            tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+        )
+        .visible(false)
+        .build()
+        {
+            let cleared = tmp.with_webview(|webview| {
+                use webkit2gtk::{WebViewExt, WebsiteDataManagerExt, WebsiteDataTypes};
+                let wv = webview.inner();
+                if let Some(dm) = wv.website_data_manager() {
+                    dm.clear(
+                        WebsiteDataTypes::COOKIES
+                            | WebsiteDataTypes::SESSION_STORAGE
+                            | WebsiteDataTypes::LOCAL_STORAGE,
+                        glib::TimeSpan::from_seconds(0),
+                        None::<&gio::Cancellable>,
+                        |_| {},
+                    );
+                }
+            });
+            let _ = cleared;
+            let _ = tmp.close();
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = force_reauth; // prompt=login in auth_params covers macOS/Windows.
 
     let (code, actual_redirect_uri) = if use_system_browser {
         auth_code_via_system_browser(app, &auth_url, &state).await?
