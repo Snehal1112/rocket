@@ -16,11 +16,11 @@ export function OAuth2SectionHeader({
 }: OAuth2SectionHeaderProps) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      {Icon && <Icon className='h-3 w-3 text-muted-foreground' />}
-      <span className='text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground'>
+      {Icon && <Icon className='h-3.5 w-3.5 text-foreground/60 shrink-0' aria-hidden='true' />}
+      <span className='text-xs font-semibold uppercase tracking-[0.06em] text-foreground/70'>
         {title}
       </span>
-      {hint && <span className='ml-auto text-2xs text-muted-foreground/70 truncate'>{hint}</span>}
+      {hint && <span className='ml-auto text-xs text-muted-foreground truncate'>{hint}</span>}
     </div>
   );
 }

@@ -43,10 +43,10 @@ export function OAuth2ConfigSection({
     <div className='space-y-4'>
       {/* Endpoints group — URLs the flow talks to. */}
       {hasEndpoints && (
-        <div className='space-y-2.5'>
+        <div className='space-y-3'>
           {showAuthUrl && (
             <div>
-              <Label className='mb-1 block'>Authorization URL</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>Authorization URL</Label>
               <SingleLineEditor
                 className='text-sm font-mono'
                 placeholder='https://auth.example.com/authorize'
@@ -60,7 +60,7 @@ export function OAuth2ConfigSection({
 
           {showTokenUrl && (
             <div>
-              <Label className='mb-1 block'>Access Token URL</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>Access Token URL</Label>
               <SingleLineEditor
                 className='text-sm font-mono'
                 placeholder='https://auth.example.com/token'
@@ -74,8 +74,8 @@ export function OAuth2ConfigSection({
 
           {showCallback && (
             <div>
-              <Label className='mb-1 block'>Callback URL</Label>
-              <div className='flex gap-1.5'>
+              <Label className='mb-1.5 block text-sm font-medium'>Callback URL</Label>
+              <div className='flex gap-2'>
                 <SingleLineEditor
                   className='text-sm font-mono flex-1'
                   value={o.callbackUrl}
@@ -86,9 +86,9 @@ export function OAuth2ConfigSection({
                 <Button
                   variant='outline'
                   size='sm'
-                  className='px-2 text-sm shrink-0'
+                  className='px-3 text-sm shrink-0'
                   onClick={() => navigator.clipboard.writeText(o.callbackUrl)}
-                  title='Copy'
+                  aria-label='Copy callback URL to clipboard'
                 >
                   Copy
                 </Button>
@@ -99,10 +99,10 @@ export function OAuth2ConfigSection({
       )}
 
       {/* Credentials group — identity and secret. */}
-      <div className='space-y-2.5'>
-        <div className={showSecret ? 'grid grid-cols-2 gap-2' : ''}>
+      <div className='space-y-3'>
+        <div className={showSecret ? 'grid grid-cols-2 gap-3' : ''}>
           <div>
-            <Label className='mb-1 block'>Client ID</Label>
+            <Label className='mb-1.5 block text-sm font-medium'>Client ID</Label>
             <SingleLineEditor
               className='text-sm'
               placeholder='client-id'
@@ -114,7 +114,7 @@ export function OAuth2ConfigSection({
           </div>
           {showSecret && (
             <div>
-              <Label className='mb-1 block'>Client Secret</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>Client Secret</Label>
               <SingleLineEditor
                 className='text-sm'
                 isSecret
@@ -129,9 +129,9 @@ export function OAuth2ConfigSection({
         </div>
 
         {showResourceOwner && (
-          <div className='grid grid-cols-2 gap-2'>
+          <div className='grid grid-cols-2 gap-3'>
             <div>
-              <Label className='mb-1 block'>Username</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>Username</Label>
               <SingleLineEditor
                 className='text-sm'
                 placeholder='user@example.com'
@@ -142,7 +142,7 @@ export function OAuth2ConfigSection({
               />
             </div>
             <div>
-              <Label className='mb-1 block'>Password</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>Password</Label>
               <SingleLineEditor
                 className='text-sm'
                 isSecret
@@ -157,7 +157,7 @@ export function OAuth2ConfigSection({
 
         {showClientAuth && (
           <div>
-            <Label className='mb-1 block'>Send Credentials</Label>
+            <Label className='mb-1.5 block text-sm font-medium'>Send Credentials</Label>
             <Select
               value={o.clientAuthentication}
               onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}
@@ -179,10 +179,10 @@ export function OAuth2ConfigSection({
       </div>
 
       {/* Scope / State group. */}
-      <div className='space-y-2.5'>
-        <div className={showState ? 'grid grid-cols-2 gap-2' : ''}>
+      <div>
+        <div className={showState ? 'grid grid-cols-2 gap-3' : ''}>
           <div>
-            <Label className='mb-1 block'>Scope</Label>
+            <Label className='mb-1.5 block text-sm font-medium'>Scope</Label>
             <SingleLineEditor
               className='text-sm'
               placeholder='read write'
@@ -194,7 +194,7 @@ export function OAuth2ConfigSection({
           </div>
           {showState && (
             <div>
-              <Label className='mb-1 block'>State</Label>
+              <Label className='mb-1.5 block text-sm font-medium'>State</Label>
               <SingleLineEditor
                 className='text-sm'
                 placeholder='Auto-generated if empty'
@@ -208,52 +208,54 @@ export function OAuth2ConfigSection({
         </div>
       </div>
 
-      {/* Behavior group — flow-level options as a single checkbox row block. */}
-      <div className='flex flex-wrap gap-x-5 gap-y-1.5 pt-0.5'>
-        {showPkce && (
-          <div className='flex items-center gap-2'>
-            <Checkbox
-              id='oauth2-use-pkce'
-              checked={o.usePkce}
-              onCheckedChange={(checked) => patchOAuth2({ usePkce: !!checked })}
-            />
-            <Label
+      {/* Behavior options — each checkbox is a full-width row for a larger target. */}
+      {(showPkce || showSystemBrowser) && (
+        <div className='space-y-2 pt-1'>
+          {showPkce && (
+            <label
               htmlFor='oauth2-use-pkce'
-              className='text-xs text-muted-foreground cursor-pointer'
+              className='flex items-center gap-3 cursor-pointer py-1 rounded group'
             >
-              Use PKCE (S256)
-            </Label>
-          </div>
-        )}
-        {showSystemBrowser && (
-          <div className='flex items-center gap-2'>
-            <Checkbox
-              id='oauth2-use-system-browser'
-              checked={o.useSystemBrowser}
-              onCheckedChange={(checked) => patchOAuth2({ useSystemBrowser: !!checked })}
-            />
-            <Label
+              <Checkbox
+                id='oauth2-use-pkce'
+                checked={o.usePkce}
+                onCheckedChange={(checked) => patchOAuth2({ usePkce: !!checked })}
+              />
+              <span className='text-sm text-foreground/80 group-hover:text-foreground transition-colors select-none'>
+                Use PKCE (S256)
+              </span>
+            </label>
+          )}
+          {showSystemBrowser && (
+            <label
               htmlFor='oauth2-use-system-browser'
-              className='text-xs text-muted-foreground cursor-pointer'
+              className='flex items-center gap-3 cursor-pointer py-1 rounded group'
             >
-              Use system browser
-            </Label>
-          </div>
-        )}
-        <div className='flex items-center gap-2'>
-          <Checkbox
-            id='oauth2-verify-ssl'
-            checked={o.verifySsl}
-            onCheckedChange={(checked) => patchOAuth2({ verifySsl: !!checked })}
-          />
-          <Label
-            htmlFor='oauth2-verify-ssl'
-            className='text-xs text-muted-foreground cursor-pointer'
-          >
-            Verify SSL certificates
-          </Label>
+              <Checkbox
+                id='oauth2-use-system-browser'
+                checked={o.useSystemBrowser}
+                onCheckedChange={(checked) => patchOAuth2({ useSystemBrowser: !!checked })}
+              />
+              <span className='text-sm text-foreground/80 group-hover:text-foreground transition-colors select-none'>
+                Use system browser
+              </span>
+            </label>
+          )}
         </div>
-      </div>
+      )}
+      <label
+        htmlFor='oauth2-verify-ssl'
+        className='flex items-center gap-3 cursor-pointer py-1 rounded group'
+      >
+        <Checkbox
+          id='oauth2-verify-ssl'
+          checked={o.verifySsl}
+          onCheckedChange={(checked) => patchOAuth2({ verifySsl: !!checked })}
+        />
+        <span className='text-sm text-foreground/80 group-hover:text-foreground transition-colors select-none'>
+          Verify SSL certificates
+        </span>
+      </label>
     </div>
   );
 }

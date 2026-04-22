@@ -23,7 +23,7 @@ export function OAuth2AdvancedSection({
 
   return (
     <div>
-      <Label className='mb-1 block'>Refresh Token URL</Label>
+      <Label className='mb-1.5 block text-sm font-medium'>Refresh Token URL</Label>
       <SingleLineEditor
         className='text-sm font-mono'
         placeholder='Leave empty to use the Token URL'

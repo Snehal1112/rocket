@@ -21,7 +21,7 @@ function tokenExpiryDisplay(expiresIn: number | null, acquiredAt: number | null)
   const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (remaining < 60) return `Expires in ${remaining}s (at ${time})`;
   if (remaining < 3600) return `Expires in ${Math.floor(remaining / 60)}m (at ${time})`;
-  return `Expires in ${Math.floor(remaining / 3600)}h ${Math.floor((remaining % 3600) / 60)}m`;
+  return `Expires in ${Math.floor(remaining / 3600)}h ${Math.floor((remaining % 3600) / 60)}m (at ${time})`;
 }
 
 function isExpired(expiresIn: number | null, acquiredAt: number | null): boolean {
@@ -82,48 +82,50 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
   const expired = isExpired(o.expiresIn, o.tokenAcquiredAt);
 
   return (
-    <div className='rounded-md border border-border/50 bg-muted/20'>
+    <div className='rounded-md border border-border/60 bg-muted/15 overflow-hidden'>
       {o.accessToken && (
         <div>
           <button
             type='button'
-            className='flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer'
+            className='flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring rounded-t-md transition-colors'
             onClick={() => setAccessOpen((v) => !v)}
+            aria-expanded={accessOpen}
           >
             <span className='flex items-center gap-2'>
               {accessOpen ? (
-                <ChevronDown className='h-3.5 w-3.5' />
+                <ChevronDown className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
               ) : (
-                <ChevronRight className='h-3.5 w-3.5' />
+                <ChevronRight className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
               )}
-              <Key className='h-3.5 w-3.5 text-muted-foreground' />
-              <span className='font-medium'>Access Token</span>
+              <Key className='h-3.5 w-3.5 text-foreground/50' aria-hidden='true' />
+              <span className='font-medium text-foreground/90'>Access Token</span>
             </span>
             <span
-              className={`rounded px-1.5 py-0.5 text-2xs font-medium ${expired ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground'}`}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${expired ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground'}`}
             >
               {tokenExpiryDisplay(o.expiresIn, o.tokenAcquiredAt)}
             </span>
           </button>
           {accessOpen && (
-            <div className='px-3 pb-3'>
-              <div className='flex gap-1.5 items-start'>
+            <div className='px-3 pb-3 pt-1'>
+              <div className='flex gap-2 items-start'>
                 <Textarea
                   className='flex-1 text-xs font-mono resize-none min-h-[4.5rem] max-h-40'
                   readOnly
                   value={o.accessToken}
+                  aria-label='Access token value'
                 />
                 <Button
                   variant='outline'
                   size='sm'
-                  className='px-2 shrink-0'
+                  className='px-2.5 shrink-0 min-h-[36px]'
                   onClick={() => copy(o.accessToken, 'access')}
-                  title='Copy access token'
+                  aria-label={copied === 'access' ? 'Copied!' : 'Copy access token'}
                 >
                   {copied === 'access' ? (
-                    <Check className='h-3 w-3 text-green-500' />
+                    <Check className='h-3.5 w-3.5 text-green-500' aria-hidden='true' />
                   ) : (
-                    <Copy className='h-3 w-3' />
+                    <Copy className='h-3.5 w-3.5' aria-hidden='true' />
                   )}
                 </Button>
               </div>
@@ -133,88 +135,101 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
       )}
 
       {o.idToken && (
-        <div className={o.accessToken ? 'border-t border-border/30' : ''}>
+        <div className={o.accessToken ? 'border-t border-border/40' : ''}>
           <button
             type='button'
-            className='flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer'
+            className='flex w-full items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring transition-colors'
             onClick={() => setIdOpen((v) => !v)}
+            aria-expanded={idOpen}
           >
             {idOpen ? (
-              <ChevronDown className='h-3.5 w-3.5' />
+              <ChevronDown className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
             ) : (
-              <ChevronRight className='h-3.5 w-3.5' />
+              <ChevronRight className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
             )}
-            <Key className='h-3.5 w-3.5 text-muted-foreground' />
-            <span className='font-medium'>ID Token</span>
+            <Key className='h-3.5 w-3.5 text-foreground/50' aria-hidden='true' />
+            <span className='font-medium text-foreground/90'>ID Token</span>
           </button>
           {idOpen && (
-            <div className='px-3 pb-3 space-y-1.5'>
+            <div className='px-3 pb-3 pt-1 space-y-2'>
               {o.idTokenClaims ? (
                 <>
-                  {o.idTokenClaims.subject && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Subject</span>
-                      <span className='font-mono truncate'>{o.idTokenClaims.subject}</span>
-                    </div>
-                  )}
-                  {o.idTokenClaims.issuer && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Issuer</span>
-                      <span className='font-mono truncate'>{o.idTokenClaims.issuer}</span>
-                    </div>
-                  )}
-                  {o.idTokenClaims.audience && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Audience</span>
-                      <span className='font-mono truncate'>{o.idTokenClaims.audience}</span>
-                    </div>
-                  )}
-                  {o.idTokenClaims.expiry && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Expires</span>
-                      <span>{formatTimestamp(o.idTokenClaims.expiry)}</span>
-                    </div>
-                  )}
-                  {o.idTokenClaims.issuedAt && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Issued</span>
-                      <span>{formatTimestamp(o.idTokenClaims.issuedAt)}</span>
-                    </div>
-                  )}
-                  {o.idTokenClaims.algorithm && (
-                    <div className='flex text-xs'>
-                      <span className='w-20 shrink-0 text-muted-foreground'>Algorithm</span>
-                      <span>{o.idTokenClaims.algorithm}</span>
-                    </div>
-                  )}
+                  <dl className='space-y-1.5'>
+                    {o.idTokenClaims.subject && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Subject</dt>
+                        <dd className='font-mono truncate min-w-0'>{o.idTokenClaims.subject}</dd>
+                      </div>
+                    )}
+                    {o.idTokenClaims.issuer && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Issuer</dt>
+                        <dd className='font-mono truncate min-w-0'>{o.idTokenClaims.issuer}</dd>
+                      </div>
+                    )}
+                    {o.idTokenClaims.audience && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>
+                          Audience
+                        </dt>
+                        <dd className='font-mono truncate min-w-0'>{o.idTokenClaims.audience}</dd>
+                      </div>
+                    )}
+                    {o.idTokenClaims.expiry && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Expires</dt>
+                        <dd>{formatTimestamp(o.idTokenClaims.expiry)}</dd>
+                      </div>
+                    )}
+                    {o.idTokenClaims.issuedAt && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>Issued</dt>
+                        <dd>{formatTimestamp(o.idTokenClaims.issuedAt)}</dd>
+                      </div>
+                    )}
+                    {o.idTokenClaims.algorithm && (
+                      <div className='flex gap-3 text-sm'>
+                        <dt className='w-20 shrink-0 text-muted-foreground font-medium'>
+                          Algorithm
+                        </dt>
+                        <dd>{o.idTokenClaims.algorithm}</dd>
+                      </div>
+                    )}
+                  </dl>
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='text-xs mt-1 h-auto px-0 py-0.5'
+                    className='text-sm mt-1 h-8 px-2'
                     onClick={() => setShowRawPayload((v) => !v)}
+                    aria-expanded={showRawPayload}
                   >
                     {showRawPayload ? 'Hide' : 'View'} Raw Payload
                   </Button>
                   {showRawPayload && (
-                    <pre className='text-xs font-mono bg-muted p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
+                    <pre className='text-xs font-mono bg-muted/60 border border-border/40 p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
                       {o.idTokenClaims.rawPayload}
                     </pre>
                   )}
                 </>
               ) : (
-                <div className='flex gap-1.5'>
-                  <Input className='flex-1 text-sm font-mono truncate' readOnly value={o.idToken} />
+                <div className='flex gap-2 items-center'>
+                  <Input
+                    className='flex-1 text-sm font-mono'
+                    readOnly
+                    value={o.idToken}
+                    aria-label='ID token value'
+                  />
                   <Button
                     variant='outline'
                     size='sm'
-                    className='px-2 shrink-0'
+                    className='px-2.5 shrink-0 min-h-[36px]'
                     onClick={() => copy(o.idToken, 'id')}
-                    title='Copy ID token'
+                    aria-label={copied === 'id' ? 'Copied!' : 'Copy ID token'}
                   >
                     {copied === 'id' ? (
-                      <Check className='h-3 w-3 text-green-500' />
+                      <Check className='h-3.5 w-3.5 text-green-500' aria-hidden='true' />
                     ) : (
-                      <Copy className='h-3 w-3' />
+                      <Copy className='h-3.5 w-3.5' aria-hidden='true' />
                     )}
                   </Button>
                 </div>
@@ -225,9 +240,17 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
       )}
 
       {(o.tokenType || o.responseScope) && (
-        <div className='flex gap-4 px-3 py-1.5 text-2xs text-muted-foreground border-t border-border/30'>
-          {o.tokenType && <span>Token Type: {o.tokenType}</span>}
-          {o.responseScope && <span>Scope: {o.responseScope}</span>}
+        <div className='flex flex-wrap gap-4 px-3 py-2 text-xs text-muted-foreground border-t border-border/40 bg-muted/10'>
+          {o.tokenType && (
+            <span>
+              <span className='font-medium text-foreground/60'>Type:</span> {o.tokenType}
+            </span>
+          )}
+          {o.responseScope && (
+            <span>
+              <span className='font-medium text-foreground/60'>Scope:</span> {o.responseScope}
+            </span>
+          )}
         </div>
       )}
     </div>

@@ -183,46 +183,63 @@ export function OAuth2AuthEditor({
   const grantLabel = GRANT_LABELS[o.grantType];
   const hasAnyToken = !!(o.accessToken || o.refreshToken || o.idToken);
 
+  const advancedId = 'oauth2-advanced-content';
+  const additionalId = 'oauth2-additional-content';
+
   return (
-    <div className='space-y-5'>
-      {/* Flow anchor row — grant type select with descriptive hint. */}
-      <div className='flex items-center gap-3'>
-        <OAuth2SectionHeader icon={Workflow} title='Flow' />
-        <Select
-          value={o.grantType}
-          onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}
-        >
-          <SelectTrigger className='h-8 w-52 text-sm'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='client_credentials' className='text-sm'>
-              Client Credentials
-            </SelectItem>
-            <SelectItem value='password' className='text-sm'>
-              Password
-            </SelectItem>
-            <SelectItem value='authorization_code' className='text-sm'>
-              Authorization Code
-            </SelectItem>
-            <SelectItem value='implicit' className='text-sm'>
-              Implicit
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <span className='ml-auto truncate text-2xs text-muted-foreground/70'>
-          {grantLabel.hint}
-        </span>
+    <div className='space-y-0'>
+      {/* ── Flow ── */}
+      <div className='pb-4 mb-4 border-b border-border/40'>
+        <div className='flex items-start gap-3'>
+          <div className='flex items-center gap-2 pt-1 shrink-0'>
+            <Workflow className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
+            <label
+              htmlFor='oauth2-grant-type'
+              className='text-xs font-semibold uppercase tracking-[0.06em] text-foreground/70'
+            >
+              Flow
+            </label>
+          </div>
+          <div className='flex-1 min-w-0'>
+            <Select
+              value={o.grantType}
+              onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}
+            >
+              <SelectTrigger id='oauth2-grant-type' className='h-8 w-full text-sm'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='client_credentials' className='text-sm'>
+                  Client Credentials
+                </SelectItem>
+                <SelectItem value='password' className='text-sm'>
+                  Password
+                </SelectItem>
+                <SelectItem value='authorization_code' className='text-sm'>
+                  Authorization Code
+                </SelectItem>
+                <SelectItem value='implicit' className='text-sm'>
+                  Implicit
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className='mt-1.5 text-xs text-muted-foreground leading-relaxed'>
+              {grantLabel.hint}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Token display — only renders when a token exists. */}
-      <div ref={tokenDisplayRef}>
+      {/* ── Token display ── */}
+      <div ref={tokenDisplayRef} className='mb-4'>
         <OAuth2TokenDisplay oauth2={o} />
       </div>
 
-      {/* Configuration — primary form. */}
-      <section className='space-y-2.5'>
-        <OAuth2SectionHeader icon={ShieldCheck} title='Configuration' />
+      {/* ── Configuration ── */}
+      <section aria-labelledby='oauth2-config-heading' className='mb-4'>
+        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border/30'>
+          <OAuth2SectionHeader icon={ShieldCheck} title='Configuration' />
+        </div>
         <OAuth2ConfigSection
           oauth2={o}
           patchOAuth2={patchOAuth2}
@@ -231,9 +248,14 @@ export function OAuth2AuthEditor({
         />
       </section>
 
-      {/* Token Handling — how the token attaches to the request. */}
-      <section className='space-y-2.5'>
-        <OAuth2SectionHeader icon={KeyRound} title='Token Handling' />
+      {/* ── Token Handling ── */}
+      <section
+        aria-labelledby='oauth2-token-heading'
+        className='mb-4 pt-4 border-t border-border/40'
+      >
+        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border/30'>
+          <OAuth2SectionHeader icon={KeyRound} title='Token Handling' />
+        </div>
         <OAuth2TokenSection
           oauth2={o}
           patchOAuth2={patchOAuth2}
@@ -242,26 +264,34 @@ export function OAuth2AuthEditor({
         />
       </section>
 
-      {/* Collapsible secondary sections — nested left-rule for visual distinction. */}
+      {/* ── Advanced (collapsible) ── */}
       {o.grantType !== 'implicit' && (
-        <section>
+        <section className='pt-1 border-t border-border/40'>
           <button
             type='button'
-            className='flex w-full items-center gap-1.5 py-1 text-left cursor-pointer group'
+            className='flex w-full items-center gap-2 py-2.5 px-0.5 text-left rounded focus-visible:outline-2 focus-visible:outline-ring group'
             onClick={() => setAdvancedOpen(!advancedOpen)}
+            aria-expanded={advancedOpen}
+            aria-controls={advancedId}
           >
             {advancedOpen ? (
-              <ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
+              <ChevronDown className='h-3.5 w-3.5 text-foreground/50 shrink-0' aria-hidden='true' />
             ) : (
-              <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
+              <ChevronRight
+                className='h-3.5 w-3.5 text-foreground/50 shrink-0'
+                aria-hidden='true'
+              />
             )}
-            <SlidersHorizontal className='h-3 w-3 text-muted-foreground' />
-            <span className='text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground group-hover:text-foreground'>
+            <SlidersHorizontal
+              className='h-3.5 w-3.5 text-foreground/50 shrink-0'
+              aria-hidden='true'
+            />
+            <span className='text-xs font-semibold uppercase tracking-[0.06em] text-foreground/60 group-hover:text-foreground/90 transition-colors'>
               Advanced
             </span>
           </button>
           {advancedOpen && (
-            <div className='mt-2 ml-[7px] border-l border-border/60 pl-4'>
+            <div id={advancedId} className='mt-1 ml-[22px] border-l-2 border-border/40 pl-4 pb-3'>
               <OAuth2AdvancedSection
                 oauth2={o}
                 patchOAuth2={patchOAuth2}
@@ -273,24 +303,27 @@ export function OAuth2AuthEditor({
         </section>
       )}
 
-      <section>
+      {/* ── Additional Parameters (collapsible) ── */}
+      <section className='border-t border-border/40'>
         <button
           type='button'
-          className='flex w-full items-center gap-1.5 py-1 text-left cursor-pointer group'
+          className='flex w-full items-center gap-2 py-2.5 px-0.5 text-left rounded focus-visible:outline-2 focus-visible:outline-ring group'
           onClick={() => setAdditionalOpen(!additionalOpen)}
+          aria-expanded={additionalOpen}
+          aria-controls={additionalId}
         >
           {additionalOpen ? (
-            <ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
+            <ChevronDown className='h-3.5 w-3.5 text-foreground/50 shrink-0' aria-hidden='true' />
           ) : (
-            <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
+            <ChevronRight className='h-3.5 w-3.5 text-foreground/50 shrink-0' aria-hidden='true' />
           )}
-          <ListPlus className='h-3 w-3 text-muted-foreground' />
-          <span className='text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground group-hover:text-foreground'>
+          <ListPlus className='h-3.5 w-3.5 text-foreground/50 shrink-0' aria-hidden='true' />
+          <span className='text-xs font-semibold uppercase tracking-[0.06em] text-foreground/60 group-hover:text-foreground/90 transition-colors'>
             Additional Parameters
           </span>
         </button>
         {additionalOpen && (
-          <div className='mt-2 ml-[7px] border-l border-border/60 pl-4'>
+          <div id={additionalId} className='mt-1 ml-[22px] border-l-2 border-border/40 pl-4 pb-3'>
             <OAuth2AdditionalParams
               oauth2={o}
               patchOAuth2={patchOAuth2}
@@ -301,20 +334,23 @@ export function OAuth2AuthEditor({
         )}
       </section>
 
-      {/* Settings — compact checkbox group. */}
-      <section className='space-y-2.5'>
-        <OAuth2SectionHeader icon={Settings2} title='Settings' />
+      {/* ── Settings ── */}
+      <section aria-labelledby='oauth2-settings-heading' className='pt-1 border-t border-border/40'>
+        <div className='flex items-center gap-2 py-2.5 mb-2'>
+          <OAuth2SectionHeader icon={Settings2} title='Settings' />
+        </div>
         <OAuth2SettingsSection oauth2={o} patchOAuth2={patchOAuth2} />
       </section>
 
-      {/* Action bar — primary CTA left, secondary actions right. */}
-      <div className='flex items-center gap-2 border-t border-border/60 pt-3'>
+      {/* ── Action bar ── */}
+      <div className='flex items-center gap-2 pt-4 mt-2 border-t border-border/60'>
         <Button
           variant='default'
           size='sm'
-          className='text-sm'
+          className='text-sm min-h-[36px]'
           disabled={getTokenDisabled}
           onClick={handleGetToken}
+          aria-busy={gettingToken}
         >
           {gettingToken ? 'Waiting…' : 'Get Access Token'}
         </Button>
@@ -322,7 +358,7 @@ export function OAuth2AuthEditor({
           <Button
             variant='outline'
             size='sm'
-            className='text-sm'
+            className='text-sm min-h-[36px]'
             disabled={gettingToken || !o.tokenUrl}
             onClick={handleRefreshToken}
           >
@@ -333,7 +369,7 @@ export function OAuth2AuthEditor({
           <Button
             variant='ghost'
             size='sm'
-            className='ml-auto text-sm text-muted-foreground hover:text-foreground'
+            className='ml-auto text-sm min-h-[36px] text-muted-foreground hover:text-foreground'
             disabled={gettingToken}
             onClick={handleClearCache}
           >
@@ -342,7 +378,10 @@ export function OAuth2AuthEditor({
         )}
       </div>
       {tokenError && (
-        <p className='rounded-sm border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-xs text-destructive'>
+        <p
+          role='alert'
+          className='mt-2 rounded border border-destructive/40 bg-destructive/8 px-3 py-2 text-sm text-destructive leading-relaxed'
+        >
           {tokenError}
         </p>
       )}
