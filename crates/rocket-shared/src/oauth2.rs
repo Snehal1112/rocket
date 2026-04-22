@@ -69,6 +69,8 @@ pub struct OAuth2Settings {
     pub auto_refresh_token: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "verifySsl")]
     pub verify_ssl: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_system_browser: Option<bool>,
 }
 
 /// OAuth2 flow — discriminated by `flow` field.
@@ -215,10 +217,24 @@ mod tests {
 
     #[test]
     fn settings() {
-        let s = OAuth2Settings { auto_fetch_token: Some(true), auto_refresh_token: Some(false), verify_ssl: None };
+        let s = OAuth2Settings { auto_fetch_token: Some(true), auto_refresh_token: Some(false), verify_ssl: None, use_system_browser: None };
         let json = serde_json::to_string(&s).unwrap();
         let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn settings_use_system_browser_roundtrip() {
+        let s = OAuth2Settings {
+            auto_fetch_token: None,
+            auto_refresh_token: None,
+            verify_ssl: None,
+            use_system_browser: Some(true),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("useSystemBrowser"), "must serialize as useSystemBrowser, got: {json}");
+        let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.use_system_browser, Some(true));
     }
 
     #[test]
@@ -227,6 +243,7 @@ mod tests {
             auto_fetch_token: None,
             auto_refresh_token: None,
             verify_ssl: Some(false),
+            use_system_browser: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("verifySsl"), "field must serialize as verifySsl, got: {json}");
@@ -240,6 +257,7 @@ mod tests {
             auto_fetch_token: None,
             auto_refresh_token: None,
             verify_ssl: None,
+            use_system_browser: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(!json.contains("verifySsl"), "None must be skipped, got: {json}");

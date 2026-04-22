@@ -45,6 +45,7 @@ interface ApiOAuth2Settings {
   autoFetchToken?: boolean | null;
   autoRefreshToken?: boolean | null;
   verifySsl?: boolean | null;
+  useSystemBrowser?: boolean | null;
 }
 
 export interface ApiOAuth2Auth {
@@ -122,6 +123,7 @@ export function oauth2StateToApiAuth(state: OAuth2State): ApiOAuth2Auth {
     autoFetchToken: state.autoFetchToken,
     autoRefreshToken: state.autoRefreshToken,
     verifySsl: state.verifySsl,
+    useSystemBrowser: state.useSystemBrowser,
   };
 
   const base = {
@@ -208,7 +210,7 @@ export function apiAuthToOAuth2State(auth: ApiOAuth2Auth): OAuth2State {
     scope: auth.scope ?? '',
     state: auth.state ?? '',
     usePkce: auth.pkce?.enabled ?? true,
-    useSystemBrowser: false,
+    useSystemBrowser: settings?.useSystemBrowser ?? false,
     tokenSource: 'accessToken' as const,
     tokenId: tc?.id ?? '',
     headerPrefix: tc?.placement?.header ?? 'Bearer',
