@@ -48,6 +48,8 @@ pub struct OAuth2GetTokenRequest {
     pub collection: Option<String>,
     pub environment_name: Option<String>,
     pub request_path: Option<String>,
+
+    pub force_reauth: Option<bool>,
 }
 
 /// Request to refresh an existing OAuth2 token.
@@ -94,6 +96,7 @@ pub struct ResolvedOAuth2Config {
     pub auth_params: Vec<AdditionalParam>,
     pub token_params: Vec<AdditionalParam>,
     pub refresh_params: Vec<AdditionalParam>,
+    pub force_reauth: bool,
 }
 
 // ─── Service ───────────────────────────────────────────────────────
@@ -436,6 +439,7 @@ impl OAuth2Service {
             auth_params: resolve_params(&req.auth_params),
             token_params: resolve_params(&req.token_params),
             refresh_params: resolve_params(&req.refresh_params),
+            force_reauth: req.force_reauth.unwrap_or(false),
         }
     }
 }
@@ -628,6 +632,7 @@ mod tests {
             collection: None,
             environment_name: Some("test".into()),
             request_path: None,
+            force_reauth: None,
         };
         let resolved = svc.resolve_get_token_request(&req);
         assert_eq!(resolved.token_url, "https://auth.example.com/token");
@@ -660,6 +665,7 @@ mod tests {
                 enabled: true,
             }],
             refresh_params: vec![],
+            force_reauth: false,
         }
     }
 
@@ -736,6 +742,7 @@ mod tests {
                 enabled: true,
             }],
             refresh_params: vec![],
+            force_reauth: false,
         };
         let form = OAuth2Service::build_code_exchange_form(
             &config,
@@ -771,6 +778,7 @@ mod tests {
             auth_params: vec![],
             token_params: vec![],
             refresh_params: vec![],
+            force_reauth: false,
         };
         let form = OAuth2Service::build_code_exchange_form(
             &config,
