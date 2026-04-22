@@ -37,201 +37,222 @@ export function OAuth2ConfigSection({
   const showSystemBrowser = o.grantType === 'authorization_code';
   const showResourceOwner = o.grantType === 'password';
 
+  const hasEndpoints = showAuthUrl || showTokenUrl || showCallback;
+
   return (
-    <div className='space-y-3'>
-      {showAuthUrl && (
-        <div>
-          <Label className='mb-1 block'>Authorization URL</Label>
-          <SingleLineEditor
-            className='text-sm font-mono'
-            placeholder='https://auth.example.com/authorize'
-            value={o.authorizationUrl}
-            onChange={(newVal) => patchOAuth2({ authorizationUrl: newVal })}
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
+    <div className='space-y-4'>
+      {/* Endpoints group — URLs the flow talks to. */}
+      {hasEndpoints && (
+        <div className='space-y-2.5'>
+          {showAuthUrl && (
+            <div>
+              <Label className='mb-1 block'>Authorization URL</Label>
+              <SingleLineEditor
+                className='text-sm font-mono'
+                placeholder='https://auth.example.com/authorize'
+                value={o.authorizationUrl}
+                onChange={(newVal) => patchOAuth2({ authorizationUrl: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          )}
+
+          {showTokenUrl && (
+            <div>
+              <Label className='mb-1 block'>Access Token URL</Label>
+              <SingleLineEditor
+                className='text-sm font-mono'
+                placeholder='https://auth.example.com/token'
+                value={o.tokenUrl}
+                onChange={(newVal) => patchOAuth2({ tokenUrl: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          )}
+
+          {showCallback && (
+            <div>
+              <Label className='mb-1 block'>Callback URL</Label>
+              <div className='flex gap-1.5'>
+                <SingleLineEditor
+                  className='text-sm font-mono flex-1'
+                  value={o.callbackUrl}
+                  onChange={(newVal) => patchOAuth2({ callbackUrl: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
+                />
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='px-2 text-sm shrink-0'
+                  onClick={() => navigator.clipboard.writeText(o.callbackUrl)}
+                  title='Copy'
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {showTokenUrl && (
-        <div>
-          <Label className='mb-1 block'>Access Token URL</Label>
-          <SingleLineEditor
-            className='text-sm font-mono'
-            placeholder='https://auth.example.com/token'
-            value={o.tokenUrl}
-            onChange={(newVal) => patchOAuth2({ tokenUrl: newVal })}
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-        </div>
-      )}
-
-      {showCallback && (
-        <div>
-          <Label className='mb-1 block'>Callback URL</Label>
-          <div className='flex gap-1.5'>
-            <SingleLineEditor
-              className='text-sm font-mono flex-1'
-              value={o.callbackUrl}
-              onChange={(newVal) => patchOAuth2({ callbackUrl: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-            <Button
-              variant='outline'
-              size='sm'
-              className='px-2 text-sm shrink-0'
-              onClick={() => navigator.clipboard.writeText(o.callbackUrl)}
-              title='Copy'
-            >
-              Copy
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {showSystemBrowser && (
-        <div className='flex items-center gap-2'>
-          <Checkbox
-            id='oauth2-use-system-browser'
-            checked={o.useSystemBrowser}
-            onCheckedChange={(checked) => patchOAuth2({ useSystemBrowser: !!checked })}
-          />
-          <Label
-            htmlFor='oauth2-use-system-browser'
-            className='text-xs text-muted-foreground cursor-pointer'
-          >
-            Use system browser for authorization
-          </Label>
-        </div>
-      )}
-
-      <div className={showSecret ? 'grid grid-cols-2 gap-2' : ''}>
-        <div>
-          <Label className='mb-1 block'>Client ID</Label>
-          <SingleLineEditor
-            className='text-sm'
-            placeholder='client-id'
-            value={o.clientId}
-            onChange={(newVal) => patchOAuth2({ clientId: newVal })}
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-        </div>
-        {showSecret && (
+      {/* Credentials group — identity and secret. */}
+      <div className='space-y-2.5'>
+        <div className={showSecret ? 'grid grid-cols-2 gap-2' : ''}>
           <div>
-            <Label className='mb-1 block'>Client Secret</Label>
+            <Label className='mb-1 block'>Client ID</Label>
             <SingleLineEditor
               className='text-sm'
-              isSecret
-              placeholder='client-secret'
-              value={o.clientSecret}
-              onChange={(newVal) => patchOAuth2({ clientSecret: newVal })}
+              placeholder='client-id'
+              value={o.clientId}
+              onChange={(newVal) => patchOAuth2({ clientId: newVal })}
               variableContext={variableContext}
               onNavigateToSource={onNavigateToSource}
             />
+          </div>
+          {showSecret && (
+            <div>
+              <Label className='mb-1 block'>Client Secret</Label>
+              <SingleLineEditor
+                className='text-sm'
+                isSecret
+                placeholder='client-secret'
+                value={o.clientSecret}
+                onChange={(newVal) => patchOAuth2({ clientSecret: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          )}
+        </div>
+
+        {showResourceOwner && (
+          <div className='grid grid-cols-2 gap-2'>
+            <div>
+              <Label className='mb-1 block'>Username</Label>
+              <SingleLineEditor
+                className='text-sm'
+                placeholder='user@example.com'
+                value={o.username}
+                onChange={(newVal) => patchOAuth2({ username: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+            <div>
+              <Label className='mb-1 block'>Password</Label>
+              <SingleLineEditor
+                className='text-sm'
+                isSecret
+                value={o.password}
+                onChange={(newVal) => patchOAuth2({ password: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          </div>
+        )}
+
+        {showClientAuth && (
+          <div>
+            <Label className='mb-1 block'>Send Credentials</Label>
+            <Select
+              value={o.clientAuthentication}
+              onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}
+            >
+              <SelectTrigger className='w-full text-sm'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='body' className='text-sm'>
+                  In Request Body
+                </SelectItem>
+                <SelectItem value='header' className='text-sm'>
+                  As Basic Auth Header
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
 
-      <div>
-        <Label className='mb-1 block'>Scope</Label>
-        <SingleLineEditor
-          className='text-sm'
-          placeholder='read write'
-          value={o.scope}
-          onChange={(newVal) => patchOAuth2({ scope: newVal })}
-          variableContext={variableContext}
-          onNavigateToSource={onNavigateToSource}
-        />
+      {/* Scope / State group. */}
+      <div className='space-y-2.5'>
+        <div className={showState ? 'grid grid-cols-2 gap-2' : ''}>
+          <div>
+            <Label className='mb-1 block'>Scope</Label>
+            <SingleLineEditor
+              className='text-sm'
+              placeholder='read write'
+              value={o.scope}
+              onChange={(newVal) => patchOAuth2({ scope: newVal })}
+              variableContext={variableContext}
+              onNavigateToSource={onNavigateToSource}
+            />
+          </div>
+          {showState && (
+            <div>
+              <Label className='mb-1 block'>State</Label>
+              <SingleLineEditor
+                className='text-sm'
+                placeholder='Auto-generated if empty'
+                value={o.state}
+                onChange={(newVal) => patchOAuth2({ state: newVal })}
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
-      {showState && (
-        <div>
-          <Label className='mb-1 block'>State</Label>
-          <SingleLineEditor
-            className='text-sm'
-            placeholder='Leave empty for auto-generated'
-            value={o.state}
-            onChange={(newVal) => patchOAuth2({ state: newVal })}
-            variableContext={variableContext}
-            onNavigateToSource={onNavigateToSource}
-          />
-        </div>
-      )}
-
-      {showResourceOwner && (
-        <div className='grid grid-cols-2 gap-2'>
-          <div>
-            <Label className='mb-1 block'>Username</Label>
-            <SingleLineEditor
-              className='text-sm'
-              placeholder='user@example.com'
-              value={o.username}
-              onChange={(newVal) => patchOAuth2({ username: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
+      {/* Behavior group — flow-level options as a single checkbox row block. */}
+      <div className='flex flex-wrap gap-x-5 gap-y-1.5 pt-0.5'>
+        {showPkce && (
+          <div className='flex items-center gap-2'>
+            <Checkbox
+              id='oauth2-use-pkce'
+              checked={o.usePkce}
+              onCheckedChange={(checked) => patchOAuth2({ usePkce: !!checked })}
             />
+            <Label
+              htmlFor='oauth2-use-pkce'
+              className='text-xs text-muted-foreground cursor-pointer'
+            >
+              Use PKCE (S256)
+            </Label>
           </div>
-          <div>
-            <Label className='mb-1 block'>Password</Label>
-            <SingleLineEditor
-              className='text-sm'
-              isSecret
-              value={o.password}
-              onChange={(newVal) => patchOAuth2({ password: newVal })}
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
+        )}
+        {showSystemBrowser && (
+          <div className='flex items-center gap-2'>
+            <Checkbox
+              id='oauth2-use-system-browser'
+              checked={o.useSystemBrowser}
+              onCheckedChange={(checked) => patchOAuth2({ useSystemBrowser: !!checked })}
             />
+            <Label
+              htmlFor='oauth2-use-system-browser'
+              className='text-xs text-muted-foreground cursor-pointer'
+            >
+              Use system browser
+            </Label>
           </div>
-        </div>
-      )}
-
-      {showClientAuth && (
-        <div>
-          <Label className='mb-1 block'>Add Credentials to</Label>
-          <Select
-            value={o.clientAuthentication}
-            onValueChange={(v) => patchOAuth2({ clientAuthentication: v as 'header' | 'body' })}
-          >
-            <SelectTrigger className='w-full text-sm'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='body' className='text-sm'>
-                Send in Request Body
-              </SelectItem>
-              <SelectItem value='header' className='text-sm'>
-                Send as Basic Auth Header
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {showPkce && (
+        )}
         <div className='flex items-center gap-2'>
           <Checkbox
-            id='oauth2-use-pkce'
-            checked={o.usePkce}
-            onCheckedChange={(checked) => patchOAuth2({ usePkce: !!checked })}
+            id='oauth2-verify-ssl'
+            checked={o.verifySsl}
+            onCheckedChange={(checked) => patchOAuth2({ verifySsl: !!checked })}
           />
-          <Label htmlFor='oauth2-use-pkce' className='text-xs text-muted-foreground cursor-pointer'>
-            Use PKCE (S256)
+          <Label
+            htmlFor='oauth2-verify-ssl'
+            className='text-xs text-muted-foreground cursor-pointer'
+          >
+            Verify SSL certificates
           </Label>
         </div>
-      )}
-
-      <div className='flex items-center gap-2'>
-        <Checkbox
-          id='oauth2-verify-ssl'
-          checked={o.verifySsl}
-          onCheckedChange={(checked) => patchOAuth2({ verifySsl: !!checked })}
-        />
-        <Label htmlFor='oauth2-verify-ssl' className='text-xs text-muted-foreground cursor-pointer'>
-          Verify SSL certificates
-        </Label>
       </div>
     </div>
   );

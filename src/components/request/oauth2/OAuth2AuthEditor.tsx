@@ -1,7 +1,15 @@
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  ListPlus,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Workflow,
+} from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -15,6 +23,7 @@ import type { AuthState } from '@/types/pane-types';
 import { OAuth2AdditionalParams } from './OAuth2AdditionalParams';
 import { OAuth2AdvancedSection } from './OAuth2AdvancedSection';
 import { OAuth2ConfigSection } from './OAuth2ConfigSection';
+import { OAuth2SectionHeader } from './OAuth2SectionHeader';
 import { OAuth2SettingsSection } from './OAuth2SettingsSection';
 import { OAuth2TokenDisplay } from './OAuth2TokenDisplay';
 import { OAuth2TokenSection } from './OAuth2TokenSection';
@@ -45,6 +54,11 @@ export function OAuth2AuthEditor({
   const [tokenError, setTokenError] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [additionalOpen, setAdditionalOpen] = useState(false);
+  const tokenDisplayRef = useRef<HTMLDivElement>(null);
+
+  // Always holds the latest patchOAuth2 so async handlers never use a stale closure.
+  const patchOAuth2Ref = useRef(patchOAuth2);
+  patchOAuth2Ref.current = patchOAuth2;
 
   const handleGetToken = useCallback(async () => {
     setGettingToken(true);
@@ -72,7 +86,7 @@ export function OAuth2AuthEditor({
         environmentName,
         requestPath,
       });
-      patchOAuth2({
+      patchOAuth2Ref.current({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || '',
         expiresIn: typeof result.expires_in === 'number' ? result.expires_in : null,
@@ -82,10 +96,15 @@ export function OAuth2AuthEditor({
         responseScope: result.scope || '',
         idTokenClaims: null,
       });
+      // Scroll the token card into view after React re-renders it.
+      setTimeout(
+        () => tokenDisplayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
+        0,
+      );
       if (result.id_token) {
         try {
           const claims = await oauth2DecodeJwt(result.id_token);
-          patchOAuth2({ idTokenClaims: claims });
+          patchOAuth2Ref.current({ idTokenClaims: claims });
         } catch {
           // JWT decode is best-effort — an opaque ID token shouldn't break the flow.
         }
@@ -95,7 +114,7 @@ export function OAuth2AuthEditor({
     } finally {
       setGettingToken(false);
     }
-  }, [o, patchOAuth2, collection, environmentName, requestPath]);
+  }, [o, collection, environmentName, requestPath]);
 
   const handleRefreshToken = useCallback(async () => {
     if (!o.refreshToken || !o.tokenUrl) return;
@@ -116,7 +135,7 @@ export function OAuth2AuthEditor({
         environmentName,
         requestPath,
       });
-      patchOAuth2({
+      patchOAuth2Ref.current({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || o.refreshToken,
         expiresIn: typeof result.expires_in === 'number' ? result.expires_in : null,
@@ -128,7 +147,7 @@ export function OAuth2AuthEditor({
       if (result.id_token) {
         try {
           const claims = await oauth2DecodeJwt(result.id_token);
-          patchOAuth2({ idTokenClaims: claims });
+          patchOAuth2Ref.current({ idTokenClaims: claims });
         } catch {
           // Non-critical.
         }
@@ -138,10 +157,10 @@ export function OAuth2AuthEditor({
     } finally {
       setGettingToken(false);
     }
-  }, [o, patchOAuth2, collection, environmentName, requestPath]);
+  }, [o, collection, environmentName, requestPath]);
 
   const handleClearCache = useCallback(() => {
-    patchOAuth2({
+    patchOAuth2Ref.current({
       accessToken: '',
       refreshToken: '',
       expiresIn: null,
@@ -152,22 +171,26 @@ export function OAuth2AuthEditor({
       idTokenClaims: null,
     });
     setTokenError('');
-  }, [patchOAuth2]);
+  }, []);
 
   const getTokenDisabled =
     gettingToken ||
     (o.grantType !== 'implicit' && !o.tokenUrl) ||
     ((o.grantType === 'authorization_code' || o.grantType === 'implicit') && !o.authorizationUrl);
 
+  const grantLabel = GRANT_LABELS[o.grantType];
+  const hasAnyToken = !!(o.accessToken || o.refreshToken || o.idToken);
+
   return (
-    <div className='space-y-4'>
-      <div>
-        <Label className='mb-1 block'>Grant Type</Label>
+    <div className='space-y-5'>
+      {/* Flow anchor row — grant type select with descriptive hint. */}
+      <div className='flex items-center gap-3'>
+        <OAuth2SectionHeader icon={Workflow} title='Flow' />
         <Select
           value={o.grantType}
           onValueChange={(val) => patchOAuth2({ grantType: val as OAuth2GrantType })}
         >
-          <SelectTrigger className='w-50 text-sm'>
+          <SelectTrigger className='h-8 w-52 text-sm'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -185,42 +208,58 @@ export function OAuth2AuthEditor({
             </SelectItem>
           </SelectContent>
         </Select>
+        <span className='ml-auto truncate text-2xs text-muted-foreground/70'>
+          {grantLabel.hint}
+        </span>
       </div>
 
-      <OAuth2TokenDisplay oauth2={o} />
+      {/* Token display — only renders when a token exists. */}
+      <div ref={tokenDisplayRef}>
+        <OAuth2TokenDisplay oauth2={o} />
+      </div>
 
-      <OAuth2ConfigSection
-        oauth2={o}
-        patchOAuth2={patchOAuth2}
-        variableContext={variableContext}
-        onNavigateToSource={onNavigateToSource}
-      />
+      {/* Configuration — primary form. */}
+      <section className='space-y-2.5'>
+        <OAuth2SectionHeader icon={ShieldCheck} title='Configuration' />
+        <OAuth2ConfigSection
+          oauth2={o}
+          patchOAuth2={patchOAuth2}
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
+        />
+      </section>
 
-      <div className='border-t border-border/50 pt-3'>
+      {/* Token Handling — how the token attaches to the request. */}
+      <section className='space-y-2.5'>
+        <OAuth2SectionHeader icon={KeyRound} title='Token Handling' />
         <OAuth2TokenSection
           oauth2={o}
           patchOAuth2={patchOAuth2}
           variableContext={variableContext}
           onNavigateToSource={onNavigateToSource}
         />
-      </div>
+      </section>
 
+      {/* Collapsible secondary sections — nested left-rule for visual distinction. */}
       {o.grantType !== 'implicit' && (
-        <div>
+        <section>
           <button
             type='button'
-            className='flex items-center gap-1 cursor-pointer text-sm text-muted-foreground hover:text-foreground py-1'
+            className='flex w-full items-center gap-1.5 py-1 text-left cursor-pointer group'
             onClick={() => setAdvancedOpen(!advancedOpen)}
           >
             {advancedOpen ? (
-              <ChevronDown className='h-3.5 w-3.5' />
+              <ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
             ) : (
-              <ChevronRight className='h-3.5 w-3.5' />
+              <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
             )}
-            Advanced Settings
+            <SlidersHorizontal className='h-3 w-3 text-muted-foreground' />
+            <span className='text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground group-hover:text-foreground'>
+              Advanced
+            </span>
           </button>
           {advancedOpen && (
-            <div className='mt-2 pl-1'>
+            <div className='mt-2 ml-[7px] border-l border-border/60 pl-4'>
               <OAuth2AdvancedSection
                 oauth2={o}
                 patchOAuth2={patchOAuth2}
@@ -229,28 +268,27 @@ export function OAuth2AuthEditor({
               />
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      <div className='border-t border-border/50 pt-3'>
-        <OAuth2SettingsSection oauth2={o} patchOAuth2={patchOAuth2} />
-      </div>
-
-      <div>
+      <section>
         <button
           type='button'
-          className='flex items-center gap-1 cursor-pointer text-sm text-muted-foreground hover:text-foreground py-1'
+          className='flex w-full items-center gap-1.5 py-1 text-left cursor-pointer group'
           onClick={() => setAdditionalOpen(!additionalOpen)}
         >
           {additionalOpen ? (
-            <ChevronDown className='h-3.5 w-3.5' />
+            <ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
           ) : (
-            <ChevronRight className='h-3.5 w-3.5' />
+            <ChevronRight className='h-3.5 w-3.5 text-muted-foreground' />
           )}
-          Additional Parameters
+          <ListPlus className='h-3 w-3 text-muted-foreground' />
+          <span className='text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground group-hover:text-foreground'>
+            Additional Parameters
+          </span>
         </button>
         {additionalOpen && (
-          <div className='mt-2'>
+          <div className='mt-2 ml-[7px] border-l border-border/60 pl-4'>
             <OAuth2AdditionalParams
               oauth2={o}
               patchOAuth2={patchOAuth2}
@@ -259,44 +297,60 @@ export function OAuth2AuthEditor({
             />
           </div>
         )}
-      </div>
+      </section>
 
-      <div className='border-t border-border/50 pt-3 space-y-2'>
-        <div className='flex gap-2'>
+      {/* Settings — compact checkbox group. */}
+      <section className='space-y-2.5'>
+        <OAuth2SectionHeader icon={Settings2} title='Settings' />
+        <OAuth2SettingsSection oauth2={o} patchOAuth2={patchOAuth2} />
+      </section>
+
+      {/* Action bar — primary CTA left, secondary actions right. */}
+      <div className='flex items-center gap-2 border-t border-border/60 pt-3'>
+        <Button
+          variant='default'
+          size='sm'
+          className='text-sm'
+          disabled={getTokenDisabled}
+          onClick={handleGetToken}
+        >
+          {gettingToken ? 'Waiting…' : 'Get Access Token'}
+        </Button>
+        {o.refreshToken && (
           <Button
             variant='outline'
             size='sm'
             className='text-sm'
-            disabled={getTokenDisabled}
-            onClick={handleGetToken}
+            disabled={gettingToken || !o.tokenUrl}
+            onClick={handleRefreshToken}
           >
-            {gettingToken ? 'Waiting...' : 'Get Access Token'}
+            Refresh
           </Button>
-          {o.refreshToken && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='text-sm'
-              disabled={gettingToken || !o.tokenUrl}
-              onClick={handleRefreshToken}
-            >
-              Refresh
-            </Button>
-          )}
-          {(o.accessToken || o.refreshToken || o.idToken) && (
-            <Button
-              variant='ghost'
-              size='sm'
-              className='text-sm'
-              disabled={gettingToken}
-              onClick={handleClearCache}
-            >
-              Clear Cache
-            </Button>
-          )}
-        </div>
-        {tokenError && <p className='text-xs text-destructive'>{tokenError}</p>}
+        )}
+        {hasAnyToken && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='ml-auto text-sm text-muted-foreground hover:text-foreground'
+            disabled={gettingToken}
+            onClick={handleClearCache}
+          >
+            Clear Cache
+          </Button>
+        )}
       </div>
+      {tokenError && (
+        <p className='rounded-sm border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-xs text-destructive'>
+          {tokenError}
+        </p>
+      )}
     </div>
   );
 }
+
+const GRANT_LABELS: Record<OAuth2GrantType, { hint: string }> = {
+  client_credentials: { hint: 'Machine-to-machine — no user present' },
+  password: { hint: 'Resource owner credentials — legacy' },
+  authorization_code: { hint: 'User-delegated — recommended with PKCE' },
+  implicit: { hint: 'Browser-only — deprecated' },
+};

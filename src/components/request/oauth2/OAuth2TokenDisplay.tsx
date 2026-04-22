@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Copy, Key } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { AuthState } from '@/types/pane-types';
@@ -34,10 +34,17 @@ function formatTimestamp(ts: number | null): string {
 }
 
 export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
-  const [accessOpen, setAccessOpen] = useState(false);
-  const [idOpen, setIdOpen] = useState(false);
+  // Start expanded whenever a token is present. User can collapse manually.
+  const [accessOpen, setAccessOpen] = useState(!!o.accessToken);
+  const [idOpen, setIdOpen] = useState(!!o.idToken);
   const [showRawPayload, setShowRawPayload] = useState(false);
   const [, setTick] = useState(0);
+
+  // Track previous token values so we only auto-expand on a NEW token arriving,
+  // not on every re-render. This way a manual collapse stays sticky until the
+  // next fetch replaces the token.
+  const prevAccessToken = useRef(o.accessToken);
+  const prevIdToken = useRef(o.idToken);
 
   // Re-render every 30s to keep the expiry countdown fresh.
   useEffect(() => {
@@ -45,6 +52,22 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
     const interval = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(interval);
   }, [o.expiresIn, o.tokenAcquiredAt]);
+
+  // Auto-expand when a new (different) access token arrives; auto-close when cleared.
+  useEffect(() => {
+    if (o.accessToken !== prevAccessToken.current) {
+      prevAccessToken.current = o.accessToken;
+      setAccessOpen(!!o.accessToken);
+    }
+  }, [o.accessToken]);
+
+  // Auto-expand when a new id token arrives; auto-close when cleared.
+  useEffect(() => {
+    if (o.idToken !== prevIdToken.current) {
+      prevIdToken.current = o.idToken;
+      setIdOpen(!!o.idToken);
+    }
+  }, [o.idToken]);
 
   if (!o.accessToken && !o.idToken) return null;
 
@@ -57,7 +80,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
           <button
             type='button'
             className='flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer'
-            onClick={() => setAccessOpen(!accessOpen)}
+            onClick={() => setAccessOpen((v) => !v)}
           >
             <span className='flex items-center gap-2'>
               {accessOpen ? (
@@ -68,7 +91,9 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
               <Key className='h-3.5 w-3.5 text-muted-foreground' />
               <span className='font-medium'>Access Token</span>
             </span>
-            <span className={`text-2xs ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
+            <span
+              className={`rounded px-1.5 py-0.5 text-2xs font-medium ${expired ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground'}`}
+            >
               {tokenExpiryDisplay(o.expiresIn, o.tokenAcquiredAt)}
             </span>
           </button>
@@ -83,9 +108,9 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                 <Button
                   variant='outline'
                   size='sm'
-                  className='px-2 text-sm shrink-0'
+                  className='px-2 shrink-0'
                   onClick={() => navigator.clipboard.writeText(o.accessToken)}
-                  title='Copy'
+                  title='Copy access token'
                 >
                   <Copy className='h-3 w-3' />
                 </Button>
@@ -100,7 +125,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
           <button
             type='button'
             className='flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted/40 cursor-pointer'
-            onClick={() => setIdOpen(!idOpen)}
+            onClick={() => setIdOpen((v) => !v)}
           >
             {idOpen ? (
               <ChevronDown className='h-3.5 w-3.5' />
@@ -116,45 +141,45 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                 <>
                   {o.idTokenClaims.subject && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Subject</span>
-                      <span className='font-mono'>{o.idTokenClaims.subject}</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Subject</span>
+                      <span className='font-mono truncate'>{o.idTokenClaims.subject}</span>
                     </div>
                   )}
                   {o.idTokenClaims.issuer && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Issuer</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Issuer</span>
                       <span className='font-mono truncate'>{o.idTokenClaims.issuer}</span>
                     </div>
                   )}
                   {o.idTokenClaims.audience && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Audience</span>
-                      <span className='font-mono'>{o.idTokenClaims.audience}</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Audience</span>
+                      <span className='font-mono truncate'>{o.idTokenClaims.audience}</span>
                     </div>
                   )}
                   {o.idTokenClaims.expiry && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Expires</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Expires</span>
                       <span>{formatTimestamp(o.idTokenClaims.expiry)}</span>
                     </div>
                   )}
                   {o.idTokenClaims.issuedAt && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Issued</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Issued</span>
                       <span>{formatTimestamp(o.idTokenClaims.issuedAt)}</span>
                     </div>
                   )}
                   {o.idTokenClaims.algorithm && (
                     <div className='flex text-xs'>
-                      <span className='w-20 text-muted-foreground'>Algorithm</span>
+                      <span className='w-20 shrink-0 text-muted-foreground'>Algorithm</span>
                       <span>{o.idTokenClaims.algorithm}</span>
                     </div>
                   )}
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='text-xs mt-1'
-                    onClick={() => setShowRawPayload(!showRawPayload)}
+                    className='text-xs mt-1 h-auto px-0 py-0.5'
+                    onClick={() => setShowRawPayload((v) => !v)}
                   >
                     {showRawPayload ? 'Hide' : 'View'} Raw Payload
                   </Button>
@@ -170,9 +195,9 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                   <Button
                     variant='outline'
                     size='sm'
-                    className='px-2 text-sm shrink-0'
+                    className='px-2 shrink-0'
                     onClick={() => navigator.clipboard.writeText(o.idToken)}
-                    title='Copy'
+                    title='Copy ID token'
                   >
                     <Copy className='h-3 w-3' />
                   </Button>
