@@ -7,7 +7,7 @@ import { visualizer } from "rollup-plugin-visualizer";
 export const testConfig = {
   environment: 'jsdom',
   globals: true,
-  setupFiles: [],
+  setupFiles: ['./src/test-setup.ts'],
   include: ['src/**/*.{test,spec}.{ts,tsx}'],
   coverage: {
     provider: 'v8' as const,
