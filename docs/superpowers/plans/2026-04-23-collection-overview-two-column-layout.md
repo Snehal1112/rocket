@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor the Collection Overview tab: two-column overview section (left: MethodBreakdown + Default Headers + Requests + Tags cards; right: Documentation panel), remove the Readme and Tags tabs, add a Documentation tab (full-page editor), upgrade `MarkdownEditor` to the Documentation card style and reuse it everywhere.
+**Goal:** Refactor the Collection Overview tab: two-column overview section (left: MethodBreakdown + Default Headers + Requests + Tags cards; right: Documentation panel), remove the Readme and Tags tabs, add a Documentation tab (full-page editor), upgrade `MarkdownEditor` to the Documentation card style, and fix the backend to store collection documentation in the spec-compliant `docs:` field instead of the non-standard `readme:` field.
 
-**Architecture:** `MarkdownEditor` is upgraded to render as a full Card with shadcn Tabs, monospace textarea, save-on-blur footer, and empty state — replacing the inline Documentation block in `WorkspaceOverviewTab` and powering both the overview right-column panel and the new Documentation tab in `CollectionOverviewTab`. `CollectionSection` type drops `'readme'` and `'tags'`, adds `'documentation'`. The `validSections` guard already falls back to `'overview'` for unknown stored values so persisted `'readme'`/`'tags'` states migrate automatically. No backend changes — `readme` is already persisted in `CollectionSettings`.
+**Architecture:** Three layers of change: (1) **Backend** — `CollectionSettings` drops `description` and `readme`, adds `docs: Option<String>`; `oc_conversions.rs` maps `OcCollection.docs` ↔ `CollectionSettings.docs`; `OcCollection` serde struct removes the non-standard `readme` field. (2) **Frontend types** — `CollectionSettings` interface updated to match. (3) **UI** — `MarkdownEditor` upgraded to Documentation card style and reused in `WorkspaceOverviewTab`, the Overview right-column panel, and the new Documentation tab; `CollectionSection` type updated; Readme/Tags tabs removed.
 
-**Tech Stack:** React 18, TypeScript, shadcn/ui (Card, CardHeader, CardContent, Tabs, TabsList, TabsTrigger, Button), lucide-react (FileText, Check, Loader2, Save), ReactMarkdown + remark-gfm, `useSaveButton` hook, Tailwind CSS.
+**Tech Stack:** Rust (serde_yaml, thiserror), React 18, TypeScript, shadcn/ui (Card, CardHeader, CardContent, Tabs, TabsList, TabsTrigger, Button), lucide-react (FileText, Check, Loader2, Save), ReactMarkdown + remark-gfm, `useSaveButton` hook, Tailwind CSS.
 
 ---
 
@@ -14,19 +14,264 @@
 
 | File | Change |
 |---|---|
-| `src/types/pane-types.ts` | **Modify** — update `CollectionSection` type: remove `'readme'` and `'tags'`, add `'documentation'` |
+| `crates/rocket-collection/src/settings.rs` | **Modify** — replace `description` + `readme` with `docs: Option<String>` |
+| `crates/rocket-infra/src/opencollection.rs` | **Modify** — remove `readme` field from `OcCollection` |
+| `crates/rocket-infra/src/oc_conversions.rs` | **Modify** — map `oc.docs` ↔ `settings.docs`; remove all `readme` references |
+| `src/lib/tauri-api.ts` | **Modify** — update `CollectionSettings` interface: remove `description`/`readme`, add `docs` |
+| `src/types/pane-types.ts` | **Modify** — update `CollectionSection` type: remove `'readme'`/`'tags'`, add `'documentation'` |
 | `src/components/collections/MarkdownEditor.tsx` | **Modify** — upgrade to Documentation card style; add optional `mode`/`onModeChange`/`onSave`/`saveState`/`isDirty` props |
-| `src/components/workspace/WorkspaceOverviewTab.tsx` | **Modify** — replace inline Documentation card (~90 lines) with `<MarkdownEditor>` |
-| `src/components/collections/CollectionOverviewTab.tsx` | **Modify** — update `TABS`, `validSections`, add doc panel state wiring, refactor overview section to two-column layout with Tags card, replace Readme+Tags tabs with Documentation tab |
+| `src/components/workspace/WorkspaceOverviewTab.tsx` | **Modify** — replace inline Documentation card with `<MarkdownEditor>` |
+| `src/components/collections/CollectionOverviewTab.tsx` | **Modify** — use `docs` state throughout; update TABS/validSections; two-column overview; Documentation tab; remove Readme/Tags tabs |
 
 ---
 
-### Task 1: Update CollectionSection type
+### Task 1: Fix backend — replace description/readme with docs in CollectionSettings
+
+**Files:**
+- Modify: `crates/rocket-collection/src/settings.rs`
+- Modify: `crates/rocket-infra/src/opencollection.rs`
+- Modify: `crates/rocket-infra/src/oc_conversions.rs`
+
+**Context:** Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`.
+
+The OpenCollection spec defines `docs:` as the standard string field for collection-level markdown documentation. Bruno stores docs in `docs {}` in `.bru` which serializes to `docs:` in YAML. Currently Rocket misuses this: `OcCollection.docs` maps to `CollectionSettings.description` (a short summary field), and `CollectionSettings.readme` uses a non-standard `readme:` field in the YML.
+
+Fix: collapse both into a single `docs: Option<String>` field that round-trips correctly through `OcCollection.docs`.
+
+- [ ] **Step 1: Write a failing test in rocket-infra**
+
+  In `crates/rocket-infra/src/oc_conversions.rs`, find the `#[cfg(test)]` block at the bottom and add:
+
+  ```rust
+  #[test]
+  fn collection_docs_roundtrips_through_docs_field() {
+      use crate::opencollection::OcCollection;
+      use rocket_collection::settings::CollectionSettings;
+
+      // Build a minimal OcCollection with docs set
+      let oc = OcCollection {
+          opencollection: Some("1.0.0".into()),
+          uid: None,
+          info: None,
+          config: None,
+          items: None,
+          request: None,
+          docs: Some("# Hello\nWorld".into()),
+          bundled: None,
+          extensions: None,
+      };
+
+      // Convert to domain
+      let col = oc_collection_to_collection(oc, "test-col".into(), vec![]);
+      assert_eq!(col.settings.docs, Some("# Hello\nWorld".into()));
+
+      // Convert back to OC
+      let oc2 = collection_to_oc_collection(col);
+      assert_eq!(oc2.docs, Some("# Hello\nWorld".into()));
+  }
+  ```
+
+- [ ] **Step 2: Run the test to confirm it fails**
+
+  ```bash
+  cd /Users/snehaldangroshiya/data/rocket && cargo test -p rocket-infra collection_docs_roundtrips 2>&1 | tail -15
+  ```
+
+  Expected: compile error — `CollectionSettings` has no `docs` field yet, and `OcCollection` still has `readme`.
+
+- [ ] **Step 3: Update CollectionSettings**
+
+  In `crates/rocket-collection/src/settings.rs`, replace the `description` and `readme` fields:
+
+  ```rust
+  /// Per-collection default auth, headers, and variables, stored in opencollection.yml.
+  #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+  #[serde(rename_all = "camelCase")]
+  pub struct CollectionSettings {
+      /// Markdown documentation for this collection (maps to `docs:` in opencollection.yml).
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub docs: Option<String>,
+
+      /// Optional auth applied to all requests in this collection.
+      #[serde(default)]
+      pub auth: Option<Auth>,
+
+      /// Default headers prepended to every request in this collection.
+      #[serde(default)]
+      pub headers: Vec<Header>,
+
+      /// Collection-scoped variables, resolved alongside environment variables.
+      #[serde(default)]
+      pub variables: Vec<CollectionVariable>,
+  }
+  ```
+
+- [ ] **Step 4: Remove readme from OcCollection**
+
+  In `crates/rocket-infra/src/opencollection.rs`, find `OcCollection` (around line 950). Remove the `readme` field:
+
+  ```rust
+  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+  pub struct OcCollection {
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub opencollection: Option<String>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub uid: Option<String>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub info: Option<OcInfo>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub config: Option<OcCollectionConfig>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub items: Option<Vec<OcItem>>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub request: Option<OcRequestDefaults>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub docs: Option<String>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub bundled: Option<bool>,
+      #[serde(default, skip_serializing_if = "Option::is_none")]
+      pub extensions: Option<serde_yaml::Value>,
+  }
+  ```
+
+- [ ] **Step 5: Fix oc_conversions.rs**
+
+  In `crates/rocket-infra/src/oc_conversions.rs`, find the two conversion functions and update them.
+
+  **`oc_collection_to_collection`** — replace the settings block (two occurrences, the `if let Some(defaults)` branch and the `else` branch):
+
+  ```rust
+  // if let Some(defaults) = oc.request branch:
+  let settings = if let Some(defaults) = oc.request {
+      CollectionSettings {
+          docs: oc.docs,
+          auth: defaults.auth.map(Auth::from),
+          headers: defaults
+              .headers
+              .unwrap_or_default()
+              .into_iter()
+              .map(Header::from)
+              .collect(),
+          variables: defaults
+              .variables
+              .unwrap_or_default()
+              .into_iter()
+              .map(oc_variable_to_collection_variable)
+              .collect(),
+      }
+  } else {
+      CollectionSettings {
+          docs: oc.docs,
+          ..CollectionSettings::default()
+      }
+  };
+  ```
+
+  **`collection_to_oc_collection`** — update the `OcCollection { ... }` construction at the end of the function:
+
+  ```rust
+  OcCollection {
+      opencollection: Some("1.0.0".into()),
+      uid: None,
+      info: Some(OcInfo {
+          name: col.name,
+          summary: None,
+          version: None,
+          authors: None,
+      }),
+      config: None,
+      items: if items.is_empty() { None } else { Some(items) },
+      request,
+      docs: col.settings.docs,
+      bundled: None,
+      extensions: None,
+  }
+  ```
+
+- [ ] **Step 6: Run the test — should pass now**
+
+  ```bash
+  cd /Users/snehaldangroshiya/data/rocket && cargo test -p rocket-infra collection_docs_roundtrips 2>&1 | tail -10
+  ```
+
+  Expected: PASS.
+
+- [ ] **Step 7: Run all infra tests to check for regressions**
+
+  ```bash
+  cd /Users/snehaldangroshiya/data/rocket && cargo test -p rocket-infra 2>&1 | tail -20
+  ```
+
+  Fix any test that references `description`, `readme`, or `oc.readme` — update them to use `docs` instead.
+
+- [ ] **Step 8: Run cargo check across the workspace**
+
+  ```bash
+  cd /Users/snehaldangroshiya/data/rocket && cargo check 2>&1 | grep "^error" | head -20
+  ```
+
+  Fix all compile errors (any code referencing `settings.description`, `settings.readme`, `oc.readme`).
+
+- [ ] **Step 9: Commit**
+
+  ```bash
+  git add crates/rocket-collection/src/settings.rs crates/rocket-infra/src/opencollection.rs crates/rocket-infra/src/oc_conversions.rs
+  git commit -m "fix(collection): store documentation in spec-compliant docs field, remove non-standard readme"
+  ```
+
+---
+
+### Task 2: Update frontend CollectionSettings interface
+
+**Files:**
+- Modify: `src/lib/tauri-api.ts`
+
+**Context:** The `CollectionSettings` TypeScript interface must match the updated Rust struct. Replace `description?: string` and `readme?: string` with `docs?: string`.
+
+- [ ] **Step 1: Update the interface**
+
+  In `src/lib/tauri-api.ts`, find the `CollectionSettings` interface (around line 59):
+
+  ```ts
+  export interface CollectionSettings {
+    description?: string;
+    readme?: string;
+    // ... other fields
+  }
+  ```
+
+  Replace the `description` and `readme` lines with:
+
+  ```ts
+  export interface CollectionSettings {
+    docs?: string;
+    // ... other fields unchanged
+  }
+  ```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+  ```bash
+  cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -30
+  ```
+
+  Expected: errors only in `CollectionOverviewTab.tsx` where `description` and `readme` are still referenced — those are fixed in Task 5.
+
+- [ ] **Step 3: Commit**
+
+  ```bash
+  git add src/lib/tauri-api.ts
+  git commit -m "fix(api): update CollectionSettings interface — replace description/readme with docs"
+  ```
+
+---
+
+### Task 3: Update CollectionSection type
 
 **Files:**
 - Modify: `src/types/pane-types.ts`
 
-**Context:** `CollectionSection` is a union type used in `CollectionTab` and consumed by `pane-store`. Removing `'readme'` and `'tags'` and adding `'documentation'` is the only change. No store logic needs updating — `updateCollectionSection` accepts any `CollectionSection` value and `CollectionOverviewTab` already has a `validSections` guard that falls back unknown stored values to `'overview'`.
+**Context:** Remove `'readme'` and `'tags'`, add `'documentation'`. The `validSections` guard in `CollectionOverviewTab` already falls back unknown stored values to `'overview'`, so users with `'readme'` or `'tags'` persisted will land on Overview automatically.
 
 - [ ] **Step 1: Update the type**
 
@@ -45,10 +290,10 @@
 - [ ] **Step 2: Verify TypeScript compiles**
 
   ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -30
+  cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -20
   ```
 
-  Expected: errors only in `CollectionOverviewTab.tsx` where `'readme'` and `'tags'` are referenced — those will be fixed in Task 4. If errors appear anywhere else, fix them now.
+  Expected: errors only in `CollectionOverviewTab.tsx` — fixed in Task 5.
 
 - [ ] **Step 3: Commit**
 
@@ -59,13 +304,13 @@
 
 ---
 
-### Task 2: Upgrade MarkdownEditor to Documentation card style
+### Task 4: Upgrade MarkdownEditor to Documentation card style
 
 **Files:**
 - Modify: `src/components/collections/MarkdownEditor.tsx`
 - Create: `src/components/collections/MarkdownEditor.test.tsx`
 
-**Context:** The current `MarkdownEditor` uses raw `<button>` tabs, a shadcn `Textarea`, and a prose div. It needs to become a full Card: `CardHeader` with FileText icon + "Documentation" label on left and shadcn `Tabs` on right, `CardContent` with a monospace `<textarea>` in edit mode with an optional save-on-blur footer, and a ReactMarkdown preview with empty state. The new props `mode`, `onModeChange`, `onSave`, `saveState`, `isDirty` are **optional** — when `onSave` is absent the footer is not rendered. When `mode`/`onModeChange` are absent the component manages its own mode state internally (preserving the existing Readme tab usage pattern).
+**Context:** The current `MarkdownEditor` uses raw `<button>` tabs, a shadcn `Textarea`, and a prose div. It needs to become a full Card: `CardHeader` with FileText icon + "Documentation" label on left and shadcn `Tabs` on right, `CardContent` with a monospace `<textarea>` in edit mode with an optional save-on-blur footer, and a ReactMarkdown preview with empty state. New props `mode`, `onModeChange`, `onSave`, `saveState`, `isDirty` are optional — when `onSave` is absent the footer is not rendered; when `mode`/`onModeChange` are absent the component manages its own mode state internally.
 
 - [ ] **Step 1: Write tests**
 
@@ -77,10 +322,7 @@
   import { describe, expect, it, vi } from 'vitest';
   import { MarkdownEditor } from './MarkdownEditor';
 
-  const baseProps = {
-    value: '',
-    onChange: vi.fn(),
-  };
+  const baseProps = { value: '', onChange: vi.fn() };
 
   describe('MarkdownEditor', () => {
     it('renders Documentation label', () => {
@@ -123,23 +365,17 @@
     });
 
     it('renders save button when onSave is provided', () => {
-      render(
-        <MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />,
-      );
+      render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />);
       expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
     });
 
-    it('save button is disabled when isDirty is false', () => {
-      render(
-        <MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />,
-      );
+    it('save button disabled when isDirty is false', () => {
+      render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />);
       expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
     });
 
-    it('save button is enabled when isDirty is true', () => {
-      render(
-        <MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={true} />,
-      );
+    it('save button enabled when isDirty is true', () => {
+      render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={true} />);
       expect(screen.getByRole('button', { name: /save/i })).toBeEnabled();
     });
 
@@ -158,7 +394,7 @@
   cd /Users/snehaldangroshiya/data/rocket && yarn test MarkdownEditor 2>&1 | tail -10
   ```
 
-  Expected: multiple failures — component doesn't yet have the new structure.
+  Expected: multiple failures.
 
 - [ ] **Step 3: Rewrite MarkdownEditor**
 
@@ -314,7 +550,7 @@
   cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -20
   ```
 
-  Expected: errors only in `CollectionOverviewTab.tsx` (Task 4) and `WorkspaceOverviewTab.tsx` (Task 3) — not in `MarkdownEditor.tsx` itself.
+  Expected: errors only in `CollectionOverviewTab.tsx` (fixed in Task 5) and `WorkspaceOverviewTab.tsx` (fixed in Task 5 also, after Task 5).
 
 - [ ] **Step 6: Commit**
 
@@ -325,14 +561,14 @@
 
 ---
 
-### Task 3: Replace inline Documentation card in WorkspaceOverviewTab with MarkdownEditor
+### Task 5: Replace inline Documentation card in WorkspaceOverviewTab with MarkdownEditor
 
 **Files:**
 - Modify: `src/components/workspace/WorkspaceOverviewTab.tsx`
 
-**Context:** `WorkspaceOverviewTab` has ~90 lines of inline Documentation card JSX (lines 352–442). Replace with `<MarkdownEditor>` passing existing local state: `docMode`, `docContent`, `isDocDirty`, `saveDocState`, `triggerSaveDoc`. The outer `<div className='flex-1 p-4 flex flex-col overflow-hidden'>` wrapper stays unchanged.
+**Context:** `WorkspaceOverviewTab` has ~90 lines of inline Documentation card JSX (lines 352–442). Replace with `<MarkdownEditor>`. The workspace uses `docs` field already (`workspace.description` maps to `docs:` in workspace.yml — this is already correct and unchanged). Existing local state names `docMode`, `docContent`, `isDocDirty`, `saveDocState`, `triggerSaveDoc` map directly to the new props.
 
-- [ ] **Step 1: Add MarkdownEditor import**
+- [ ] **Step 1: Add MarkdownEditor import and remove now-unused imports**
 
   In `src/components/workspace/WorkspaceOverviewTab.tsx`, add:
 
@@ -340,21 +576,21 @@
   import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
   ```
 
-  Remove these imports that are now only used inside `MarkdownEditor` (verify each is not used elsewhere in the file before removing):
+  Remove these imports now only used inside `MarkdownEditor`:
   - `Check`, `FileText`, `Loader2`, `Save` from lucide-react
   - `ReactMarkdown` from react-markdown
   - `remarkGfm` from remark-gfm
   - `CardHeader` from `@/components/ui/card`
   - `Tabs`, `TabsList`, `TabsTrigger` from `@/components/ui/tabs`
 
-  The remaining lucide-react import becomes:
+  Remaining lucide-react import:
   ```tsx
   import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
   ```
 
 - [ ] **Step 2: Replace the right column JSX**
 
-  Find the block starting with `{/* ── RIGHT COLUMN — Documentation ── */}` (line ~351). Replace the entire block (through the closing `</div>` of the right column) with:
+  Find `{/* ── RIGHT COLUMN — Documentation ── */}` (line ~351). Replace the entire block with:
 
   ```tsx
   {/* ── RIGHT COLUMN — Documentation ── */}
@@ -378,17 +614,9 @@
   cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -20
   ```
 
-  Expected: errors only in `CollectionOverviewTab.tsx` (Task 4) — not here.
+  Expected: errors only in `CollectionOverviewTab.tsx` (Task 6).
 
-- [ ] **Step 4: Run linter**
-
-  ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep "error" | head -10
-  ```
-
-  Expected: 0 errors in `WorkspaceOverviewTab.tsx`.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
   ```bash
   git add src/components/workspace/WorkspaceOverviewTab.tsx
@@ -397,25 +625,28 @@
 
 ---
 
-### Task 4: Refactor CollectionOverviewTab — two-column overview, new Documentation tab, remove Readme/Tags tabs
+### Task 6: Refactor CollectionOverviewTab — use docs field, two-column overview, Documentation tab
 
 **Files:**
 - Modify: `src/components/collections/CollectionOverviewTab.tsx`
 
-**Context:** This is the main refactor. Changes:
-1. Update `TABS` array: remove Readme and Tags entries, add Documentation entry (`value: 'documentation'`).
-2. Update `validSections` to `['overview', 'auth', 'variables', 'documentation']`.
-3. Add `docMode` state, `saveDocFn`, second `useSaveButton` instance, `persistedReadme`, `isDocDirty`.
-4. Reset `docMode` to `'preview'` on collection load.
-5. Replace the overview section's single-column `<ScrollArea>` with a two-column layout: left scrollable column (MethodBreakdown, Default Headers, Requests, Tags cards) + right column (`<MarkdownEditor>` with doc-specific save wiring).
-6. Remove the `{activeSection === 'readme' && ...}` block entirely.
-7. Remove the `{activeSection === 'tags' && ...}` block entirely.
-8. Add `{activeSection === 'documentation' && ...}` block: full-height `<MarkdownEditor>` using the global `triggerSave`/`saveState`/`isDirty` (same as the old Readme tab).
-9. Remove the `description` textarea from the overview section.
+**Context:** This is the main UI refactor. The `readme` state variable is renamed to `docs` throughout to match the updated `CollectionSettings.docs` field. Changes: (1) rename `readme`→`docs` in all state/handlers; (2) update `TABS` and `validSections`; (3) add `docMode` state, `saveDocFn`, second `useSaveButton`, `persistedDocs`, `isDocDirty`; (4) reset `docMode` on collection load; (5) two-column overview section with Tags card; (6) replace Readme+Tags tabs with Documentation tab.
 
-- [ ] **Step 1: Update TABS array and validSections**
+- [ ] **Step 1: Rename readme state to docs throughout**
 
-  Find the `TABS` constant (around line 187):
+  Find every occurrence of `readme` in the component body (not imports) and rename to `docs`:
+
+  - `const [readme, setReadme] = useState('');` → `const [docs, setDocs] = useState('');`
+  - `setReadme(s.readme ?? '');` → `setDocs(s.docs ?? '');`
+  - `readme: readme || undefined,` in `saveSettings` → `docs: docs || undefined,`
+  - The `saveSettings` dependency array: `description, readme` → `docs` (and remove `description`)
+  - Remove the `const [description, setDescription] = useState('');` line entirely
+  - Remove `setDescription(s.description ?? '');` from the load effect
+  - Remove `description: description || undefined,` from `saveSettings`
+
+- [ ] **Step 2: Update TABS and validSections**
+
+  Find the `TABS` constant:
   ```tsx
   const TABS: { label: string; value: CollectionSection }[] = [
     { label: 'Overview', value: 'overview' },
@@ -436,7 +667,7 @@
   ];
   ```
 
-  Find the `validSections` line (around line 218):
+  Find `validSections`:
   ```tsx
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'readme', 'tags'];
   ```
@@ -446,24 +677,20 @@
   const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
   ```
 
-- [ ] **Step 2: Add docMode state**
+- [ ] **Step 3: Add docMode state and second save hook**
 
-  After `const [readme, setReadme] = useState('');`, add:
-
+  After `const [docs, setDocs] = useState('');`, add:
   ```tsx
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   ```
 
-- [ ] **Step 3: Add saveDocFn and second useSaveButton hook**
-
   After `const { state: saveState, trigger: triggerSave } = useSaveButton(saveSettings, 'Failed to save settings');`, add:
-
   ```tsx
   const saveDocFn = useCallback(async () => {
     await saveCollectionSettings(collectionName, {
-      readme: readme.trim() || undefined,
+      docs: docs.trim() || undefined,
     });
-  }, [collectionName, readme]);
+  }, [collectionName, docs]);
 
   const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(
     saveDocFn,
@@ -471,32 +698,28 @@
   );
   ```
 
-- [ ] **Step 4: Add persistedReadme and isDocDirty**
+- [ ] **Step 4: Add persistedDocs and isDocDirty**
 
-  After `const statsLine = ...` (after the early-return guards), add:
-
+  After `const statsLine = ...` (after the loading/error early returns), add:
   ```tsx
-  const persistedReadme = collection.settings.readme ?? '';
-  const isDocDirty = readme !== persistedReadme;
+  const persistedDocs = collection.settings.docs ?? '';
+  const isDocDirty = docs !== persistedDocs;
   ```
 
 - [ ] **Step 5: Reset docMode on collection load**
 
-  Find the load `useEffect`. Add `setDocMode('preview');` immediately after `setLoading(true);`:
-
+  In the load `useEffect`, add `setDocMode('preview');` immediately after `setLoading(true);`:
   ```tsx
   useEffect(() => {
     setLoading(true);
     setDocMode('preview');
     setIsLoaded(false);
-    setError(null);
-    getCollection(collectionName)
-      .then((col) => {
+    ...
   ```
 
 - [ ] **Step 6: Replace the entire tab content section**
 
-  Find the entire block from `<div ref={scrollContainerRef} className='relative flex-1 min-h-0'>` through its closing `</div>` (currently wrapping `<ScrollArea>` with all tab sections inside). Replace with:
+  Replace the block from `<div ref={scrollContainerRef} ...>` through its closing `</div>` with:
 
   ```tsx
   <div ref={scrollContainerRef} className='relative flex-1 min-h-0'>
@@ -575,8 +798,8 @@
         {/* RIGHT — Documentation panel */}
         <div className='w-80 flex-shrink-0 flex flex-col p-4'>
           <MarkdownEditor
-            value={readme}
-            onChange={setReadme}
+            value={docs}
+            onChange={setDocs}
             mode={docMode}
             onModeChange={setDocMode}
             onSave={() => void triggerSaveDoc()}
@@ -592,23 +815,23 @@
     {activeSection !== 'overview' && (
       <ScrollArea className='h-full'>
         <div className='p-6 max-w-3xl mx-auto space-y-6'>
-          {/* Authorization tab */}
+          {/* Authorization tab — keep existing JSX exactly as-is */}
           {activeSection === 'auth' && (
-            /* KEEP EXISTING AUTH TAB JSX EXACTLY AS-IS */
+            /* PASTE EXISTING AUTH TAB CONTENT HERE — NO CHANGES */
           )}
 
-          {/* Variables tab */}
+          {/* Variables tab — keep existing JSX exactly as-is */}
           {activeSection === 'variables' && (
-            /* KEEP EXISTING VARIABLES TAB JSX EXACTLY AS-IS */
+            /* PASTE EXISTING VARIABLES TAB CONTENT HERE — NO CHANGES */
           )}
 
           {/* Documentation tab — full-page editor */}
           {activeSection === 'documentation' && (
             <div className='h-full flex flex-col'>
               <MarkdownEditor
-                value={readme}
+                value={docs}
                 onChange={(v) => {
-                  setReadme(v);
+                  setDocs(v);
                   setIsDirty(true);
                 }}
                 mode={docMode}
@@ -628,13 +851,9 @@
   </div>
   ```
 
-  **Important:** Copy the existing auth and variables tab JSX blocks exactly — do not alter their content. Remove the `{activeSection === 'readme' && ...}` and `{activeSection === 'tags' && ...}` blocks entirely.
+  **Important:** Copy the existing auth and variables tab JSX blocks verbatim. Remove the `{activeSection === 'readme' && ...}` and `{activeSection === 'tags' && ...}` blocks entirely.
 
-- [ ] **Step 7: Remove unused imports**
-
-  After the refactor, `TagsList` is still imported and used. `MarkdownEditor` import already exists. Verify `description` is still declared as state (it is — it stays in the `saveSettings` payload). The `description` textarea render is not in the new overview JSX, so it's gone. No other cleanup needed.
-
-- [ ] **Step 8: Verify TypeScript compiles clean**
+- [ ] **Step 7: Verify TypeScript compiles clean**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -30
@@ -642,7 +861,7 @@
 
   Expected: 0 errors.
 
-- [ ] **Step 9: Run linter**
+- [ ] **Step 8: Run linter**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep "error" | head -20
@@ -650,24 +869,24 @@
 
   Expected: 0 errors.
 
-- [ ] **Step 10: Run all tests**
+- [ ] **Step 9: Run all tests**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn test 2>&1 | tail -15
   ```
 
-  Expected: all pass (including the 11 MarkdownEditor tests from Task 2).
+  Expected: all pass.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 10: Commit**
 
   ```bash
   git add src/components/collections/CollectionOverviewTab.tsx
-  git commit -m "feat(collection-overview): two-column overview, Documentation tab, remove Readme/Tags tabs"
+  git commit -m "feat(collection-overview): two-column overview, Documentation tab, docs field, remove Readme/Tags tabs"
   ```
 
 ---
 
-### Task 5: Manual smoke test
+### Task 7: Manual smoke test
 
 **Files:** None — validation only.
 
@@ -677,47 +896,39 @@
   cd /Users/snehaldangroshiya/data/rocket && yarn dev
   ```
 
-  Open `http://localhost:1420`.
+- [ ] **Step 2: Verify documentation saves to docs: in the YML**
 
-- [ ] **Step 2: Verify Workspace Overview tab**
+  Open any collection → Overview tab → Documentation panel (right column) → Edit → type `# Hello` → blur.
 
-  Open the Workspace Overview tab.
+  Then inspect the file on disk:
 
-  Expected: right column Documentation card looks identical to before — Edit/Preview tabs, monospace textarea, save-on-blur footer, markdown preview with empty state.
+  ```bash
+  find ~/.rocket-api -name "opencollection.yml" | head -3 | xargs grep -l "Hello" 2>/dev/null | head -1 | xargs cat
+  ```
 
-- [ ] **Step 3: Verify Collection Overview tab — two-column layout**
+  Expected: the file contains `docs: "# Hello"` (or a multiline block scalar) — NOT `readme:`.
+
+- [ ] **Step 3: Verify Workspace Overview tab unchanged**
+
+  Open the Workspace Overview tab. Documentation card looks identical, saves correctly.
+
+- [ ] **Step 4: Verify Collection Overview tab — two-column layout**
 
   Open any collection → Overview tab.
 
   Expected:
-  - Tab bar shows: Overview · Authorization · Variables · Documentation (no Readme, no Tags)
-  - Left column: MethodBreakdown card, Default Headers card (rows + Save button), Requests card (search + rows), Tags card (read-only tag chips or "No tags found" message)
-  - Right column (320px): Documentation card (MarkdownEditor) with Edit/Preview tabs
-  - Vertical border divider between columns
-  - No description textarea
+  - Tab bar: Overview · Authorization · Variables · Documentation
+  - Left column: MethodBreakdown, Default Headers, Requests, Tags cards
+  - Right column (320px): Documentation panel (MarkdownEditor)
 
-- [ ] **Step 4: Verify Documentation panel in overview saves to readme**
+- [ ] **Step 5: Verify Documentation tab full-page**
 
-  In the right column of Overview:
-  - Click Edit, type `# Hello world`, blur — button shows Saved
-  - Close and reopen the collection — text persists
-  - Click the **Documentation** tab — same text appears there (same `readme` field)
+  Click Documentation tab — full-page MarkdownEditor, same content as right-column panel, saves correctly.
 
-- [ ] **Step 5: Verify Documentation tab (full-page)**
-
-  Click the Documentation tab.
-
-  Expected: full-width `MarkdownEditor` with the same content, Edit/Preview toggle works, Save button inside the editor saves correctly.
-
-- [ ] **Step 6: Verify Authorization and Variables tabs still work**
+- [ ] **Step 6: Verify Authorization and Variables tabs work**
 
   Click each — content unchanged, save works.
 
-- [ ] **Step 7: Verify Default Headers save**
+- [ ] **Step 7: Verify Bruno interop**
 
-  Add a header on the Overview tab, click Save — persists after reopening.
-
-- [ ] **Step 8: Verify Tags card**
-
-  On a collection that has requests with tags: Tags card shows tag chips with counts.
-  On a collection with no tagged requests: Tags card shows "No tags found. Add tags to requests to see them here."
+  If a Bruno collection with a `docs:` field is available, open it in Rocket and confirm the documentation content appears in the Documentation panel.

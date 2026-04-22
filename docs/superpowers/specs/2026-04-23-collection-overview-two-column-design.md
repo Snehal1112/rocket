@@ -55,7 +55,16 @@ The `validSections` guard in `CollectionOverviewTab` already falls back to `'ove
 
 ## Data
 
-No backend changes. `readme` field on the collection settings already exists and is loaded/saved by `CollectionOverviewTab`. Both the Overview Documentation panel and the Documentation tab read/write the same `readme` state.
+**Backend correction required.** The OpenCollection spec defines `docs:` as the standard field for collection-level markdown documentation. Bruno stores collection docs in `docs {}` in `.bru`, which serializes to `docs:` in YAML. Currently Rocket maps `docs:` → `CollectionSettings.description` (a short summary field) and uses a non-standard `readme:` extension field for the long-form markdown.
+
+The fix:
+- Remove `description` and `readme` from `CollectionSettings`; replace with a single `docs: Option<String>` field
+- In `OcCollection` (infra serde struct): remove `readme` field; `docs` stays and maps to `CollectionSettings.docs`
+- In `oc_conversions.rs`: `oc_collection_to_collection` reads `oc.docs` → `settings.docs`; `collection_to_oc_collection` writes `col.settings.docs` → `oc.docs`
+- Frontend `CollectionSettings` interface: replace `description?: string` and `readme?: string` with `docs?: string`
+- `CollectionOverviewTab`: replace all `readme` state with `docs` state; `saveSettings` payload uses `docs`
+
+The `description` textarea on the overview section was already being removed (replaced by the Documentation panel) — this change cleans up the underlying field too. No migration needed for existing users: any data in the non-standard `readme:` field will be lost on next save (acceptable since it was never spec-compliant), and `docs:` already round-trips correctly for collections that used the description field.
 
 ## Component Reuse
 
