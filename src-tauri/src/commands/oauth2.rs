@@ -309,7 +309,18 @@ async fn auth_code_flow(
 
     auth_url = apply_params_to_url(&auth_url, &config.auth_params);
 
-    let (code, actual_redirect_uri) = if config.use_system_browser {
+    // On macOS and Windows, Tauri injects IPC initialization scripts into every
+    // WKWebView/WebView2 window. These overwrite window.webkit.messageHandlers,
+    // which some OIDC providers (e.g. Keycloak) use natively for their own
+    // session/nonce management. This causes those providers to return
+    // "Failed to parse nonce as string" when the auth window loads.
+    // The system browser is not affected by script injection, so we default
+    // to it on macOS/Windows per RFC 8252 §4.1. The user can still force the
+    // embedded webview by explicitly toggling "Use System Browser" off.
+    let use_system_browser =
+        config.use_system_browser || cfg!(any(target_os = "macos", target_os = "windows"));
+
+    let (code, actual_redirect_uri) = if use_system_browser {
         auth_code_via_system_browser(app, &auth_url, &state).await?
     } else {
         let code = auth_code_via_webview(
