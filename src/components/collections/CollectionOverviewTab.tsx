@@ -405,8 +405,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       {/* Collection header. */}
       <div
         className={cn(
-          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-shadow duration-200',
-          isScrolled && 'shadow-[0_4px_16px_rgba(0,0,0,0.12)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.5)]',
+          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-[filter] duration-200',
+          isScrolled && 'drop-shadow-[0_4px_16px_rgba(0,0,0,0.12)] dark:drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)]',
         )}
       >
         <div className='flex items-center gap-2 mb-1'>
