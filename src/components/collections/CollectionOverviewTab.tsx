@@ -14,6 +14,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSaveButton } from '@/hooks/use-save-button';
+import {
+  type ApiOAuth2Auth,
+  apiAuthToOAuth2State,
+  oauth2StateToApiAuth,
+} from '@/lib/oauth2-mapping';
 import type { Auth } from '@/lib/tauri-api';
 import {
   type Collection,
@@ -71,64 +76,9 @@ function toAuthState(auth: Collection['settings']['auth']): AuthState {
 
   // Rust uses "o-auth2" authType and OAuth2Flow shape: { flow, credentials, accessTokenUrl }.
   if (authType === 'o-auth2' || authType === 'oauth2') {
-    const flow = (a.flow ?? a.grantType ?? 'client_credentials') as string;
-    const creds = (a.credentials ?? {}) as Record<string, unknown>;
-    const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
-    const grantType =
-      flow === 'resource_owner_password_credentials'
-        ? 'password'
-        : flow === 'authorization_code'
-          ? 'authorization_code'
-          : flow === 'implicit'
-            ? 'implicit'
-            : 'client_credentials';
     return {
       authType: 'oauth2' as const,
-      oauth2: {
-        grantType: grantType as
-          | 'client_credentials'
-          | 'password'
-          | 'authorization_code'
-          | 'implicit',
-        authorizationUrl: (a.authorizationUrl as string) ?? '',
-        tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
-        callbackUrl:
-          (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
-        clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
-        clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
-        scope: (a.scope as string) ?? '',
-        state: (a.state as string) ?? '',
-        username: (resourceOwner.username as string) ?? (a.username as string) ?? '',
-        password: (resourceOwner.password as string) ?? (a.password as string) ?? '',
-        clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
-        headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
-        addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
-        // verifySsl lives in settings.verifySsl on the API response (nested in OAuth2Settings).
-        verifySsl:
-          ((a.settings as Record<string, unknown> | undefined)?.verifySsl as boolean) ?? true,
-        accessToken: (a.accessToken as string) ?? '',
-        refreshToken: (a.refreshToken as string) ?? '',
-        expiresIn: (a.expiresIn as number) ?? null,
-        tokenAcquiredAt: (a.tokenAcquiredAt as number) ?? null,
-        usePkce: true,
-        useSystemBrowser: false,
-        tokenSource: 'accessToken',
-        tokenId: '',
-        refreshTokenUrl: (a.refreshTokenUrl as string) ?? '',
-        autoFetchToken:
-          ((a.settings as Record<string, unknown> | undefined)?.autoFetchToken as boolean) ??
-          true,
-        autoRefreshToken:
-          ((a.settings as Record<string, unknown> | undefined)?.autoRefreshToken as boolean) ??
-          false,
-        authParams: [],
-        tokenParams: [],
-        refreshParams: [],
-        idToken: '',
-        tokenType: '',
-        responseScope: '',
-        idTokenClaims: null,
-      },
+      oauth2: apiAuthToOAuth2State(auth as unknown as ApiOAuth2Auth),
     };
   }
 
@@ -194,57 +144,9 @@ function authStateToApi(auth: AuthState): Auth | undefined {
         value: auth.apiKey?.value ?? '',
         placement: auth.apiKey?.addTo ?? 'header',
       };
-    case 'oauth2': {
-      const o = auth.oauth2;
-      const gt = o?.grantType ?? 'client_credentials';
-      const flow =
-        gt === 'password'
-          ? 'resource_owner_password_credentials'
-          : gt === 'authorization_code'
-            ? 'authorization_code'
-            : gt === 'implicit'
-              ? 'implicit'
-              : 'client_credentials';
-      // Implicit flow: flat shape with clientId, no credentials object.
-      if (flow === 'implicit') {
-        return {
-          authType: 'o-auth2',
-          flow: 'implicit',
-          authorizationUrl: o?.authorizationUrl ?? '',
-          clientId: o?.clientId ?? '',
-          callbackUrl: o?.callbackUrl || undefined,
-          scope: o?.scope || undefined,
-          state: o?.state || undefined,
-          settings: { verifySsl: o?.verifySsl ?? true },
-        } as unknown as Auth;
-      }
-      const base = {
-        authType: 'o-auth2' as const,
-        flow,
-        accessTokenUrl: o?.tokenUrl ?? '',
-        credentials: { clientId: o?.clientId ?? '', clientSecret: o?.clientSecret ?? '' },
-        scope: o?.scope || undefined,
-        settings: { verifySsl: o?.verifySsl ?? true },
-      };
-      if (flow === 'authorization_code') {
-        return {
-          ...base,
-          authorizationUrl: o?.authorizationUrl ?? '',
-          callbackUrl: o?.callbackUrl || undefined,
-          state: o?.state || undefined,
-        } as unknown as Auth;
-      }
-      if (flow === 'resource_owner_password_credentials') {
-        return {
-          ...base,
-          resourceOwner: o?.username
-            ? { username: o.username, password: o.password ?? '' }
-            : undefined,
-        } as unknown as Auth;
-      }
-      // client_credentials
-      return base as unknown as Auth;
-    }
+    case 'oauth2':
+      if (!auth.oauth2) return undefined;
+      return oauth2StateToApiAuth(auth.oauth2) as Auth;
     case 'aws-sig-v4': {
       const a = auth.awsSigV4;
       return {

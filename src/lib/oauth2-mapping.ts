@@ -48,7 +48,8 @@ interface ApiOAuth2Settings {
 }
 
 export interface ApiOAuth2Auth {
-  authType: 'OAuth2';
+  [key: string]: unknown;
+  authType: 'o-auth2';
   flow: string;
   authorizationUrl?: string;
   accessTokenUrl?: string;
@@ -71,7 +72,7 @@ type OAuth2State = NonNullable<AuthState['oauth2']>;
 
 function frontendParamsToApi(params: OAuth2AdditionalParam[]): ApiOAuth2AdditionalParameter[] {
   return params
-    .filter((p) => p.key || p.value)
+    .filter((p) => p.enabled)
     .map((p) => ({
       name: p.key,
       value: p.value,
@@ -124,7 +125,7 @@ export function oauth2StateToApiAuth(state: OAuth2State): ApiOAuth2Auth {
   };
 
   const base = {
-    authType: 'OAuth2' as const,
+    authType: 'o-auth2' as const,
     additionalParameters,
     tokenConfig,
     settings,

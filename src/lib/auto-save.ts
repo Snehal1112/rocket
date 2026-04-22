@@ -1,4 +1,5 @@
 import { toApiAuth } from '@/lib/execute-request';
+import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
 import { type Request, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
@@ -6,6 +7,11 @@ import type { RequestState } from '@/types/pane-types';
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function toApiRequest(uid: string, name: string, request: RequestState): Request {
+  const auth =
+    request.auth.authType === 'oauth2' && request.auth.oauth2
+      ? oauth2StateToApiAuth(request.auth.oauth2)
+      : toApiAuth(request.auth);
+
   return {
     uid,
     name,
@@ -18,7 +24,7 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
       request.body.mode !== 'none'
         ? { mode: request.body.mode, content: request.body.content }
         : undefined,
-    auth: toApiAuth(request.auth),
+    auth,
   };
 }
 

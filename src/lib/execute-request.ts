@@ -61,7 +61,7 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
         placement: auth.apiKey?.addTo ?? 'header',
       };
     case 'oauth2':
-      // Send the stored access token as a bearer token.
+      // For execution, send the stored access token as a bearer token.
       return {
         authType: 'bearer',
         token: resolve(auth.oauth2?.accessToken ?? ''),

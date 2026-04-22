@@ -1,6 +1,7 @@
 import { Check, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
 import { type Request as ApiRequest, type Auth, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
@@ -31,53 +32,9 @@ function authForSave(auth: RequestTab['request']['auth']): Auth {
         value: auth.apiKey?.value ?? '',
         placement: auth.apiKey?.addTo ?? 'header',
       };
-    case 'oauth2': {
-      const o = auth.oauth2;
-      const gt = o?.grantType ?? 'client_credentials';
-      const flow =
-        gt === 'password'
-          ? 'resource_owner_password_credentials'
-          : gt === 'authorization_code'
-            ? 'authorization_code'
-            : gt === 'implicit'
-              ? 'implicit'
-              : 'client_credentials';
-      if (flow === 'implicit') {
-        return {
-          authType: 'o-auth2',
-          flow: 'implicit',
-          authorizationUrl: o?.authorizationUrl ?? '',
-          clientId: o?.clientId ?? '',
-          callbackUrl: o?.callbackUrl || undefined,
-          scope: o?.scope || undefined,
-          state: o?.state || undefined,
-        } as Auth;
-      }
-      const base = {
-        authType: 'o-auth2',
-        flow,
-        accessTokenUrl: o?.tokenUrl ?? '',
-        credentials: { clientId: o?.clientId ?? '', clientSecret: o?.clientSecret ?? '' },
-        scope: o?.scope || undefined,
-      };
-      if (flow === 'authorization_code') {
-        return {
-          ...base,
-          authorizationUrl: o?.authorizationUrl ?? '',
-          callbackUrl: o?.callbackUrl || undefined,
-          state: o?.state || undefined,
-        } as Auth;
-      }
-      if (flow === 'resource_owner_password_credentials') {
-        return {
-          ...base,
-          resourceOwner: o?.username
-            ? { username: o.username, password: o.password ?? '' }
-            : undefined,
-        } as Auth;
-      }
-      return base as Auth;
-    }
+    case 'oauth2':
+      if (!auth.oauth2) return { authType: 'none' };
+      return oauth2StateToApiAuth(auth.oauth2) as Auth;
     case 'aws-sig-v4':
       return {
         authType: 'aws-sig-v4',

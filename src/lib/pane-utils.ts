@@ -1,3 +1,4 @@
+import { type ApiOAuth2Auth, apiAuthToOAuth2State } from '@/lib/oauth2-mapping';
 import type { Request as ApiRequest } from '@/lib/tauri-api';
 import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import type {
@@ -30,64 +31,12 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
         apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.placement },
       };
       break;
-    case 'o-auth2': {
-      const a = req.auth as Record<string, unknown>;
-      // Support Rust OAuth2Flow shape (flow + credentials + accessTokenUrl) and legacy flat shape.
-      const flow = (a.flow ?? a.grantType ?? 'client_credentials') as string;
-      const creds = (a.credentials ?? {}) as Record<string, unknown>;
-      const resourceOwner = (a.resourceOwner ?? {}) as Record<string, unknown>;
-      const grantType =
-        flow === 'resource_owner_password_credentials'
-          ? 'password'
-          : flow === 'authorization_code'
-            ? 'authorization_code'
-            : flow === 'implicit'
-              ? 'implicit'
-              : 'client_credentials';
+    case 'o-auth2':
       auth = {
         authType: 'oauth2',
-        oauth2: {
-          grantType: grantType as
-            | 'client_credentials'
-            | 'password'
-            | 'authorization_code'
-            | 'implicit',
-          authorizationUrl: (a.authorizationUrl as string) ?? '',
-          tokenUrl: (a.accessTokenUrl as string) ?? (a.tokenUrl as string) ?? '',
-          callbackUrl:
-            (a.callbackUrl as string) ?? 'https://exchange4all.local/webapp/#oidc-callback',
-          clientId: (creds.clientId as string) ?? (a.clientId as string) ?? '',
-          clientSecret: (creds.clientSecret as string) ?? (a.clientSecret as string) ?? '',
-          scope: (a.scope as string) ?? '',
-          state: (a.state as string) ?? '',
-          username: (resourceOwner.username as string) ?? (a.username as string) ?? '',
-          password: (resourceOwner.password as string) ?? (a.password as string) ?? '',
-          clientAuthentication: ((a.clientAuthentication as string) ?? 'body') as 'header' | 'body',
-          headerPrefix: (a.headerPrefix as string) ?? 'Bearer',
-          addTokenTo: ((a.addTokenTo as string) ?? 'header') as 'header' | 'queryParams',
-          verifySsl: (a.verifySsl as boolean) ?? true,
-          accessToken: (a.accessToken as string) ?? '',
-          refreshToken: (a.refreshToken as string) ?? '',
-          expiresIn: (a.expiresIn as number) ?? null,
-          tokenAcquiredAt: (a.tokenAcquiredAt as number) ?? null,
-          usePkce: true,
-          useSystemBrowser: false,
-          tokenSource: 'accessToken',
-          tokenId: '',
-          refreshTokenUrl: '',
-          autoFetchToken: true,
-          autoRefreshToken: false,
-          authParams: [],
-          tokenParams: [],
-          refreshParams: [],
-          idToken: '',
-          tokenType: '',
-          responseScope: '',
-          idTokenClaims: null,
-        },
+        oauth2: apiAuthToOAuth2State(req.auth as unknown as ApiOAuth2Auth),
       };
       break;
-    }
     case 'aws-sig-v4': {
       const a = req.auth as Record<string, unknown>;
       auth = {
