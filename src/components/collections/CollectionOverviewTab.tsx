@@ -316,17 +316,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     'Failed to save settings',
   );
 
-  const saveDocFn = useCallback(async () => {
-    await saveCollectionSettings(collectionName, {
-      docs: docs.trim() || undefined,
-    });
-  }, [collectionName, docs]);
-
-  const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(
-    saveDocFn,
-    'Failed to save documentation',
-  );
-
   const handleAuthTypeChange = useCallback(
     (authType: AuthState['authType']) => {
       const next: AuthState = { authType };
@@ -520,14 +509,17 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             <div className='w-80 flex-shrink-0 flex flex-col p-4'>
               <MarkdownEditor
                 value={docs}
-                onChange={setDocs}
+                onChange={(v) => {
+                  setDocs(v);
+                  setIsDirty(true);
+                }}
                 mode={docMode}
                 onModeChange={setDocMode}
-                onSave={() => void triggerSaveDoc()}
-                saveState={saveDocState}
+                onSave={() => void triggerSave()}
+                saveState={saveState}
                 isDirty={isDocDirty}
                 onBlur={() => {
-                  if (isDocDirty) void triggerSaveDoc();
+                  if (isDocDirty) void triggerSave();
                 }}
               />
             </div>
@@ -643,14 +635,17 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           <div className='flex-1 flex flex-col p-6'>
             <MarkdownEditor
               value={docs}
-              onChange={setDocs}
+              onChange={(v) => {
+                setDocs(v);
+                setIsDirty(true);
+              }}
               mode={docMode}
               onModeChange={setDocMode}
               onSave={() => void triggerSave()}
               saveState={saveState}
-              isDirty={isDirty}
+              isDirty={isDocDirty}
               onBlur={() => {
-                if (isDirty) void triggerSave();
+                if (isDocDirty) void triggerSave();
               }}
             />
           </div>
