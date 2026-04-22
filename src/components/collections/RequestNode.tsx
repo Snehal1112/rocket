@@ -1,4 +1,4 @@
-import { Copy, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Copy, FolderInput, LayoutPanelLeft, MoreHorizontal, PanelBottom, PanelRight, Pencil, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
@@ -189,7 +189,10 @@ export function RequestNode({
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuContent
+              className='w-48 bg-card/40 backdrop-blur-sm'
+              onClick={(e) => e.stopPropagation()}
+            >
               <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
                 <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
               </DropdownMenuItem>
@@ -199,10 +202,12 @@ export function RequestNode({
                   setIsRenaming(true);
                 }}
               >
-                Rename
+                <Pencil aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Rename
               </DropdownMenuItem>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Move to...</DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger>
+                  <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
+                </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className='w-48'>
                   {summaries.map((s) => (
                     <DropdownMenuItem
@@ -222,12 +227,14 @@ export function RequestNode({
               {/* Pane-targeting actions. */}
               {otherGroupIds.length === 1 && (
                 <DropdownMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
-                  Open in other pane
+                  <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
                 </DropdownMenuItem>
               )}
               {otherGroupIds.length > 1 && (
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Open in other pane</DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger>
+                    <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
+                  </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className='w-48'>
                     {otherGroupIds.map((gid) => (
                       <DropdownMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
@@ -238,10 +245,10 @@ export function RequestNode({
                 </DropdownMenuSub>
               )}
               <DropdownMenuItem onClick={() => openInSplit('horizontal')}>
-                Open to right
+                <PanelRight aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open to right
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => openInSplit('vertical')}>
-                Open below
+                <PanelBottom aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open below
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -260,7 +267,7 @@ export function RequestNode({
       {/* Right-click context menu — same actions, power-user shortcut. */}
       <ContextMenuContent className='w-48'>
         <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
-          Duplicate
+          <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() => {
@@ -268,10 +275,12 @@ export function RequestNode({
             setIsRenaming(true);
           }}
         >
-          Rename
+          <Pencil aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Rename
         </ContextMenuItem>
         <ContextMenuSub>
-          <ContextMenuSubTrigger>Move to...</ContextMenuSubTrigger>
+          <ContextMenuSubTrigger>
+            <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
+          </ContextMenuSubTrigger>
           <ContextMenuSubContent className='w-48'>
             {summaries.map((s) => (
               <ContextMenuItem
@@ -289,12 +298,14 @@ export function RequestNode({
         {/* Pane-targeting actions. */}
         {otherGroupIds.length === 1 && (
           <ContextMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
-            Open in other pane
+            <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
           </ContextMenuItem>
         )}
         {otherGroupIds.length > 1 && (
           <ContextMenuSub>
-            <ContextMenuSubTrigger>Open in other pane</ContextMenuSubTrigger>
+            <ContextMenuSubTrigger>
+              <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
+            </ContextMenuSubTrigger>
             <ContextMenuSubContent className='w-48'>
               {otherGroupIds.map((gid) => (
                 <ContextMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
@@ -304,14 +315,18 @@ export function RequestNode({
             </ContextMenuSubContent>
           </ContextMenuSub>
         )}
-        <ContextMenuItem onClick={() => openInSplit('horizontal')}>Open to right</ContextMenuItem>
-        <ContextMenuItem onClick={() => openInSplit('vertical')}>Open below</ContextMenuItem>
+        <ContextMenuItem onClick={() => openInSplit('horizontal')}>
+          <PanelRight aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open to right
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => openInSplit('vertical')}>
+          <PanelBottom aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open below
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           className='text-destructive'
           onClick={() => onDelete({ type: 'request', collection: collectionName, path, name })}
         >
-          Delete
+          <Trash2 aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Delete
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
