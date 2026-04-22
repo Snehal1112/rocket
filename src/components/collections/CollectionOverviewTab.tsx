@@ -403,12 +403,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   return (
     <div className='flex h-full flex-col overflow-hidden'>
       {/* Collection header. */}
-      <div
-        className={cn(
-          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-[filter] duration-200',
-          isScrolled && 'drop-shadow-[0_4px_16px_rgba(0,0,0,0.12)] dark:drop-shadow-[0_4px_16px_rgba(0,0,0,0.5)]',
-        )}
-      >
+      <div className='shrink-0 border-b border-border/70 px-6 pt-4 pb-0'>
         <div className='flex items-center gap-2 mb-1'>
           <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
           <h1 className='text-lg font-semibold leading-tight truncate'>{collection.name}</h1>
@@ -440,7 +435,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       </div>
 
       {/* Tab content. */}
-      <div ref={scrollContainerRef} className='flex-1 min-h-0'>
+      <div
+        ref={scrollContainerRef}
+        className={cn(
+          'flex-1 min-h-0 transition-shadow duration-200',
+          isScrolled && 'shadow-[inset_0_8px_6px_-6px_rgba(0,0,0,0.35)]',
+        )}
+      >
         <ScrollArea className='h-full'>
           <div className='p-6 max-w-3xl mx-auto space-y-6'>
           {/* Overview tab. */}
