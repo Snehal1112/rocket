@@ -447,7 +447,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'overview' && (
           <div className='flex h-full overflow-hidden'>
             {/* LEFT — scrollable cards */}
-            <div className='flex-1 border-r border-border overflow-hidden flex flex-col'>
+            <div className='flex-1 min-w-0 border-r border-border overflow-hidden flex flex-col'>
               <ScrollArea className='h-full'>
                 <div className='p-5 flex flex-col gap-5'>
                   <MethodBreakdown items={items} />
@@ -506,7 +506,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             </div>
 
             {/* RIGHT — Documentation panel */}
-            <div className='w-80 flex-shrink-0 flex flex-col p-4'>
+            <div className='flex-1 min-w-0 flex flex-col p-4'>
               <MarkdownEditor
                 value={docs}
                 onChange={(v) => {
