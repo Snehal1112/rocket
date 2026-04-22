@@ -965,8 +965,6 @@ pub struct OcCollection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub readme: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extensions: Option<serde_yaml::Value>,

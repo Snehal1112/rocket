@@ -16,17 +16,13 @@ pub struct CollectionVariable {
     pub secret: bool,
 }
 
-/// Per-collection default auth, headers, and variables, stored in collection.json.
+/// Per-collection default auth, headers, and variables, stored in opencollection.yml.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionSettings {
-    /// Optional human-readable description for this collection.
-    #[serde(default)]
-    pub description: Option<String>,
-
-    /// Optional markdown readme for this collection.
+    /// Markdown documentation for this collection (maps to `docs:` in opencollection.yml).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub readme: Option<String>,
+    pub docs: Option<String>,
 
     /// Optional auth applied to all requests in this collection.
     #[serde(default)]

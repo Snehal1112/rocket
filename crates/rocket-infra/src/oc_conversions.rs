@@ -1285,8 +1285,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
     // Convert request defaults to collection settings.
     let settings = if let Some(defaults) = oc.request {
         CollectionSettings {
-            description: oc.docs,
-            readme: oc.readme.clone(),
+            docs: oc.docs,
             auth: defaults.auth.map(Auth::from),
             headers: defaults
                 .headers
@@ -1303,8 +1302,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         }
     } else {
         CollectionSettings {
-            description: oc.docs,
-            readme: oc.readme,
+            docs: oc.docs,
             ..CollectionSettings::default()
         }
     };
@@ -1396,8 +1394,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         config: None,
         items: if items.is_empty() { None } else { Some(items) },
         request,
-        docs: col.settings.description,
-        readme: col.settings.readme,
+        docs: col.settings.docs,
         bundled: None,
         extensions: None,
     }
@@ -2432,6 +2429,35 @@ items:
         };
         let oc = super::collection_to_oc_collection(col);
         assert_eq!(oc.opencollection.as_deref(), Some("1.0.0"));
+    }
+}
+
+#[cfg(test)]
+mod docs_roundtrip_tests {
+    use super::*;
+
+    #[test]
+    fn collection_docs_roundtrips_through_docs_field() {
+        use crate::opencollection::OcCollection;
+        use rocket_collection::settings::CollectionSettings;
+
+        let oc = OcCollection {
+            opencollection: Some("1.0.0".into()),
+            uid: None,
+            info: None,
+            config: None,
+            items: None,
+            request: None,
+            docs: Some("# Hello\nWorld".into()),
+            bundled: None,
+            extensions: None,
+        };
+
+        let col = oc_collection_to_collection(oc);
+        assert_eq!(col.settings.docs, Some("# Hello\nWorld".into()));
+
+        let oc2 = collection_to_oc_collection(col);
+        assert_eq!(oc2.docs, Some("# Hello\nWorld".into()));
     }
 }
 

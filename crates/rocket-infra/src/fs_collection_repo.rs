@@ -231,7 +231,6 @@ impl CollectionRepository for FsCollectionRepo {
             items: None,
             request: None,
             docs: None,
-            readme: None,
             bundled: None,
             extensions: None,
         };
@@ -513,8 +512,7 @@ impl CollectionRepository for FsCollectionRepo {
 
         if let Some(defaults) = oc.request {
             Ok(CollectionSettings {
-                description: oc.docs,
-                readme: oc.readme.clone(),
+                docs: oc.docs,
                 auth: defaults.auth.map(rocket_shared::types::Auth::from),
                 headers: defaults
                     .headers
@@ -531,8 +529,7 @@ impl CollectionRepository for FsCollectionRepo {
             })
         } else {
             Ok(CollectionSettings {
-                description: oc.docs,
-                readme: oc.readme,
+                docs: oc.docs,
                 ..CollectionSettings::default()
             })
         }
@@ -559,7 +556,6 @@ impl CollectionRepository for FsCollectionRepo {
                 items: None,
                 request: None,
                 docs: None,
-                readme: None,
                 bundled: None,
                 extensions: None,
             }
@@ -603,8 +599,7 @@ impl CollectionRepository for FsCollectionRepo {
         } else {
             None
         };
-        oc.docs = settings.description.clone();
-        oc.readme = settings.readme.clone();
+        oc.docs = settings.docs.clone();
 
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
@@ -1015,8 +1010,7 @@ mod tests {
         repo.create("my-api").unwrap();
 
         let original = rocket_collection::CollectionSettings {
-            description: None,
-            readme: None,
+            docs: None,
             auth: Some(Auth::Bearer { token: "tok_abc".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
             variables: vec![],
@@ -1035,8 +1029,7 @@ mod tests {
 
         // Save settings, then verify the request count stays zero.
         let settings = rocket_collection::CollectionSettings {
-            description: None,
-            readme: None,
+            docs: None,
             auth: Some(Auth::None),
             headers: vec![],
             variables: vec![],
@@ -1055,8 +1048,7 @@ mod tests {
         repo.create("my-api").unwrap();
 
         let settings = CollectionSettings {
-            description: Some("My API docs".into()),
-            readme: None,
+            docs: Some("My API docs".into()),
             auth: Some(Auth::Bearer { token: "tok".into() }),
             headers: vec![Header::new("X-Tenant", "acme")],
             variables: vec![],
@@ -1074,7 +1066,7 @@ mod tests {
         let loaded = repo.get_settings("my-api").unwrap();
         assert_eq!(loaded.auth, settings.auth);
         assert_eq!(loaded.headers.len(), 1);
-        assert_eq!(loaded.description, Some("My API docs".into()));
+        assert_eq!(loaded.docs, Some("My API docs".into()));
     }
 
     #[test]

@@ -86,7 +86,6 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
         items: None,
         request: None,
         docs: None,
-        readme: None,
         bundled: None,
         extensions: None,
     };
