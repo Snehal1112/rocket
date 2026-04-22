@@ -175,9 +175,14 @@ export function WorkspaceEnvironmentsTab() {
   return (
     <div className='h-full flex'>
       {/* Left panel: environment list. */}
-      <div className='w-52 border-r flex flex-col'>
-        <ScrollArea className='flex-1'>
-          <div className='p-2 space-y-0.5'>
+      <div className='w-52 border-r border-border/60 flex flex-col bg-card/50'>
+        <div className='px-3 pt-3 pb-1.5'>
+          <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+            Environments
+          </p>
+        </div>
+        <ScrollArea className='flex-1 px-2'>
+          <div className='pb-2 space-y-0.5'>
             {environments.map((env) => (
               <InlineEnvName
                 key={env.name}
@@ -207,7 +212,7 @@ export function WorkspaceEnvironmentsTab() {
             )}
           </div>
         </ScrollArea>
-        <div className='p-2 border-t flex gap-1'>
+        <div className='p-2 border-t border-border/60 flex gap-1'>
           <Button
             variant='ghost'
             size='icon'
@@ -220,7 +225,7 @@ export function WorkspaceEnvironmentsTab() {
           <Button
             variant='ghost'
             size='icon'
-            className='h-7 w-7 text-destructive'
+            className='h-7 w-7 text-destructive hover:text-destructive'
             onClick={() => void handleDeleteEnv()}
             disabled={!selectedName}
             title='Delete environment'
@@ -231,20 +236,35 @@ export function WorkspaceEnvironmentsTab() {
       </div>
 
       {/* Right panel: variable editor. */}
-      <div className='flex-1 flex flex-col'>
+      <div className='flex-1 flex flex-col min-w-0'>
         {selectedName ? (
           <>
-            {/* Environment name and auto-save indicator. */}
-            <div className='flex items-center justify-between px-3 py-2 border-b border-border shrink-0'>
-              <span className='text-sm font-medium truncate'>{selectedName}</span>
-              {savedAt !== null && <SavedPill key={savedAt} />}
+            {/* Column headers */}
+            <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
+              {/* checkbox placeholder */}
+              <div className='w-4 shrink-0' />
+              <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                Key
+              </p>
+              <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                Value
+              </p>
+              <div className='w-[52px] shrink-0 flex items-center justify-end'>
+                {savedAt !== null && <SavedPill key={savedAt} />}
+              </div>
             </div>
-            <ScrollArea className='flex-1 p-3'>
-              <div className='space-y-1.5'>
+            <ScrollArea className='flex-1'>
+              <div className='px-3 pt-2 pb-1 space-y-1'>
                 {editingVars.map((variable, idx) => {
                   return (
                     // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
-                    <div key={idx} className='flex gap-1.5 items-center'>
+                    <div
+                      key={idx}
+                      className={cn(
+                        'flex gap-1.5 items-center py-0.5 group',
+                        !variable.enabled && 'opacity-50',
+                      )}
+                    >
                       {/* Enabled toggle. */}
                       <Button
                         variant='ghost'
@@ -254,11 +274,11 @@ export function WorkspaceEnvironmentsTab() {
                           'w-4 h-4 rounded border p-0 shrink-0',
                           variable.enabled
                             ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                            : 'border-gray-300 hover:bg-muted',
+                            : 'border-border hover:bg-muted',
                         )}
                         title={variable.enabled ? 'Disable variable' : 'Enable variable'}
                       >
-                        {variable.enabled && <Check className='h-3.5 w-3.5' />}
+                        {variable.enabled && <Check className='h-3 w-3' />}
                       </Button>
 
                       {/* Key input. */}
@@ -266,7 +286,7 @@ export function WorkspaceEnvironmentsTab() {
                         placeholder='Key'
                         value={variable.key}
                         onChange={(e) => updateVar(idx, { key: e.target.value })}
-                        className='flex-1 text-sm h-7'
+                        className='flex-1 text-xs h-7 font-mono'
                       />
 
                       {/* Value input, masked when secret. */}
@@ -275,14 +295,14 @@ export function WorkspaceEnvironmentsTab() {
                         type={variable.secret ? 'password' : 'text'}
                         value={variable.value}
                         onChange={(e) => updateVar(idx, { value: e.target.value })}
-                        className='flex-1 text-sm h-7'
+                        className='flex-1 text-xs h-7 font-mono'
                       />
 
                       {/* Secret toggle. */}
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='h-6 w-6 shrink-0'
+                        className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
                         onClick={() => updateVar(idx, { secret: !variable.secret })}
                         title={variable.secret ? 'Show value' : 'Hide value'}
                       >
@@ -297,11 +317,11 @@ export function WorkspaceEnvironmentsTab() {
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='h-6 w-6 shrink-0'
+                        className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
                         onClick={() => removeVar(idx)}
                         title='Delete variable'
                       >
-                        <X className='h-3.5 w-3.5' />
+                        <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
                       </Button>
                     </div>
                   );
@@ -309,16 +329,21 @@ export function WorkspaceEnvironmentsTab() {
               </div>
             </ScrollArea>
 
-            <div className='p-3 pt-0'>
-              <Button variant='ghost' size='sm' onClick={addVar} className='text-sm'>
-                <Plus className='h-3.5 w-3.5 mr-1' />
+            <div className='px-3 py-2 border-t border-border/40 shrink-0'>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={addVar}
+                className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
+              >
+                <Plus className='h-3.5 w-3.5' />
                 Add Variable
               </Button>
             </div>
           </>
         ) : (
-          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-muted/20'>
-            <RocketIdle className='w-40 h-40 opacity-90' />
+          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-card/60'>
+            <RocketIdle className='w-36 h-36 opacity-70' />
             <div className='space-y-1.5'>
               <p className='text-sm font-medium text-foreground'>No environment selected</p>
               <p className='text-xs text-muted-foreground leading-relaxed'>

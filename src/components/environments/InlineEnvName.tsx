@@ -93,16 +93,20 @@ export function InlineEnvName({
   }
 
   return (
-    <button
-      type='button'
+    <Button
+      variant='ghost'
+      size='sm'
       onClick={onClick}
       onDoubleClick={enterEdit}
+      title='Double-click to rename'
       className={cn(
-        'w-full text-left px-2 py-1.5 text-sm rounded-sm truncate',
-        isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted/60',
+        'w-full justify-start px-2 h-7 text-sm font-normal rounded-sm truncate',
+        isSelected
+          ? 'bg-primary/10 text-primary hover:bg-primary/15 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/20'
+          : 'text-foreground/80 hover:text-foreground hover:bg-muted/60',
       )}
     >
-      {name}
-    </button>
+      <span className='truncate'>{name}</span>
+    </Button>
   );
 }

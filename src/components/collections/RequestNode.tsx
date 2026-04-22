@@ -276,7 +276,7 @@ export function RequestNode({
       </ContextMenuTrigger>
 
       {/* Right-click context menu — same actions, power-user shortcut. */}
-      <ContextMenuContent className='w-48'>
+      <ContextMenuContent className='w-48 bg-card/40 backdrop-blur-sm'>
         <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
           <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
         </ContextMenuItem>

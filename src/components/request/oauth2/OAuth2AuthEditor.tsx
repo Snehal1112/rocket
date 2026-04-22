@@ -361,11 +361,11 @@ export function OAuth2AuthEditor({
       </section>
 
       {/* ── Action bar ── */}
-      <div className='flex items-center gap-2 pt-4 mt-2 border-t border-border/60'>
+      <div className='flex flex-wrap items-center gap-2 pt-4 mt-2 border-t border-border/60'>
         <Button
           variant='default'
           size='sm'
-          className='text-sm min-h-[36px]'
+          className='text-sm shrink-0 whitespace-nowrap min-h-[36px]'
           disabled={getTokenDisabled}
           onClick={handleGetToken}
           aria-busy={gettingToken}
@@ -375,7 +375,7 @@ export function OAuth2AuthEditor({
         <Button
           variant='outline'
           size='sm'
-          className='text-sm min-h-[36px]'
+          className='text-sm shrink-0 whitespace-nowrap min-h-[36px]'
           disabled={gettingToken || !o.refreshToken || !o.tokenUrl}
           onClick={handleRefreshToken}
           title={!o.refreshToken ? 'No refresh token — get an access token first' : undefined}
@@ -386,7 +386,7 @@ export function OAuth2AuthEditor({
           <Button
             variant='ghost'
             size='sm'
-            className='ml-auto text-sm min-h-[36px] text-muted-foreground hover:text-foreground'
+            className='ml-auto text-sm shrink-0 whitespace-nowrap min-h-[36px] text-muted-foreground hover:text-foreground'
             disabled={gettingToken}
             onClick={handleClearCache}
           >

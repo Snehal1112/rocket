@@ -85,7 +85,7 @@ function App() {
               </ErrorBoundary>
             </div>
             <hr
-              className='h-full w-1.5 shrink-0 cursor-col-resize bg-border/35 transition-colors hover:bg-primary/35 border-0'
+              className='h-full w-0.5 shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-primary/50 border-0'
               aria-orientation='vertical'
               onPointerDown={(e) => {
                 e.preventDefault();

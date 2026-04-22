@@ -12,28 +12,41 @@
 
 @layer base {
   :root {
-    --background: 214 44% 98%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    /* VSCode Light Modern: editor.background #FFFFFF */
+    --background: 0 0% 100%;
+    /* VSCode Light Modern: foreground #3B3B3B */
+    --foreground: 0 0% 23%;
+    /* VSCode Light Modern: sideBar.background #F8F8F8 */
+    --card: 0 0% 97.3%;
+    --card-foreground: 0 0% 23%;
+    /* VSCode Light Modern: dropdown.listBackground #FFFFFF */
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 213 88% 42%;
+    --popover-foreground: 0 0% 23%;
+    /* VSCode Light Modern: button.background #005FB8 */
+    --primary: 209 100% 36.1%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 95%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 213 35% 94%;
-    --muted-foreground: 215 17% 40%;
-    --accent: 212 86% 94%;
-    --accent-foreground: 213 88% 30%;
+    /* VSCode Light Modern: button.secondaryBackground #E5E5E5 */
+    --secondary: 0 0% 90%;
+    /* VSCode Light Modern: button.secondaryForeground #3B3B3B */
+    --secondary-foreground: 0 0% 23%;
+    /* VSCode Light Modern: list.hoverBackground #F2F2F2 */
+    --muted: 0 0% 95%;
+    /* VSCode Light Modern: tab.inactiveForeground #868686 */
+    --muted-foreground: 0 0% 53%;
+    /* VSCode Light Modern: list.activeSelectionBackground #E8E8E8 */
+    --accent: 0 0% 91%;
+    --accent-foreground: 0 0% 23%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 98%;
-    --border: 214 31% 88%;
-    --input: 214 31% 88%;
-    --ring: 213 88% 42%;
-    --chart-1: 213 88% 42%;
+    /* VSCode Light Modern: sideBar.border #E5E5E5 */
+    --border: 0 0% 90%;
+    /* VSCode Light Modern: input.border #CECECE */
+    --input: 0 0% 80.8%;
+    /* VSCode Light Modern: focusBorder #005FB8 */
+    --ring: 209 100% 36.1%;
+    --chart-1: 209 100% 36.1%;
     --chart-2: 171 65% 35%;
     --chart-3: 28 91% 52%;
     --chart-4: 283 52% 49%;
@@ -42,28 +55,41 @@
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
+    /* VSCode Dark Modern: editor.background #1F1F1F */
     --background: 0 0% 12%;
-    --foreground: 0 0% 87%;
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 87%;
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 87%;
-    --primary: 207 100% 42%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 87%;
-    --muted: 0 0% 14%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 204 100% 18%;
-    --accent-foreground: 0 0% 90%;
+    /* VSCode Dark Modern: foreground #CCCCCC */
+    --foreground: 0 0% 80%;
+    /* VSCode Dark Modern: sideBar.background #181818 */
+    --card: 0 0% 9.4%;
+    --card-foreground: 0 0% 80%;
+    /* VSCode Dark Modern: dropdown.listBackground #1F1F1F */
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 80%;
+    /* VSCode Dark Modern: button.background #0078D4 */
+    --primary: 206 100% 41.6%;
+    --primary-foreground: 0 0% 100%;
+    /* VSCode Dark Modern: button.secondaryHoverBackground #2B2B2B */
+    --secondary: 0 0% 17%;
+    /* VSCode Dark Modern: button.secondaryForeground #CCCCCC */
+    --secondary-foreground: 0 0% 80%;
+    /* VSCode Dark Modern: input.background #313131 */
+    --muted: 0 0% 19.2%;
+    /* VSCode Dark Modern: panelTitle.inactiveForeground #9D9D9D */
+    --muted-foreground: 0 0% 62%;
+    /* VSCode Dark Modern: textCodeBlock.background #2B2B2B */
+    --accent: 0 0% 17%;
+    --accent-foreground: 0 0% 80%;
     --destructive: 0 72% 45%;
     --destructive-foreground: 0 0% 98%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 98%;
-    --border: 0 0% 19%;
-    --input: 0 0% 19%;
-    --ring: 207 100% 42%;
-    --chart-1: 207 100% 42%;
+    /* VSCode Dark Modern: sideBar.border #2B2B2B */
+    --border: 0 0% 17%;
+    /* VSCode Dark Modern: input.background #313131 (used for dark:bg-input/30 fill on inputs) */
+    --input: 0 0% 19.2%;
+    /* VSCode Dark Modern: focusBorder #0078D4 */
+    --ring: 206 100% 41.6%;
+    --chart-1: 206 100% 41.6%;
     --chart-2: 160 63% 39%;
     --chart-3: 30 94% 55%;
     --chart-4: 282 60% 62%;

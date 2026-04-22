@@ -308,7 +308,7 @@ export function CollectionsSidebar() {
   return (
     // biome-ignore lint/a11y/useSemanticElements: existing div layout cannot change to nav without layout refactor
     <div
-      className='h-full flex flex-col bg-card/50 border-r border-border-70'
+      className='h-full flex flex-col bg-card border-r border-border'
       role='navigation'
       aria-label='Collections'
     >

@@ -5,7 +5,7 @@ import { SandboxPopover } from './SandboxPopover';
 
 export function WorkspaceToolbar() {
   return (
-    <div className='h-9 border-b border-border/70 bg-card/85 backdrop-blur-sm px-3 flex items-center justify-between shrink-0'>
+    <div className='h-9 border-b border-border bg-card px-3 flex items-center justify-between shrink-0'>
       {/* Left side */}
       <div className='flex items-center gap-2'>
         <CollectionDropdown />

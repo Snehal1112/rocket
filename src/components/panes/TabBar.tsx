@@ -86,7 +86,7 @@ export function TabBar({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for tab drag-and-drop
     <div
-      className={`flex items-center border-b border-border/70 bg-card/70 backdrop-blur-sm overflow-x-auto overflow-y-hidden shrink-0 ${isDragOver ? 'ring-2 ring-primary/60 ring-inset' : ''}`}
+      className={`flex items-center border-b border-border bg-card overflow-x-auto overflow-y-hidden shrink-0 ${isDragOver ? 'ring-2 ring-primary/60 ring-inset' : ''}`}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';

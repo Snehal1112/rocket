@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Environment, Variable } from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
+import { cn } from '@/lib/utils';
 import { InlineEnvName } from './InlineEnvName';
 
 interface EnvironmentDialogProps {
@@ -152,15 +153,20 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-2xl p-0 gap-0 backdrop-blur-sm'>
-        <DialogHeader className='p-4 pb-2'>
-          <DialogTitle>Manage Environments</DialogTitle>
+      <DialogContent className='max-w-3xl p-0 gap-0'>
+        <DialogHeader className='px-5 py-4 border-b border-border/60'>
+          <DialogTitle className='text-sm font-semibold'>Manage Environments</DialogTitle>
         </DialogHeader>
-        <div className='flex border-t  border-border min-h-87.5'>
+        <div className='flex min-h-[420px] max-h-[560px]'>
           {/* Left panel: environment list. */}
-          <div className='w-50 border-r border-border flex flex-col'>
-            <ScrollArea className='flex-1'>
-              <div className='p-2 space-y-0.5'>
+          <div className='w-52 border-r border-border/60 flex flex-col bg-card/50'>
+            <div className='px-3 pt-3 pb-1.5'>
+              <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                Environments
+              </p>
+            </div>
+            <ScrollArea className='flex-1 px-2'>
+              <div className='pb-2 space-y-0.5'>
                 {environments.map((env) => (
                   <InlineEnvName
                     key={env.name}
@@ -193,7 +199,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 )}
               </div>
             </ScrollArea>
-            <div className='p-2 border-t border-border flex gap-1'>
+            <div className='p-2 border-t border-border/60 flex gap-1'>
               <Button
                 variant='ghost'
                 size='icon'
@@ -207,7 +213,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-7 w-7 text-destructive'
+                className='h-7 w-7 text-destructive hover:text-destructive'
                 onClick={handleDeleteEnv}
                 disabled={!selectedName}
                 title='Delete environment'
@@ -219,24 +225,44 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
           </div>
 
           {/* Right panel: variable editor. */}
-          <div className='flex-1 flex flex-col'>
+          <div className='flex-1 flex flex-col min-w-0'>
             {selectedEnv ? (
               <>
-                <ScrollArea className='flex-1 p-3'>
-                  <div className='space-y-1.5'>
+                {/* Column headers */}
+                <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
+                  {/* checkbox placeholder */}
+                  <div className='w-4 shrink-0' />
+                  <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                    Key
+                  </p>
+                  <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                    Value
+                  </p>
+                  {/* action buttons placeholder */}
+                  <div className='w-[52px] shrink-0' />
+                </div>
+                <ScrollArea className='flex-1'>
+                  <div className='px-3 pt-2 pb-1 space-y-1'>
                     {selectedEnv.variables.map((variable, idx) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: index is stable here — rows are not reordered
-                      <div key={idx} className='flex gap-1.5 items-center'>
+                      <div
+                        key={idx}
+                        className={cn(
+                          'flex gap-1.5 items-center rounded-sm px-0 py-0.5 group',
+                          !variable.enabled && 'opacity-50',
+                        )}
+                      >
                         <Checkbox
                           checked={variable.enabled}
                           onCheckedChange={(checked) => updateVariable(idx, { enabled: !!checked })}
                           aria-label={`${variable.enabled ? 'Disable' : 'Enable'} variable`}
+                          className='shrink-0'
                         />
                         <Input
                           placeholder='Key'
                           value={variable.key}
                           onChange={(e) => updateVariable(idx, { key: e.target.value })}
-                          className='flex-1 text-sm font-mono'
+                          className='flex-1 h-7 text-xs font-mono'
                           aria-label={`Variable key ${idx + 1}`}
                         />
                         <Input
@@ -244,13 +270,13 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVariable(idx, { value: e.target.value })}
-                          className='flex-1 text-sm font-mono'
+                          className='flex-1 h-7 text-xs font-mono'
                           aria-label={`Variable value ${idx + 1}`}
                         />
                         <Button
                           variant='ghost'
                           size='icon'
-                          className='h-6 w-6 shrink-0'
+                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
                           onClick={() => updateVariable(idx, { secret: !variable.secret })}
                           title={variable.secret ? 'Show value' : 'Hide value'}
                         >
@@ -263,27 +289,32 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                         <Button
                           variant='ghost'
                           size='icon'
-                          className='h-6 w-6 shrink-0'
+                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
                           onClick={() => removeVariable(idx)}
                           aria-label={`Delete variable ${idx + 1}`}
                         >
-                          <X className='h-3.5 w-3.5' />
+                          <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
                         </Button>
                       </div>
                     ))}
                   </div>
                 </ScrollArea>
-                <div className='p-3 pt-0 flex items-center justify-between'>
-                  <Button variant='ghost' size='sm' onClick={addVariable} className='text-sm'>
-                    <Plus className='h-3.5 w-3.5 mr-1' />
+                <div className='px-3 py-2 border-t border-border/40 flex items-center justify-between shrink-0'>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={addVariable}
+                    className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
+                  >
+                    <Plus className='h-3.5 w-3.5' />
                     Add Variable
                   </Button>
                   {savedAt !== null && <SavedPill key={savedAt} />}
                 </div>
               </>
             ) : (
-              <div className='flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 bg-gradient-to-b from-background to-muted/20'>
-                <RocketIdle className='w-28 h-28 opacity-90' />
+              <div className='flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 bg-gradient-to-b from-background to-card/60'>
+                <RocketIdle className='w-24 h-24 opacity-70' />
                 <div className='space-y-1'>
                   <p className='text-sm font-medium text-foreground'>No environment selected</p>
                   <p className='text-xs text-muted-foreground leading-relaxed'>

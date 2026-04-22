@@ -21,7 +21,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   }, []);
 
   return (
-    <div className='h-7 border-t border-border/70 bg-card/50 backdrop-blur-sm px-2 flex items-center gap-1.5 shrink-0'>
+    <div className='h-7 border-t border-border bg-card px-2 flex items-center gap-1.5 shrink-0'>
       <Button
         variant='ghost'
         size='icon'
