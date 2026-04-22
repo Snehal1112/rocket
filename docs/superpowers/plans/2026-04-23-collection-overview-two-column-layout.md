@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor the Collection Overview tab's `overview` section into a two-column layout — left column with existing content cards (MethodBreakdown, Default Headers, Requests), right column with a persistent Documentation panel — while extracting the Documentation card into a shared component so `WorkspaceOverviewTab` and `CollectionOverviewTab` share the same implementation.
+**Goal:** Refactor the Collection Overview tab's `overview` section into a two-column layout — left column with existing content cards (MethodBreakdown, Default Headers, Requests), right column with a persistent Documentation panel — by upgrading the existing `MarkdownEditor` component to the Documentation card style and reusing it in both `WorkspaceOverviewTab` and `CollectionOverviewTab`.
 
-**Architecture:** Extract the Documentation card JSX (currently only in `WorkspaceOverviewTab`) into `src/components/ui/documentation-panel.tsx` with props for value, onChange, onSave, saveState, isDirty, mode, and onModeChange. Both overview tabs consume this component. `CollectionOverviewTab`'s `overview` section gets a second independent `useSaveButton` instance for the doc panel wired to the `readme` field (the backend already persists `readme` in `CollectionSettings`). No backend changes required.
+**Architecture:** `MarkdownEditor` is upgraded to render as a full Card with shadcn Tabs, a monospace textarea, save-on-blur footer, and empty state — matching the Documentation card in `WorkspaceOverviewTab`. New props (`onSave`, `saveState`, `isDirty`) are optional so the existing Readme tab usage continues to work. `WorkspaceOverviewTab` replaces its ~90-line inline Documentation block with `<MarkdownEditor>`. `CollectionOverviewTab` gets a second `useSaveButton` instance for the overview Documentation panel and a two-column layout in the overview section. No backend changes — `readme` is already persisted in `CollectionSettings`.
 
 **Tech Stack:** React 18, TypeScript, shadcn/ui (Card, CardHeader, CardContent, Tabs, TabsList, TabsTrigger, Button), lucide-react (FileText, Check, Loader2, Save), ReactMarkdown + remark-gfm, `useSaveButton` hook, Tailwind CSS.
 
@@ -14,101 +14,135 @@
 
 | File | Change |
 |---|---|
-| `src/components/ui/documentation-panel.tsx` | **Create** — shared Documentation card component |
-| `src/components/workspace/WorkspaceOverviewTab.tsx` | **Modify** — replace inline Documentation card with `<DocumentationPanel>` |
-| `src/components/collections/CollectionOverviewTab.tsx` | **Modify** — add doc panel state/save wiring, refactor overview section to two-column layout using `<DocumentationPanel>` |
+| `src/components/collections/MarkdownEditor.tsx` | **Modify** — upgrade to Documentation card style; add optional `onSave`/`saveState`/`isDirty` props |
+| `src/components/workspace/WorkspaceOverviewTab.tsx` | **Modify** — replace inline Documentation card (~90 lines) with `<MarkdownEditor>` |
+| `src/components/collections/CollectionOverviewTab.tsx` | **Modify** — add doc panel state wiring, refactor overview section to two-column layout using `<MarkdownEditor>`, update Readme tab usage |
 
-No backend changes — `readme` field is already in `CollectionSettings`, persisted by `save_collection_settings`, and loaded/saved by the existing `saveSettings` callback in `CollectionOverviewTab`.
+No backend changes — `readme` field is already in `CollectionSettings`, persisted by `save_collection_settings`, and loaded/saved by the existing `saveSettings` callback.
 
 ---
 
-### Task 1: Create shared DocumentationPanel component
+### Task 1: Upgrade MarkdownEditor to Documentation card style
 
 **Files:**
-- Create: `src/components/ui/documentation-panel.tsx`
+- Modify: `src/components/collections/MarkdownEditor.tsx`
 
-**Context:** The Documentation card in `WorkspaceOverviewTab` (lines 352–442) is a self-contained Card with Edit/Preview tabs, a monospace textarea that auto-saves on blur, a save button with loading/success states, and a ReactMarkdown preview pane with an empty state. All of this will be extracted verbatim and made prop-driven. The parent manages all state (`value`, `mode`, `saveState`, `isDirty`) — the component is purely presentational.
+**Context:** The current `MarkdownEditor` is a simple div with raw `<button>` tabs, a shadcn `Textarea`, and a prose div. It needs to become the full Documentation card: a `Card` wrapper with `CardHeader` containing a `FileText` icon + "Documentation" label on the left and shadcn `Tabs` on the right, a `CardContent` with a monospace `<textarea>` (not `Textarea`) in edit mode with a save-on-blur footer, and a `ReactMarkdown` preview with empty state. The new props `onSave`, `saveState`, and `isDirty` are **optional** — when absent, the footer save button is not rendered and the component behaves as a controlled editor only (preserving the existing Readme tab usage).
 
-- [ ] **Step 1: Write a test for DocumentationPanel**
+- [ ] **Step 1: Write tests for the upgraded MarkdownEditor**
 
-  Create `src/components/ui/documentation-panel.test.tsx`:
+  Create `src/components/collections/MarkdownEditor.test.tsx`:
 
   ```tsx
   import { render, screen } from '@testing-library/react';
   import userEvent from '@testing-library/user-event';
   import { describe, expect, it, vi } from 'vitest';
-  import { DocumentationPanel } from './documentation-panel';
+  import { MarkdownEditor } from './MarkdownEditor';
 
   const baseProps = {
     value: '',
     onChange: vi.fn(),
-    onSave: vi.fn(),
-    saveState: 'idle' as const,
-    isDirty: false,
-    mode: 'preview' as const,
-    onModeChange: vi.fn(),
   };
 
-  describe('DocumentationPanel', () => {
-    it('renders empty state in preview mode when value is empty', () => {
-      render(<DocumentationPanel {...baseProps} />);
+  describe('MarkdownEditor', () => {
+    it('renders Documentation label and FileText icon', () => {
+      render(<MarkdownEditor {...baseProps} />);
+      expect(screen.getByText('Documentation')).toBeInTheDocument();
+    });
+
+    it('defaults to preview mode and shows empty state when value is empty', () => {
+      render(<MarkdownEditor {...baseProps} />);
       expect(screen.getByText('No documentation yet')).toBeInTheDocument();
     });
 
     it('renders markdown content in preview mode when value is set', () => {
-      render(<DocumentationPanel {...baseProps} value='# Hello' />);
+      render(<MarkdownEditor {...baseProps} value='# Hello' />);
       expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
     });
 
     it('renders textarea in edit mode', () => {
-      render(<DocumentationPanel {...baseProps} mode='edit' />);
+      render(<MarkdownEditor {...baseProps} mode='edit' />);
       expect(screen.getByPlaceholderText(/Add documentation/)).toBeInTheDocument();
+    });
+
+    it('calls onChange when user types in edit mode', async () => {
+      const onChange = vi.fn();
+      render(<MarkdownEditor {...baseProps} mode='edit' onChange={onChange} />);
+      await userEvent.type(screen.getByPlaceholderText(/Add documentation/), 'x');
+      expect(onChange).toHaveBeenCalled();
     });
 
     it('calls onModeChange when Edit tab is clicked', async () => {
       const onModeChange = vi.fn();
-      render(<DocumentationPanel {...baseProps} onModeChange={onModeChange} />);
+      render(<MarkdownEditor {...baseProps} onModeChange={onModeChange} />);
       await userEvent.click(screen.getByRole('tab', { name: 'Edit' }));
       expect(onModeChange).toHaveBeenCalledWith('edit');
     });
 
-    it('save button is disabled when not dirty', () => {
-      render(<DocumentationPanel {...baseProps} mode='edit' isDirty={false} />);
+    it('does not render save button when onSave is not provided', () => {
+      render(<MarkdownEditor {...baseProps} mode='edit' />);
+      expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    });
+
+    it('renders save button when onSave is provided', () => {
+      render(
+        <MarkdownEditor
+          {...baseProps}
+          mode='edit'
+          onSave={vi.fn()}
+          saveState='idle'
+          isDirty={false}
+        />,
+      );
+      expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    });
+
+    it('save button is disabled when isDirty is false', () => {
+      render(
+        <MarkdownEditor
+          {...baseProps}
+          mode='edit'
+          onSave={vi.fn()}
+          saveState='idle'
+          isDirty={false}
+        />,
+      );
       expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
     });
 
-    it('save button is enabled when dirty', () => {
-      render(<DocumentationPanel {...baseProps} mode='edit' isDirty={true} />);
+    it('save button is enabled when isDirty is true', () => {
+      render(
+        <MarkdownEditor
+          {...baseProps}
+          mode='edit'
+          onSave={vi.fn()}
+          saveState='idle'
+          isDirty={true}
+        />,
+      );
       expect(screen.getByRole('button', { name: /save/i })).toBeEnabled();
     });
 
-    it('calls onSave when save button clicked', async () => {
-      const onSave = vi.fn().mockResolvedValue(undefined);
-      render(<DocumentationPanel {...baseProps} mode='edit' isDirty={true} onSave={onSave} />);
-      await userEvent.click(screen.getByRole('button', { name: /save/i }));
-      expect(onSave).toHaveBeenCalled();
-    });
-
-    it('clicking Add Documentation button calls onModeChange with edit', async () => {
+    it('clicking Add Documentation switches to edit mode', async () => {
       const onModeChange = vi.fn();
-      render(<DocumentationPanel {...baseProps} onModeChange={onModeChange} />);
+      render(<MarkdownEditor {...baseProps} onModeChange={onModeChange} />);
       await userEvent.click(screen.getByRole('button', { name: /add documentation/i }));
       expect(onModeChange).toHaveBeenCalledWith('edit');
     });
   });
   ```
 
-- [ ] **Step 2: Run the test to confirm it fails**
+- [ ] **Step 2: Run tests to confirm they fail**
 
   ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn test documentation-panel 2>&1 | tail -10
+  cd /Users/snehaldangroshiya/data/rocket && yarn test MarkdownEditor 2>&1 | tail -10
   ```
 
-  Expected: FAIL — module `./documentation-panel` not found.
+  Expected: multiple failures — component doesn't yet have the new props or structure.
 
-- [ ] **Step 3: Create the component**
+- [ ] **Step 3: Rewrite MarkdownEditor**
 
-  Create `src/components/ui/documentation-panel.tsx`:
+  Replace the entire contents of `src/components/collections/MarkdownEditor.tsx`:
 
   ```tsx
   import { Check, FileText, Loader2, Save } from 'lucide-react';
@@ -120,27 +154,29 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
   import type { SaveButtonState } from '@/hooks/use-save-button';
   import { cn } from '@/lib/utils';
 
-  interface DocumentationPanelProps {
+  interface MarkdownEditorProps {
     value: string;
     onChange: (value: string) => void;
-    onSave: () => void;
-    saveState: SaveButtonState;
-    isDirty: boolean;
-    mode: 'edit' | 'preview';
-    onModeChange: (mode: 'edit' | 'preview') => void;
     onBlur?: () => void;
+    /** Controlled mode — if omitted the component manages mode internally */
+    mode?: 'edit' | 'preview';
+    onModeChange?: (mode: 'edit' | 'preview') => void;
+    /** When provided, a Save button is shown in the edit footer */
+    onSave?: () => void;
+    saveState?: SaveButtonState;
+    isDirty?: boolean;
   }
 
-  export function DocumentationPanel({
+  export function MarkdownEditor({
     value,
     onChange,
-    onSave,
-    saveState,
-    isDirty,
-    mode,
-    onModeChange,
     onBlur,
-  }: DocumentationPanelProps) {
+    mode = 'preview',
+    onModeChange,
+    onSave,
+    saveState = 'idle',
+    isDirty = false,
+  }: MarkdownEditorProps) {
     return (
       <Card className='flex-1 flex flex-col overflow-hidden'>
         <CardHeader className='flex flex-row items-center justify-between py-2.5 px-4 shrink-0'>
@@ -148,7 +184,7 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
             <FileText className='h-3.5 w-3.5 text-muted-foreground' />
             <span className='text-xs font-semibold text-muted-foreground'>Documentation</span>
           </div>
-          <Tabs value={mode} onValueChange={(v) => onModeChange(v as 'edit' | 'preview')}>
+          <Tabs value={mode} onValueChange={(v) => onModeChange?.(v as 'edit' | 'preview')}>
             <TabsList className='h-6'>
               <TabsTrigger value='edit' className='text-[10px] px-2.5 py-0.5'>
                 Edit
@@ -170,29 +206,31 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
                 onChange={(e) => onChange(e.target.value)}
                 onBlur={onBlur}
               />
-              <div className='flex justify-end items-center gap-2 px-3 py-2 border-t border-border shrink-0'>
-                <span className='text-[10px] text-muted-foreground/50'>
-                  Markdown supported · saves on blur
-                </span>
-                <Button
-                  size='sm'
-                  className={cn(
-                    'h-6 text-[10px] px-3 gap-1',
-                    saveState === 'success' && 'text-green-600',
-                  )}
-                  onClick={onSave}
-                  disabled={!isDirty || saveState !== 'idle'}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 className='h-3 w-3 animate-spin' />
-                  ) : saveState === 'success' ? (
-                    <Check className='h-3 w-3' />
-                  ) : (
-                    <Save className='h-3 w-3' />
-                  )}
-                  {saveState === 'success' ? 'Saved' : 'Save'}
-                </Button>
-              </div>
+              {onSave && (
+                <div className='flex justify-end items-center gap-2 px-3 py-2 border-t border-border shrink-0'>
+                  <span className='text-[10px] text-muted-foreground/50'>
+                    Markdown supported · saves on blur
+                  </span>
+                  <Button
+                    size='sm'
+                    className={cn(
+                      'h-6 text-[10px] px-3 gap-1',
+                      saveState === 'success' && 'text-green-600',
+                    )}
+                    onClick={onSave}
+                    disabled={!isDirty || saveState !== 'idle'}
+                  >
+                    {saveState === 'saving' ? (
+                      <Loader2 className='h-3 w-3 animate-spin' />
+                    ) : saveState === 'success' ? (
+                      <Check className='h-3 w-3' />
+                    ) : (
+                      <Save className='h-3 w-3' />
+                    )}
+                    {saveState === 'success' ? 'Saved' : 'Save'}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -215,7 +253,7 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
                     variant='outline'
                     size='sm'
                     className='text-xs h-7'
-                    onClick={() => onModeChange('edit')}
+                    onClick={() => onModeChange?.('edit')}
                   >
                     <FileText className='h-3 w-3 mr-1.5' />
                     Add Documentation
@@ -230,13 +268,13 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
   }
   ```
 
-- [ ] **Step 4: Run the tests — all should pass**
+- [ ] **Step 4: Run tests — all should pass**
 
   ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn test documentation-panel 2>&1 | tail -15
+  cd /Users/snehaldangroshiya/data/rocket && yarn test MarkdownEditor 2>&1 | tail -15
   ```
 
-  Expected: 8 tests pass, 0 failures.
+  Expected: 11 tests pass, 0 failures.
 
 - [ ] **Step 5: Verify TypeScript compiles**
 
@@ -249,64 +287,54 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 - [ ] **Step 6: Commit**
 
   ```bash
-  git add src/components/ui/documentation-panel.tsx src/components/ui/documentation-panel.test.tsx
-  git commit -m "feat(ui): extract DocumentationPanel shared component"
+  git add src/components/collections/MarkdownEditor.tsx src/components/collections/MarkdownEditor.test.tsx
+  git commit -m "feat(markdown-editor): upgrade to Documentation card style with optional save props"
   ```
 
 ---
 
-### Task 2: Replace inline Documentation card in WorkspaceOverviewTab with DocumentationPanel
+### Task 2: Replace inline Documentation card in WorkspaceOverviewTab with MarkdownEditor
 
 **Files:**
 - Modify: `src/components/workspace/WorkspaceOverviewTab.tsx`
 
-**Context:** `WorkspaceOverviewTab` currently has ~90 lines of Documentation card JSX (lines 352–442). We replace that entire block with `<DocumentationPanel>` passing the existing local state. The component already has `docMode`, `docContent`, `isDocDirty`, `saveDocState`, `triggerSaveDoc` — all map directly to props. The outer `<div className='flex-1 p-4 flex flex-col overflow-hidden'>` wrapper stays.
+**Context:** `WorkspaceOverviewTab` currently has ~90 lines of inline Documentation card JSX (lines 352–442). We replace it with `<MarkdownEditor>` passing the existing local state. The component already has `docMode`, `docContent`, `isDocDirty`, `saveDocState`, `triggerSaveDoc`. The outer `<div className='flex-1 p-4 flex flex-col overflow-hidden'>` wrapper stays.
 
-- [ ] **Step 1: Add DocumentationPanel import**
+- [ ] **Step 1: Add MarkdownEditor import**
 
-  In `src/components/workspace/WorkspaceOverviewTab.tsx`, add to the import block:
+  In `src/components/workspace/WorkspaceOverviewTab.tsx`, add:
 
   ```tsx
-  import { DocumentationPanel } from '@/components/ui/documentation-panel';
+  import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
   ```
 
-  Remove these imports that are no longer needed directly in this file (they are now used inside DocumentationPanel):
-  - `FileText` from lucide-react
+  Then remove these imports that are now only used inside `MarkdownEditor` (verify each is not used elsewhere in the file before removing):
+  - `Check`, `FileText`, `Loader2`, `Save` from lucide-react
   - `ReactMarkdown` from react-markdown
   - `remarkGfm` from remark-gfm
   - `CardHeader` from `@/components/ui/card`
-  - `Tabs, TabsList, TabsTrigger` from `@/components/ui/tabs`
+  - `Tabs`, `TabsList`, `TabsTrigger` from `@/components/ui/tabs`
 
-  Keep: `Check`, `Loader2`, `Save` (still used by WorkspaceOverviewTab itself? — no, those were only in the doc panel). Remove them too if they're not used elsewhere in the file.
-
-  After removing, the lucide-react import line becomes:
+  The remaining lucide-react imports are:
   ```tsx
-  import {
-    Box,
-    ExternalLink,
-    FolderOpen,
-    MoreHorizontal,
-    Plus,
-    Trash2,
-    Upload,
-  } from 'lucide-react';
+  import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
   ```
 
 - [ ] **Step 2: Replace the right column JSX**
 
-  Find the right column block starting with `{/* ── RIGHT COLUMN — Documentation ── */}` (line ~351). Replace the entire block:
+  Find the right column block starting with `{/* ── RIGHT COLUMN — Documentation ── */}` (line ~351). Replace the entire block with:
 
   ```tsx
   {/* ── RIGHT COLUMN — Documentation ── */}
   <div className='flex-1 p-4 flex flex-col overflow-hidden'>
-    <DocumentationPanel
+    <MarkdownEditor
       value={docContent}
       onChange={setDocContent}
+      mode={docMode}
+      onModeChange={setDocMode}
       onSave={() => void triggerSaveDoc()}
       saveState={saveDocState}
       isDirty={isDocDirty}
-      mode={docMode}
-      onModeChange={setDocMode}
       onBlur={() => { if (isDocDirty) void triggerSaveDoc(); }}
     />
   </div>
@@ -323,16 +351,16 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 - [ ] **Step 4: Run linter**
 
   ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep -E "error|warn" | grep -i "workspace\|documentation" | head -10
+  cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep "error" | head -10
   ```
 
-  Expected: 0 errors in the modified files.
+  Expected: 0 errors.
 
 - [ ] **Step 5: Commit**
 
   ```bash
   git add src/components/workspace/WorkspaceOverviewTab.tsx
-  git commit -m "refactor(workspace-overview): use shared DocumentationPanel component"
+  git commit -m "refactor(workspace-overview): use shared MarkdownEditor for Documentation panel"
   ```
 
 ---
@@ -340,29 +368,11 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 ### Task 3: Add Documentation panel state wiring to CollectionOverviewTab
 
 **Files:**
-- Modify: `src/components/collections/CollectionOverviewTab.tsx:1-43` (imports)
-- Modify: `src/components/collections/CollectionOverviewTab.tsx:207-221` (state declarations)
-- Modify: `src/components/collections/CollectionOverviewTab.tsx:318-321` (after save hook)
-- Modify: `src/components/collections/CollectionOverviewTab.tsx:244-291` (load effect)
+- Modify: `src/components/collections/CollectionOverviewTab.tsx`
 
-**Context:** The component already has `readme` state loaded from `collection.settings.readme` and saved via `saveSettings`. We need to add: (1) `docMode` state for the Edit/Preview toggle; (2) `isDocDirty` derived value comparing live `readme` to the persisted value; (3) a second `useSaveButton` instance (`saveDocState`/`triggerSaveDoc`) wired to a `saveDocFn` that saves only `readme` via `saveCollectionSettings`. The existing `saveSettings` continues to save all fields (including `readme`) when other tab save buttons are used — no change there.
+**Context:** The component already has `readme` state loaded from `collection.settings.readme` and saved via `saveSettings`. We need: (1) `docMode` state for the Edit/Preview toggle; (2) `isDocDirty` derived value comparing live `readme` to the persisted value on disk; (3) a second `useSaveButton` instance (`saveDocState`/`triggerSaveDoc`) wired to a `saveDocFn` that saves only `readme` independently. The existing `saveSettings` continues to save all fields when the user hits Save on other tabs.
 
-- [ ] **Step 1: Add DocumentationPanel import and remove now-redundant imports**
-
-  In `src/components/collections/CollectionOverviewTab.tsx`, add to the import block:
-
-  ```tsx
-  import { DocumentationPanel } from '@/components/ui/documentation-panel';
-  ```
-
-  The file currently imports `Card, CardContent` from `@/components/ui/card`. Add `CardHeader`:
-  ```tsx
-  import { Card, CardContent, CardHeader } from '@/components/ui/card';
-  ```
-
-  The overview section will use `DocumentationPanel` for the doc card, so we do NOT need to add ReactMarkdown/remarkGfm imports to this file — they live inside the shared component.
-
-- [ ] **Step 2: Add docMode state**
+- [ ] **Step 1: Add docMode state**
 
   After the existing `const [readme, setReadme] = useState('');` line, add:
 
@@ -370,7 +380,7 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   ```
 
-- [ ] **Step 3: Add saveDocFn and second useSaveButton hook**
+- [ ] **Step 2: Add saveDocFn and second useSaveButton hook**
 
   After the existing `const { state: saveState, trigger: triggerSave } = useSaveButton(saveSettings, 'Failed to save settings');` block, add:
 
@@ -387,16 +397,16 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
   );
   ```
 
-- [ ] **Step 4: Add persistedReadme and isDocDirty**
+- [ ] **Step 3: Add persistedReadme and isDocDirty**
 
-  These are derived values that depend on `collection` being loaded. Add them after the `const statsLine = ...` line (after the early-return guards for `loading` and `error`):
+  These derived values depend on `collection` being loaded. Add them after the `const statsLine = ...` line (after the early-return guards):
 
   ```tsx
   const persistedReadme = collection.settings.readme ?? '';
   const isDocDirty = readme !== persistedReadme;
   ```
 
-- [ ] **Step 5: Reset docMode when collection changes**
+- [ ] **Step 4: Reset docMode when collection changes**
 
   Find the load `useEffect` that starts `setLoading(true);`. Add `setDocMode('preview');` immediately after:
 
@@ -410,7 +420,7 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
       .then((col) => {
   ```
 
-- [ ] **Step 6: Verify TypeScript compiles**
+- [ ] **Step 5: Verify TypeScript compiles**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -20
@@ -418,53 +428,44 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 
   Expected: 0 errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
   ```bash
   git add src/components/collections/CollectionOverviewTab.tsx
-  git commit -m "feat(collection-overview): add doc panel state, saveDocFn, isDocDirty wiring"
+  git commit -m "feat(collection-overview): add docMode, saveDocFn, isDocDirty wiring"
   ```
 
 ---
 
-### Task 4: Refactor the overview section to two-column layout
+### Task 4: Refactor overview section to two-column layout and update Readme tab
 
 **Files:**
-- Modify: `src/components/collections/CollectionOverviewTab.tsx:437-515` (the overview section JSX)
+- Modify: `src/components/collections/CollectionOverviewTab.tsx`
 
-**Context:** Currently the entire tab content lives inside a single `<ScrollArea>` with a `max-w-3xl mx-auto` constraint (line ~449). We restructure so the `overview` section manages its own two-column layout (left scrollable column, right Documentation panel), and all other sections (auth, variables, readme, tags) keep the existing outer `ScrollArea`. The outer scroll elevation overlay (`scrollContainerRef`, `isScrolled`) stays in place — its `useEffect` queries `[data-radix-scroll-area-viewport]` inside the ref, which will exist on non-overview tabs and be absent on the overview tab (where `isScrolled` is reset to `false` by `handleSectionChange`).
+**Context:** The `overview` section currently lives inside a single outer `<ScrollArea>` with `max-w-3xl mx-auto`. We split so the overview section manages its own two-column layout (left scrollable column with three cards, right column with `<MarkdownEditor>`), while auth/variables/readme/tags keep the existing outer `ScrollArea`. The Readme tab currently uses `<MarkdownEditor>` with the old props (`value`, `onChange`, `onBlur`) — we update it to also pass `mode`/`onModeChange` using the existing `isDirty`/`triggerSave` pattern.
 
-- [ ] **Step 1: Split outer ScrollArea into overview vs non-overview**
+- [ ] **Step 1: Replace the overview section with two-column layout**
 
-  Find the current tab content wrapper (around line 448):
+  Find the current outer tab content structure:
   ```tsx
   <ScrollArea className='h-full'>
     <div className='p-6 max-w-3xl mx-auto space-y-6'>
+      {activeSection === 'overview' && ( ... )}
+      {activeSection === 'auth' && ( ... )}
+      {activeSection === 'variables' && ( ... )}
+      {activeSection === 'readme' && ( ... )}
+      {activeSection === 'tags' && ( ... )}
+    </div>
+  </ScrollArea>
   ```
-  
-  And its closing tags:
-  ```tsx
-      </div>
-    </ScrollArea>
-  ```
 
-  Replace this structure so the overview section sits outside the ScrollArea, and the other sections remain inside it. The new structure inside `<div ref={scrollContainerRef} className='relative flex-1 min-h-0'>` becomes:
+  Replace with this structure (keep auth/variables/readme/tags content exactly as-is, only restructure the wrapper):
 
   ```tsx
-  {/* Scroll elevation overlay — paints over content when scrolled (non-overview tabs only) */}
-  <div
-    className={cn(
-      'pointer-events-none absolute inset-x-0 top-0 z-10 h-6 transition-opacity duration-200',
-      'bg-gradient-to-b from-black/10 to-transparent',
-      'dark:from-black/40 dark:to-transparent',
-      isScrolled ? 'opacity-100' : 'opacity-0',
-    )}
-  />
-
   {/* Overview tab — two-column layout with its own internal scroll */}
   {activeSection === 'overview' && (
     <div className='flex h-full overflow-hidden'>
-      {/* LEFT column */}
+      {/* LEFT column — scrollable cards */}
       <div className='flex-1 border-r border-border overflow-hidden flex flex-col'>
         <ScrollArea className='h-full'>
           <div className='p-5 flex flex-col gap-5'>
@@ -516,14 +517,14 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 
       {/* RIGHT column — Documentation panel */}
       <div className='w-80 flex-shrink-0 flex flex-col p-4'>
-        <DocumentationPanel
+        <MarkdownEditor
           value={readme}
           onChange={setReadme}
+          mode={docMode}
+          onModeChange={setDocMode}
           onSave={() => void triggerSaveDoc()}
           saveState={saveDocState}
           isDirty={isDocDirty}
-          mode={docMode}
-          onModeChange={setDocMode}
           onBlur={() => { if (isDocDirty) void triggerSaveDoc(); }}
         />
       </div>
@@ -535,29 +536,89 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
     <ScrollArea className='h-full'>
       <div className='p-6 max-w-3xl mx-auto space-y-6'>
         {activeSection === 'auth' && (
-          /* ... existing auth tab content unchanged ... */
+          /* PASTE EXISTING AUTH TAB CONTENT HERE — no changes */
         )}
         {activeSection === 'variables' && (
-          /* ... existing variables tab content unchanged ... */
+          /* PASTE EXISTING VARIABLES TAB CONTENT HERE — no changes */
         )}
         {activeSection === 'readme' && (
-          /* ... existing readme tab content unchanged ... */
+          /* see Step 2 below */
         )}
         {activeSection === 'tags' && (
-          /* ... existing tags tab content unchanged ... */
+          /* PASTE EXISTING TAGS TAB CONTENT HERE — no changes */
         )}
       </div>
     </ScrollArea>
   )}
   ```
 
-  **Important:** Keep the auth, variables, readme, and tags tab JSX exactly as it is today — only move it inside `{activeSection !== 'overview' && (...)}`. Do not alter any of that content.
+  **Important:** The auth, variables, and tags tab JSX must be copied exactly as they exist today — do not alter any of that content.
 
-- [ ] **Step 2: Remove the description textarea from the overview section**
+- [ ] **Step 2: Update the Readme tab to use MarkdownEditor's new props**
 
-  The description textarea (currently around lines 453–475) is no longer rendered in the overview section (it's replaced by the Documentation panel). It is already absent from the new left-column JSX above. Confirm `description` state and its inclusion in `saveSettings` are untouched — only the `<textarea id='col-description' ...>` render is removed.
+  The current Readme tab (inside the `activeSection === 'readme'` block) renders:
 
-- [ ] **Step 3: Verify TypeScript compiles clean**
+  ```tsx
+  <div className='space-y-4'>
+    <MarkdownEditor
+      value={readme}
+      onChange={(v) => {
+        setReadme(v);
+        setIsDirty(true);
+      }}
+      onBlur={() => {
+        if (isDirty) void triggerSave();
+      }}
+    />
+    <div className='flex justify-end'>
+      <Button
+        size='sm'
+        onClick={() => void triggerSave()}
+        disabled={!isDirty || saveState !== 'idle'}
+        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+      >
+        {saveState === 'saving' ? (
+          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+        ) : saveState === 'success' ? (
+          <Check className='h-3.5 w-3.5' />
+        ) : (
+          <Save className='h-3.5 w-3.5' />
+        )}
+        {saveState === 'success' ? 'Saved' : 'Save'}
+      </Button>
+    </div>
+  </div>
+  ```
+
+  Replace with (the save button is now inside `MarkdownEditor`, and mode is controlled by `docMode`/`setDocMode`):
+
+  ```tsx
+  <div className='h-full flex flex-col'>
+    <MarkdownEditor
+      value={readme}
+      onChange={(v) => {
+        setReadme(v);
+        setIsDirty(true);
+      }}
+      mode={docMode}
+      onModeChange={setDocMode}
+      onSave={() => void triggerSave()}
+      saveState={saveState}
+      isDirty={isDirty}
+      onBlur={() => {
+        if (isDirty) void triggerSave();
+      }}
+    />
+  </div>
+  ```
+
+  Note: The Readme tab uses `triggerSave`/`saveState`/`isDirty` (the global settings save) not the doc-specific ones — this is correct because the Readme tab saves all settings together via `saveSettings`.
+
+- [ ] **Step 3: Remove the description textarea from the overview section**
+
+  The description `<textarea id='col-description' ...>` block is not included in the new left column JSX above. Confirm `description` state and its inclusion in `saveSettings` payload are untouched — only the textarea render is gone.
+
+- [ ] **Step 4: Verify TypeScript compiles clean**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn tsc --noEmit 2>&1 | head -30
@@ -565,27 +626,27 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 
   Expected: 0 errors.
 
-- [ ] **Step 4: Run linter**
+- [ ] **Step 5: Run linter**
 
   ```bash
-  cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep -E "error" | head -20
+  cd /Users/snehaldangroshiya/data/rocket && yarn check 2>&1 | grep "error" | head -20
   ```
 
   Expected: 0 errors.
 
-- [ ] **Step 5: Run all tests**
+- [ ] **Step 6: Run all tests**
 
   ```bash
   cd /Users/snehaldangroshiya/data/rocket && yarn test 2>&1 | tail -15
   ```
 
-  Expected: all pass (including the 8 DocumentationPanel tests from Task 1).
+  Expected: all pass (including the 11 MarkdownEditor tests from Task 1).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
   ```bash
   git add src/components/collections/CollectionOverviewTab.tsx
-  git commit -m "feat(collection-overview): two-column overview with shared DocumentationPanel"
+  git commit -m "feat(collection-overview): two-column overview with MarkdownEditor Documentation panel"
   ```
 
 ---
@@ -602,14 +663,14 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 
   Open `http://localhost:1420`.
 
-- [ ] **Step 2: Verify Workspace Overview tab still works**
+- [ ] **Step 2: Verify Workspace Overview tab**
 
-  Open the Workspace Overview tab (default landing).
+  Open the Workspace Overview tab.
 
   Expected:
-  - Right column shows Documentation card (rendered by `DocumentationPanel`) — Edit/Preview tabs in header, same look as before
-  - Edit, type content, blur → saves (button shows Saved)
-  - Preview renders markdown
+  - Right column shows the Documentation card (rendered by `MarkdownEditor`) — same look as before (FileText icon, "Documentation" label, Edit/Preview tabs)
+  - Edit mode: monospace textarea with save-on-blur footer
+  - Preview mode: renders markdown; empty state with "Add Documentation" button
 
 - [ ] **Step 3: Verify Collection Overview tab — two-column layout**
 
@@ -617,25 +678,30 @@ No backend changes — `readme` field is already in `CollectionSettings`, persis
 
   Expected:
   - Left column: MethodBreakdown card, Default Headers card (KeyValueEditor rows + Save button), Requests card (search + request rows)
-  - Right column (320px): Documentation card with Edit/Preview tabs
+  - Right column (320px): Documentation card (`MarkdownEditor`) with Edit/Preview tabs
   - Vertical border divider between columns
   - No description textarea
-  - Left column scrolls independently when content overflows
 
 - [ ] **Step 4: Verify Documentation panel saves to readme**
 
   In the Collection Overview tab:
-  - Click Edit, type `# Hello`, blur or click Save
-  - Reopen the collection (close tab, reopen) — text persists
-  - Switch to the **Readme** tab — the same text appears there (same `readme` field)
+  - Click Edit, type `# Hello`, blur or click Save — button shows Saved
+  - Close and reopen the collection — text persists
+  - Switch to the **Readme** tab — same text appears (same `readme` field, same `MarkdownEditor` component)
 
-- [ ] **Step 5: Verify non-overview tabs still work**
+- [ ] **Step 5: Verify Readme tab still works**
 
-  Click Authorization, Variables, Readme, Tags tabs on the collection.
+  Open the Readme tab on the collection.
+
+  Expected: `MarkdownEditor` renders with the readme content, Edit/Preview toggle works, Save button inside the editor saves correctly.
+
+- [ ] **Step 6: Verify non-overview tabs still work**
+
+  Click Authorization, Variables, Tags tabs.
 
   Expected: each shows its full-width single-column content, unmodified.
 
-- [ ] **Step 6: Verify Default Headers save**
+- [ ] **Step 7: Verify Default Headers save**
 
   Add a header in the Default Headers card on the Overview tab, click Save.
 
