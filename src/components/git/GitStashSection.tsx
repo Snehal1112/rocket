@@ -5,6 +5,9 @@ import {
   GitBranch,
   Loader2,
   MoreHorizontal,
+  PackageCheck,
+  PackageOpen,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -297,12 +300,14 @@ export function GitStashSection() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end' className='w-48'>
                     <DropdownMenuItem onClick={() => void popStash(stash.index)}>
+                      <PackageOpen className='h-3.5 w-3.5 mr-2 shrink-0' />
                       <span>Pop</span>
                       <span className='ml-auto text-[11px] text-muted-foreground'>
                         apply + remove
                       </span>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => void applyStash(stash.index)}>
+                      <PackageCheck className='h-3.5 w-3.5 mr-2 shrink-0' />
                       <span>Apply</span>
                       <span className='ml-auto text-[11px] text-muted-foreground'>keep stash</span>
                     </DropdownMenuItem>
@@ -311,7 +316,7 @@ export function GitStashSection() {
                       className='text-destructive focus:text-destructive'
                       onClick={() => void dropStash(stash.index)}
                     >
-                      Drop
+                      <Trash2 className='h-3.5 w-3.5 mr-2 shrink-0' /> Drop
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
