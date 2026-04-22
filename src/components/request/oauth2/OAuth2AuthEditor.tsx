@@ -65,6 +65,15 @@ export function OAuth2AuthEditor({
   const handleGetToken = useCallback(async () => {
     setGettingToken(true);
     setTokenError('');
+    const isForceReauth = o.forceReauth && o.grantType === 'authorization_code';
+    const authParamsForRequest = isForceReauth
+      ? [
+          ...o.authParams,
+          { key: 'prompt', value: 'login', sendIn: 'queryparams' as const, enabled: true },
+        ]
+      : o.authParams.length
+        ? o.authParams
+        : undefined;
     try {
       const result = await oauth2GetToken({
         grantType: o.grantType,
@@ -81,12 +90,13 @@ export function OAuth2AuthEditor({
         usePkce: o.usePkce,
         useSystemBrowser: o.useSystemBrowser,
         verifySsl: o.verifySsl,
-        authParams: o.authParams.length ? o.authParams : undefined,
+        authParams: authParamsForRequest,
         tokenParams: o.tokenParams.length ? o.tokenParams : undefined,
         refreshParams: o.refreshParams.length ? o.refreshParams : undefined,
         collection,
         environmentName,
         requestPath,
+        forceReauth: isForceReauth || undefined,
       });
       patchOAuth2Ref.current({
         accessToken: result.access_token,
@@ -98,8 +108,8 @@ export function OAuth2AuthEditor({
         responseScope: result.scope || '',
         idTokenClaims: null,
         accessTokenClaims: null,
+        forceReauth: false,
       });
-      // Scroll the token card into view after React re-renders it.
       setTimeout(
         () => tokenDisplayRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
         0,
@@ -115,10 +125,11 @@ export function OAuth2AuthEditor({
           const claims = await oauth2DecodeJwt(result.id_token);
           patchOAuth2Ref.current({ idTokenClaims: claims });
         } catch {
-          // JWT decode is best-effort — an opaque ID token shouldn't break the flow.
+          // JWT decode is best-effort.
         }
       }
     } catch (err) {
+      patchOAuth2Ref.current({ forceReauth: false });
       setTokenError(err instanceof Error ? err.message : String(err));
     } finally {
       setGettingToken(false);
@@ -186,9 +197,8 @@ export function OAuth2AuthEditor({
       responseScope: '',
       idTokenClaims: null,
       accessTokenClaims: null,
-      // Disable auto-fetch so the next Send does not immediately re-populate
-      // the token the user just explicitly cleared.
       autoFetchToken: false,
+      forceReauth: true,
     });
     setTokenError('');
   }, []);
