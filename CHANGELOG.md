@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.6.2](https://github.com/Snehal1112/rocket/compare/v0.6.1...v0.6.2) (2026-04-22)
+
+### Features
+
+* add 'dynamic' source type and resolution to url-variables ([12eee0a](https://github.com/Snehal1112/rocket/commit/12eee0a985b283a211b9346f45c90f1095eee084))
+* add TypeScript dynamic variable registry (118 variables, faker.js) ([3eb78c2](https://github.com/Snehal1112/rocket/commit/3eb78c21f9821b3f347237fead2e058c07da44dd))
+* **dynamic-vars:** add 118-variable generator registry ([632834c](https://github.com/Snehal1112/rocket/commit/632834cebe1075ee85565a6aeff2c22d1a027612))
+* **git:** return fetch summary from git_fetch IPC command ([716955d](https://github.com/Snehal1112/rocket/commit/716955dc34e2671e50777e3f692d68434c35d84a))
+* **git:** show skeleton while Git panel loads ([ca3ba30](https://github.com/Snehal1112/rocket/commit/ca3ba30e1cdad60b11c9f3702e12da3ae03c74b4))
+* integrate dynamic variable resolution into resolver ($-prefix) ([609d145](https://github.com/Snehal1112/rocket/commit/609d14592cfbf68fa0d1f401850d95c621c30309))
+* integrate dynamic variable resolution into variable-context.ts ([804ffef](https://github.com/Snehal1112/rocket/commit/804ffef144b737404637456a2e7bcfc816102872))
+* **jwt:** add JWT decoder for OAuth2 ID token display ([c21c4d0](https://github.com/Snehal1112/rocket/commit/c21c4d0c81eef66b75bf72246977df3c2a2b3f5b))
+* **oauth2:** add code exchange helper for auth_code flow ([9c95aeb](https://github.com/Snehal1112/rocket/commit/9c95aebbad367744306b6c26fa3a0370da8dd979))
+* **oauth2:** add HTTP dispatch for direct grant flows ([af8a277](https://github.com/Snehal1112/rocket/commit/af8a277a0d33b5d15adcc985ca8dc3474dde73f0))
+* **oauth2:** add id_token, AdditionalParam, URL/body helpers ([6bd6397](https://github.com/Snehal1112/rocket/commit/6bd6397b1fa8c0f83e4ecd4d8ceebf0e98de30a4))
+* **oauth2:** add oauth2_decode_jwt command and OAuth2Service managed state ([907765a](https://github.com/Snehal1112/rocket/commit/907765a3c4fae67e6f62e16bc31fc994c80a1f15))
+* **oauth2:** add OAuth2Service scaffold with resolve ([5c4fa20](https://github.com/Snehal1112/rocket/commit/5c4fa20021acbc7a125da1c455ef7515373f6f48))
+* **oauth2:** auto-fetch and auto-refresh tokens before request execution ([1dda055](https://github.com/Snehal1112/rocket/commit/1dda055b8cfd529e7f1fa1578eebd5f370072b3a))
+* **oauth2:** decode and display access token JWT payload ([97c8aaa](https://github.com/Snehal1112/rocket/commit/97c8aaa88769ec45a00703781e81562a5be1f258))
+* **oauth2:** extend AuthState with PKCE, additional params, settings, JWT claims ([a5169f4](https://github.com/Snehal1112/rocket/commit/a5169f4402d3ea6b9b7bd7545ccfa2cce64cd02d))
+* **oauth2:** mapping layer and Tauri API bindings for unified token commands ([478e19c](https://github.com/Snehal1112/rocket/commit/478e19c16438f27dd496a5a6940bddfe4894aaa6))
+* **oauth2:** oauth2_get_token, oauth2_refresh_token commands with system browser support ([bafdcdc](https://github.com/Snehal1112/rocket/commit/bafdcdc4a98990dd71e48cfb67e337b4717b8fc3))
+* **oauth2:** OAuth2AdditionalParams tabbed key-value editor ([0d127ab](https://github.com/Snehal1112/rocket/commit/0d127ab92c6d08b612f99316ffc41e39d02d3f63))
+* **oauth2:** OAuth2AuthEditor orchestrator with Tauri command wiring ([7d1d2fa](https://github.com/Snehal1112/rocket/commit/7d1d2fa3955efe84db8d2ec8ddee7b26408556be))
+* **oauth2:** OAuth2ConfigSection and OAuth2TokenSection components ([55e3e5a](https://github.com/Snehal1112/rocket/commit/55e3e5acb4c66a190df2bf5de0f655f3824ea52d))
+* **oauth2:** OAuth2TokenDisplay, SettingsSection, AdvancedSection components ([4a4d613](https://github.com/Snehal1112/rocket/commit/4a4d61318dc90226521143516c6b6dc21c327ac0))
+* render dynamic variables with cyan D badge in popover and Monaco ([c17007f](https://github.com/Snehal1112/rocket/commit/c17007fd8c3122d2cd1566c5e8e0f27bd1a999bb))
+
+### Bug Fixes
+
+* **a11y:** raise sidebar icon and badge contrast to WCAG AAA ([13a12b0](https://github.com/Snehal1112/rocket/commit/13a12b070e078ec1873ae506785239e0b6caaf79))
+* **backend:** address important backend issues ([7a1b3c2](https://github.com/Snehal1112/rocket/commit/7a1b3c2688a63be547624866cdf92194c12a0792))
+* **ci:** generate changelog once, not per matrix runner ([ce82522](https://github.com/Snehal1112/rocket/commit/ce825222fc2a4225c353dc8c7608815a4cc2fc4e))
+* **console:** show auth headers in console request log ([513b3d8](https://github.com/Snehal1112/rocket/commit/513b3d837847ebe4fd2a657b2a28df7338fdfd77))
+* **dynamic-vars:** correct alphaNumeric charset and bitcoin address length ([36cda65](https://github.com/Snehal1112/rocket/commit/36cda658efc74f6f07da1df99316207b536a683e))
+* **editor:** eliminate theme flash on first Monaco diff/conflict view ([b0598b3](https://github.com/Snehal1112/rocket/commit/b0598b37b1ffe47e1549653611235fa56a60c6ba))
+* **git:** handle directory paths in stage() and refresh status before stageAll ([50412d0](https://github.com/Snehal1112/rocket/commit/50412d08f5332e3f457b5e3a215a0617686b9271))
+* **git:** recurse untracked dirs in status to prevent staging errors ([124984e](https://github.com/Snehal1112/rocket/commit/124984e98a4fb3212d97b4af9f6f5b2b18d9d0b2))
+* **import:** map Bruno variable value to initial_value on collection import ([632e87c](https://github.com/Snehal1112/rocket/commit/632e87cee986e071c6b4fa24c94b6e27c2efc8a7))
+* **infra:** atomic file writes to prevent data corruption on crash ([6712540](https://github.com/Snehal1112/rocket/commit/6712540475cd28b4b8818f3b7331b2f817e9dac9))
+* **infra:** use create_new to eliminate TOCTOU race in save_request ([f7c2d93](https://github.com/Snehal1112/rocket/commit/f7c2d9377d354735b0d06cb6cd09d0d3aa6fadf4))
+* **oauth2:** add missing use_system_browser to oc_conversions test fixture ([11e2d57](https://github.com/Snehal1112/rocket/commit/11e2d57130c72616cf979c20f130ea7e7ddeec2b))
+* **oauth2:** always show Refresh button, disabled when no refresh token ([17eecc0](https://github.com/Snehal1112/rocket/commit/17eecc0e559a3717ef11ecdf5f7e42b03b180e69))
+* **oauth2:** fix stale closure clobbering access token on fetch ([2bdb513](https://github.com/Snehal1112/rocket/commit/2bdb513b8a1e466603425c5f5f535c93af149848))
+* **oauth2:** persist full OAuth2 config on save, not just access token ([cdffc53](https://github.com/Snehal1112/rocket/commit/cdffc53d3dbd3bcfbd6444e09252895127b277f7))
+* **oauth2:** persist tokenSource selection across save/reload ([5280cf9](https://github.com/Snehal1112/rocket/commit/5280cf9313daeb80f509a5dab95d4f052cb3a485))
+* **oauth2:** persist useSystemBrowser setting across save/reload ([ec839cc](https://github.com/Snehal1112/rocket/commit/ec839ccd11881eaa26cc830935b047732c250178))
+* **oauth2:** restore accessTokenClaims from cache on collection tab reopen ([8d9c6de](https://github.com/Snehal1112/rocket/commit/8d9c6de69c5525164da22a1783f0ad88a802aa70))
+* **oauth2:** restore missing token fields on collection tab reopen ([93f0ceb](https://github.com/Snehal1112/rocket/commit/93f0ceb579652b5dec3e6cb8fa16dacd734935e3))
+* **params:** extract path params on request load and cURL import ([c99fbdc](https://github.com/Snehal1112/rocket/commit/c99fbdcdd02de89849159c9ece196339e578ed24))
+* **security:** confine HTTP executor file reads to workspace directory ([f1820cf](https://github.com/Snehal1112/rocket/commit/f1820cfee41a0c0e8d728011a1682e4af4075664))
+* **sidebar:** prevent layout shift on active tree item ([f694b00](https://github.com/Snehal1112/rocket/commit/f694b00d92c5d86a89d36ddf3747fa9ef2ae883d))
+* **startup:** replace expect() panics with graceful error propagation ([c991553](https://github.com/Snehal1112/rocket/commit/c991553a738c0a673fb78495666af8ec969b0f0c))
+* **vars:** open request variables dialog from Variables tab for saved requests ([9176fc3](https://github.com/Snehal1112/rocket/commit/9176fc399c1e9d99cb255fadde6aa5f99f404203))
+* **vars:** open request variables in dismissible dialog on tooltip nav ([97ca33a](https://github.com/Snehal1112/rocket/commit/97ca33a3843f93b52647337e40ccc18990dadfac))
+* **vars:** persist current variable value on save and restore on load ([b83678f](https://github.com/Snehal1112/rocket/commit/b83678f8549240e749583f668a89ceca796b5e4a))
+* **vars:** persist initial and current values separately ([461ceda](https://github.com/Snehal1112/rocket/commit/461ceda6f70a66e9a5a04af47ab49126aa6db751))
+* **workspace:** update active path before persisting on workspace switch ([5c7f4a2](https://github.com/Snehal1112/rocket/commit/5c7f4a20f874037d340c4f2a067bfa82317e7399))
+
+### Performance Improvements
+
+* **git:** eliminate redundant IPC calls on Git tab switch ([45ce1b9](https://github.com/Snehal1112/rocket/commit/45ce1b922776851b05e7b9fb551f5d504001d71c))
+
+### Reverts
+
+* **vars:** show request variables inline in tab, not in dialog ([1446120](https://github.com/Snehal1112/rocket/commit/14461209ecb35c60e7c7e5f5b04783f961d76560))
+
 ## [0.6.1](https://github.com/Snehal1112/rocket/compare/v0.5.0...v0.6.1) (2026-04-20)
 
 ### Features
