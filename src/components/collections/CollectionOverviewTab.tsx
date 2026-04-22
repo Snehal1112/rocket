@@ -252,6 +252,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             refreshToken: cachedAuth.oauth2.refreshToken ?? '',
             expiresIn: cachedAuth.oauth2.expiresIn ?? null,
             tokenAcquiredAt: cachedAuth.oauth2.tokenAcquiredAt ?? null,
+            idToken: cachedAuth.oauth2.idToken ?? '',
+            idTokenClaims: cachedAuth.oauth2.idTokenClaims ?? null,
+            tokenType: cachedAuth.oauth2.tokenType ?? '',
+            responseScope: cachedAuth.oauth2.responseScope ?? '',
           };
         }
         setAuth(diskAuth);

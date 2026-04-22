@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, Copy, Key } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Copy, Key } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import type { AuthState } from '@/types/pane-types';
 
 type OAuth2State = NonNullable<AuthState['oauth2']>;
@@ -39,6 +40,13 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
   const [idOpen, setIdOpen] = useState(!!o.idToken);
   const [showRawPayload, setShowRawPayload] = useState(false);
   const [, setTick] = useState(0);
+  const [copied, setCopied] = useState<'access' | 'id' | null>(null);
+
+  const copy = (text: string, which: 'access' | 'id') => {
+    navigator.clipboard.writeText(text);
+    setCopied(which);
+    setTimeout(() => setCopied(null), 1500);
+  };
 
   // Track previous token values so we only auto-expand on a NEW token arriving,
   // not on every re-render. This way a manual collapse stays sticky until the
@@ -99,9 +107,9 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
           </button>
           {accessOpen && (
             <div className='px-3 pb-3'>
-              <div className='flex gap-1.5'>
-                <Input
-                  className='flex-1 text-sm font-mono truncate'
+              <div className='flex gap-1.5 items-start'>
+                <Textarea
+                  className='flex-1 text-xs font-mono resize-none min-h-[4.5rem] max-h-40'
                   readOnly
                   value={o.accessToken}
                 />
@@ -109,10 +117,14 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                   variant='outline'
                   size='sm'
                   className='px-2 shrink-0'
-                  onClick={() => navigator.clipboard.writeText(o.accessToken)}
+                  onClick={() => copy(o.accessToken, 'access')}
                   title='Copy access token'
                 >
-                  <Copy className='h-3 w-3' />
+                  {copied === 'access' ? (
+                    <Check className='h-3 w-3 text-green-500' />
+                  ) : (
+                    <Copy className='h-3 w-3' />
+                  )}
                 </Button>
               </div>
             </div>
@@ -196,10 +208,14 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                     variant='outline'
                     size='sm'
                     className='px-2 shrink-0'
-                    onClick={() => navigator.clipboard.writeText(o.idToken)}
+                    onClick={() => copy(o.idToken, 'id')}
                     title='Copy ID token'
                   >
-                    <Copy className='h-3 w-3' />
+                    {copied === 'id' ? (
+                      <Check className='h-3 w-3 text-green-500' />
+                    ) : (
+                      <Copy className='h-3 w-3' />
+                    )}
                   </Button>
                 </div>
               )}

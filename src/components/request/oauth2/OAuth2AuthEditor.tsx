@@ -53,7 +53,9 @@ export function OAuth2AuthEditor({
   const [gettingToken, setGettingToken] = useState(false);
   const [tokenError, setTokenError] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [additionalOpen, setAdditionalOpen] = useState(false);
+  const [additionalOpen, setAdditionalOpen] = useState(
+    () => o.authParams.length > 0 || o.tokenParams.length > 0 || o.refreshParams.length > 0,
+  );
   const tokenDisplayRef = useRef<HTMLDivElement>(null);
 
   // Always holds the latest patchOAuth2 so async handlers never use a stale closure.
