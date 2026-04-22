@@ -710,6 +710,7 @@ export interface OAuth2GetTokenRequest {
   collection?: string;
   environmentName?: string;
   requestPath?: string;
+  forceReauth?: boolean;
 }
 
 export interface OAuth2RefreshRequest {

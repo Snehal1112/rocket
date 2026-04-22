@@ -228,6 +228,7 @@ export interface AuthState {
     responseScope: string;
     idTokenClaims: OAuth2JwtClaims | null;
     accessTokenClaims: OAuth2JwtClaims | null;
+    forceReauth?: boolean;
   };
   awsSigV4?: {
     accessKey: string;
