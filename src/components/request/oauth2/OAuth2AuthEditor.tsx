@@ -198,10 +198,10 @@ export function OAuth2AuthEditor({
       idTokenClaims: null,
       accessTokenClaims: null,
       autoFetchToken: false,
-      forceReauth: true,
+      forceReauth: o.grantType === 'authorization_code',
     });
     setTokenError('');
-  }, []);
+  }, [o]);
 
   const getTokenDisabled =
     gettingToken ||
