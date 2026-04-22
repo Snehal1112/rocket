@@ -3,8 +3,10 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
+  LayoutGrid,
   Lock,
   MoreHorizontal,
+  Pencil,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -328,7 +330,7 @@ export function CollectionNode({
               <DropdownMenuItem
                 onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}
               >
-                Overview
+                <LayoutGrid className='h-3.5 w-3.5 mr-2' /> Overview
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setCreateRequestOpen(true)}>
@@ -349,7 +351,7 @@ export function CollectionNode({
                   setIsRenaming(true);
                 }}
               >
-                Rename
+                <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -389,12 +391,14 @@ export function CollectionNode({
             usePaneStore.getState().openTab(tab);
           }}
         >
-          Overview
+          <LayoutGrid className='h-3.5 w-3.5 mr-2' /> Overview
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => setCreateRequestOpen(true)}>New Request</ContextMenuItem>
+        <ContextMenuItem onClick={() => setCreateRequestOpen(true)}>
+          <Plus className='h-3.5 w-3.5 mr-2' /> New Request
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>
-          New Folder
+          <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -403,7 +407,7 @@ export function CollectionNode({
             setIsRenaming(true);
           }}
         >
-          Rename
+          <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -424,7 +428,7 @@ export function CollectionNode({
             })
           }
         >
-          Delete
+          <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
         </ContextMenuItem>
       </ContextMenuContent>
 
