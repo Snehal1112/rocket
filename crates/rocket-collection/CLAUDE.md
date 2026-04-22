@@ -71,8 +71,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **`variables: Vec<CollectionVariable>`** — collection-scoped variables sit below environment variables in the resolution hierarchy. Each `CollectionVariable` has a `secret: bool` field to suppress UI display and an `initial_value` field for Postman export compatibility.
 - **`auth: Option<Auth>`** — default auth applied to all requests in the collection.
 - **`headers: Vec<Header>`** — default headers prepended to every request.
-- **`description: Option<String>`** — optional human-readable description.
-- **`readme: Option<String>`** — optional markdown readme.
+- **`docs: Option<String>`** — optional markdown documentation for the collection (maps to `docs:` in opencollection.yml).
 
 ## CollectionRepository
 

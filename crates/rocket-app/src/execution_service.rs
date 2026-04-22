@@ -859,8 +859,7 @@ mod tests {
         use rocket_shared::types::Auth;
 
         let settings = CollectionSettings {
-            description: None,
-            readme: None,
+            docs: None,
             auth: Some(Auth::Bearer { token: "col_tok".into() }),
             headers: vec![],
             variables: vec![],
