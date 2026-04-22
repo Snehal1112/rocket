@@ -435,13 +435,16 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       </div>
 
       {/* Tab content. */}
-      <div
-        ref={scrollContainerRef}
-        className={cn(
-          'flex-1 min-h-0 transition-shadow duration-200',
-          isScrolled && 'shadow-[inset_0_8px_6px_-6px_rgba(0,0,0,0.35)]',
-        )}
-      >
+      <div ref={scrollContainerRef} className='relative flex-1 min-h-0'>
+        {/* Scroll elevation overlay — paints over content when scrolled. */}
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-0 z-10 h-6 transition-opacity duration-200',
+            'bg-gradient-to-b from-black/10 to-transparent',
+            'dark:from-black/40 dark:to-transparent',
+            isScrolled ? 'opacity-100' : 'opacity-0',
+          )}
+        />
         <ScrollArea className='h-full'>
           <div className='p-6 max-w-3xl mx-auto space-y-6'>
           {/* Overview tab. */}
