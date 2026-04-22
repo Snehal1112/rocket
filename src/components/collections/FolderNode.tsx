@@ -219,7 +219,10 @@ export function FolderNode({
                   <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuContent
+                className='w-48 bg-card/40 backdrop-blur-sm'
+                onClick={(e) => e.stopPropagation()}
+              >
                 <DropdownMenuItem
                   onClick={() => {
                     setOpen(true);
@@ -264,7 +267,7 @@ export function FolderNode({
             </DropdownMenu>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className='w-48'>
+        <ContextMenuContent className='w-48 bg-card/40 backdrop-blur-sm'>
           <ContextMenuItem
             onClick={() => {
               setOpen(true);
@@ -272,13 +275,15 @@ export function FolderNode({
               setNewRequestName('');
             }}
           >
-            New Request
+            <Plus className='h-3.5 w-3.5 mr-2' /> New Request
           </ContextMenuItem>
           <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
-            New Folder
+            <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => setVarsOpen(true)}>Variables</ContextMenuItem>
+          <ContextMenuItem onClick={() => setVarsOpen(true)}>
+            <Variable className='h-3.5 w-3.5 mr-2' /> Variables
+          </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {
@@ -287,7 +292,7 @@ export function FolderNode({
               setIsRenaming(true);
             }}
           >
-            Rename
+            <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
@@ -301,7 +306,7 @@ export function FolderNode({
               })
             }
           >
-            Delete
+            <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
