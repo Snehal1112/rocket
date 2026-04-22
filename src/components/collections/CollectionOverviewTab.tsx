@@ -447,62 +447,60 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'overview' && (
           <div className='flex h-full overflow-hidden'>
             {/* LEFT — scrollable cards */}
-            <div className='flex-1 min-w-0 border-r border-border flex flex-col'>
-              <ScrollArea className='flex-1'>
-                <div className='p-5 flex flex-col gap-5 w-full'>
-                  <MethodBreakdown items={items} />
+            <div className='flex-1 min-w-0 border-r border-border overflow-y-auto'>
+              <div className='p-5 flex flex-col gap-5'>
+                <MethodBreakdown items={items} />
 
-                  <Card>
-                    <CardHeader className='pb-2 pt-4 px-4'>
-                      <span className='text-sm font-medium'>Default Headers</span>
-                    </CardHeader>
-                    <CardContent className='px-4 pb-4'>
-                      <HeadersEditor
-                        headers={headers}
-                        onChange={(v) => {
-                          setHeaders(v);
-                          setIsDirty(true);
-                        }}
-                      />
-                      <div className='flex justify-end mt-3'>
-                        <Button
-                          size='sm'
-                          onClick={() => void triggerSave()}
-                          disabled={!isDirty || saveState !== 'idle'}
-                          className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                        >
-                          {saveState === 'saving' ? (
-                            <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                          ) : saveState === 'success' ? (
-                            <Check className='h-3.5 w-3.5' />
-                          ) : (
-                            <Save className='h-3.5 w-3.5' />
-                          )}
-                          {saveState === 'success' ? 'Saved' : 'Save'}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                <Card>
+                  <CardHeader className='pb-2 pt-4 px-4'>
+                    <span className='text-sm font-medium'>Default Headers</span>
+                  </CardHeader>
+                  <CardContent className='px-4 pb-4'>
+                    <HeadersEditor
+                      headers={headers}
+                      onChange={(v) => {
+                        setHeaders(v);
+                        setIsDirty(true);
+                      }}
+                    />
+                    <div className='flex justify-end mt-3'>
+                      <Button
+                        size='sm'
+                        onClick={() => void triggerSave()}
+                        disabled={!isDirty || saveState !== 'idle'}
+                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                      >
+                        {saveState === 'saving' ? (
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                        ) : saveState === 'success' ? (
+                          <Check className='h-3.5 w-3.5' />
+                        ) : (
+                          <Save className='h-3.5 w-3.5' />
+                        )}
+                        {saveState === 'success' ? 'Saved' : 'Save'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                  <Card>
-                    <CardHeader className='pb-2 pt-4 px-4'>
-                      <span className='text-sm font-medium'>Requests</span>
-                    </CardHeader>
-                    <CardContent className='px-4 pb-4'>
-                      <RequestList items={items} collectionName={collectionName} />
-                    </CardContent>
-                  </Card>
+                <Card>
+                  <CardHeader className='pb-2 pt-4 px-4'>
+                    <span className='text-sm font-medium'>Requests</span>
+                  </CardHeader>
+                  <CardContent className='px-4 pb-4'>
+                    <RequestList items={items} collectionName={collectionName} />
+                  </CardContent>
+                </Card>
 
-                  <Card>
-                    <CardHeader className='pb-2 pt-4 px-4'>
-                      <span className='text-sm font-medium'>Tags</span>
-                    </CardHeader>
-                    <CardContent className='px-4 pb-4'>
-                      <TagsList collection={collection} />
-                    </CardContent>
-                  </Card>
-                </div>
-              </ScrollArea>
+                <Card>
+                  <CardHeader className='pb-2 pt-4 px-4'>
+                    <span className='text-sm font-medium'>Tags</span>
+                  </CardHeader>
+                  <CardContent className='px-4 pb-4'>
+                    <TagsList collection={collection} />
+                  </CardContent>
+                </Card>
+              </div>
             </div>
 
             {/* RIGHT — Documentation panel */}
