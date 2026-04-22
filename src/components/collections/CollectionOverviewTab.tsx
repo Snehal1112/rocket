@@ -449,7 +449,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             {/* LEFT — scrollable cards */}
             <div className='flex-1 min-w-0 border-r border-border flex flex-col'>
               <ScrollArea className='flex-1'>
-                <div className='p-5 flex flex-col gap-5'>
+                <div className='p-5 flex flex-col gap-5 w-full'>
                   <MethodBreakdown items={items} />
 
                   <Card>
