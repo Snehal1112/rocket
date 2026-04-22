@@ -2273,6 +2273,7 @@ http:
                 auto_fetch_token: Some(true),
                 auto_refresh_token: Some(false),
                 verify_ssl: Some(true),
+                use_system_browser: None,
             }),
         });
 
