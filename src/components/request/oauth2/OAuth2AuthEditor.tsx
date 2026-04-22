@@ -68,7 +68,7 @@ export function OAuth2AuthEditor({
     const isForceReauth = o.forceReauth && o.grantType === 'authorization_code';
     const authParamsForRequest = isForceReauth
       ? [
-          ...o.authParams,
+          ...o.authParams.filter(p => p.key !== 'prompt'),
           { key: 'prompt', value: 'login', sendIn: 'queryparams' as const, enabled: true },
         ]
       : o.authParams.length
@@ -201,7 +201,7 @@ export function OAuth2AuthEditor({
       forceReauth: o.grantType === 'authorization_code',
     });
     setTokenError('');
-  }, [o]);
+  }, [o.grantType]);
 
   const getTokenDisabled =
     gettingToken ||

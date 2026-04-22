@@ -325,6 +325,9 @@ async fn auth_code_flow(
 
     #[cfg(target_os = "linux")]
     if force_reauth && !use_system_browser {
+        // Note: dm.clear() is async (GLib callback-based) — the auth window may open
+        // before clearing completes. This is a best-effort UX improvement; the
+        // prompt=login param is the primary mechanism.
         if let Some(existing) = app.get_webview_window("oauth2-auth") {
             let _ = existing.close();
         }
