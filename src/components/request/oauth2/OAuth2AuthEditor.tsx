@@ -354,17 +354,16 @@ export function OAuth2AuthEditor({
         >
           {gettingToken ? 'Waiting…' : 'Get Access Token'}
         </Button>
-        {o.refreshToken && (
-          <Button
-            variant='outline'
-            size='sm'
-            className='text-sm min-h-[36px]'
-            disabled={gettingToken || !o.tokenUrl}
-            onClick={handleRefreshToken}
-          >
-            Refresh
-          </Button>
-        )}
+        <Button
+          variant='outline'
+          size='sm'
+          className='text-sm min-h-[36px]'
+          disabled={gettingToken || !o.refreshToken || !o.tokenUrl}
+          onClick={handleRefreshToken}
+          title={!o.refreshToken ? 'No refresh token — get an access token first' : undefined}
+        >
+          Refresh
+        </Button>
         {hasAnyToken && (
           <Button
             variant='ghost'
