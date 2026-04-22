@@ -266,8 +266,16 @@ pub async fn oauth2_refresh_token(
 pub async fn oauth2_get_token(
     app: AppHandle,
     svc: State<'_, OAuth2Service>,
-    request: OAuth2GetTokenRequest,
+    mut request: OAuth2GetTokenRequest,
 ) -> Result<OAuthToken, DomainError> {
+    // Apply the OS-specific default only when the user has not explicitly chosen.
+    // On macOS/Windows the embedded WKWebView/WebView2 has Tauri IPC scripts
+    // injected that can break OIDC providers (e.g. Keycloak nonce handling),
+    // so we default to the system browser on those platforms.
+    // An explicit `false` from the UI always wins and opens the in-app webview.
+    if request.use_system_browser.is_none() {
+        request.use_system_browser = Some(cfg!(any(target_os = "macos", target_os = "windows")));
+    }
     let config = svc.resolve_get_token_request(&request);
 
     match config.grant_type.as_str() {
@@ -309,16 +317,10 @@ async fn auth_code_flow(
 
     auth_url = apply_params_to_url(&auth_url, &config.auth_params);
 
-    // On macOS and Windows, Tauri injects IPC initialization scripts into every
-    // WKWebView/WebView2 window. These overwrite window.webkit.messageHandlers,
-    // which some OIDC providers (e.g. Keycloak) use natively for their own
-    // session/nonce management. This causes those providers to return
-    // "Failed to parse nonce as string" when the auth window loads.
-    // The system browser is not affected by script injection, so we default
-    // to it on macOS/Windows per RFC 8252 §4.1. The user can still force the
-    // embedded webview by explicitly toggling "Use System Browser" off.
-    let use_system_browser =
-        config.use_system_browser || cfg!(any(target_os = "macos", target_os = "windows"));
+    // The OS-specific default has already been applied in oauth2_get_token before
+    // resolving — config.use_system_browser faithfully reflects the user's choice
+    // (or the platform default when the user never touched the toggle).
+    let use_system_browser = config.use_system_browser;
 
     let (code, actual_redirect_uri) = if use_system_browser {
         auth_code_via_system_browser(app, &auth_url, &state).await?
