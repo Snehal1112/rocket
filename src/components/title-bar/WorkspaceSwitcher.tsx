@@ -1,4 +1,15 @@
-import { Check, ChevronDown, Download, FolderOpen, LogOut, MoreHorizontal, Pencil, Pin, Plus, Trash2 } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  Download,
+  FolderOpen,
+  LogOut,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import { useState } from 'react';
 import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import {

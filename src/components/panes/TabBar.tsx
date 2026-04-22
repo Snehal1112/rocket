@@ -1,4 +1,18 @@
-import { BookmarkPlus, Braces, Columns2, Globe, LayoutPanelLeft, PanelBottom, PanelRight, Pencil, Plus, Radio, Save, X, Zap } from 'lucide-react';
+import {
+  BookmarkPlus,
+  Braces,
+  Columns2,
+  Globe,
+  LayoutPanelLeft,
+  PanelBottom,
+  PanelRight,
+  Pencil,
+  Plus,
+  Radio,
+  Save,
+  X,
+  Zap,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -128,9 +142,13 @@ export function TabBar({
               }}
             >
               {tab.source ? (
-                <><Save className='h-3.5 w-3.5 mr-2' /> Save</>
+                <>
+                  <Save className='h-3.5 w-3.5 mr-2' /> Save
+                </>
               ) : (
-                <><BookmarkPlus className='h-3.5 w-3.5 mr-2' /> Save to collection...</>
+                <>
+                  <BookmarkPlus className='h-3.5 w-3.5 mr-2' /> Save to collection...
+                </>
               )}
             </ContextMenuItem>
             <ContextMenuItem
@@ -228,10 +246,18 @@ export function TabBar({
           </Button>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => openEphemeralTab('http')}><Globe className='h-3.5 w-3.5 mr-2' /> HTTP</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('graphql')}><Braces className='h-3.5 w-3.5 mr-2' /> GraphQL</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('grpc')}><Zap className='h-3.5 w-3.5 mr-2' /> gRPC</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('websocket')}><Radio className='h-3.5 w-3.5 mr-2' /> WebSocket</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('http')}>
+            <Globe className='h-3.5 w-3.5 mr-2' /> HTTP
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('graphql')}>
+            <Braces className='h-3.5 w-3.5 mr-2' /> GraphQL
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('grpc')}>
+            <Zap className='h-3.5 w-3.5 mr-2' /> gRPC
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('websocket')}>
+            <Radio className='h-3.5 w-3.5 mr-2' /> WebSocket
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
     </div>

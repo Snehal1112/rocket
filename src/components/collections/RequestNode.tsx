@@ -1,4 +1,13 @@
-import { Copy, FolderInput, LayoutPanelLeft, MoreHorizontal, PanelBottom, PanelRight, Pencil, Trash2 } from 'lucide-react';
+import {
+  Copy,
+  FolderInput,
+  LayoutPanelLeft,
+  MoreHorizontal,
+  PanelBottom,
+  PanelRight,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
@@ -227,13 +236,15 @@ export function RequestNode({
               {/* Pane-targeting actions. */}
               {otherGroupIds.length === 1 && (
                 <DropdownMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
-                  <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
+                  <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other
+                  pane
                 </DropdownMenuItem>
               )}
               {otherGroupIds.length > 1 && (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
+                    <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in
+                    other pane
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className='w-48'>
                     {otherGroupIds.map((gid) => (
