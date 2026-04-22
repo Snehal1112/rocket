@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Download, FolderOpen, MoreHorizontal, Pin, Plus } from 'lucide-react';
+import { Check, ChevronDown, Download, FolderOpen, LogOut, MoreHorizontal, Pencil, Pin, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ImportBrunoDialog } from '@/components/import/ImportBrunoDialog';
 import {
@@ -89,13 +89,13 @@ export function WorkspaceSwitcher() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end' className='w-36'>
           <DropdownMenuItem onSelect={() => setRenameTarget({ id: ws.id, name: ws.name })}>
-            Rename
+            <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => setCloseTarget({ id: ws.id, name: ws.name })}
             disabled={!canCloseOrDelete}
           >
-            Close
+            <LogOut className='h-3.5 w-3.5 mr-2' /> Close
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -103,7 +103,7 @@ export function WorkspaceSwitcher() {
             onSelect={() => setDeleteTarget({ id: ws.id, name: ws.name })}
             disabled={ws.id === 'default' || !canCloseOrDelete}
           >
-            Delete
+            <Trash2 className='h-3.5 w-3.5 mr-2' /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
