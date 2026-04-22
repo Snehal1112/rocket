@@ -57,8 +57,7 @@ export interface CollectionVariable {
 }
 
 export interface CollectionSettings {
-  description?: string;
-  readme?: string;
+  docs?: string;
   auth?: Auth;
   headers: Header[];
   variables: CollectionVariable[];
