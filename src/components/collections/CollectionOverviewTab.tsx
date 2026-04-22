@@ -432,7 +432,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       </div>
 
       {/* Tab content. */}
-      <div ref={scrollContainerRef} className='relative flex-1 min-h-0'>
+      <div ref={scrollContainerRef} className='relative flex-1 min-h-0 h-full'>
         {/* Scroll elevation overlay — paints over content when scrolled. */}
         <div
           className={cn(
