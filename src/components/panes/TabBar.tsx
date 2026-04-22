@@ -1,4 +1,4 @@
-import { PanelBottom, PanelRight, Plus } from 'lucide-react';
+import { BookmarkPlus, Braces, Columns2, Globe, LayoutPanelLeft, PanelBottom, PanelRight, Pencil, Plus, Radio, Save, X, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -127,7 +127,11 @@ export function TabBar({
                 );
               }}
             >
-              {tab.source ? 'Save' : 'Save to collection...'}
+              {tab.source ? (
+                <><Save className='h-3.5 w-3.5 mr-2' /> Save</>
+              ) : (
+                <><BookmarkPlus className='h-3.5 w-3.5 mr-2' /> Save to collection...</>
+              )}
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
@@ -135,14 +139,14 @@ export function TabBar({
                 setRenameValue(tab.title);
               }}
             >
-              Rename
+              <Pencil className='h-3.5 w-3.5 mr-2' /> Rename
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
               disabled={isWorkspaceTab(tab)}
               onClick={() => (onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId))}
             >
-              Close
+              <X className='h-3.5 w-3.5 mr-2' /> Close
             </ContextMenuItem>
             <ContextMenuItem
               disabled={isWorkspaceTab(tab)}
@@ -155,7 +159,7 @@ export function TabBar({
                   });
               }}
             >
-              Close Others
+              <Columns2 className='h-3.5 w-3.5 mr-2' /> Close Others
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => splitGroup(node.groupId, 'horizontal')}>
@@ -167,12 +171,14 @@ export function TabBar({
             <ContextMenuSeparator />
             {otherGroupIds.length === 1 && (
               <ContextMenuItem onClick={() => moveTab(tab.id, node.groupId, otherGroupIds[0])}>
-                Move to other pane
+                <LayoutPanelLeft className='h-3.5 w-3.5 mr-2' /> Move to other pane
               </ContextMenuItem>
             )}
             {otherGroupIds.length > 1 && (
               <ContextMenuSub>
-                <ContextMenuSubTrigger>Move to other pane</ContextMenuSubTrigger>
+                <ContextMenuSubTrigger>
+                  <LayoutPanelLeft className='h-3.5 w-3.5 mr-2' /> Move to other pane
+                </ContextMenuSubTrigger>
                 <ContextMenuSubContent>
                   {otherGroupIds.map((id, i) => (
                     <ContextMenuItem key={id} onClick={() => moveTab(tab.id, node.groupId, id)}>
@@ -191,7 +197,7 @@ export function TabBar({
                 if (newId) moveTab(tab.id, node.groupId, newId);
               }}
             >
-              Move to new split right
+              <PanelRight className='h-3.5 w-3.5 mr-2' /> Move to new split right
             </ContextMenuItem>
             <ContextMenuItem
               onClick={() => {
@@ -202,7 +208,7 @@ export function TabBar({
                 if (newId) moveTab(tab.id, node.groupId, newId);
               }}
             >
-              Move to new split below
+              <PanelBottom className='h-3.5 w-3.5 mr-2' /> Move to new split below
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
@@ -222,10 +228,10 @@ export function TabBar({
           </Button>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => openEphemeralTab('http')}>HTTP</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('graphql')}>GraphQL</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('grpc')}>gRPC</ContextMenuItem>
-          <ContextMenuItem onClick={() => openEphemeralTab('websocket')}>WebSocket</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('http')}><Globe className='h-3.5 w-3.5 mr-2' /> HTTP</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('graphql')}><Braces className='h-3.5 w-3.5 mr-2' /> GraphQL</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('grpc')}><Zap className='h-3.5 w-3.5 mr-2' /> gRPC</ContextMenuItem>
+          <ContextMenuItem onClick={() => openEphemeralTab('websocket')}><Radio className='h-3.5 w-3.5 mr-2' /> WebSocket</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
     </div>
