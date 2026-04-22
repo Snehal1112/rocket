@@ -68,7 +68,7 @@ export function OAuth2AuthEditor({
     const isForceReauth = o.forceReauth && o.grantType === 'authorization_code';
     const authParamsForRequest = isForceReauth
       ? [
-          ...o.authParams.filter(p => p.key !== 'prompt'),
+          ...o.authParams.filter((p) => p.key !== 'prompt'),
           { key: 'prompt', value: 'login', sendIn: 'queryparams' as const, enabled: true },
         ]
       : o.authParams.length

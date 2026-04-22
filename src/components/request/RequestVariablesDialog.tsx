@@ -56,7 +56,12 @@ export function RequestVariablesDialog({
   }, [collection, requestPath, variables, onClose, onVarCountChange]);
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onClose();
+      }}
+    >
       <DialogContent className='max-w-3xl'>
         <DialogHeader>
           <DialogTitle>{requestName} — Variables</DialogTitle>

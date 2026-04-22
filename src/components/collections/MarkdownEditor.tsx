@@ -66,7 +66,7 @@ export function MarkdownEditor({
         {mode === 'edit' && (
           <div className='flex-1 flex flex-col overflow-hidden'>
             <Textarea
-              className='flex-1 w-full bg-transparent border-none resize-none px-4 py-3.5 text-xs font-mono text-muted-foreground placeholder:text-muted-foreground/40 focus-visible:outline-none leading-relaxed'
+              className='flex-1 w-full bg-transparent border-none resize-none px-4 py-3.5 text-xs font-mono text-muted-foreground placeholder:text-muted-foreground/40 focus-visible:outline-none focus-visible:ring-0 leading-relaxed'
               placeholder={'Add documentation...\n\nSupports **Markdown**'}
               value={value}
               onChange={(e) => onChange(e.target.value)}

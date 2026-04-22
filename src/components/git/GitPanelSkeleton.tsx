@@ -33,7 +33,10 @@ export function GitPanelSkeleton() {
           {/* Links section placeholder */}
           <div className='shrink-0 border-t border-border/70 px-3 py-2 space-y-1'>
             {[1, 2, 3].map((n) => (
-              <div key={n} className='h-8 w-full rounded-md bg-muted/50 motion-safe:animate-pulse' />
+              <div
+                key={n}
+                className='h-8 w-full rounded-md bg-muted/50 motion-safe:animate-pulse'
+              />
             ))}
           </div>
         </div>

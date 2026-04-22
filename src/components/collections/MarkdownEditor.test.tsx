@@ -50,17 +50,41 @@ describe('MarkdownEditor', () => {
   });
 
   it('renders save button when onSave is provided', () => {
-    render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />);
+    render(
+      <MarkdownEditor
+        {...baseProps}
+        mode='edit'
+        onSave={vi.fn()}
+        saveState='idle'
+        isDirty={false}
+      />,
+    );
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
   });
 
   it('save button disabled when isDirty is false', () => {
-    render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={false} />);
+    render(
+      <MarkdownEditor
+        {...baseProps}
+        mode='edit'
+        onSave={vi.fn()}
+        saveState='idle'
+        isDirty={false}
+      />,
+    );
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
   });
 
   it('save button enabled when isDirty is true', () => {
-    render(<MarkdownEditor {...baseProps} mode='edit' onSave={vi.fn()} saveState='idle' isDirty={true} />);
+    render(
+      <MarkdownEditor
+        {...baseProps}
+        mode='edit'
+        onSave={vi.fn()}
+        saveState='idle'
+        isDirty={true}
+      />,
+    );
     expect(screen.getByRole('button', { name: /save/i })).toBeEnabled();
   });
 

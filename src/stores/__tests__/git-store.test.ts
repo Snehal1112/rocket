@@ -97,7 +97,11 @@ describe('git-store clearError', () => {
 
   it('fetch clears stale error before executing', async () => {
     const { gitFetch } = await import('@/lib/tauri-api');
-    vi.mocked(gitFetch).mockResolvedValueOnce({ updatedRefs: [], receivedObjects: 0, receivedBytes: 0 });
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: [],
+      receivedObjects: 0,
+      receivedBytes: 0,
+    });
 
     useGitStore.setState({
       error: 'stale error',

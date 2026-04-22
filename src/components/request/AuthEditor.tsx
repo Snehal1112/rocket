@@ -59,8 +59,8 @@ export function AuthEditor({
         <Card className='bg-muted/50'>
           <CardContent className='px-3 py-2.5'>
             <p className='text-xs text-muted-foreground'>
-              This request inherits authorization from the collection settings. To override, select a
-              different auth type above.
+              This request inherits authorization from the collection settings. To override, select
+              a different auth type above.
             </p>
           </CardContent>
         </Card>
