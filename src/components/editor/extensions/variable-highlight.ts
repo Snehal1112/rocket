@@ -8,7 +8,7 @@ import {
 } from '@codemirror/view';
 import { setVariableContextEffect, variableContextField } from './variable-context-facet';
 
-const VAR_REGEX = /\{\{([\w.-]+)\}\}/g;
+const VAR_REGEX = /\{\{([$\w.-]+)\}\}/g;
 
 /**
  * ViewPlugin that scans the document for {{variable}} patterns and applies

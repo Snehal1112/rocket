@@ -60,7 +60,7 @@ function scopeBadge(source: VariableSource): string {
  */
 export const variableCompletionSource: CompletionSource = (context: CompletionContext) => {
   // Match `{{` optionally followed by partial variable name chars.
-  const before = context.matchBefore(/\{\{[\w.-]*/);
+  const before = context.matchBefore(/\{\{[$\w.-]*/);
   if (!before) return null;
 
   const varContext = context.state.field(variableContextField);

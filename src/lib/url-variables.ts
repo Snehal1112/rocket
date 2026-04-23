@@ -1,5 +1,5 @@
 import type { CollectionVariable } from '@/lib/tauri-api';
-import { generateDynamicVar } from './dynamic-vars';
+import { generateDynamicVar, listDynamicVars } from './dynamic-vars';
 
 // Matches {{variable.name}} style placeholders.
 const VAR_REGEX = /\{\{([$\w.-]+)\}\}/g;
@@ -39,7 +39,7 @@ export function buildResolver(
 
 // Builds a scope-aware variable map for the overlay UI.
 // Lower-priority scopes are written first; higher-priority scopes overwrite them.
-// Priority (lowest → highest): process → global → collection → env → folder → request → runtime.
+// Priority (lowest → highest): dynamic → process → global → collection → env → folder → request → runtime.
 export function buildScopedContext(params: {
   runtimeVars?: Record<string, string>;
   requestVars?: CollectionVariable[];
@@ -54,6 +54,8 @@ export function buildScopedContext(params: {
   const add = (k: string, v: string, source: VariableSource, label: string, secret = false) =>
     out.set(k, { value: v, source, label, secret });
 
+  for (const name of listDynamicVars())
+    add(`$${name}`, generateDynamicVar(name) ?? '', 'dynamic', 'Dynamic');
   for (const [k, v] of Object.entries(params.processEnvVars ?? {}))
     add(`process.env.${k}`, v, 'process', 'Process Env');
   for (const [k, v] of Object.entries(params.globalVars ?? {})) add(k, v, 'global', 'Global');
