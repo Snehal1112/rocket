@@ -12,12 +12,12 @@
 
 @layer base {
   :root {
-    /* VSCode Light Modern: editor.background #FFFFFF */
-    --background: 0 0% 100%;
+    /* VSCode Light Modern: sideBar.background #F8F8F8 — shell/sidebar base layer */
+    --background: 0 0% 97.3%;
     /* VSCode Light Modern: foreground #3B3B3B */
     --foreground: 0 0% 23%;
-    /* VSCode Light Modern: sideBar.background #F8F8F8 */
-    --card: 0 0% 97.3%;
+    /* VSCode Light Modern: editor.background #FFFFFF — elevated content surface */
+    --card: 0 0% 100%;
     --card-foreground: 0 0% 23%;
     /* VSCode Light Modern: dropdown.listBackground #FFFFFF */
     --popover: 0 0% 100%;
@@ -55,12 +55,12 @@
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
-    /* VSCode Dark Modern: editor.background #1F1F1F */
-    --background: 0 0% 12%;
+    /* VSCode Dark Modern: sideBar.background #181818 — shell/sidebar base layer */
+    --background: 0 0% 9.4%;
     /* VSCode Dark Modern: foreground #CCCCCC */
     --foreground: 0 0% 80%;
-    /* VSCode Dark Modern: sideBar.background #181818 */
-    --card: 0 0% 9.4%;
+    /* VSCode Dark Modern: editor.background #1F1F1F — elevated content surface */
+    --card: 0 0% 12%;
     --card-foreground: 0 0% 80%;
     /* VSCode Dark Modern: dropdown.listBackground #1F1F1F */
     --popover: 0 0% 12%;
