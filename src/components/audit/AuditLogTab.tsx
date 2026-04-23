@@ -40,7 +40,7 @@ export function AuditLogTab() {
   const activeCount = profile?.activeFrameworks.length ?? 0;
 
   return (
-    <div className='h-full flex flex-col bg-background'>
+    <div className='h-full flex flex-col bg-card'>
       {/* Header */}
       <div className='shrink-0 border-b border-border/70 px-6 py-3 flex items-center justify-between'>
         <div className='flex items-center gap-2'>
@@ -104,7 +104,7 @@ export function AuditLogTab() {
           </div>
         ) : (
           <table className='w-full text-left'>
-            <thead className='text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 sticky top-0 bg-background'>
+            <thead className='text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 sticky top-0 bg-card'>
               <tr>
                 <th scope='col' className='py-2 px-3 font-medium'>
                   When
