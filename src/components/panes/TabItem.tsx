@@ -57,7 +57,7 @@ export function TabItem({
       }}
       className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${isDragging ? 'opacity-50' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
         isActive
-          ? 'bg-background/95 border-b-2 border-b-primary -mb-px text-foreground'
+          ? 'bg-card border-b-2 border-b-primary -mb-px text-foreground'
           : 'hover:bg-accent/50 text-muted-foreground'
       }`}
     >

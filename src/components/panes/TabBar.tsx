@@ -101,7 +101,7 @@ export function TabBar({
             <div>
               {renamingTabId === tab.id ? (
                 // Inline rename input replacing the tab item.
-                <div className='flex items-center px-2 py-1 border-r border-border/70 bg-background/95 border-b-2 border-b-primary -mb-px shrink-0'>
+                <div className='flex items-center px-2 py-1 border-r border-border/70 bg-card border-b-2 border-b-primary -mb-px shrink-0'>
                   <Input
                     autoFocus
                     className='h-5 w-28 text-xs px-1'
