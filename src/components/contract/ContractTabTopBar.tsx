@@ -19,7 +19,7 @@ export function ContractTabTopBar({
   onNew,
 }: ContractTabTopBarProps) {
   return (
-    <div className='flex items-center justify-between px-5 py-3 border-b border-border shrink-0 bg-background'>
+    <div className='flex items-center justify-between px-5 py-3 border-b border-border shrink-0 bg-card'>
       <div className='flex items-center gap-2.5 min-w-0'>
         {/* Back button — all non-list views */}
         {view !== 'list' && onBack && (

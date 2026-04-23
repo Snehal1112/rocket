@@ -212,7 +212,7 @@ export function ContractTab({ tab }: ContractTabProps) {
   // ── Render: List view ──────────────────────────────────────────
   if (view.type === 'list') {
     return (
-      <div className='flex flex-col h-full bg-background'>
+      <div className='flex flex-col h-full bg-card'>
         <ContractTabTopBar collectionName={tab.collectionName} view='list' onNew={goCreate} />
         <ScrollArea className='flex-1'>
           <div className='max-w-2xl mx-auto px-6 py-5'>
@@ -244,7 +244,7 @@ export function ContractTab({ tab }: ContractTabProps) {
     const viewTitle = isEdit ? 'Edit contract' : 'New contract';
 
     return (
-      <div className='flex flex-col h-full bg-background'>
+      <div className='flex flex-col h-full bg-card'>
         <ContractTabTopBar
           collectionName={tab.collectionName}
           view={isEdit ? 'edit' : 'create'}
@@ -271,7 +271,7 @@ export function ContractTab({ tab }: ContractTabProps) {
         </div>
 
         {/* Action bar */}
-        <div className='flex items-center justify-end gap-2 px-6 py-3 border-t border-border bg-background shrink-0'>
+        <div className='flex items-center justify-end gap-2 px-6 py-3 border-t border-border bg-card shrink-0'>
           <Button variant='outline' size='sm' onClick={goList}>
             Cancel
           </Button>
@@ -295,7 +295,7 @@ export function ContractTab({ tab }: ContractTabProps) {
     const changelog = changelogs[view.contractId];
 
     return (
-      <div className='flex flex-col h-full bg-background'>
+      <div className='flex flex-col h-full bg-card'>
         <ContractTabTopBar
           collectionName={tab.collectionName}
           view='changelog'
