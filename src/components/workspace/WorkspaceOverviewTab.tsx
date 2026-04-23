@@ -239,7 +239,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                 summaries.map((col) => (
                   <Card
                     key={col.name}
-                    className='mb-2 last:mb-0 bg-card/20 border rounded-md cursor-pointer hover:bg-card transition-colors'
+                    className='mb-2 last:mb-0 bg-card border rounded-md cursor-pointer hover:bg-muted/30 transition-colors'
                   >
                     <CardContent className='p-0'>
                       {/* biome-ignore lint/a11y/useSemanticElements: contains nested interactive elements (dropdown button), cannot be a <button> */}

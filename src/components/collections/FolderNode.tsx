@@ -173,7 +173,7 @@ export function FolderNode({
           <div className='group relative flex items-center'>
             <TreeItem value={basePath} open={open} onOpenChange={setOpen} className='flex-1'>
               <TreeItemContent
-                className='flex items-center gap-1 w-full px-2 py-1 text-xs rounded-sm cursor-pointer'
+                className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
                 onClick={() => setOpen((prev) => !prev)}
               >
                 {open ? (
