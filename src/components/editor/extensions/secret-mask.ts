@@ -8,7 +8,7 @@ import {
   WidgetType,
 } from '@codemirror/view';
 
-const VAR_REGEX = /\{\{[\w.-]+\}\}/g;
+const VAR_REGEX = /\{\{[$\w.-]+\}\}/g;
 
 /**
  * Widget that renders ● characters as a replacement for secret text.
