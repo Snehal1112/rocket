@@ -78,6 +78,10 @@ export const rocketTheme = EditorView.theme({
     background: 'rgba(100, 116, 139, 0.15)',
     color: 'rgb(51, 65, 85)', // slate-700
   },
+  '.cm-var-dynamic': {
+    background: 'rgba(6, 182, 212, 0.15)',
+    color: 'rgb(14, 116, 144)', // cyan-700
+  },
   '.cm-var-unresolved': {
     background: 'hsl(var(--destructive) / 0.15)',
     color: 'hsl(var(--destructive))',
@@ -201,6 +205,9 @@ export const rocketThemeDark = EditorView.theme(
     },
     '.cm-var-request, .cm-var-runtime': {
       color: 'rgb(134, 239, 172)', // green-300
+    },
+    '.cm-var-dynamic': {
+      color: 'rgb(103, 232, 249)', // cyan-300
     },
     '.cm-var-process': {
       color: 'rgb(203, 213, 225)', // slate-300

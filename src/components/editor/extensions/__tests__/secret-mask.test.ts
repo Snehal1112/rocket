@@ -61,4 +61,19 @@ describe('secretMask', () => {
     const masks = document.querySelectorAll('.cm-secret-mask');
     expect(masks.length).toBe(0);
   });
+
+  it('does not mask partial {{ opener so autocomplete can activate', () => {
+    const v = createView('prefix{{');
+    // The {{ opener and everything after it must stay visible (unmasked).
+    const content = v.dom.querySelector('.cm-content');
+    const text = content?.textContent ?? '';
+    expect(text).toContain('{{');
+  });
+
+  it('does not mask partial {{name opener with no closing braces', () => {
+    const v = createView('{{myVar');
+    const content = v.dom.querySelector('.cm-content');
+    const text = content?.textContent ?? '';
+    expect(text).toContain('{{myVar');
+  });
 });

@@ -10,6 +10,10 @@ import {
 
 const VAR_REGEX = /\{\{[$\w.-]+\}\}/g;
 
+// Matches a partial {{variable opener that has no closing }}.
+// This keeps the {{ prefix visible so autocomplete can activate.
+const PARTIAL_VAR_REGEX = /\{\{[$\w.-]*$/;
+
 /**
  * Widget that renders ● characters as a replacement for secret text.
  * The actual document text is preserved — only the visual rendering is masked.
@@ -61,28 +65,36 @@ function buildMask(view: EditorView): DecorationSet {
   const doc = view.state.doc.toString();
   if (!doc) return builder.finish();
 
-  // Find all {{var}} ranges — these stay visible.
-  const varRanges: Array<[number, number]> = [];
+  // Find all complete {{var}} ranges — these stay visible.
+  const visibleRanges: Array<[number, number]> = [];
   VAR_REGEX.lastIndex = 0;
   let match = VAR_REGEX.exec(doc);
   while (match !== null) {
-    varRanges.push([match.index, match.index + match[0].length]);
+    visibleRanges.push([match.index, match.index + match[0].length]);
     match = VAR_REGEX.exec(doc);
   }
 
-  // Replace everything outside {{var}} ranges with ● widgets.
-  let pos = 0;
-  for (const [start, end] of varRanges) {
-    if (pos < start) {
-      const len = start - pos;
-      builder.add(pos, start, Decoration.replace({ widget: new MaskWidget(len) }));
-    }
-    pos = end;
+  // Also keep any trailing partial opener ({{ with no closing }}) visible
+  // so the user can see they're typing a variable and autocomplete activates.
+  const partial = PARTIAL_VAR_REGEX.exec(doc);
+  if (partial) {
+    visibleRanges.push([partial.index, doc.length]);
   }
-  // Mask trailing text after last variable.
+
+  // Sort ranges by start position (partial may interleave with complete ranges).
+  visibleRanges.sort((a, b) => a[0] - b[0]);
+
+  // Replace everything outside visible ranges with ● widgets.
+  let pos = 0;
+  for (const [start, end] of visibleRanges) {
+    if (pos < start) {
+      builder.add(pos, start, Decoration.replace({ widget: new MaskWidget(start - pos) }));
+    }
+    pos = Math.max(pos, end);
+  }
+  // Mask trailing text after last visible range.
   if (pos < doc.length) {
-    const len = doc.length - pos;
-    builder.add(pos, doc.length, Decoration.replace({ widget: new MaskWidget(len) }));
+    builder.add(pos, doc.length, Decoration.replace({ widget: new MaskWidget(doc.length - pos) }));
   }
 
   return builder.finish();
