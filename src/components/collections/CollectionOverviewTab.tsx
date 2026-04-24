@@ -1,5 +1,5 @@
 import { BoxIcon, Check, Loader2, Save } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
@@ -21,6 +21,8 @@ import {
   oauth2StateToApiAuth,
 } from '@/lib/oauth2-mapping';
 import type { Auth } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
+import { useEnvStore } from '@/stores/env-store';
 import {
   type Collection,
   type CollectionItem,
@@ -196,6 +198,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
   const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
+  const activeEnvId = useEnvStore((s) => s.activeEnvId);
+  const environments = useEnvStore((s) => s.environments);
+  const globalEnv = useEnvStore((s) => s.globalEnv);
+  const processEnvVars = useEnvStore((s) => s.processEnvVars);
+
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +215,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
+
+  const scopedContext = useMemo(() => {
+    const envVars: Record<string, string> = {};
+    if (activeEnvId) {
+      const env = environments.find((e) => e.name === activeEnvId);
+      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
+    }
+    const globalVars: Record<string, string> = globalEnv
+      ? Object.fromEntries(globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]))
+      : {};
+    return buildScopedContext({ envVars, envLabel: activeEnvId ?? undefined, globalVars, processEnvVars, collectionVars: variables });
+  }, [activeEnvId, environments, globalEnv, processEnvVars, variables]);
+
   // True once the user edits any field; reset after successful save or reload.
   const [isDirty, setIsDirty] = useState(false);
   // Prevents the store-sync effect from firing with the empty initial auth
@@ -567,6 +587,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                         setAuth(v);
                         setIsDirty(true);
                       }}
+                      variableContext={scopedContext}
                     />
 
                     <div className='flex justify-end'>

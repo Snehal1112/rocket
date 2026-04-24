@@ -1,11 +1,13 @@
 import { Check, Loader2, Save } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
+import { useEnvStore } from '@/stores/env-store';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
 
 interface CollectionSettingsDialogProps {
@@ -30,6 +32,22 @@ export function CollectionSettingsDialog({
   const [activeTab, setActiveTab] = useState<SettingsTab>('auth');
   const [auth, setAuth] = useState<AuthState>(DEFAULT_AUTH);
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
+
+  const activeEnvId = useEnvStore((s) => s.activeEnvId);
+  const environments = useEnvStore((s) => s.environments);
+  const globalEnv = useEnvStore((s) => s.globalEnv);
+  const processEnvVars = useEnvStore((s) => s.processEnvVars);
+  const scopedContext = useMemo(() => {
+    const envVars: Record<string, string> = {};
+    if (activeEnvId) {
+      const env = environments.find((e) => e.name === activeEnvId);
+      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
+    }
+    const globalVars: Record<string, string> = globalEnv
+      ? Object.fromEntries(globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]))
+      : {};
+    return buildScopedContext({ envVars, envLabel: activeEnvId ?? undefined, globalVars, processEnvVars });
+  }, [activeEnvId, environments, globalEnv, processEnvVars]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -102,7 +120,7 @@ export function CollectionSettingsDialog({
 
       {/* Tab content. */}
       <div className='min-h-[12rem]'>
-        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} />}
+        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} variableContext={scopedContext} />}
         {activeTab === 'headers' && <HeadersEditor headers={headers} onChange={setHeaders} />}
       </div>
 

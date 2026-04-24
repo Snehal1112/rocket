@@ -199,20 +199,23 @@ export function SingleLineEditor({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const state = EditorState.create({
+    let state = EditorState.create({
       doc: value,
       extensions,
     });
+
+    // Seed the variable context field before view creation so the highlight
+    // plugin's constructor already sees the correct context (not empty Map).
+    if (variableContextRef.current) {
+      state = state.update({
+        effects: setVariableContextEffect.of(variableContextRef.current),
+      }).state;
+    }
 
     const view = new EditorView({
       state,
       parent: containerRef.current,
     });
-
-    // Seed the variable context field with the value available at creation time.
-    if (variableContextRef.current) {
-      view.dispatch({ effects: setVariableContextEffect.of(variableContextRef.current) });
-    }
 
     viewRef.current = view;
 
