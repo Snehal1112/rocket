@@ -1027,9 +1027,31 @@ impl GitService for Git2Service {
             .index()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         if index.has_conflicts() {
-            return Err(DomainError::Internal(
-                "merge resulted in conflicts".to_string(),
-            ));
+            // Write the conflicted index so git_conflicts() can enumerate the files.
+            index
+                .write()
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            let conflicted: Vec<String> = index
+                .conflicts()
+                .map(|iter| {
+                    iter.flatten()
+                        .filter_map(|c| {
+                            c.our
+                                .or(c.their)
+                                .or(c.ancestor)
+                                .and_then(|e| String::from_utf8(e.path).ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let file_list = if conflicted.is_empty() {
+                "unknown files".to_string()
+            } else {
+                conflicted.join(", ")
+            };
+            return Err(DomainError::Conflict(format!(
+                "merge conflict: resolve conflicts in {file_list} and commit to complete the merge"
+            )));
         }
 
         let tree_id = index
@@ -2882,5 +2904,48 @@ mod tests {
             matches!(result, Err(rocket_shared::error::DomainError::InvalidInput(_))),
             "expected InvalidInput for staged changes, got: {:?}", result
         );
+    }
+
+    #[test]
+    fn merge_branch_with_conflicts_returns_conflict_error_and_writes_index() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create 'feature' branch and commit a change to test.bru.
+        svc.create_branch(&path, "feature").unwrap();
+        std::fs::write(dir.path().join("test.bru"), "feature version").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx.write().unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature commit", &tree, &[&head]).unwrap();
+
+        // Switch back to main and make a conflicting change to the same file.
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
+        let mut idx2 = repo.index().unwrap();
+        idx2.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx2.write().unwrap();
+        let tree_id2 = idx2.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_id2).unwrap();
+        let head2 = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main conflicting commit", &tree2, &[&head2]).unwrap();
+
+        // Now try to merge 'feature' into main — must conflict.
+        let result = svc.merge_branch(&path, "feature");
+        assert!(
+            matches!(result, Err(rocket_shared::error::DomainError::Conflict(_))),
+            "expected Conflict error, got: {:?}", result
+        );
+
+        // Conflicts must be readable after the call (index was written).
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(!conflicts.is_empty(), "expected at least one conflict file in index");
+        assert!(conflicts.iter().any(|c| c.path == "test.bru"));
     }
 }
