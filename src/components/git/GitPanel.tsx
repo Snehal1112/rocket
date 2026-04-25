@@ -20,7 +20,7 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
-import { gitInit, onCollectionChanged } from '@/lib/tauri-api';
+import { onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { GitPanelSkeleton } from '@/components/git/GitPanelSkeleton';
 
@@ -55,6 +55,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
     status,
     collectionPath: loadedPath,
     isRepo: storeIsRepo,
+    initRepo,
   } = useGitStore();
   const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
@@ -153,8 +154,8 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             variant='outline'
             size='sm'
             onClick={async () => {
-              await gitInit(collectionPath);
-              await checkAndLoad(collectionPath);
+              await initRepo(collectionPath);
+              setIsRepo(useGitStore.getState().isRepo);
             }}
           >
             Initialize Git

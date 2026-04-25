@@ -8,6 +8,7 @@ import {
   type GitCredentials,
   gitAbortMerge,
   gitAddRemote,
+  gitInit,
   gitBranches,
   gitCheckoutRemoteBranch,
   gitCommit,
@@ -93,6 +94,7 @@ interface GitState {
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
+  initRepo: (path: string) => Promise<void>;
   hasConflicts: () => boolean;
 }
 
@@ -596,6 +598,16 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  // Initialize a new git repository at the given path then load it into the store.
+  initRepo: async (path: string) => {
+    try {
+      await gitInit(path);
+      await get().setCollection(path);
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
 
   // Reset the store back to its initial state.
   reset: () => {
