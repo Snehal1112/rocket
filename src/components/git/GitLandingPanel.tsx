@@ -6,6 +6,7 @@ import {
   Clock,
   GitBranch,
   GitCommit,
+  KeyRound,
   Loader2,
   RefreshCw,
 } from 'lucide-react';
@@ -24,11 +25,23 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useGitStore } from '@/stores/git-store';
 
 export function GitLandingPanel() {
-  const { status, push, pull, fetch, saveStash, popStash, error, clearError } = useGitStore();
+  const {
+    status,
+    push,
+    pull,
+    fetch,
+    saveStash,
+    popStash,
+    error,
+    clearError,
+    credentials,
+    setShowCredentialsDialog,
+  } = useGitStore();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -195,6 +208,27 @@ export function GitLandingPanel() {
               >
                 ↓{behind}
               </Badge>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className={cn(
+                        'h-6 w-6',
+                        credentials ? 'text-muted-foreground' : 'text-amber-500',
+                      )}
+                      onClick={() => setShowCredentialsDialog(true)}
+                      aria-label='Change SSH credentials'
+                    >
+                      <KeyRound className='h-3.5 w-3.5' />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {credentials ? 'Change credentials' : 'Set credentials'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </div>
         </CardHeader>
