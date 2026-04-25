@@ -82,10 +82,17 @@ export function GitLandingPanel() {
     try {
       await saveStash('Auto-stash before pull');
       await pull();
-      setLastFetched(new Date().toLocaleTimeString());
+      // After pull, check whether it produced merge conflicts.
+      // If so, do NOT restore the stash — applying it on top of a conflicted
+      // index would corrupt the working tree with doubled conflicts.
+      if (useGitStore.getState().hasConflicts()) {
+        // Leave the stash in place; the user can pop it after resolving conflicts.
+        return;
+      }
       await popStash(0);
+      setLastFetched(new Date().toLocaleTimeString());
     } catch {
-      // If pop fails (conflict), stash is preserved for manual resolution.
+      // If pop fails (e.g. stash itself conflicts), stash is preserved for manual resolution.
     } finally {
       setPulling(false);
     }
