@@ -885,6 +885,7 @@ export interface UiStateWorkspaceTabs {
 export interface UiState {
   activeMode: 'workspace' | 'collection';
   workspaceTabs?: UiStateWorkspaceTabs;
+  layoutDirection?: 'stacked' | 'side-by-side';
 }
 
 export const loadUiState = () => invoke<UiState | null>('load_ui_state');
