@@ -10,6 +10,7 @@ import { VisualDiffView } from './VisualDiffView';
 
 interface DiffViewerProps {
   diffState: DiffState;
+  hideStageToggle?: boolean;
 }
 
 // Maps file extension to a Monaco language identifier.
@@ -33,7 +34,7 @@ function getLanguage(filePath: string): string {
 }
 
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
-export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
+export function DiffViewer({ diffState: initialDiffState, hideStageToggle = false }: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
   const { themeName } = useMonacoTheme();
 
@@ -94,6 +95,7 @@ export function DiffViewer({ diffState: initialDiffState }: DiffViewerProps) {
         mode={mode}
         onModeChange={handleModeChange}
         canShowVisual={canShowVisual}
+        hideStageToggle={hideStageToggle}
       />
       {mode === 'visual' && canShowVisual ? (
         <VisualDiffView oldContent={diffState.oldContent} newContent={diffState.newContent} />

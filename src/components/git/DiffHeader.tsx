@@ -9,6 +9,7 @@ interface DiffHeaderProps {
   mode: 'text' | 'visual';
   onModeChange: (mode: 'text' | 'visual') => void;
   canShowVisual: boolean;
+  hideStageToggle?: boolean;
 }
 
 // Header bar showing file status badge, path, staged/working toggle, and text/visual mode toggle.
@@ -18,6 +19,7 @@ export function DiffHeader({
   mode,
   onModeChange,
   canShowVisual,
+  hideStageToggle = false,
 }: DiffHeaderProps) {
   return (
     <div className='flex items-center gap-2 border-b px-3 py-1.5'>
@@ -36,19 +38,21 @@ export function DiffHeader({
             </TabsList>
           </Tabs>
         )}
-        <Tabs
-          value={diffState.isStaged ? 'staged' : 'working'}
-          onValueChange={(v) => onToggleStaged(v === 'staged')}
-        >
-          <TabsList className='h-6'>
-            <TabsTrigger value='working' className='text-xs px-2 py-0.5'>
-              Working
-            </TabsTrigger>
-            <TabsTrigger value='staged' className='text-xs px-2 py-0.5'>
-              Staged
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {!hideStageToggle && (
+          <Tabs
+            value={diffState.isStaged ? 'staged' : 'working'}
+            onValueChange={(v) => onToggleStaged(v === 'staged')}
+          >
+            <TabsList className='h-6'>
+              <TabsTrigger value='working' className='text-xs px-2 py-0.5'>
+                Working
+              </TabsTrigger>
+              <TabsTrigger value='staged' className='text-xs px-2 py-0.5'>
+                Staged
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
       </div>
     </div>
   );

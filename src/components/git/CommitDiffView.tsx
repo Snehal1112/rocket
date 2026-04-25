@@ -74,7 +74,11 @@ export function CommitDiffView({ diffs, collectionPath }: CommitDiffViewProps) {
       <div className='flex-1 overflow-hidden'>
         {selectedDiff ? (
           <Suspense fallback={null}>
-            <DiffViewer diffState={fileDiffToDiffState(selectedDiff, collectionPath)} />
+            <DiffViewer
+              key={selectedDiff.path}
+              diffState={fileDiffToDiffState(selectedDiff, collectionPath)}
+              hideStageToggle
+            />
           </Suspense>
         ) : (
           <div className='flex items-center justify-center h-full text-xs text-muted-foreground'>
