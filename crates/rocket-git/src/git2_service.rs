@@ -844,29 +844,28 @@ impl GitService for Git2Service {
     fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
-        // Refuse to switch if the working tree has uncommitted changes that
-        // could be silently discarded. This mirrors `git switch` / `git checkout`
-        // default behaviour.
+        // Pre-flight: refuse if any tracked file has staged or working-tree changes.
+        // Untracked files (WT_NEW) are intentionally excluded — a branch switch
+        // cannot overwrite them.
+        let mut status_opts = git2::StatusOptions::new();
+        status_opts.include_untracked(false);
         let dirty = repo
-            .statuses(Some(
-                git2::StatusOptions::new()
-                    .include_untracked(false)
-                    .include_ignored(false),
-            ))
+            .statuses(Some(&mut status_opts))
             .map_err(|e| DomainError::Internal(e.to_string()))?
             .iter()
-            .any(|s| {
-                s.status().intersects(
+            .any(|e| {
+                e.status().intersects(
                     git2::Status::INDEX_NEW
                         | git2::Status::INDEX_MODIFIED
                         | git2::Status::INDEX_DELETED
                         | git2::Status::INDEX_RENAMED
+                        | git2::Status::INDEX_TYPECHANGE
                         | git2::Status::WT_MODIFIED
                         | git2::Status::WT_DELETED
-                        | git2::Status::WT_RENAMED,
+                        | git2::Status::WT_RENAMED
+                        | git2::Status::WT_TYPECHANGE,
                 )
             });
-
         if dirty {
             return Err(DomainError::InvalidInput(
                 "You have uncommitted changes that would be overwritten by switching branches. \
@@ -875,21 +874,25 @@ impl GitService for Git2Service {
             ));
         }
 
+        // Save the current HEAD ref for rollback if checkout fails.
+        let old_head = repo
+            .head()
+            .ok()
+            .and_then(|r| r.name().map(String::from));
+
         repo.set_head(&format!("refs/heads/{name}"))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        // Safe checkout — will fail if local modifications would be overwritten.
-        // This matches `git switch` / `git checkout` default behaviour.
+
+        // Safe checkout as a second-layer guard (TOCTOU window defence).
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().safe()))
             .map_err(|e| {
-                if e.message().contains("conflict") || e.message().contains("overwritten") {
-                    DomainError::InvalidInput(
-                        "You have uncommitted changes that would be overwritten by switching branches. \
-                         Please commit or stash your changes first.".to_string()
-                    )
-                } else {
-                    DomainError::Internal(e.to_string())
+                // Best-effort rollback — restore HEAD to its previous ref.
+                if let Some(ref original) = old_head {
+                    let _ = repo.set_head(original);
                 }
+                DomainError::Internal(e.to_string())
             })?;
+
         Ok(())
     }
 
@@ -2856,5 +2859,28 @@ mod tests {
         // The dirty file must still be there — not discarded.
         let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
         assert_eq!(content, "dirty content");
+    }
+
+    #[test]
+    fn switch_branch_refuses_when_staged_changes_exist() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        svc.create_branch(&path, "other").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+
+        // Stage a new file without committing.
+        std::fs::write(dir.path().join("staged.bru"), "staged content").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("staged.bru")).unwrap();
+        idx.write().unwrap();
+
+        let result = svc.switch_branch(&path, "other");
+        assert!(
+            matches!(result, Err(rocket_shared::error::DomainError::InvalidInput(_))),
+            "expected InvalidInput for staged changes, got: {:?}", result
+        );
     }
 }
