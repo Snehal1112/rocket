@@ -35,6 +35,9 @@ export function GitCommitForm() {
         disabled={committing}
         aria-label='Commit message'
       />
+      {stagedCount === 0 && message.trim().length > 0 && (
+        <p className='text-xs text-muted-foreground/70'>No files staged</p>
+      )}
       <Button
         onClick={handleCommit}
         disabled={!message.trim() || stagedCount === 0 || committing}
