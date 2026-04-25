@@ -588,6 +588,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                         setIsDirty(true);
                       }}
                       variableContext={scopedContext}
+                      collection={collectionName}
+                      environmentName={activeEnvId ?? undefined}
                     />
 
                     <div className='flex justify-end'>

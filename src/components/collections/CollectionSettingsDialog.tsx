@@ -120,7 +120,7 @@ export function CollectionSettingsDialog({
 
       {/* Tab content. */}
       <div className='min-h-[12rem]'>
-        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} variableContext={scopedContext} />}
+        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} variableContext={scopedContext} collection={collectionName} environmentName={activeEnvId ?? undefined} />}
         {activeTab === 'headers' && <HeadersEditor headers={headers} onChange={setHeaders} />}
       </div>
 

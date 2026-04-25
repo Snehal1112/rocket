@@ -68,9 +68,17 @@ pub async fn oauth2_auth_code_flow(
     // Build the webview with about:blank first so we can configure TLS
     // policy before navigating to the auth URL (avoids race condition
     // where WebKitGTK rejects the cert before our policy takes effect).
-    let parsed_auth_url: url::Url = auth_url
-        .parse()
-        .map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?;
+    let parsed_auth_url: url::Url = auth_url.parse().map_err(|_| {
+        if authorization_url.contains("{{") {
+            DomainError::Internal(
+                "Authorization URL contains an unresolved variable. \
+                 Make sure the variable is defined in the active environment."
+                    .into(),
+            )
+        } else {
+            DomainError::Internal(format!("Invalid authorization URL: {authorization_url}"))
+        }
+    })?;
 
     // on_navigation must be Fn (not FnOnce), hence Mutex<Option<Sender>>.
     let window = tauri::WebviewWindowBuilder::new(
@@ -447,9 +455,17 @@ async fn auth_code_via_webview(
         let _ = existing.close();
     }
 
-    let parsed_auth_url: url::Url = auth_url
-        .parse()
-        .map_err(|e| DomainError::Internal(format!("Invalid auth URL: {e}")))?;
+    let parsed_auth_url: url::Url = auth_url.parse().map_err(|_| {
+        if auth_url.contains("{{") {
+            DomainError::Internal(
+                "Authorization URL contains an unresolved variable. \
+                 Make sure the variable is defined in the active environment."
+                    .into(),
+            )
+        } else {
+            DomainError::Internal(format!("Invalid authorization URL: {auth_url}"))
+        }
+    })?;
 
     let window = tauri::WebviewWindowBuilder::new(
         app,

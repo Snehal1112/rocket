@@ -226,6 +226,7 @@ async function maybeAutoRefreshOrFetchToken(
   collection: string | undefined,
   environmentName: string | undefined,
   requestPath: string | undefined,
+  varCtx: Record<string, string>,
 ): Promise<RequestState> {
   if (request.auth.authType !== 'oauth2' || !request.auth.oauth2) return request;
   const oauth = request.auth.oauth2;
@@ -245,6 +246,8 @@ async function maybeAutoRefreshOrFetchToken(
     });
   };
 
+  const rv = (s: string) => resolveWithContext(s, varCtx);
+
   // Auto-refresh takes precedence when a usable refresh token exists.
   if (
     oauth.autoRefreshToken &&
@@ -253,16 +256,19 @@ async function maybeAutoRefreshOrFetchToken(
     (oauth.refreshTokenUrl || oauth.tokenUrl)
   ) {
     try {
+      const resolvedRefreshParams = oauth.refreshParams.length
+        ? oauth.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
       const result = await oauth2RefreshToken({
-        refreshToken: oauth.refreshToken,
-        tokenUrl: oauth.tokenUrl,
-        refreshTokenUrl: oauth.refreshTokenUrl || undefined,
-        clientId: oauth.clientId,
-        clientSecret: oauth.clientSecret || undefined,
-        scope: oauth.scope || undefined,
+        refreshToken: rv(oauth.refreshToken),
+        tokenUrl: rv(oauth.tokenUrl),
+        refreshTokenUrl: oauth.refreshTokenUrl ? rv(oauth.refreshTokenUrl) : undefined,
+        clientId: rv(oauth.clientId),
+        clientSecret: oauth.clientSecret ? rv(oauth.clientSecret) : undefined,
+        scope: oauth.scope ? rv(oauth.scope) : undefined,
         clientAuthentication: oauth.clientAuthentication,
         verifySsl: oauth.verifySsl,
-        refreshParams: oauth.refreshParams.length ? oauth.refreshParams : undefined,
+        refreshParams: resolvedRefreshParams,
         collection,
         environmentName,
         requestPath,
@@ -287,24 +293,33 @@ async function maybeAutoRefreshOrFetchToken(
     // Auto-fetch is restricted to non-interactive grants. Opening the system
     // browser or a webview as a side effect of Send would surprise the user.
     try {
+      const resolvedAuthParams = oauth.authParams.length
+        ? oauth.authParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
+      const resolvedTokenParams = oauth.tokenParams.length
+        ? oauth.tokenParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
+      const resolvedRefreshParams = oauth.refreshParams.length
+        ? oauth.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
       const result = await oauth2GetToken({
         grantType: oauth.grantType,
-        authorizationUrl: oauth.authorizationUrl || undefined,
-        tokenUrl: oauth.tokenUrl || undefined,
-        callbackUrl: oauth.callbackUrl || undefined,
-        clientId: oauth.clientId,
-        clientSecret: oauth.clientSecret || undefined,
-        scope: oauth.scope || undefined,
-        state: oauth.state || undefined,
-        username: oauth.username || undefined,
-        password: oauth.password || undefined,
+        authorizationUrl: rv(oauth.authorizationUrl) || undefined,
+        tokenUrl: rv(oauth.tokenUrl) || undefined,
+        callbackUrl: rv(oauth.callbackUrl) || undefined,
+        clientId: rv(oauth.clientId),
+        clientSecret: oauth.clientSecret ? rv(oauth.clientSecret) : undefined,
+        scope: oauth.scope ? rv(oauth.scope) : undefined,
+        state: oauth.state ? rv(oauth.state) : undefined,
+        username: oauth.username ? rv(oauth.username) : undefined,
+        password: oauth.password ? rv(oauth.password) : undefined,
         clientAuthentication: oauth.clientAuthentication,
         usePkce: oauth.usePkce,
         useSystemBrowser: oauth.useSystemBrowser,
         verifySsl: oauth.verifySsl,
-        authParams: oauth.authParams.length ? oauth.authParams : undefined,
-        tokenParams: oauth.tokenParams.length ? oauth.tokenParams : undefined,
-        refreshParams: oauth.refreshParams.length ? oauth.refreshParams : undefined,
+        authParams: resolvedAuthParams,
+        tokenParams: resolvedTokenParams,
+        refreshParams: resolvedRefreshParams,
         collection,
         environmentName,
         requestPath,
@@ -344,12 +359,50 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const preRequestPath = found?.tab.source?.path;
   const preEnvName = useEnvStore.getState().activeEnvId ?? undefined;
 
+  // Build a variable context for pre-resolving OAuth2 fields before they reach
+  // the Tauri command. The backend env_repo only covers the workspace-level
+  // (global) environment directory, not collection-scoped environments, so
+  // variable resolution for OAuth2 must happen here on the frontend.
+  const preEnvStore = useEnvStore.getState();
+  let preCollectionVars: CollectionVariable[] = [];
+  if (preCollection) {
+    try {
+      const settings = await getCollectionSettings(preCollection);
+      preCollectionVars = settings.variables;
+    } catch {
+      // Non-critical.
+    }
+  }
+  let preFolderVars: CollectionVariable[] = [];
+  let preRequestVars: CollectionVariable[] = [];
+  if (preCollection && preRequestPath) {
+    try {
+      preFolderVars = await getFolderChainVariables(preCollection, preRequestPath);
+    } catch {
+      // Non-critical.
+    }
+    try {
+      preRequestVars = await getRequestVariables(preCollection, preRequestPath);
+    } catch {
+      // Non-critical.
+    }
+  }
+  const preVarCtx = buildVariableContext({
+    processEnvVars: preEnvStore.processEnvVars,
+    globalVars: preEnvStore.getGlobalVariables(),
+    envVars: preEnvStore.getActiveVariables(),
+    collectionVars: preCollectionVars,
+    folderVars: preFolderVars,
+    requestVars: preRequestVars,
+  });
+
   const effectiveRequest = await maybeAutoRefreshOrFetchToken(
     tabId,
     request,
     preCollection,
     preEnvName,
     preRequestPath,
+    preVarCtx,
   );
 
   const {

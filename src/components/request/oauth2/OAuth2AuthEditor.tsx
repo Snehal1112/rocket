@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { oauth2DecodeJwt, oauth2GetToken, oauth2RefreshToken } from '@/lib/tauri-api';
+import { resolveWithContext } from '@/lib/variable-context';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { AuthState } from '@/types/pane-types';
 import { OAuth2AdditionalParams } from './OAuth2AdditionalParams';
@@ -62,6 +63,18 @@ export function OAuth2AuthEditor({
   const patchOAuth2Ref = useRef(patchOAuth2);
   patchOAuth2Ref.current = patchOAuth2;
 
+  // Build a flat key→value map from variableContext so we can resolve {{vars}}
+  // on the frontend before sending to Tauri. The backend env_repo only covers
+  // workspace-level (global) environments, not collection-scoped ones, so all
+  // resolution must happen here using the already-loaded variableContext.
+  const varCtx: Record<string, string> = variableContext
+    ? Object.fromEntries([...variableContext.entries()].map(([k, e]) => [k, e.value]))
+    : {};
+  // Ref so async callbacks always see the latest context without re-creating callbacks.
+  const varCtxRef = useRef(varCtx);
+  varCtxRef.current = varCtx;
+  const rv = (s: string) => resolveWithContext(s, varCtxRef.current);
+
   const handleGetToken = useCallback(async () => {
     setGettingToken(true);
     setTokenError('');
@@ -75,24 +88,35 @@ export function OAuth2AuthEditor({
         ? o.authParams
         : undefined;
     try {
+      const resolvedAuthParams = authParamsForRequest?.map((p) => ({
+        ...p,
+        key: rv(p.key),
+        value: rv(p.value),
+      }));
+      const resolvedTokenParams = o.tokenParams.length
+        ? o.tokenParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
+      const resolvedRefreshParams = o.refreshParams.length
+        ? o.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
       const result = await oauth2GetToken({
         grantType: o.grantType,
-        authorizationUrl: o.authorizationUrl || undefined,
-        tokenUrl: o.tokenUrl || undefined,
-        callbackUrl: o.callbackUrl || undefined,
-        clientId: o.clientId,
-        clientSecret: o.clientSecret || undefined,
-        scope: o.scope || undefined,
-        state: o.state || undefined,
-        username: o.username || undefined,
-        password: o.password || undefined,
+        authorizationUrl: rv(o.authorizationUrl) || undefined,
+        tokenUrl: rv(o.tokenUrl) || undefined,
+        callbackUrl: rv(o.callbackUrl) || undefined,
+        clientId: rv(o.clientId),
+        clientSecret: o.clientSecret ? rv(o.clientSecret) : undefined,
+        scope: o.scope ? rv(o.scope) : undefined,
+        state: o.state ? rv(o.state) : undefined,
+        username: o.username ? rv(o.username) : undefined,
+        password: o.password ? rv(o.password) : undefined,
         clientAuthentication: o.clientAuthentication,
         usePkce: o.usePkce,
         useSystemBrowser: o.useSystemBrowser,
         verifySsl: o.verifySsl,
-        authParams: authParamsForRequest,
-        tokenParams: o.tokenParams.length ? o.tokenParams : undefined,
-        refreshParams: o.refreshParams.length ? o.refreshParams : undefined,
+        authParams: resolvedAuthParams,
+        tokenParams: resolvedTokenParams,
+        refreshParams: resolvedRefreshParams,
         collection,
         environmentName,
         requestPath,
@@ -141,16 +165,19 @@ export function OAuth2AuthEditor({
     setGettingToken(true);
     setTokenError('');
     try {
+      const resolvedRefreshParams = o.refreshParams.length
+        ? o.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
+        : undefined;
       const result = await oauth2RefreshToken({
-        refreshToken: o.refreshToken,
-        tokenUrl: o.tokenUrl,
-        refreshTokenUrl: o.refreshTokenUrl || undefined,
-        clientId: o.clientId,
-        clientSecret: o.clientSecret || undefined,
-        scope: o.scope || undefined,
+        refreshToken: rv(o.refreshToken),
+        tokenUrl: rv(o.tokenUrl),
+        refreshTokenUrl: o.refreshTokenUrl ? rv(o.refreshTokenUrl) : undefined,
+        clientId: rv(o.clientId),
+        clientSecret: o.clientSecret ? rv(o.clientSecret) : undefined,
+        scope: o.scope ? rv(o.scope) : undefined,
         clientAuthentication: o.clientAuthentication,
         verifySsl: o.verifySsl,
-        refreshParams: o.refreshParams.length ? o.refreshParams : undefined,
+        refreshParams: resolvedRefreshParams,
         collection,
         environmentName,
         requestPath,
