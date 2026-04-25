@@ -1,4 +1,15 @@
 import { AlertTriangle, Minus, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -23,12 +34,21 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
     discardFiles,
   } = useGitStore();
 
+  const [showDiscardAllDialog, setShowDiscardAllDialog] = useState(false);
+
   const staged = status?.files.filter((f) => f.staged) ?? [];
   const unstaged = status?.files.filter((f) => !f.staged && f.status !== 'unchanged') ?? [];
+  const discardableFiles = unstaged.filter((f) => f.status !== 'conflicted');
 
   const handleDiscardAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    discardFiles(unstaged.filter((f) => f.status !== 'conflicted').map((f) => f.path));
+    if (discardableFiles.length === 0) return;
+    setShowDiscardAllDialog(true);
+  };
+
+  const handleConfirmDiscardAll = () => {
+    discardFiles(discardableFiles.map((f) => f.path));
+    setShowDiscardAllDialog(false);
   };
 
   const handleStageAll = (e: React.MouseEvent) => {
@@ -56,7 +76,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
     <TooltipProvider>
       <div className='overflow-y-auto flex-1'>
         <div className='p-3 space-y-1'>
-          {/* Staged section — shown above unstaged, only when files are staged. */}
+          {/* Staged section */}
           {staged.length > 0 && (
             <>
               <div className='flex items-center justify-between px-2 py-1'>
@@ -79,7 +99,6 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                 </div>
               </div>
 
-              {/* Staged file rows. */}
               {staged.map((file) => (
                 // biome-ignore lint/a11y/useSemanticElements: outer <button> nesting inner <button> is invalid HTML; WebKitGTK reparses it and breaks mouseleave tracking.
                 <div
@@ -122,7 +141,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
             </>
           )}
 
-          {/* Unstaged section header. */}
+          {/* Unstaged section header */}
           <div className='flex items-center justify-between px-2 py-1'>
             <span className='text-xs font-medium text-muted-foreground'>Unstaged Changes</span>
             <div className='flex items-center gap-1.5'>
@@ -133,6 +152,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     size='icon'
                     className='h-5 w-5'
                     onClick={handleDiscardAll}
+                    disabled={discardableFiles.length === 0}
                   >
                     <Trash2 className='h-3.5 w-3.5' />
                   </Button>
@@ -151,14 +171,14 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
             </div>
           </div>
 
-          {/* Empty state when working tree is clean. */}
+          {/* Empty state */}
           {unstaged.length === 0 && (
             <p className='px-2 py-1 text-xs text-muted-foreground/60'>
               {staged.length > 0 ? 'All changes staged.' : 'Working tree clean.'}
             </p>
           )}
 
-          {/* Unstaged file rows. */}
+          {/* Unstaged file rows */}
           {unstaged.map((file) => {
             const isConflicted = file.status === 'conflicted';
             return (
@@ -235,6 +255,23 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
           })}
         </div>
       </div>
+
+      {/* Discard-all confirmation dialog */}
+      <AlertDialog open={showDiscardAllDialog} onOpenChange={setShowDiscardAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard All Changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently discard all {discardableFiles.length} unstaged{' '}
+              {discardableFiles.length === 1 ? 'change' : 'changes'}. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDiscardAll}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 }
