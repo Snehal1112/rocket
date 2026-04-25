@@ -3058,4 +3058,222 @@ mod tests {
         assert!(!log.is_empty());
         assert_eq!(log[0].files_changed, 1, "expected 1 file in initial commit, got {}", log[0].files_changed);
     }
+
+    #[test]
+    fn pull_fast_forward_updates_branch() {
+        let (local_dir, local_path, _remote_dir, remote_path) = setup_repo_with_remote();
+        let svc = Git2Service::new();
+        let creds = GitCredentials::SshAgent;
+
+        // First push local main to remote so remote has a commit.
+        svc.push(&local_path, "origin", &creds).unwrap();
+
+        // Add a commit directly to the bare remote via a second clone.
+        let clone2_dir = TempDir::new().unwrap();
+        git2::build::RepoBuilder::new()
+            .clone(&remote_path, clone2_dir.path())
+            .unwrap();
+        let clone2 = git2::Repository::open(clone2_dir.path()).unwrap();
+        // Get the tip commit from the remote tracking branch.
+        let origin_main = clone2.find_reference("refs/remotes/origin/main").unwrap();
+        let tip_commit = origin_main.peel_to_commit().unwrap();
+        // Create a local main branch pointing at the tip commit.
+        clone2.branch("main", &tip_commit, false).unwrap();
+        clone2.set_head("refs/heads/main").unwrap();
+        clone2.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        std::fs::write(clone2_dir.path().join("remote_change.bru"), "from remote").unwrap();
+        let mut idx = clone2.index().unwrap();
+        idx.add_path(std::path::Path::new("remote_change.bru")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = clone2.find_tree(tree_id).unwrap();
+        let head = clone2.head().unwrap().peel_to_commit().unwrap();
+        clone2.commit(Some("HEAD"), &sig, &sig, "remote commit", &tree, &[&head]).unwrap();
+        clone2.find_remote("origin").unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // Pull into the original local repo — should fast-forward.
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(result.is_ok(), "fast-forward pull failed: {:?}", result);
+
+        // The new file from the remote commit must now exist locally.
+        assert!(
+            local_dir.path().join("remote_change.bru").exists(),
+            "pulled file not present after fast-forward pull"
+        );
+
+        drop(local_dir);
+        drop(clone2_dir);
+    }
+
+    #[test]
+    fn push_and_pull_roundtrip() {
+        let (local_dir, local_path, _remote_dir, remote_path) = setup_repo_with_remote();
+        let svc = Git2Service::new();
+        let creds = GitCredentials::SshAgent;
+
+        // Push local main to remote.
+        svc.push(&local_path, "origin", &creds).unwrap();
+
+        // Clone the remote into a second local dir.
+        let clone2_dir = TempDir::new().unwrap();
+        git2::build::RepoBuilder::new()
+            .clone(&remote_path, clone2_dir.path())
+            .unwrap();
+
+        // Add a commit in clone2 and push it.
+        let clone2 = git2::Repository::open(clone2_dir.path()).unwrap();
+        // Create a local main branch from the remote tracking ref and check it out.
+        let origin_main = clone2.find_reference("refs/remotes/origin/main").unwrap();
+        let tip_commit = origin_main.peel_to_commit().unwrap();
+        clone2.branch("main", &tip_commit, false).unwrap();
+        clone2.set_head("refs/heads/main").unwrap();
+        clone2.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        std::fs::write(clone2_dir.path().join("roundtrip.bru"), "roundtrip").unwrap();
+        let mut idx = clone2.index().unwrap();
+        idx.add_path(std::path::Path::new("roundtrip.bru")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = clone2.find_tree(tree_id).unwrap();
+        let head = clone2.head().unwrap().peel_to_commit().unwrap();
+        clone2.commit(Some("HEAD"), &sig, &sig, "roundtrip commit", &tree, &[&head]).unwrap();
+        clone2.find_remote("origin").unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+
+        // Pull in local1 and verify the file arrived.
+        svc.pull(&local_path, "origin", &creds).unwrap();
+        assert!(
+            local_dir.path().join("roundtrip.bru").exists(),
+            "roundtrip file not present after pull"
+        );
+
+        drop(local_dir);
+        drop(clone2_dir);
+    }
+
+    #[test]
+    fn resolve_conflict_ours_stages_local_version() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create conflicting branches.
+        svc.create_branch(&path, "feature").unwrap();
+        std::fs::write(dir.path().join("test.bru"), "feature version").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx.write().unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
+        let mut idx2 = repo.index().unwrap();
+        idx2.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx2.write().unwrap();
+        let tree_id2 = idx2.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_id2).unwrap();
+        let head2 = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        svc.merge_branch(&path, "feature").unwrap_err(); // produces conflict
+
+        // Resolve using Ours strategy.
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours).unwrap();
+
+        // File on disk must contain the local (main) version.
+        let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content.trim(), "main version", "expected 'main version', got: {content}");
+
+        // File must be staged (no longer in conflict list).
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(
+            !conflicts.iter().any(|c| c.path == "test.bru"),
+            "test.bru still in conflicts after Ours resolution"
+        );
+    }
+
+    #[test]
+    fn resolve_conflict_theirs_stages_remote_version() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        svc.create_branch(&path, "feature").unwrap();
+        std::fs::write(dir.path().join("test.bru"), "feature version").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx.write().unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
+        let mut idx2 = repo.index().unwrap();
+        idx2.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx2.write().unwrap();
+        let tree_id2 = idx2.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_id2).unwrap();
+        let head2 = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        svc.merge_branch(&path, "feature").unwrap_err();
+
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content.trim(), "feature version", "expected 'feature version', got: {content}");
+
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(
+            !conflicts.iter().any(|c| c.path == "test.bru"),
+            "test.bru still in conflicts after Theirs resolution"
+        );
+    }
+
+    #[test]
+    fn abort_merge_resets_file_to_head_content() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        svc.create_branch(&path, "feature").unwrap();
+        std::fs::write(dir.path().join("test.bru"), "feature version").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx.write().unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
+        let mut idx2 = repo.index().unwrap();
+        idx2.add_path(std::path::Path::new("test.bru")).unwrap();
+        idx2.write().unwrap();
+        let tree_id2 = idx2.write_tree().unwrap();
+        let tree2 = repo.find_tree(tree_id2).unwrap();
+        let head2 = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        svc.merge_branch(&path, "feature").unwrap_err();
+
+        svc.abort_merge(&path).unwrap();
+
+        let conflicts = svc.conflicts(&path).unwrap();
+        assert!(conflicts.is_empty(), "conflicts should be empty after abort");
+
+        let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content.trim(), "main version", "file not restored after abort");
+    }
 }
