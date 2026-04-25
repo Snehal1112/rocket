@@ -272,7 +272,8 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
                 {rightPanel.kind === 'diff' && rightPanel.file.path}
                 {rightPanel.kind === 'conflict' && rightPanel.conflictFile.path}
                 {rightPanel.kind === 'commits' && 'Commit History'}
-                {rightPanel.kind === 'commitDiff' && `${rightPanel.commit.id} — ${rightPanel.commit.message.slice(0, 40)}`}
+                {rightPanel.kind === 'commitDiff' &&
+                  `${rightPanel.commit.id} — ${rightPanel.commit.message.slice(0, 40)}`}
                 {rightPanel.kind === 'stashes' && 'Stashes'}
               </span>
             </div>
