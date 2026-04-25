@@ -12,6 +12,7 @@ import { TitleBar } from '@/components/title-bar';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
 import { useEnvStore } from '@/stores/env-store';
+import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -29,6 +30,9 @@ function App() {
     const init = async () => {
       await loadWorkspaces();
       const uiState = await restoreUiState();
+      if (uiState?.layoutDirection) {
+        useLayoutStore.getState().setRequestLayout(uiState.layoutDirection);
+      }
       if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
         const { workspaceId } = uiState.workspaceTabs;
         const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === workspaceId);

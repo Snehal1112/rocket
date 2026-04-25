@@ -1,5 +1,6 @@
 import { loadUiState, saveUiState, type UiState } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useLayoutStore } from '@/stores/layout-store';
 import type { PaneNode } from '@/types/pane-types';
 import { isWorkspaceTab } from '@/types/pane-types';
 
@@ -18,9 +19,11 @@ export function scheduleSaveUiState() {
   saveTimeout = setTimeout(() => {
     const state = usePaneStore.getState();
     const isWsMode = state.isWorkspaceMode();
+    const layoutState = useLayoutStore.getState();
 
     const uiState: UiState = {
       activeMode: isWsMode ? 'workspace' : 'collection',
+      layoutDirection: layoutState.requestLayout,
     };
 
     if (isWsMode) {
