@@ -168,6 +168,25 @@ fn build_simple_diff(old: &Option<String>, new: &Option<String>) -> Vec<DiffHunk
     }]
 }
 
+/// Count the number of files changed in a commit relative to its first parent.
+/// For the initial commit (no parent), diffs against an empty tree.
+fn count_commit_files(repo: &Repository, commit: &git2::Commit) -> usize {
+    let new_tree = match commit.tree() {
+        Ok(t) => t,
+        Err(_) => return 0,
+    };
+    let old_tree: Option<git2::Tree> = commit
+        .parent(0)
+        .ok()
+        .and_then(|p| p.tree().ok());
+
+    repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), None)
+        .ok()
+        .and_then(|d| d.stats().ok())
+        .map(|s| s.files_changed())
+        .unwrap_or(0)
+}
+
 /// Extract the current branch name from the repository HEAD.
 fn branch_name(repo: &Repository) -> String {
     repo.head()
@@ -534,6 +553,10 @@ impl GitService for Git2Service {
             let _ = repo.cleanup_state();
         }
 
+        let commit_obj = repo.find_commit(oid)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let files_changed = count_commit_files(&repo, &commit_obj);
+
         Ok(CommitInfo {
             id: oid.to_string()[..7].to_string(),
             full_id: oid.to_string(),
@@ -541,7 +564,7 @@ impl GitService for Git2Service {
             author: sig.name().unwrap_or("").to_string(),
             author_email: sig.email().unwrap_or("").to_string(),
             timestamp: chrono::Utc::now(),
-            files_changed: 0,
+            files_changed,
         })
     }
 
@@ -560,6 +583,7 @@ impl GitService for Git2Service {
                 .unwrap_or_default()
                 .with_timezone(&chrono::Utc);
 
+            let files_changed = count_commit_files(&repo, &commit);
             commits.push(CommitInfo {
                 id: oid.to_string()[..7].to_string(),
                 full_id: oid.to_string(),
@@ -567,7 +591,7 @@ impl GitService for Git2Service {
                 author: commit.author().name().unwrap_or("").to_string(),
                 author_email: commit.author().email().unwrap_or("").to_string(),
                 timestamp,
-                files_changed: 0,
+                files_changed,
             });
         }
         Ok(commits)
@@ -2947,5 +2971,31 @@ mod tests {
         let conflicts = svc.conflicts(&path).unwrap();
         assert!(!conflicts.is_empty(), "expected at least one conflict file in index");
         assert!(conflicts.iter().any(|c| c.path == "test.bru"));
+    }
+
+    #[test]
+    fn commit_returns_files_changed_count() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Stage a new file (second commit, so has a parent).
+        std::fs::write(dir.path().join("new.bru"), "new request").unwrap();
+        let repo = git2::Repository::open(&path).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("new.bru")).unwrap();
+        idx.write().unwrap();
+
+        let info = svc.commit(&path, "add new.bru").unwrap();
+        assert_eq!(info.files_changed, 1, "expected 1 file changed, got {}", info.files_changed);
+    }
+
+    #[test]
+    fn log_returns_files_changed_count() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let log = svc.log(&path, 10).unwrap();
+        // The initial commit in setup_repo() adds test.bru — files_changed should be 1.
+        assert!(!log.is_empty());
+        assert_eq!(log[0].files_changed, 1, "expected 1 file in initial commit, got {}", log[0].files_changed);
     }
 }
