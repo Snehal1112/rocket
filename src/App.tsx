@@ -15,6 +15,7 @@ import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
+import type { CollectionTab } from '@/types/pane-types';
 
 function App() {
   const root = usePaneStore((s) => s.root);
@@ -39,8 +40,24 @@ function App() {
         if (ws) {
           usePaneStore.getState().openWorkspaceTabs(ws.id);
         }
+      } else if (uiState?.activeMode === 'collection' && uiState.activeCollection) {
+        // Restore the active collection and any collection overview tabs that
+        // were open before the reload. Request tabs are not restored (they carry
+        // heavy in-flight state); only lightweight collection-type tabs are.
+        usePaneStore.getState().switchCollection(uiState.activeCollection);
+        for (const saved of uiState.collectionTabs ?? []) {
+          const tab: CollectionTab = {
+            id: saved.id,
+            title: saved.title,
+            tabType: 'collection',
+            collectionName: saved.collectionName,
+            activeSection: (saved.activeSection as CollectionTab['activeSection']) ?? 'overview',
+            isDirty: false,
+          };
+          usePaneStore.getState().openTab(tab);
+        }
       } else {
-        // No saved workspace state or collection mode — show workspace overview.
+        // No saved state — show workspace overview as the default landing page.
         const store = useWorkspaceStore.getState();
         const activeWs = store.workspaces.find((w) => w.id === store.activeWorkspaceId);
         if (activeWs) {

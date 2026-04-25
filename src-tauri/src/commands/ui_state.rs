@@ -8,12 +8,26 @@ pub struct UiState {
     pub workspace_tabs: Option<UiStateWorkspaceTabs>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_direction: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_collection: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collection_tabs: Vec<UiStateCollectionTab>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiStateWorkspaceTabs {
     pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiStateCollectionTab {
+    pub id: String,
+    pub title: String,
+    pub collection_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_section: Option<String>,
 }
 
 #[tauri::command]

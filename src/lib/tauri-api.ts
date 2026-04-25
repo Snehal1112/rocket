@@ -882,10 +882,19 @@ export interface UiStateWorkspaceTabs {
   workspaceId: string;
 }
 
+export interface UiStateCollectionTab {
+  id: string;
+  title: string;
+  collectionName: string;
+  activeSection?: string;
+}
+
 export interface UiState {
   activeMode: 'workspace' | 'collection';
   workspaceTabs?: UiStateWorkspaceTabs;
   layoutDirection?: 'stacked' | 'side-by-side';
+  activeCollection?: string;
+  collectionTabs?: UiStateCollectionTab[];
 }
 
 export const loadUiState = () => invoke<UiState | null>('load_ui_state');
