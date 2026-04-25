@@ -1,10 +1,11 @@
 import { getVersion } from '@tauri-apps/api/app';
-import { Moon, Sun, Terminal } from 'lucide-react';
+import { Moon, PanelBottom, PanelRight, Sun, Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
 import { useConsoleStore } from '@/stores/console-store';
+import { useLayoutStore } from '@/stores/layout-store';
 
 interface StatusBarProps {
   isConsoleOpen?: boolean;
@@ -15,6 +16,8 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   const entryCount = useConsoleStore((s) => s.entries.length);
   const { isDark, toggleTheme } = useTheme();
   const [version, setVersion] = useState<string | null>(null);
+  const requestLayout = useLayoutStore((s) => s.requestLayout);
+  const setRequestLayout = useLayoutStore((s) => s.setRequestLayout);
 
   useEffect(() => {
     getVersion().then(setVersion);
@@ -51,7 +54,22 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
           </span>
         )}
       </Button>
-      {version && <span className='ml-auto text-2xs text-muted-foreground'>{`v${version}`}</span>}
+      <Button
+        variant='ghost'
+        size='sm'
+        className={cn('h-5 px-1.5 text-xs gap-1 ml-auto', requestLayout === 'side-by-side' && 'bg-accent')}
+        onClick={() => setRequestLayout(requestLayout === 'stacked' ? 'side-by-side' : 'stacked')}
+        title={requestLayout === 'stacked' ? 'Switch to side by side' : 'Switch to stacked'}
+        aria-label={requestLayout === 'stacked' ? 'Side by side' : 'Stack'}
+      >
+        {requestLayout === 'stacked' ? (
+          <PanelBottom className='h-3.5 w-3.5 text-muted-foreground' />
+        ) : (
+          <PanelRight className='h-3.5 w-3.5 text-muted-foreground' />
+        )}
+        {requestLayout === 'stacked' ? 'Side by side' : 'Stack'}
+      </Button>
+      {version && <span className='text-2xs text-muted-foreground'>{`v${version}`}</span>}
     </div>
   );
 }
