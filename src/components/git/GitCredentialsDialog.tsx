@@ -17,8 +17,8 @@ type AuthType = 'sshKey' | 'sshAgent' | 'userPass' | 'token';
 
 export function GitCredentialsDialog() {
   const { showCredentialsDialog, setShowCredentialsDialog, setCredentials } = useGitStore();
-  const [authType, setAuthType] = useState<AuthType>('sshAgent');
-  const [privateKeyPath, setPrivateKeyPath] = useState('~/.ssh/id_rsa');
+  const [authType, setAuthType] = useState<AuthType>('sshKey');
+  const [privateKeyPath, setPrivateKeyPath] = useState('~/.ssh/id_ed25519');
   const [passphrase, setPassphrase] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

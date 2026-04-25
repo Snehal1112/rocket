@@ -25,12 +25,23 @@ pub(super) fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'
             GitCredentials::SshKey {
                 private_key_path,
                 passphrase,
-            } => git2::Cred::ssh_key(
-                username.unwrap_or("git"),
-                None,
-                Path::new(private_key_path),
-                passphrase.as_deref(),
-            ),
+            } => {
+                // libgit2 does not expand `~` — do it ourselves so that paths
+                // like `~/.ssh/id_ed25519_snehal1112` resolve correctly.
+                let expanded = if private_key_path.starts_with('~') {
+                    std::env::var("HOME")
+                        .map(|home| private_key_path.replacen('~', &home, 1))
+                        .unwrap_or_else(|_| private_key_path.clone())
+                } else {
+                    private_key_path.clone()
+                };
+                git2::Cred::ssh_key(
+                    username.unwrap_or("git"),
+                    None,
+                    Path::new(&expanded),
+                    passphrase.as_deref(),
+                )
+            }
             GitCredentials::SshAgent => {
                 git2::Cred::ssh_key_from_agent(username.unwrap_or("git"))
             }
