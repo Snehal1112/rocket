@@ -30,7 +30,6 @@ export function BranchSelector() {
   );
 
   const filteredRemote = branches.remote.filter((b) => {
-    // Exclude HEAD pointer and branches that already have a local counterpart.
     if (b.name.endsWith('/HEAD')) return false;
     const localName = b.name.split('/').slice(1).join('/');
     return (
@@ -45,7 +44,6 @@ export function BranchSelector() {
     const prevError = useGitStore.getState().error;
     await createBranch(newBranchName.trim());
     const nextError = useGitStore.getState().error;
-    // If the store recorded a new error, surface it inline rather than silently dropping it.
     if (nextError && nextError !== prevError) {
       setCreateError(nextError);
     } else {
@@ -53,8 +51,6 @@ export function BranchSelector() {
     }
   };
 
-  // Switch to a local branch, keeping the popover open on failure so the
-  // error is visible rather than silently dropped into the store.
   const handleSwitch = async (name: string) => {
     setSwitchError(null);
     const prevError = useGitStore.getState().error;
@@ -67,7 +63,6 @@ export function BranchSelector() {
     }
   };
 
-  // Check out a remote branch, keeping the popover open on failure.
   const handleCheckoutRemote = async (name: string) => {
     setSwitchError(null);
     const prevError = useGitStore.getState().error;
@@ -75,6 +70,26 @@ export function BranchSelector() {
     const nextError = useGitStore.getState().error;
     if (nextError && nextError !== prevError) {
       setSwitchError(nextError);
+    } else {
+      setOpen(false);
+    }
+  };
+
+  // Await merge, then surface the result:
+  // - On success: close the popover.
+  // - On conflict: close the popover so the conflict resolver is visible.
+  // - On other error: keep the popover open and show the error inline.
+  const handleMerge = async (name: string) => {
+    setSwitchError(null);
+    const prevError = useGitStore.getState().error;
+    await mergeBranch(name);
+    const nextError = useGitStore.getState().error;
+    if (nextError && nextError !== prevError) {
+      if (nextError.toLowerCase().includes('conflict')) {
+        setOpen(false);
+      } else {
+        setSwitchError(nextError);
+      }
     } else {
       setOpen(false);
     }
@@ -147,8 +162,7 @@ export function BranchSelector() {
                           className='h-5 w-5'
                           onClick={(e) => {
                             e.stopPropagation();
-                            mergeBranch(branch.name);
-                            setOpen(false);
+                            void handleMerge(branch.name);
                           }}
                         >
                           <GitMerge className='h-3.5 w-3.5 text-muted-foreground' />
