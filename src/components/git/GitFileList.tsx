@@ -14,7 +14,6 @@ interface GitFileListProps {
 export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) {
   const {
     status,
-    conflicts,
     refreshConflicts,
     refreshStatus,
     stageFiles,
@@ -44,7 +43,8 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
 
   const handleConflictClick = async (file: FileStatus) => {
     await refreshConflicts();
-    const conflictFile = conflicts.find((c) => c.path === file.path);
+    // Read fresh state — the `conflicts` binding captured at render-time is stale after the await.
+    const conflictFile = useGitStore.getState().conflicts.find((c) => c.path === file.path);
     if (conflictFile) {
       onConflictClick(conflictFile);
     } else {

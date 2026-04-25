@@ -1,10 +1,10 @@
 import '@/components/editor/monaco-setup';
 import Editor from '@monaco-editor/react';
+import { AlertCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { gitResolveConflict } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import type { ConflictState } from '@/types/pane-types';
 
@@ -15,7 +15,7 @@ interface ConflictResolverProps {
 export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
-  const { refreshStatus, abortMerge } = useGitStore();
+  const { resolveConflict, abortMerge, error, clearError } = useGitStore();
   const { themeName } = useMonacoTheme();
 
   const handleAbort = async () => {
@@ -23,16 +23,11 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
   };
 
   const handleResolve = async (resolution: 'ours' | 'theirs' | 'custom', content?: string) => {
-    try {
-      const res =
-        resolution === 'custom'
-          ? { resolution: 'custom' as const, content: content ?? '' }
-          : { resolution };
-      await gitResolveConflict(conflictState.collectionPath, conflictState.filePath, res);
-      await refreshStatus();
-    } catch {
-      // Handle silently.
-    }
+    const res =
+      resolution === 'custom'
+        ? { resolution: 'custom' as const, content: content ?? '' }
+        : { resolution };
+    await resolveConflict(conflictState.filePath, res);
   };
 
   if (manualMode) {
@@ -69,6 +64,20 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             </Button>
           </div>
         </div>
+        {error && (
+          <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
+            <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
+            <span className='flex-1 wrap-break-word'>{error}</span>
+            <button
+              type='button'
+              className='shrink-0 hover:opacity-70 leading-none'
+              onClick={clearError}
+              aria-label='Dismiss error'
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className='flex-1'>
           <Editor
             value={manualContent}
@@ -99,6 +108,20 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
           </Button>
         </div>
       </div>
+      {error && (
+        <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
+          <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
+          <span className='flex-1 wrap-break-word'>{error}</span>
+          <button
+            type='button'
+            className='shrink-0 hover:opacity-70 leading-none'
+            onClick={clearError}
+            aria-label='Dismiss error'
+          >
+            ×
+          </button>
+        </div>
+      )}
       <div className='flex flex-1 min-h-0'>
         <div className='flex-1 flex flex-col border-r'>
           <div className='px-2 py-1 text-sm font-medium text-muted-foreground border-b'>Ours</div>

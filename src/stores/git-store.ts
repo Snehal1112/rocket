@@ -279,6 +279,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await gitCommit(collectionPath, message);
       await get().refreshStatus();
+      await get().refreshLog();
     } catch (e) {
       set({ error: String(e) });
     }
