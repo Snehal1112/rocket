@@ -607,10 +607,26 @@ impl GitService for Git2Service {
         let head = repo
             .head()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        let branch = head
+        let branch_name_str = head
             .shorthand()
             .unwrap_or("main");
-        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+
+        // Prefer the configured upstream's remote branch name as the push target.
+        // Falls back to same-name if no upstream is configured.
+        let remote_branch = repo
+            .find_branch(branch_name_str, git2::BranchType::Local)
+            .ok()
+            .and_then(|b| b.upstream().ok())
+            .and_then(|u| {
+                u.name().ok().flatten().map(|full| {
+                    // upstream name is "origin/feat-x" — strip the "origin/" prefix.
+                    full.splitn(2, '/').nth(1).map(String::from)
+                })
+            })
+            .flatten()
+            .unwrap_or_else(|| branch_name_str.to_string());
+
+        let refspec = format!("refs/heads/{branch_name_str}:refs/heads/{remote_branch}");
 
         let callbacks = build_callbacks(creds);
         let mut push_opts = git2::PushOptions::new();
@@ -1442,6 +1458,50 @@ mod tests {
         repo.set_head("refs/heads/main").unwrap();
 
         (dir, path)
+    }
+
+    fn setup_repo_with_remote() -> (TempDir, String, TempDir, String) {
+        // Create a bare "remote" repo.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        git2::Repository::init_bare(&remote_path).unwrap();
+
+        // Clone it locally — local file-path remotes need no credentials.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        git2::build::RepoBuilder::new()
+            .clone(&remote_path, local_dir.path())
+            .expect("clone failed");
+
+        // Make an initial commit so the repo is non-empty.
+        let repo = git2::Repository::open(&local_path).unwrap();
+        let sig = git2::Signature::now("T", "t@t.com").unwrap();
+        std::fs::write(local_dir.path().join("a.bru"), "content").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("a.bru")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+
+        (local_dir, local_path, remote_dir, remote_path)
+    }
+
+    #[test]
+    fn push_succeeds_for_same_name_branch() {
+        let (local_dir, local_path, _remote_dir, remote_path) = setup_repo_with_remote();
+        let svc = Git2Service::new();
+
+        // Local file-path remotes don't invoke the credential callback.
+        let result = svc.push(&local_path, "origin", &crate::credentials::GitCredentials::SshAgent);
+        assert!(result.is_ok(), "push failed: {:?}", result);
+
+        // Verify the ref landed in the bare remote.
+        let bare = git2::Repository::open_bare(&remote_path).unwrap();
+        assert!(bare.find_reference("refs/heads/main").is_ok());
+
+        drop(local_dir);
     }
 
     #[test]
