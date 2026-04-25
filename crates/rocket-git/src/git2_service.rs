@@ -843,10 +843,53 @@ impl GitService for Git2Service {
 
     fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
+
+        // Refuse to switch if the working tree has uncommitted changes that
+        // could be silently discarded. This mirrors `git switch` / `git checkout`
+        // default behaviour.
+        let dirty = repo
+            .statuses(Some(
+                git2::StatusOptions::new()
+                    .include_untracked(false)
+                    .include_ignored(false),
+            ))
+            .map_err(|e| DomainError::Internal(e.to_string()))?
+            .iter()
+            .any(|s| {
+                s.status().intersects(
+                    git2::Status::INDEX_NEW
+                        | git2::Status::INDEX_MODIFIED
+                        | git2::Status::INDEX_DELETED
+                        | git2::Status::INDEX_RENAMED
+                        | git2::Status::WT_MODIFIED
+                        | git2::Status::WT_DELETED
+                        | git2::Status::WT_RENAMED,
+                )
+            });
+
+        if dirty {
+            return Err(DomainError::InvalidInput(
+                "You have uncommitted changes that would be overwritten by switching branches. \
+                 Please commit or stash your changes first."
+                    .to_string(),
+            ));
+        }
+
         repo.set_head(&format!("refs/heads/{name}"))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
-            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        // Safe checkout — will fail if local modifications would be overwritten.
+        // This matches `git switch` / `git checkout` default behaviour.
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().safe()))
+            .map_err(|e| {
+                if e.message().contains("conflict") || e.message().contains("overwritten") {
+                    DomainError::InvalidInput(
+                        "You have uncommitted changes that would be overwritten by switching branches. \
+                         Please commit or stash your changes first.".to_string()
+                    )
+                } else {
+                    DomainError::Internal(e.to_string())
+                }
+            })?;
         Ok(())
     }
 
@@ -2786,5 +2829,32 @@ mod tests {
         // feature-x is now checked out — deleting it must fail.
         let result = svc.delete_branch(&path, "feature-x");
         assert!(result.is_err(), "deleting the currently checked-out branch must fail");
+    }
+
+    #[test]
+    fn switch_branch_refuses_when_dirty() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Create a second branch to switch to.
+        svc.create_branch(&path, "other").unwrap();
+        // Switch back to main first (create_branch switches HEAD).
+        let repo = git2::Repository::open(&path).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+
+        // Now dirty the working tree on main.
+        std::fs::write(dir.path().join("test.bru"), "dirty content").unwrap();
+
+        // Attempting to switch to 'other' must fail with InvalidInput, not silently discard the change.
+        let result = svc.switch_branch(&path, "other");
+        assert!(
+            matches!(result, Err(rocket_shared::error::DomainError::InvalidInput(_))),
+            "expected InvalidInput when dirty, got: {:?}", result
+        );
+
+        // The dirty file must still be there — not discarded.
+        let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
+        assert_eq!(content, "dirty content");
     }
 }
