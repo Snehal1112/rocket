@@ -43,6 +43,7 @@ import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
+import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type {
@@ -56,12 +57,12 @@ import type {
 import { isRequestTab } from '@/types/pane-types';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
-import { RocketTabBar } from './RocketTabBar';
 import { HeadersEditor } from './HeadersEditor';
 import { PathParamsPanel } from './PathParamsPanel';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
+import { RocketTabBar } from './RocketTabBar';
 import { SaveRequestButton } from './SaveRequestButton';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 
@@ -100,6 +101,7 @@ interface RequestPanelProps {
 export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { request, response } = tab;
   const updateRequest = usePaneStore((s) => s.updateRequest);
+  const requestLayout = useLayoutStore((s) => s.requestLayout);
 
   const { send, sending } = useExecuteRequest(tab.id);
 
@@ -120,6 +122,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [requestHeight, setRequestHeight] = useState(55);
   const [isDragging, setIsDragging] = useState(false);
+  const [requestWidth, setRequestWidth] = useState(50);
 
   const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -217,6 +220,43 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     },
     [requestHeight],
   );
+
+  const handleVerticalSeparatorDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+      const container = containerRef.current;
+      if (!container) return;
+
+      const startX = e.clientX;
+      const startWidth = requestWidth;
+      const containerW = container.getBoundingClientRect().width;
+
+      const onMove = (ev: PointerEvent) => {
+        const delta = ev.clientX - startX;
+        const pct = startWidth + (delta / containerW) * 100;
+        setRequestWidth(Math.min(80, Math.max(20, pct)));
+      };
+      const onUp = () => {
+        setIsDragging(false);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [requestWidth],
+  );
+
+  const handleVerticalSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setRequestWidth((w) => Math.min(80, Math.max(20, w - 5)));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setRequestWidth((w) => Math.min(80, Math.max(20, w + 5)));
+    }
+  }, []);
 
   const handleUrlChange = useCallback(
     (url: string) => {
@@ -713,6 +753,390 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     docMode,
   ]);
 
+  const urlBar = (
+    <>
+      <div className='flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm'>
+        <Select
+          value={request.method}
+          onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
+        >
+          <SelectTrigger
+            className={cn('h-8 w-28 text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {METHODS.map((m) => (
+              <SelectItem
+                key={m}
+                value={m}
+                className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}
+              >
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <SingleLineEditor
+          value={request.url}
+          onChange={(val) => {
+            setUrlError('');
+            handleUrlChange(val);
+          }}
+          onSubmit={() => send(request)}
+          onCurlImport={handleCurlImport}
+          variableContext={scopedContext}
+          pathParams={pathParamMap}
+          queryParams={queryParamMap}
+          onPathParamChange={(key, val) => {
+            const updated = request.pathParams.map((p) =>
+              p.key === key ? { ...p, value: val } : p,
+            );
+            updateRequest(tab.id, { pathParams: updated });
+          }}
+          onNavigateToSource={handleEditorNavigateToSource}
+          placeholder='Enter URL or paste a cURL request'
+          className='flex-1'
+        />
+
+        <Button
+          size='sm'
+          className='h-8 px-3'
+          disabled={sending}
+          onClick={() => {
+            const url = request.url.trim();
+            if (!url) {
+              setUrlError('URL is required');
+              return;
+            }
+            // Skip URL format check when the URL has unresolved template vars;
+            // the backend resolves them before making the HTTP call.
+            if (!url.includes('{{')) {
+              try {
+                new URL(url);
+              } catch {
+                setUrlError('Invalid URL — include http:// or https://');
+                return;
+              }
+            }
+            setUrlError('');
+            send(request);
+          }}
+        >
+          <Send className='mr-1 h-3.5 w-3.5' />
+          {sending ? 'Sending...' : 'Send'}
+        </Button>
+
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7'
+          onClick={() => setShowLoadTest(true)}
+          title='Load test'
+          aria-label='Load test'
+        >
+          <Zap className='h-3.5 w-3.5' aria-hidden='true' />
+        </Button>
+
+        {!tab.source && (
+          <>
+            <Button
+              size='sm'
+              variant='outline'
+              className='h-7'
+              onClick={() => setSaveToCollectionOpen(true)}
+            >
+              Save to Collection
+            </Button>
+            <SaveToCollectionDialog
+              open={saveToCollectionOpen}
+              tab={tab}
+              onClose={() => setSaveToCollectionOpen(false)}
+            />
+          </>
+        )}
+
+        <SaveRequestButton tab={tab} groupId={_groupId} />
+      </div>
+      {urlError && <p className='text-xs text-destructive px-3 py-1'>{urlError}</p>}
+      {curlImported && (
+        <p className='text-xs text-green-600 dark:text-green-400 px-3 py-1'>Imported from cURL</p>
+      )}
+    </>
+  );
+
+  const sectionTabs = (
+    <div className='flex-1 flex flex-col min-h-0 bg-card/50'>
+      <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
+      <div className='flex-1 overflow-auto p-3 bg-card/65'>
+        {activeSection === 'params' && (
+          <div className='space-y-2'>
+            <PathParamsPanel
+              params={request.pathParams}
+              onChange={handlePathParamsChange}
+              variableContext={scopedContext}
+              onNavigateToSource={handleEditorNavigateToSource}
+            />
+            <QueryParamsEditor
+              params={request.queryParams}
+              onChange={handleParamsChange}
+              variableContext={scopedContext}
+              onNavigateToSource={handleEditorNavigateToSource}
+            />
+          </div>
+        )}
+        {activeSection === 'headers' && (
+          <HeadersEditor
+            headers={request.headers}
+            onChange={handleHeadersChange}
+            variableContext={scopedContext}
+            onNavigateToSource={handleEditorNavigateToSource}
+          />
+        )}
+        {activeSection === 'body' && (
+          <BodyEditor
+            body={request.body}
+            onChange={handleBodyChange}
+            variableContext={scopedContext}
+            onNavigateToSource={handleEditorNavigateToSource}
+          />
+        )}
+        {activeSection === 'auth' && (
+          <AuthEditor
+            auth={request.auth}
+            onChange={handleAuthChange}
+            variableContext={scopedContext}
+            onNavigateToSource={handleEditorNavigateToSource}
+            collection={tab.source?.collection}
+            environmentName={activeEnvIdForScope ?? undefined}
+            requestPath={tab.source?.path}
+          />
+        )}
+        {activeSection === 'variables' &&
+          (tab.source?.collection && tab.source?.path ? (
+            <RequestVariablesPanel
+              collection={tab.source.collection}
+              requestPath={tab.source.path}
+              onVarCountChange={setRequestVarCount}
+            />
+          ) : (
+            <div className='flex flex-col items-center justify-center gap-4 py-10 text-center'>
+              <div className='h-12 w-12 rounded-xl bg-muted/40 border border-border/50 flex items-center justify-center'>
+                <Braces className='h-5 w-5 text-muted-foreground/30' />
+              </div>
+              <div className='space-y-1.5'>
+                <p className='text-xs font-medium text-muted-foreground/70'>
+                  No collection attached
+                </p>
+                <p className='text-[11px] text-muted-foreground/40 max-w-[200px] leading-relaxed'>
+                  Save this request to a collection to define request-scoped variables.
+                </p>
+              </div>
+            </div>
+          ))}
+        {activeSection === 'settings' && (
+          <div className='space-y-4'>
+            {/* Security group. */}
+            <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
+              <div className='flex items-center gap-2 mb-1'>
+                <ShieldCheck className='h-3.5 w-3.5 text-muted-foreground' />
+                <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                  Security
+                </span>
+              </div>
+              <label
+                htmlFor='verify-ssl'
+                className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+              >
+                <Checkbox
+                  id='verify-ssl'
+                  checked={settings.verifySsl}
+                  onCheckedChange={(checked) => handleSettingsChange({ verifySsl: !!checked })}
+                />
+                <div>
+                  <span className='text-sm'>Verify SSL certificate</span>
+                  <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                    Validate the server's TLS certificate chain.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {/* Connection group. */}
+            <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
+              <div className='flex items-center gap-2 mb-1'>
+                <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
+                <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                  Connection
+                </span>
+              </div>
+              <label
+                htmlFor='follow-redirects'
+                className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+              >
+                <Checkbox
+                  id='follow-redirects'
+                  checked={settings.followRedirects}
+                  onCheckedChange={(checked) =>
+                    handleSettingsChange({ followRedirects: !!checked })
+                  }
+                />
+                <div>
+                  <span className='text-sm'>Follow redirects</span>
+                  <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                    Automatically follow HTTP 3xx redirects.
+                  </p>
+                </div>
+              </label>
+              <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
+                <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+                <div className='flex items-center gap-2.5 flex-1'>
+                  <div className='flex-1'>
+                    <label htmlFor='timeout-ms' className='text-sm'>
+                      Timeout
+                    </label>
+                    <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                      Max wait time before aborting the request.
+                    </p>
+                  </div>
+                  <div className='flex items-center gap-1.5'>
+                    <Input
+                      id='timeout-ms'
+                      type='number'
+                      min={0}
+                      className='h-7 w-24 text-xs text-right tabular-nums'
+                      value={settings.timeoutMs}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (!Number.isNaN(val) && val >= 0) {
+                          handleSettingsChange({ timeoutMs: val });
+                        }
+                      }}
+                    />
+                    <span className='text-[11px] text-muted-foreground'>ms</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {activeSection === 'docs' && (
+          <RequestDocsPanel
+            docs={request.docs}
+            mode={docMode}
+            hasSource={!!(tab.source?.collection && tab.source?.path)}
+            onSave={(docs) => {
+              void handleSaveDocs(docs);
+            }}
+            onSwitchToEdit={() => setDocMode('edit')}
+          />
+        )}
+      </div>
+    </div>
+  );
+
+  const responseArea = sending ? (
+    <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+      <Loader2 className='h-5 w-5 animate-spin text-primary' />
+      <p className='text-sm text-muted-foreground'>Sending request...</p>
+    </div>
+  ) : response ? (
+    <ResponseBodyViewer response={response} />
+  ) : (
+    <div className='flex flex-1 flex-col items-center justify-center gap-3'>
+      <RocketLiftOff className='w-24 h-24' />
+      <p className='text-sm font-medium text-foreground'>Ready for liftoff</p>
+      <p className='text-xs text-muted-foreground'>Send a request to see the response here</p>
+      <p className='text-xs text-muted-foreground mt-1'>
+        Press{' '}
+        <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
+          Ctrl+Enter
+        </kbd>{' '}
+        to send
+      </p>
+    </div>
+  );
+
+  const dialogs = (
+    <>
+      <LoadTestDialog
+        open={showLoadTest}
+        onOpenChange={setShowLoadTest}
+        request={request}
+        tabId={tab.id}
+      />
+      <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
+      <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              This tab has unsaved changes. Do you want to discard them?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => setUnsavedDialogOpen(false)}>
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+
+  if (requestLayout === 'side-by-side') {
+    return (
+      <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
+        {urlBar}
+        <div className='flex flex-1 min-h-0'>
+          {/* Request side */}
+          <div
+            className='flex flex-col overflow-hidden bg-card/80 min-w-[20%] max-w-[80%]'
+            style={{ width: `${requestWidth}%` }}
+          >
+            {sectionTabs}
+          </div>
+
+          {/* Vertical separator */}
+          {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
+          <div
+            role='separator'
+            tabIndex={0}
+            aria-orientation='vertical'
+            aria-label='Resize request and response panels'
+            aria-valuemin={20}
+            aria-valuemax={80}
+            aria-valuenow={Math.round(requestWidth)}
+            onPointerDown={handleVerticalSeparatorDown}
+            onKeyDown={handleVerticalSeparatorKeyDown}
+            className={cn(
+              'w-3 flex items-center justify-center cursor-col-resize select-none border-x transition-colors',
+              'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
+              isDragging
+                ? 'bg-primary/15 border-primary/50'
+                : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
+            )}
+          >
+            <div
+              className={cn(
+                'rounded-full transition-all',
+                isDragging ? 'h-24 w-1.5 bg-primary' : 'h-16 w-1 bg-muted-foreground/40',
+              )}
+            />
+          </div>
+
+          {/* Response side */}
+          <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-w-0'>
+            {responseArea}
+          </div>
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
       {/* ── Request area ── */}
@@ -723,284 +1147,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         )}
         style={expandFull ? undefined : ({ '--req-h': `${requestHeight}%` } as React.CSSProperties)}
       >
-        {/* URL bar. */}
-        <div className='flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm'>
-          <Select
-            value={request.method}
-            onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
-          >
-            <SelectTrigger
-              className={cn('h-8 w-28 text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {METHODS.map((m) => (
-                <SelectItem
-                  key={m}
-                  value={m}
-                  className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}
-                >
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <SingleLineEditor
-            value={request.url}
-            onChange={(val) => {
-              setUrlError('');
-              handleUrlChange(val);
-            }}
-            onSubmit={() => send(request)}
-            onCurlImport={handleCurlImport}
-            variableContext={scopedContext}
-            pathParams={pathParamMap}
-            queryParams={queryParamMap}
-            onPathParamChange={(key, val) => {
-              const updated = request.pathParams.map((p) =>
-                p.key === key ? { ...p, value: val } : p,
-              );
-              updateRequest(tab.id, { pathParams: updated });
-            }}
-            onNavigateToSource={handleEditorNavigateToSource}
-            placeholder='Enter URL or paste a cURL request'
-            className='flex-1'
-          />
-
-          <Button
-            size='sm'
-            className='h-8 px-3'
-            disabled={sending}
-            onClick={() => {
-              const url = request.url.trim();
-              if (!url) {
-                setUrlError('URL is required');
-                return;
-              }
-              // Skip URL format check when the URL has unresolved template vars;
-              // the backend resolves them before making the HTTP call.
-              if (!url.includes('{{')) {
-                try {
-                  new URL(url);
-                } catch {
-                  setUrlError('Invalid URL — include http:// or https://');
-                  return;
-                }
-              }
-              setUrlError('');
-              send(request);
-            }}
-          >
-            <Send className='mr-1 h-3.5 w-3.5' />
-            {sending ? 'Sending...' : 'Send'}
-          </Button>
-
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-7'
-            onClick={() => setShowLoadTest(true)}
-            title='Load test'
-            aria-label='Load test'
-          >
-            <Zap className='h-3.5 w-3.5' aria-hidden='true' />
-          </Button>
-
-          {!tab.source && (
-            <>
-              <Button
-                size='sm'
-                variant='outline'
-                className='h-7'
-                onClick={() => setSaveToCollectionOpen(true)}
-              >
-                Save to Collection
-              </Button>
-              <SaveToCollectionDialog
-                open={saveToCollectionOpen}
-                tab={tab}
-                onClose={() => setSaveToCollectionOpen(false)}
-              />
-            </>
-          )}
-
-          <SaveRequestButton tab={tab} groupId={_groupId} />
-        </div>
-        {urlError && <p className='text-xs text-destructive px-3 py-1'>{urlError}</p>}
-        {curlImported && (
-          <p className='text-xs text-green-600 dark:text-green-400 px-3 py-1'>Imported from cURL</p>
-        )}
-
-        {/* Section tabs. */}
-        <div className='flex-1 flex flex-col min-h-0  bg-card/50'>
-          <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
-          <div className='flex-1 overflow-auto p-3 bg-card/65'>
-            {activeSection === 'params' && (
-              <div className='space-y-2'>
-                <PathParamsPanel
-                  params={request.pathParams}
-                  onChange={handlePathParamsChange}
-                  variableContext={scopedContext}
-                  onNavigateToSource={handleEditorNavigateToSource}
-                />
-                <QueryParamsEditor
-                  params={request.queryParams}
-                  onChange={handleParamsChange}
-                  variableContext={scopedContext}
-                  onNavigateToSource={handleEditorNavigateToSource}
-                />
-              </div>
-            )}
-            {activeSection === 'headers' && (
-              <HeadersEditor
-                headers={request.headers}
-                onChange={handleHeadersChange}
-                variableContext={scopedContext}
-                onNavigateToSource={handleEditorNavigateToSource}
-              />
-            )}
-            {activeSection === 'body' && (
-              <BodyEditor
-                body={request.body}
-                onChange={handleBodyChange}
-                variableContext={scopedContext}
-                onNavigateToSource={handleEditorNavigateToSource}
-              />
-            )}
-            {activeSection === 'auth' && (
-              <AuthEditor
-                auth={request.auth}
-                onChange={handleAuthChange}
-                variableContext={scopedContext}
-                onNavigateToSource={handleEditorNavigateToSource}
-                collection={tab.source?.collection}
-                environmentName={activeEnvIdForScope ?? undefined}
-                requestPath={tab.source?.path}
-              />
-            )}
-            {activeSection === 'variables' &&
-              (tab.source?.collection && tab.source?.path ? (
-                <RequestVariablesPanel
-                  collection={tab.source.collection}
-                  requestPath={tab.source.path}
-                  onVarCountChange={setRequestVarCount}
-                />
-              ) : (
-                <div className='flex flex-col items-center justify-center gap-4 py-10 text-center'>
-                  <div className='h-12 w-12 rounded-xl bg-muted/40 border border-border/50 flex items-center justify-center'>
-                    <Braces className='h-5 w-5 text-muted-foreground/30' />
-                  </div>
-                  <div className='space-y-1.5'>
-                    <p className='text-xs font-medium text-muted-foreground/70'>
-                      No collection attached
-                    </p>
-                    <p className='text-[11px] text-muted-foreground/40 max-w-[200px] leading-relaxed'>
-                      Save this request to a collection to define request-scoped variables.
-                    </p>
-                  </div>
-                </div>
-              ))}
-            {activeSection === 'settings' && (
-              <div className='space-y-4'>
-                {/* Security group. */}
-                <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    <ShieldCheck className='h-3.5 w-3.5 text-muted-foreground' />
-                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
-                      Security
-                    </span>
-                  </div>
-                  <label
-                    htmlFor='verify-ssl'
-                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
-                  >
-                    <Checkbox
-                      id='verify-ssl'
-                      checked={settings.verifySsl}
-                      onCheckedChange={(checked) => handleSettingsChange({ verifySsl: !!checked })}
-                    />
-                    <div>
-                      <span className='text-sm'>Verify SSL certificate</span>
-                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                        Validate the server's TLS certificate chain.
-                      </p>
-                    </div>
-                  </label>
-                </div>
-
-                {/* Connection group. */}
-                <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
-                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
-                      Connection
-                    </span>
-                  </div>
-                  <label
-                    htmlFor='follow-redirects'
-                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
-                  >
-                    <Checkbox
-                      id='follow-redirects'
-                      checked={settings.followRedirects}
-                      onCheckedChange={(checked) =>
-                        handleSettingsChange({ followRedirects: !!checked })
-                      }
-                    />
-                    <div>
-                      <span className='text-sm'>Follow redirects</span>
-                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                        Automatically follow HTTP 3xx redirects.
-                      </p>
-                    </div>
-                  </label>
-                  <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
-                    <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-                    <div className='flex items-center gap-2.5 flex-1'>
-                      <div className='flex-1'>
-                        <label htmlFor='timeout-ms' className='text-sm'>
-                          Timeout
-                        </label>
-                        <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                          Max wait time before aborting the request.
-                        </p>
-                      </div>
-                      <div className='flex items-center gap-1.5'>
-                        <Input
-                          id='timeout-ms'
-                          type='number'
-                          min={0}
-                          className='h-7 w-24 text-xs text-right tabular-nums'
-                          value={settings.timeoutMs}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            if (!Number.isNaN(val) && val >= 0) {
-                              handleSettingsChange({ timeoutMs: val });
-                            }
-                          }}
-                        />
-                        <span className='text-[11px] text-muted-foreground'>ms</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-            {activeSection === 'docs' && (
-              <RequestDocsPanel
-                docs={request.docs}
-                mode={docMode}
-                hasSource={!!(tab.source?.collection && tab.source?.path)}
-                onSave={(docs) => {
-                  void handleSaveDocs(docs);
-                }}
-                onSwitchToEdit={() => setDocMode('edit')}
-              />
-            )}
-          </div>
-        </div>
+        {urlBar}
+        {sectionTabs}
       </div>
 
       {/* ── Drag separator and response area — hidden on Docs/Settings tabs. ── */}
@@ -1034,58 +1182,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </div>
 
           <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0'>
-            {sending ? (
-              <div className='flex flex-1 flex-col items-center justify-center gap-3'>
-                <Loader2 className='h-5 w-5 animate-spin text-primary' />
-                <p className='text-sm text-muted-foreground'>Sending request...</p>
-              </div>
-            ) : response ? (
-              <ResponseBodyViewer response={response} />
-            ) : (
-              <div className='flex flex-1 flex-col items-center justify-center gap-3'>
-                <RocketLiftOff className='w-24 h-24' />
-                <p className='text-sm font-medium text-foreground'>Ready for liftoff</p>
-                <p className='text-xs text-muted-foreground'>
-                  Send a request to see the response here
-                </p>
-                <p className='text-xs text-muted-foreground mt-1'>
-                  Press{' '}
-                  <kbd className='rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-2xs'>
-                    Ctrl+Enter
-                  </kbd>{' '}
-                  to send
-                </p>
-              </div>
-            )}
+            {responseArea}
           </div>
         </>
       )}
-
-      <LoadTestDialog
-        open={showLoadTest}
-        onOpenChange={setShowLoadTest}
-        request={request}
-        tabId={tab.id}
-      />
-      <EnvironmentDialog open={envDialogOpen} onOpenChange={setEnvDialogOpen} />
-
-      {/* Unsaved changes dialog. */}
-      <AlertDialog open={unsavedDialogOpen} onOpenChange={setUnsavedDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              This tab has unsaved changes. Do you want to discard them?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => setUnsavedDialogOpen(false)}>
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {dialogs}
     </div>
   );
 }
