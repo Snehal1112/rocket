@@ -47,6 +47,15 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Cmd/Ctrl+Shift+G — open the git panel for the active collection.
+      if (e.key === 'G' && e.shiftKey) {
+        e.preventDefault();
+        import('@/components/layout/GitToolbarButton').then(({ openGitPanel }) => {
+          void openGitPanel();
+        });
+        return;
+      }
+
       // Cmd/Ctrl+Tab — cycle to the next tab (wrapping) in the active group.
       if (e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault();
