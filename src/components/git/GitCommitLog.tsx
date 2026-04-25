@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import type { CommitInfo } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 
-// Return a human-readable relative time string for an ISO timestamp.
 function relativeTime(timestamp: string): string {
   const now = Date.now();
   const then = new Date(timestamp).getTime();
@@ -20,7 +20,11 @@ function relativeTime(timestamp: string): string {
   return `${months}mo ago`;
 }
 
-export function GitCommitLog() {
+interface GitCommitLogProps {
+  onCommitClick: (commit: CommitInfo) => void;
+}
+
+export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
   const { commitLog, refreshLog } = useGitStore();
   const [limit, setLimit] = useState(50);
 
@@ -44,7 +48,13 @@ export function GitCommitLog() {
         {commitLog.map((commit) => (
           <div
             key={commit.fullId}
-            className='flex items-start gap-2 px-2 py-1.25 hover:bg-muted/50'
+            role='button'
+            tabIndex={0}
+            className='flex items-start gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer'
+            onClick={() => onCommitClick(commit)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onCommitClick(commit);
+            }}
           >
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -52,7 +62,10 @@ export function GitCommitLog() {
                   <button
                     type='button'
                     className='shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors'
-                    onClick={() => navigator.clipboard.writeText(commit.fullId)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(commit.fullId);
+                    }}
                   >
                     {commit.id}
                   </button>
@@ -66,6 +79,11 @@ export function GitCommitLog() {
               <p className='truncate text-[13px] font-medium leading-snug'>{commit.message}</p>
               <p className='text-[10px] text-muted-foreground/70 mt-0.5'>
                 {commit.author} · {relativeTime(commit.timestamp)}
+                {commit.filesChanged > 0 && (
+                  <span className='ml-1.5'>
+                    · {commit.filesChanged} file{commit.filesChanged !== 1 ? 's' : ''}
+                  </span>
+                )}
               </p>
             </div>
           </div>

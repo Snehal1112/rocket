@@ -311,6 +311,7 @@ pub fn run() {
             commands::git::git_status,
             commands::git::git_diff,
             commands::git::git_diff_staged,
+            commands::git::git_diff_commit,
             commands::git::git_stage,
             commands::git::git_unstage,
             commands::git::git_discard,

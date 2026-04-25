@@ -37,6 +37,11 @@ pub fn git_diff_staged(collection_path: String, file: String, svc: State<'_, Git
 }
 
 #[tauri::command]
+pub fn git_diff_commit(collection_path: String, oid: String, svc: State<'_, GitAppService>) -> Result<Vec<FileDiff>, DomainError> {
+    svc.diff_commit(&collection_path, &oid)
+}
+
+#[tauri::command]
 pub fn git_stage(collection_path: String, files: Vec<String>, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     svc.stage(&collection_path, &refs)

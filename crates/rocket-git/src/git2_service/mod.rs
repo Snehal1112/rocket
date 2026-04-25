@@ -82,6 +82,10 @@ impl GitService for Git2Service {
         status_diff::diff_staged(path, file)
     }
 
+    fn diff_commit(&self, path: &str, oid: &str) -> DomainResult<Vec<FileDiff>> {
+        staging::diff_commit(path, oid)
+    }
+
     fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         staging::stage(path, files)
     }

@@ -1,3 +1,4 @@
+use std::ops::Not;
 use std::path::Path;
 
 use git2::build::CheckoutBuilder;
@@ -130,6 +131,81 @@ pub(super) fn commit(path: &str, message: &str) -> DomainResult<CommitInfo> {
         timestamp: chrono::Utc::now(),
         files_changed,
     })
+}
+
+#[tracing::instrument(name = "git_diff_commit", skip_all, fields(repo_path = %path, oid = %oid))]
+pub(super) fn diff_commit(path: &str, oid: &str) -> DomainResult<Vec<crate::diff::FileDiff>> {
+    use crate::diff::FileDiff;
+    let repo = open_repo(path)?;
+    let obj = repo
+        .revparse_single(oid)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let commit = obj
+        .peel_to_commit()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    let commit_tree = commit.tree().map_err(|e| DomainError::Internal(e.to_string()))?;
+    let parent_tree = commit
+        .parent(0)
+        .ok()
+        .and_then(|p| p.tree().ok());
+
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    let mut results: Vec<FileDiff> = Vec::new();
+
+    diff.foreach(
+        &mut |delta, _| {
+            let file_path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let old_content = delta
+                .old_file()
+                .id()
+                .is_zero()
+                .not()
+                .then(|| {
+                    repo.find_blob(delta.old_file().id())
+                        .ok()
+                        .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                })
+                .flatten();
+
+            let new_content = delta
+                .new_file()
+                .id()
+                .is_zero()
+                .not()
+                .then(|| {
+                    repo.find_blob(delta.new_file().id())
+                        .ok()
+                        .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                })
+                .flatten();
+
+            let hunks = super::helpers::build_simple_diff(&old_content, &new_content);
+
+            results.push(FileDiff {
+                path: file_path,
+                old_content,
+                new_content,
+                hunks,
+            });
+            true
+        },
+        None,
+        None,
+        None,
+    )
+    .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    Ok(results)
 }
 
 #[tracing::instrument(name = "git_log", fields(repo_path = %path, limit = %limit))]

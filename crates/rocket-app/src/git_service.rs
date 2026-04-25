@@ -75,6 +75,10 @@ impl GitAppService {
         self.git.diff_staged(path, file)
     }
 
+    pub fn diff_commit(&self, path: &str, oid: &str) -> DomainResult<Vec<FileDiff>> {
+        self.git.diff_commit(path, oid)
+    }
+
     // Staging
     pub fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.stage(path, files)?;

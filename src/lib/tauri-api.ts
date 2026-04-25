@@ -538,6 +538,9 @@ export const gitDiff = (collectionPath: string, file: string) =>
 export const gitDiffStaged = (collectionPath: string, file: string) =>
   invoke<FileDiff>('git_diff_staged', { collectionPath, file });
 
+export const gitDiffCommit = (collectionPath: string, oid: string) =>
+  invoke<FileDiff[]>('git_diff_commit', { collectionPath, oid });
+
 export const gitStage = (collectionPath: string, files: string[]) =>
   invoke<void>('git_stage', { collectionPath, files });
 

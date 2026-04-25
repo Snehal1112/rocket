@@ -23,6 +23,7 @@ pub trait GitService: Send + Sync {
     fn status(&self, path: &str) -> DomainResult<RepoStatus>;
     fn diff_file(&self, path: &str, file: &str) -> DomainResult<FileDiff>;
     fn diff_staged(&self, path: &str, file: &str) -> DomainResult<FileDiff>;
+    fn diff_commit(&self, path: &str, oid: &str) -> DomainResult<Vec<FileDiff>>;
 
     // Staging
     fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()>;

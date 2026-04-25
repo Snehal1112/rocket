@@ -10,6 +10,7 @@ const ConflictResolver = lazy(() =>
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
 import { GitCloneDialog } from '@/components/git/GitCloneDialog';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
+import { CommitDiffView } from '@/components/git/CommitDiffView';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
 import { GitFileList } from '@/components/git/GitFileList';
@@ -19,8 +20,8 @@ import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
-import { onCollectionChanged } from '@/lib/tauri-api';
+import type { CommitInfo, ConflictFile, FileDiff, FileStatus } from '@/lib/tauri-api';
+import { gitDiffCommit, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { GitPanelSkeleton } from '@/components/git/GitPanelSkeleton';
 
@@ -29,6 +30,7 @@ type RightPanelView =
   | { kind: 'diff'; file: FileStatus }
   | { kind: 'conflict'; conflictFile: ConflictFile }
   | { kind: 'commits' }
+  | { kind: 'commitDiff'; commit: CommitInfo; diffs: FileDiff[] }
   | { kind: 'stashes' };
 
 interface GitPanelProps {
@@ -96,6 +98,15 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
       setLeftWidth((w) => Math.min(500, Math.max(200, w + 20)));
     }
   }, []);
+
+  const handleCommitClick = async (commit: CommitInfo) => {
+    try {
+      const diffs = await gitDiffCommit(collectionPath, commit.fullId);
+      setRightPanel({ kind: 'commitDiff', commit, diffs });
+    } catch {
+      // If diff fails, silently stay on commits view.
+    }
+  };
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
@@ -261,6 +272,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
                 {rightPanel.kind === 'diff' && rightPanel.file.path}
                 {rightPanel.kind === 'conflict' && rightPanel.conflictFile.path}
                 {rightPanel.kind === 'commits' && 'Commit History'}
+                {rightPanel.kind === 'commitDiff' && `${rightPanel.commit.id} — ${rightPanel.commit.message.slice(0, 40)}`}
                 {rightPanel.kind === 'stashes' && 'Stashes'}
               </span>
             </div>
@@ -285,7 +297,10 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
                 />
               </Suspense>
             )}
-            {rightPanel.kind === 'commits' && <GitCommitLog />}
+            {rightPanel.kind === 'commits' && <GitCommitLog onCommitClick={handleCommitClick} />}
+            {rightPanel.kind === 'commitDiff' && (
+              <CommitDiffView diffs={rightPanel.diffs} collectionPath={collectionPath} />
+            )}
             {rightPanel.kind === 'stashes' && (
               <div className='overflow-y-auto h-full'>
                 <div className='p-4'>
