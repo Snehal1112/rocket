@@ -57,7 +57,10 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
       <Button
         variant='ghost'
         size='sm'
-        className={cn('h-5 px-1.5 text-xs gap-1 ml-auto', requestLayout === 'side-by-side' && 'bg-accent')}
+        className={cn(
+          'h-5 px-1.5 text-xs gap-1 ml-auto',
+          requestLayout === 'side-by-side' && 'bg-accent',
+        )}
         onClick={() => setRequestLayout(requestLayout === 'stacked' ? 'side-by-side' : 'stacked')}
         title={requestLayout === 'stacked' ? 'Switch to side by side' : 'Switch to stacked'}
         aria-label={requestLayout === 'stacked' ? 'Side by side' : 'Stack'}
