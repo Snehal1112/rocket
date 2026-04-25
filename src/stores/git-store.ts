@@ -293,13 +293,17 @@ export const useGitStore = create<GitState>((set, get) => ({
     // that could contain directory-level entries (trailing '/') from an
     // older status response.
     await get().refreshStatus();
-    const { status } = get();
-    if (!status) return;
-    const unstaged = status.files
+    const { collectionPath, status } = get();
+    if (!collectionPath || !status) return;
+    const paths = status.files
       .filter((f: FileStatus) => !f.staged && f.status !== 'unchanged')
       .map((f: FileStatus) => f.path);
-    if (unstaged.length > 0) {
-      await get().stageFiles(unstaged);
+    if (paths.length === 0) return;
+    try {
+      await gitStage(collectionPath, paths);
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
     }
   },
 

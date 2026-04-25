@@ -134,9 +134,14 @@ fn get_index_content(repo: &Repository, file: &str) -> Option<String> {
 
 /// Build a simple line-by-line diff producing hunks.
 ///
-/// This is intentionally simplistic: all old lines are marked as removals and
-/// all new lines as additions inside a single hunk. A real diff algorithm is
-/// not required at this stage.
+/// Produces a single hunk with all old lines as removals followed by all new
+/// lines as additions. This is structurally correct for Monaco's DiffEditor,
+/// which applies its own Myers diff on `oldContent`/`newContent` and ignores
+/// the hunk structure. VisualDiffView also parses `oldContent`/`newContent`
+/// directly and does not rely on hunks, so both consumers are unaffected.
+///
+/// Do NOT use `hunks` for semantic diff consumers — replace with the `similar`
+/// crate for a proper Myers diff when hunk-level accuracy is needed.
 fn build_simple_diff(old: &Option<String>, new: &Option<String>) -> Vec<DiffHunk> {
     let old_lines: Vec<&str> = old.as_deref().map(|s| s.lines().collect()).unwrap_or_default();
     let new_lines: Vec<&str> = new.as_deref().map(|s| s.lines().collect()).unwrap_or_default();
@@ -239,10 +244,12 @@ fn ahead_behind(repo: &Repository) -> (usize, usize) {
 // ---------------------------------------------------------------------------
 
 impl GitService for Git2Service {
+    #[tracing::instrument(name = "git_is_repo", skip(self), fields(path = %path))]
     fn is_repo(&self, path: &str) -> bool {
         Repository::open(path).is_ok()
     }
 
+    #[tracing::instrument(name = "git_init", skip(self), fields(repo_path = %path))]
     fn init(&self, path: &str) -> DomainResult<()> {
         Repository::init(path).map_err(|e| DomainError::Internal(e.to_string()))?;
         Ok(())
@@ -274,6 +281,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_list_remotes", skip(self), fields(repo_path = %path))]
     fn list_remotes(&self, path: &str) -> DomainResult<Vec<RemoteInfo>> {
         let repo = open_repo(path)?;
         let remote_names = repo
@@ -293,6 +301,7 @@ impl GitService for Git2Service {
         Ok(remotes)
     }
 
+    #[tracing::instrument(name = "git_add_remote", skip(self), fields(repo_path = %path, name = %name))]
     fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
         repo.remote(name, url)
@@ -300,6 +309,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_remove_remote", skip(self), fields(repo_path = %path, name = %name))]
     fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
         repo.remote_delete(name)
@@ -307,6 +317,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_set_remote_url", skip(self), fields(repo_path = %path, name = %name))]
     fn set_remote_url(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
         repo.remote_set_url(name, url)
@@ -417,6 +428,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_diff_file", skip(self), fields(repo_path = %path, file = %file))]
     fn diff_file(&self, path: &str, file: &str) -> DomainResult<FileDiff> {
         let repo = open_repo(path)?;
         let old_content = get_head_content(&repo, file);
@@ -432,6 +444,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_diff_staged", skip(self), fields(repo_path = %path, file = %file))]
     fn diff_staged(&self, path: &str, file: &str) -> DomainResult<FileDiff> {
         let repo = open_repo(path)?;
         let old_content = get_head_content(&repo, file);
@@ -446,6 +459,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_stage", skip(self, files), fields(repo_path = %path, count = files.len()))]
     fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -479,6 +493,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_unstage", skip(self, files), fields(repo_path = %path, count = files.len()))]
     fn unstage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let head = repo
@@ -491,6 +506,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_discard", skip(self, files), fields(repo_path = %path, count = files.len()))]
     fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         let repo = open_repo(path)?;
         for file in files {
@@ -568,6 +584,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_log", skip(self), fields(repo_path = %path, limit = %limit))]
     fn log(&self, path: &str, limit: usize) -> DomainResult<Vec<CommitInfo>> {
         let repo = open_repo(path)?;
         let mut revwalk = repo.revwalk().map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -838,6 +855,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_branches", skip(self), fields(repo_path = %path))]
     fn branches(&self, path: &str) -> DomainResult<BranchList> {
         let repo = open_repo(path)?;
         let current = branch_name(&repo);
@@ -881,6 +899,7 @@ impl GitService for Git2Service {
         })
     }
 
+    #[tracing::instrument(name = "git_switch_branch", skip(self), fields(repo_path = %path, branch = %name))]
     fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
@@ -936,6 +955,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_checkout_remote_branch", skip(self), fields(repo_path = %path, remote_branch = %remote_branch))]
     fn checkout_remote_branch(&self, path: &str, remote_branch: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
@@ -982,6 +1002,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_create_branch", skip(self), fields(repo_path = %path, name = %name))]
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
@@ -1007,6 +1028,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_delete_branch", skip(self), fields(repo_path = %path, name = %name))]
     fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
         let mut branch = repo
@@ -1018,6 +1040,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_merge_branch", skip(self), fields(repo_path = %path, name = %name))]
     fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
@@ -1128,6 +1151,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_stash_list", skip(self), fields(repo_path = %path))]
     fn stash_list(&self, path: &str) -> DomainResult<Vec<StashEntry>> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -1214,6 +1238,7 @@ impl GitService for Git2Service {
         Ok(entries)
     }
 
+    #[tracing::instrument(name = "git_stash_save", skip(self), fields(repo_path = %path))]
     fn stash_save(&self, path: &str, message: &str) -> DomainResult<()> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -1231,6 +1256,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_stash_pop", skip(self), fields(repo_path = %path, index = %index))]
     fn stash_pop(&self, path: &str, index: usize) -> DomainResult<()> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -1239,6 +1265,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_stash_apply", skip(self), fields(repo_path = %path, index = %index))]
     fn stash_apply(&self, path: &str, index: usize) -> DomainResult<()> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -1247,6 +1274,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_stash_drop", skip(self), fields(repo_path = %path, index = %index))]
     fn stash_drop(&self, path: &str, index: usize) -> DomainResult<()> {
         let mut repo = Repository::open(path)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -1255,6 +1283,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_conflicts", skip(self), fields(repo_path = %path))]
     fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>> {
         let repo = open_repo(path)?;
         let index = repo
@@ -1306,6 +1335,7 @@ impl GitService for Git2Service {
         Ok(result)
     }
 
+    #[tracing::instrument(name = "git_resolve_conflict", skip(self, resolution), fields(repo_path = %path, file = %file))]
     fn resolve_conflict(
         &self,
         path: &str,
@@ -1403,6 +1433,7 @@ impl GitService for Git2Service {
         Ok(())
     }
 
+    #[tracing::instrument(name = "git_abort_merge", skip(self), fields(repo_path = %path))]
     fn abort_merge(&self, path: &str) -> DomainResult<()> {
         let repo = open_repo(path)?;
 
