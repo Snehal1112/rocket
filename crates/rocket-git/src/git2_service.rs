@@ -606,17 +606,35 @@ impl GitService for Git2Service {
         let repo = open_repo(path)?;
         let current_branch = branch_name(&repo);
 
-        // Resolve the remote-tracking ref for the current branch directly
-        // (e.g. refs/remotes/origin/main).  This avoids the FETCH_HEAD
-        // pitfall: when the repo fetches multiple branches, FETCH_HEAD's first
-        // line may point to a different branch (e.g. feature/database-migration)
-        // causing the wrong branch to be merged into main.
-        let remote_ref_name = format!("refs/remotes/{remote}/{current_branch}");
-        let fetch_commit = repo
-            .find_reference(&remote_ref_name)
-            .map_err(|e| DomainError::Internal(format!(
-                "remote tracking ref '{remote_ref_name}' not found after fetch: {e}"
-            )))
+        // Resolve the remote-tracking ref to merge.  Resolution order:
+        // 1. Configured upstream tracking branch (e.g. local "master" → "origin/main").
+        // 2. Same-name remote branch: refs/remotes/<remote>/<current_branch>.
+        // 3. Remote HEAD (refs/remotes/<remote>/HEAD) — the remote's default branch.
+        //    This handles repos cloned before the remote renamed its default branch
+        //    and repos with no upstream tracking configured at all.
+        let tracking_ref = repo
+            .find_branch(&current_branch, git2::BranchType::Local)
+            .ok()
+            .and_then(|b| b.upstream().ok())
+            .and_then(|u| u.get().resolve().ok())
+            .or_else(|| {
+                let refname = format!("refs/remotes/{remote}/{current_branch}");
+                repo.find_reference(&refname).ok().and_then(|r| r.resolve().ok())
+            })
+            .or_else(|| {
+                // refs/remotes/origin/HEAD is a symbolic ref pointing to the
+                // remote's default branch (set during clone / git remote set-head).
+                let head_refname = format!("refs/remotes/{remote}/HEAD");
+                repo.find_reference(&head_refname).ok().and_then(|r| r.resolve().ok())
+            });
+
+        let fetch_commit = tracking_ref
+            .ok_or_else(|| {
+                DomainError::Internal(format!(
+                    "remote tracking ref 'refs/remotes/{remote}/{current_branch}' not found after fetch: \
+                     no upstream configured and branch name does not match any remote branch"
+                ))
+            })
             .and_then(|r| {
                 repo.reference_to_annotated_commit(&r)
                     .map_err(|e| DomainError::Internal(e.to_string()))

@@ -223,9 +223,17 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
     }
     const globalVars: Record<string, string> = globalEnv
-      ? Object.fromEntries(globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]))
+      ? Object.fromEntries(
+          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
+        )
       : {};
-    return buildScopedContext({ envVars, envLabel: activeEnvId ?? undefined, globalVars, processEnvVars, collectionVars: variables });
+    return buildScopedContext({
+      envVars,
+      envLabel: activeEnvId ?? undefined,
+      globalVars,
+      processEnvVars,
+      collectionVars: variables,
+    });
   }, [activeEnvId, environments, globalEnv, processEnvVars, variables]);
 
   // True once the user edits any field; reset after successful save or reload.

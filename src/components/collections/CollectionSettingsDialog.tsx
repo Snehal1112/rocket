@@ -44,9 +44,16 @@ export function CollectionSettingsDialog({
       if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
     }
     const globalVars: Record<string, string> = globalEnv
-      ? Object.fromEntries(globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]))
+      ? Object.fromEntries(
+          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
+        )
       : {};
-    return buildScopedContext({ envVars, envLabel: activeEnvId ?? undefined, globalVars, processEnvVars });
+    return buildScopedContext({
+      envVars,
+      envLabel: activeEnvId ?? undefined,
+      globalVars,
+      processEnvVars,
+    });
   }, [activeEnvId, environments, globalEnv, processEnvVars]);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -120,7 +127,15 @@ export function CollectionSettingsDialog({
 
       {/* Tab content. */}
       <div className='min-h-[12rem]'>
-        {activeTab === 'auth' && <AuthEditor auth={auth} onChange={setAuth} variableContext={scopedContext} collection={collectionName} environmentName={activeEnvId ?? undefined} />}
+        {activeTab === 'auth' && (
+          <AuthEditor
+            auth={auth}
+            onChange={setAuth}
+            variableContext={scopedContext}
+            collection={collectionName}
+            environmentName={activeEnvId ?? undefined}
+          />
+        )}
         {activeTab === 'headers' && <HeadersEditor headers={headers} onChange={setHeaders} />}
       </div>
 
