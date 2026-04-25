@@ -6,6 +6,8 @@ pub struct UiState {
     pub active_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_tabs: Option<UiStateWorkspaceTabs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_direction: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
