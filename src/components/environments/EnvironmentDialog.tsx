@@ -227,8 +227,8 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                   <ScrollArea className='flex-1'>
                     <div className='px-3 pt-2 pb-1 space-y-1'>
                       {selectedEnv.variables.map((variable, idx) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: index is stable here — rows are not reordered
                         <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: index is stable here — rows are not reordered
                           key={idx}
                           className={cn(
                             'flex gap-1.5 items-center rounded-sm px-0 py-0.5 group',
