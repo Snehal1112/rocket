@@ -873,7 +873,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
       <div className='flex-1 overflow-auto p-3 bg-card/65'>
         {activeSection === 'params' && (
-          <div className='space-y-2'>
+          <div className='space-y-3'>
             <PathParamsPanel
               params={request.pathParams}
               onChange={handlePathParamsChange}
