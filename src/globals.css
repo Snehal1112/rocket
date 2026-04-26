@@ -42,9 +42,9 @@
     /* VSCode 2026 Light: notificationsWarningIcon.foreground #B69500 */
     --warning: 49 100% 36%;
     --warning-foreground: 0 0% 100%;
-    /* VSCode 2026 Light: sideBar.border #F0F1F2 — structural separator (sidebar, panel,
-       tab, titlebar dividers). Hairline — felt not seen. 1.09:1 on bg. */
-    --border: 210 7% 95%;
+    /* VSCode 2026 Light: structural separator (sidebar, panel, tab, titlebar dividers).
+       1.37:1 on bg — perceptible hairline. Matches input separator visibility. */
+    --border: 210 7% 85%;
     /* VSCode 2026 Light: input.border #D8D8D8 (full opacity) — interactive field borders
        (inputs, selects, SingleLineEditor). 1.43:1 on white. */
     --input: 0 0% 84.7%;
@@ -204,11 +204,11 @@ html.linux #root {
 }
 
 /* Card elevation.
-   Card border uses VSCode widget.border (#E2E2E5 / #E4E5E6) territory — between the
-   structural hairline (--border #f1f2f3) and interactive fields (--input #d8d8d8).
+   Card border sits above structural separators (--border #d6d8db) — cards are elevated
+   surfaces so their border is lighter than panel dividers but still visible.
    Shadow is a whisper only; dark: --popover sits above --background. */
 [data-slot='card'] {
-  border-color: #e2e3e5;
+  border-color: #e8e9ea;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
