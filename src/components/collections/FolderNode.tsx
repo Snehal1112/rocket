@@ -220,7 +220,7 @@ export function FolderNode({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                className='w-48 bg-card/40 backdrop-blur-sm'
+                className='w-48'
                 onClick={(e) => e.stopPropagation()}
               >
                 <DropdownMenuItem
@@ -267,7 +267,7 @@ export function FolderNode({
             </DropdownMenu>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className='w-48 bg-card/40 backdrop-blur-sm'>
+        <ContextMenuContent className='w-48'>
           <ContextMenuItem
             onClick={() => {
               setOpen(true);

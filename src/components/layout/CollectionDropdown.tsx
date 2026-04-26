@@ -59,7 +59,7 @@ export function CollectionDropdown() {
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className='w-72 p-0 bg-card/50 backdrop-blur-sm border border-border/70 rounded-sm'
+        className='w-72 p-0 bg-card/50 backdrop-blur-sm border border-border rounded-sm'
         align='start'
       >
         {/* Workspace section — clickable to open workspace tabs. */}

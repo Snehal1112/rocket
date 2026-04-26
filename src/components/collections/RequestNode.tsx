@@ -199,7 +199,7 @@ export function RequestNode({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              className='w-48 bg-card/40 backdrop-blur-sm'
+              className='w-48'
               onClick={(e) => e.stopPropagation()}
             >
               <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
@@ -276,7 +276,7 @@ export function RequestNode({
       </ContextMenuTrigger>
 
       {/* Right-click context menu — same actions, power-user shortcut. */}
-      <ContextMenuContent className='w-48 bg-card/40 backdrop-blur-sm'>
+      <ContextMenuContent className='w-48'>
         <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
           <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
         </ContextMenuItem>

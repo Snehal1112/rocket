@@ -161,7 +161,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
     // onMouseDown here is intentional UX — tracks which pane the user is clicking into.
     // biome-ignore lint/a11y/noStaticElementInteractions: pane focus tracking
     <section
-      className={`flex flex-col h-full${isInSplitLayout && isActive ? ' ring-1 ring-primary/40' : ''}`}
+      className={`flex flex-col h-full bg-card${isInSplitLayout && isActive ? ' ring-1 ring-primary/40' : ''}`}
       onMouseDown={() => setActiveGroup(node.groupId)}
     >
       {(hasTabs || isInSplitLayout) && <TabBar node={node} onCloseTab={handleCloseTab} />}

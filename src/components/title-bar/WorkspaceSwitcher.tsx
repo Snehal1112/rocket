@@ -65,7 +65,12 @@ export function WorkspaceSwitcher() {
           if (ws.id !== activeId) void switchWorkspace(ws.id);
         }}
       >
-        <Briefcase className={cn('h-3.5 w-3.5 shrink-0', ws.id === activeId ? 'text-foreground fill-foreground' : 'text-muted-foreground')} />
+        <Briefcase
+          className={cn(
+            'h-3.5 w-3.5 shrink-0',
+            ws.id === activeId ? 'text-foreground fill-foreground' : 'text-muted-foreground',
+          )}
+        />
         <span className='flex-1 truncate'>{ws.name}</span>
       </DropdownMenuItem>
 

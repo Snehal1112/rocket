@@ -757,7 +757,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const urlBar = (
     <>
-      <div className='flex items-center gap-2 border-b border-border/70 px-3 py-2 bg-card/70 backdrop-blur-sm'>
+      <div className='flex items-center gap-2 border-b border-border px-3 py-2 bg-card'>
         <Select
           value={request.method}
           onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
@@ -869,9 +869,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   );
 
   const sectionTabs = (
-    <div className='flex-1 flex flex-col min-h-0 bg-card/50'>
+    <div className='flex-1 flex flex-col min-h-0 bg-card'>
       <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
-      <div className='flex-1 overflow-auto p-3 bg-card/65'>
+      <div className='flex-1 overflow-auto p-3'>
         {activeSection === 'params' && (
           <div className='space-y-3'>
             <PathParamsPanel
@@ -1101,7 +1101,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <div className='flex flex-1 min-h-0'>
           {/* Request side */}
           <div
-            className='flex flex-col overflow-hidden bg-card/80 min-w-[20%] max-w-[80%]'
+            className='flex flex-col overflow-hidden bg-card min-w-[20%] max-w-[80%]'
             style={{ width: `${requestWidth}%` }}
           >
             {sectionTabs}
@@ -1124,7 +1124,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
               isDragging
                 ? 'bg-primary/15 border-primary/50'
-                : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
+                : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
             )}
           >
             <div
@@ -1136,7 +1136,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </div>
 
           {/* Response side */}
-          <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-w-0'>
+          <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>
             {responseArea}
           </div>
         </div>
@@ -1150,7 +1150,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       {/* ── Request area ── */}
       <div
         className={cn(
-          'flex flex-col overflow-hidden bg-card/80',
+          'flex flex-col overflow-hidden bg-card',
           expandFull ? 'flex-1' : 'h-(--req-h) min-h-[20%] max-h-[80%]',
         )}
         style={expandFull ? undefined : ({ '--req-h': `${requestHeight}%` } as React.CSSProperties)}
@@ -1178,7 +1178,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
               isDragging
                 ? 'bg-primary/15 border-primary/50'
-                : 'bg-muted/50 border-border/70 hover:bg-accent/70 hover:border-primary/40',
+                : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
             )}
           >
             <div
@@ -1189,7 +1189,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             />
           </div>
 
-          <div className='flex-1 flex flex-col overflow-hidden bg-card/65 min-h-0'>
+          <div className='flex-1 flex flex-col overflow-hidden bg-card min-h-0'>
             {responseArea}
           </div>
         </>

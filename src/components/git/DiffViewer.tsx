@@ -34,7 +34,10 @@ function getLanguage(filePath: string): string {
 }
 
 // Renders a side-by-side Monaco diff or visual structured diff for a single file.
-export function DiffViewer({ diffState: initialDiffState, hideStageToggle = false }: DiffViewerProps) {
+export function DiffViewer({
+  diffState: initialDiffState,
+  hideStageToggle = false,
+}: DiffViewerProps) {
   const [diffState, setDiffState] = useState(initialDiffState);
   const { themeName } = useMonacoTheme();
 

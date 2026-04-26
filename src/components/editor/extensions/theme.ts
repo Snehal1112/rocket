@@ -5,7 +5,7 @@ import { EditorView } from '@codemirror/view';
  * Uses CSS custom properties so it automatically adapts to light/dark mode.
  *
  * The wrapper div (in SingleLineEditor.tsx) provides:
- *   h-8 rounded-md border border-input bg-background dark:bg-input/50
+ *   h-9 rounded-md border border-input bg-background dark:bg-input/30 shadow-xs
  *   focus-within:ring-[3px] focus-within:border-ring
  *
  * This theme handles the inner editor content styling only.
@@ -20,10 +20,10 @@ export const rocketTheme = EditorView.theme({
     outline: 'none',
   },
   '.cm-scroller': {
-    // line-height equal to the inner height of the h-8 wrapper (32px − 2px border)
+    // line-height equal to the inner height of the h-9 wrapper (36px − 2px border)
     // naturally centers the single text line and the placeholder widget.
     overflow: 'hidden',
-    lineHeight: '30px',
+    lineHeight: '34px',
     fontFamily: 'inherit',
   },
   '.cm-content': {
@@ -116,7 +116,7 @@ export const rocketTheme = EditorView.theme({
     border: '1px solid hsl(var(--border) / 0.6)',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--popover) / 0.95)',
+    background: 'hsl(var(--card) / 0.5)',
     overflow: 'hidden',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul': {
@@ -154,7 +154,7 @@ export const rocketTheme = EditorView.theme({
     border: '1px solid hsl(var(--border) / 0.6)',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--popover) / 0.95)',
+    background: 'hsl(var(--card) / 0.5)',
     color: 'hsl(var(--muted-foreground))',
     fontSize: '11px',
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
