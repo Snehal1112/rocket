@@ -12,15 +12,18 @@
 
 @layer base {
   :root {
-    /* VSCode 2026 Light: sideBar.background #FAFAFD — shell/sidebar base layer */
-    --background: 240 20% 99%;
+    /* Off-white shell — both surfaces darkened from pure white to reduce glare.
+       Shell #eef0f4 (L=94.5%) sits below card #f6f7fa (L=97.3%), preserving
+       the sideBar < editor elevation hierarchy. Diverges from VSCode 2026 spec
+       intentionally for eye comfort on Rocket's card-heavy layout. */
+    --background: 220 21.4% 94.5%;
     /* VSCode 2026 Light: foreground #202020 */
     --foreground: 0 0% 12.5%;
-    /* VSCode 2026 Light: editor.background #FFFFFF — elevated content surface */
-    --card: 0 0% 100%;
+    /* Off-white card — #f6f7fa, noticeably softer than pure white */
+    --card: 225 28.6% 97.3%;
     --card-foreground: 0 0% 12.5%;
-    /* VSCode 2026 Light: editorWidget.background #FAFAFD */
-    --popover: 240 20% 99%;
+    /* Off-white widget bg — between shell and card */
+    --popover: 220 25% 95.3%;
     --popover-foreground: 0 0% 12.5%;
     /* VSCode 2026 Light: button.background #0069CC */
     --primary: 210 100% 40%;
