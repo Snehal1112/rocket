@@ -1,6 +1,4 @@
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/inter/600.css";
+@import "@fontsource-variable/inter";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/600.css";
@@ -12,15 +10,18 @@
 
 @layer base {
   :root {
-    /* VSCode 2026 Light: sideBar.background #FAFAFD — shell/sidebar base layer */
-    --background: 240 20% 99%;
+    /* Off-white shell — both surfaces darkened from pure white to reduce glare.
+       Shell #eef0f4 (L=94.5%) sits below card #f6f7fa (L=97.3%), preserving
+       the sideBar < editor elevation hierarchy. Diverges from VSCode 2026 spec
+       intentionally for eye comfort on Rocket's card-heavy layout. */
+    --background: 220 21.4% 94.5%;
     /* VSCode 2026 Light: foreground #202020 */
     --foreground: 0 0% 12.5%;
-    /* VSCode 2026 Light: editor.background #FFFFFF — elevated content surface */
-    --card: 0 0% 100%;
+    /* Off-white card — #f6f7fa, noticeably softer than pure white */
+    --card: 225 28.6% 97.3%;
     --card-foreground: 0 0% 12.5%;
-    /* VSCode 2026 Light: editorWidget.background #FAFAFD */
-    --popover: 240 20% 99%;
+    /* Off-white widget bg — between shell and card */
+    --popover: 220 25% 95.3%;
     --popover-foreground: 0 0% 12.5%;
     /* VSCode 2026 Light: button.background #0069CC */
     --primary: 210 100% 40%;
@@ -185,6 +186,20 @@
       scroll-behavior: auto;
     }
   }
+}
+
+/* Sidebar elevation — rightward shadow makes the sidebar feel like an elevated layer
+   above the content area, matching VSCode 2026 Light's visual treatment.
+   Light: visible shadow (sidebar is lighter than content in dark mode so shadow is wrong there).
+   Dark: suppressed — dark sidebar is already a lower surface, shadow would deepen incorrectly. */
+.sidebar-elevation {
+  box-shadow:
+    2px 0 4px rgba(0, 0, 0, 0.08),
+    4px 0 12px rgba(0, 0, 0, 0.05);
+}
+
+.dark .sidebar-elevation {
+  box-shadow: none;
 }
 
 /* Linux: transparent window with border and rounded corners.

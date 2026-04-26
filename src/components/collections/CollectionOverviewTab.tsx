@@ -207,7 +207,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isOverviewScrolled, setIsOverviewScrolled] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const overviewScrollRef = useRef<HTMLDivElement>(null);
 
   // Editable settings state.
   const [docs, setDocs] = useState('');
@@ -264,6 +266,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     viewport.addEventListener('scroll', handleScroll, { passive: true });
     return () => viewport.removeEventListener('scroll', handleScroll);
   }, []);
+
+  useEffect(() => {
+    const el = overviewScrollRef.current;
+    if (!el) return;
+    const handleScroll = () => setIsOverviewScrolled(el.scrollTop > 0);
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [collection]); // re-attach when overview mounts (collection load)
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
@@ -427,8 +437,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      {/* Collection header. */}
-      <div className='shrink-0 border-b border-border/70 px-6 pt-4 pb-0'>
+      {/* Collection header — shadow appears when overview left panel is scrolled. */}
+      <div
+        className={cn(
+          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-shadow duration-200',
+          isOverviewScrolled && 'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
+        )}
+      >
         <div className='flex items-center gap-2 mb-1'>
           <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
           <h1 className='text-lg font-semibold leading-tight truncate'>{collection.name}</h1>
@@ -475,7 +490,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'overview' && (
           <div className='flex h-full overflow-hidden'>
             {/* LEFT — scrollable cards */}
-            <div className='flex-1 min-w-0 border-r border-border overflow-y-auto'>
+            <div ref={overviewScrollRef} className='flex-1 min-w-0 border-r border-border overflow-y-auto'>
               <div className='p-5 flex flex-col gap-5'>
                 <MethodBreakdown items={items} />
 
