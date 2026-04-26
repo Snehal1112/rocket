@@ -619,35 +619,37 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'variables' && (
           <ScrollArea className='h-full'>
             <div className='p-6 max-w-3xl mx-auto space-y-6'>
-              <Card>
-                <CardContent className='space-y-4 p-4'>
-                  <CollectionVariablesEditor
-                    variables={variables}
-                    onChange={(v) => {
-                      setVariables(v);
-                      setIsDirty(true);
-                    }}
-                  />
+              <div className='space-y-4'>
+                <Card>
+                  <CardContent className='space-y-4 p-4'>
+                    <CollectionVariablesEditor
+                      variables={variables}
+                      onChange={(v) => {
+                        setVariables(v);
+                        setIsDirty(true);
+                      }}
+                    />
 
-                  <div className='flex justify-end'>
-                    <Button
-                      size='sm'
-                      onClick={() => void triggerSave()}
-                      disabled={!isDirty || saveState !== 'idle'}
-                      className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                    >
-                      {saveState === 'saving' ? (
-                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                      ) : saveState === 'success' ? (
-                        <Check className='h-3.5 w-3.5' />
-                      ) : (
-                        <Save className='h-3.5 w-3.5' />
-                      )}
-                      {saveState === 'success' ? 'Saved' : 'Save'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className='flex justify-end'>
+                      <Button
+                        size='sm'
+                        onClick={() => void triggerSave()}
+                        disabled={!isDirty || saveState !== 'idle'}
+                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                      >
+                        {saveState === 'saving' ? (
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                        ) : saveState === 'success' ? (
+                          <Check className='h-3.5 w-3.5' />
+                        ) : (
+                          <Save className='h-3.5 w-3.5' />
+                        )}
+                        {saveState === 'success' ? 'Saved' : 'Save'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </ScrollArea>
         )}
