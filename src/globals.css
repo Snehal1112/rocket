@@ -190,6 +190,20 @@
   }
 }
 
+/* Sidebar elevation — rightward shadow makes the sidebar feel like an elevated layer
+   above the content area, matching VSCode 2026 Light's visual treatment.
+   Light: visible shadow (sidebar is lighter than content in dark mode so shadow is wrong there).
+   Dark: suppressed — dark sidebar is already a lower surface, shadow would deepen incorrectly. */
+.sidebar-elevation {
+  box-shadow:
+    2px 0 4px rgba(0, 0, 0, 0.08),
+    4px 0 12px rgba(0, 0, 0, 0.05);
+}
+
+.dark .sidebar-elevation {
+  box-shadow: none;
+}
+
 /* Linux: transparent window with border and rounded corners.
    Body padding creates a visible gap for the border to render against the desktop. */
 html.linux body {
