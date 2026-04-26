@@ -401,6 +401,10 @@ impl OAuth2Service {
         );
         let r = |s: &str| resolve(s, &vars).output;
 
+        // URL fields are trimmed after resolution — stray whitespace from copy-paste
+        // causes the webview to navigate to a path like "/authorize%20?" (not found).
+        let ru = |s: &str| r(s).trim().to_string();
+
         // Resolve additional param values (keys and values both).
         let resolve_params = |params: &Option<Vec<AdditionalParam>>| -> Vec<AdditionalParam> {
             params
@@ -420,9 +424,9 @@ impl OAuth2Service {
         // scope is equivalent to omitting the parameter).
         ResolvedOAuth2Config {
             grant_type: req.grant_type.clone(),
-            authorization_url: r(req.authorization_url.as_deref().unwrap_or_default()),
-            token_url: r(req.token_url.as_deref().unwrap_or_default()),
-            callback_url: r(req.callback_url.as_deref().unwrap_or_default()),
+            authorization_url: ru(req.authorization_url.as_deref().unwrap_or_default()),
+            token_url: ru(req.token_url.as_deref().unwrap_or_default()),
+            callback_url: ru(req.callback_url.as_deref().unwrap_or_default()),
             client_id: r(&req.client_id),
             client_secret: r(req.client_secret.as_deref().unwrap_or_default()),
             scope: req.scope.as_deref().map(|s| r(s)).filter(|s| !s.is_empty()),

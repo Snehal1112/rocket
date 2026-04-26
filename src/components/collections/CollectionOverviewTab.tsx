@@ -557,15 +557,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           <ScrollArea className='h-full'>
             <div className='p-6 max-w-3xl mx-auto space-y-6'>
               <div className='space-y-4'>
-                <Card className='bg-muted/30'>
-                  <CardContent className='px-3 py-2.5'>
-                    <p className='text-xs text-muted-foreground'>
-                      This authorization method will be used for every request in this collection.
-                      You can override this by specifying one in the request.
-                    </p>
-                  </CardContent>
-                </Card>
-
                 <Card>
                   <CardContent className='space-y-4 p-4'>
                     <div className='space-y-1.5'>
