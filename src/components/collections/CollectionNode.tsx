@@ -154,6 +154,12 @@ export function CollectionNode({
     if (filter) setOpen(true);
   }, [filter]);
 
+  // Auto-expand when this collection becomes the active one in the pane store.
+  const activeCollection = usePaneStore((s) => s.activeCollection);
+  useEffect(() => {
+    if (activeCollection === summary.name) setOpen(true);
+  }, [activeCollection, summary.name]);
+
   // Clear pending click timer on unmount.
   useEffect(() => {
     return () => {
