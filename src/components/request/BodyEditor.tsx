@@ -67,7 +67,7 @@ export function BodyEditor({
       )}
 
       {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
-        <div className='flex-1 border rounded min-h-[200px]'>
+        <div className='flex-1 border rounded-lg overflow-hidden min-h-[200px]'>
           <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper
               value={body.content}

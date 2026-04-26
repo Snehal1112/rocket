@@ -863,6 +863,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fontsource-variable/inter@npm:^5.2.8":
+  version: 5.2.8
+  resolution: "@fontsource-variable/inter@npm:5.2.8"
+  checksum: 10c0/35b46df31c8c18f55f87228acf6297e4dac6cc9f38d0faaafdaf5a40e40c386cf1bfb115fb0fe0dcdb9b7e14f582843693ccf070d9c903072a5b2fc0f8dfde56
+  languageName: node
+  linkType: hard
+
 "@fontsource/inter@npm:^5.2.8":
   version: 5.2.8
   resolution: "@fontsource/inter@npm:5.2.8"
@@ -6856,6 +6863,7 @@ __metadata:
     "@codemirror/state": "npm:^6.6.0"
     "@codemirror/view": "npm:^6.41.0"
     "@faker-js/faker": "npm:^10.4.0"
+    "@fontsource-variable/inter": "npm:^5.2.8"
     "@fontsource/inter": "npm:^5.2.8"
     "@fontsource/jetbrains-mono": "npm:^5.2.8"
     "@monaco-editor/react": "npm:^4.7.0"
