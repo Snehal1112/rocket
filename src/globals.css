@@ -55,39 +55,38 @@
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
-    /* VSCode Dark Modern: sideBar.background #181818 — shell/sidebar base layer */
-    --background: 0 0% 9.4%;
-    /* VSCode Dark Modern: foreground #CCCCCC */
-    --foreground: 0 0% 80%;
-    /* VSCode Dark Modern: editor.background #1F1F1F — elevated content surface */
-    --card: 0 0% 12%;
-    --card-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: dropdown.listBackground #1F1F1F */
-    --popover: 0 0% 12%;
-    --popover-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: button.background #0078D4 */
+    /* screenshot: sidebar #1C1C1C */
+    --background: 0 0% 11%;
+    /* screenshot: primary text #D4D4D4 */
+    --foreground: 0 0% 83%;
+    /* screenshot: editor surface #252526 */
+    --card: 0 0% 14.5%;
+    --card-foreground: 0 0% 83%;
+    /* VSCode Dark Modern: dropdown.listBackground */
+    --popover: 0 0% 14.5%;
+    --popover-foreground: 0 0% 83%;
+    /* VSCode Dark Modern: button.background #0078D4 — unchanged */
     --primary: 206 100% 41.6%;
     --primary-foreground: 0 0% 100%;
-    /* VSCode Dark Modern: button.secondaryHoverBackground #2B2B2B */
-    --secondary: 0 0% 17%;
-    /* VSCode Dark Modern: button.secondaryForeground #CCCCCC */
-    --secondary-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: input.background #313131 */
-    --muted: 0 0% 19.2%;
-    /* VSCode Dark Modern: panelTitle.inactiveForeground #9D9D9D */
-    --muted-foreground: 0 0% 62%;
-    /* VSCode Dark Modern: textCodeBlock.background #2B2B2B */
-    --accent: 0 0% 17%;
-    --accent-foreground: 0 0% 80%;
-    --destructive: 0 72% 45%;
+    /* screenshot: tab bar #2D2D2D */
+    --secondary: 0 0% 17.6%;
+    --secondary-foreground: 0 0% 83%;
+    /* screenshot: input background #2D2D2D */
+    --muted: 0 0% 17.6%;
+    /* screenshot: muted text #9D9D9D */
+    --muted-foreground: 0 0% 61.6%;
+    /* screenshot: hover #2A2A2A — separated from border */
+    --accent: 0 0% 16.5%;
+    --accent-foreground: 0 0% 83%;
+    --destructive: 0 71% 61.6%;
     --destructive-foreground: 0 0% 98%;
-    --warning: 38 92% 50%;
+    --warning: 45 100% 40%;
     --warning-foreground: 0 0% 98%;
-    /* VSCode Dark Modern: sideBar.border #2B2B2B */
-    --border: 0 0% 17%;
-    /* VSCode Dark Modern: input.background #313131 (used for dark:bg-input/30 fill on inputs) */
-    --input: 0 0% 19.2%;
-    /* VSCode Dark Modern: focusBorder #0078D4 */
+    /* screenshot: card borders #3C3C3C — major visibility improvement */
+    --border: 0 0% 23.5%;
+    /* screenshot: input border #3C3C3C */
+    --input: 0 0% 23.5%;
+    /* VSCode Dark Modern: focusBorder #0078D4 — unchanged */
     --ring: 206 100% 41.6%;
     --chart-1: 206 100% 41.6%;
     --chart-2: 160 63% 39%;
@@ -189,13 +188,13 @@ html.linux #root {
 /* Nested card elevation — contained cards use tighter radius and a hairline
    border shift to signal depth. Background stays near-identical to avoid
    jarring contrast jumps; shadow provides the depth cue. */
-[data-slot='card'] [data-slot='card'] {
+[data-slot="card"] [data-slot="card"] {
   border-radius: calc(var(--radius) - 4px);
   border-color: hsl(var(--border) / 0.6);
   box-shadow: none;
 }
 
-.dark [data-slot='card'] [data-slot='card'] {
+.dark [data-slot="card"] [data-slot="card"] {
   border-radius: calc(var(--radius) - 4px);
   background-color: hsl(0 0% 14%);
   border-color: hsl(0 0% 20%);
