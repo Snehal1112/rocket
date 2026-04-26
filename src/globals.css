@@ -12,88 +12,97 @@
 
 @layer base {
   :root {
-    /* VSCode Light Modern: sideBar.background #F8F8F8 — shell/sidebar base layer */
-    --background: 0 0% 97.3%;
-    /* VSCode Light Modern: foreground #3B3B3B */
-    --foreground: 0 0% 23%;
-    /* VSCode Light Modern: editor.background #FFFFFF — elevated content surface */
+    /* VSCode 2026 Light: sideBar.background #FAFAFD — shell/sidebar base layer */
+    --background: 240 20% 99%;
+    /* VSCode 2026 Light: foreground #202020 */
+    --foreground: 0 0% 12.5%;
+    /* VSCode 2026 Light: editor.background #FFFFFF — elevated content surface */
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 23%;
-    /* VSCode Light Modern: dropdown.listBackground #FFFFFF */
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 23%;
-    /* VSCode Light Modern: button.background #005FB8 */
-    --primary: 209 100% 36.1%;
+    --card-foreground: 0 0% 12.5%;
+    /* VSCode 2026 Light: editorWidget.background #FAFAFD */
+    --popover: 240 20% 99%;
+    --popover-foreground: 0 0% 12.5%;
+    /* VSCode 2026 Light: button.background #0069CC */
+    --primary: 210 100% 40%;
     --primary-foreground: 0 0% 100%;
-    /* VSCode Light Modern: button.secondaryBackground #E5E5E5 */
-    --secondary: 0 0% 90%;
-    /* VSCode Light Modern: button.secondaryForeground #3B3B3B */
-    --secondary-foreground: 0 0% 23%;
-    /* VSCode Light Modern: list.hoverBackground #F2F2F2 */
-    --muted: 0 0% 95%;
-    /* VSCode Light Modern: tab.inactiveForeground #868686 */
-    --muted-foreground: 0 0% 53%;
-    /* VSCode Light Modern: list.activeSelectionBackground #E8E8E8 */
-    --accent: 0 0% 91%;
-    --accent-foreground: 0 0% 23%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 98%;
-    /* VSCode Light Modern: sideBar.border #E5E5E5 */
-    --border: 0 0% 90%;
-    /* VSCode Light Modern: input.border #CECECE */
-    --input: 0 0% 80.8%;
-    /* VSCode Light Modern: focusBorder #005FB8 */
-    --ring: 209 100% 36.1%;
-    --chart-1: 209 100% 36.1%;
-    --chart-2: 171 65% 35%;
-    --chart-3: 28 91% 52%;
-    --chart-4: 283 52% 49%;
-    --chart-5: 343 74% 52%;
-    --radius: 0.7rem;
+    /* VSCode 2026 Light: button.secondaryBackground #EAEAEA */
+    --secondary: 0 0% 91.7%;
+    /* VSCode 2026 Light: button.secondaryForeground #202020 */
+    --secondary-foreground: 0 0% 12.5%;
+    /* VSCode 2026 Light: list.inactiveSelectionBackground #EAEAEA — darkened to #e0e0e0 for tab/badge visibility */
+    --muted: 0 0% 87.8%;
+    /* VSCode 2026 Light: descriptionForeground #606060 */
+    --muted-foreground: 0 0% 37.6%;
+    /* VSCode 2026 Light: list.hoverBackground #DADADA — darkened to #c8c8c8 for perceptible hover states */
+    --accent: 0 0% 78.4%;
+    --accent-foreground: 0 0% 12.5%;
+    /* VSCode 2026 Light: inputValidation.errorBorder #ad0707 */
+    --destructive: 3 93% 35%;
+    --destructive-foreground: 0 0% 100%;
+    /* VSCode 2026 Light: notificationsWarningIcon.foreground #B69500 */
+    --warning: 49 100% 36%;
+    --warning-foreground: 0 0% 100%;
+    /* VSCode 2026 Light: sideBar.border #F0F1F2 — structural separator (sidebar dividers,
+       table rows, section lines). Slightly darker than theme spec so layout lines are
+       faintly visible without competing with content. #e6e8ea = 1.23:1 on white. */
+    --border: 210 7% 91%;
+    /* VSCode 2026 Light: input.border — interactive field borders (inputs, selects,
+       SingleLineEditor). Cards use --border + shadow instead. #c7c7c7 = 1.69:1 on white. */
+    --input: 0 0% 78%;
+    /* VSCode 2026 Light: focusBorder #0069CC */
+    --ring: 210 100% 40%;
+    /* VSCode 2026 Light: charts palette */
+    --chart-1: 210 100% 40%;
+    --chart-2: 152 56% 37%;
+    --chart-3: 27 88% 46%;
+    --chart-4: 277 47% 43%;
+    --chart-5: 3 93% 35%;
+    --radius: 0.5rem;
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
-    /* VSCode Dark Modern: sideBar.background #181818 — shell/sidebar base layer */
-    --background: 0 0% 9.4%;
-    /* VSCode Dark Modern: foreground #CCCCCC */
-    --foreground: 0 0% 80%;
-    /* VSCode Dark Modern: editor.background #1F1F1F — elevated content surface */
-    --card: 0 0% 12%;
-    --card-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: dropdown.listBackground #1F1F1F */
-    --popover: 0 0% 12%;
-    --popover-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: button.background #0078D4 */
-    --primary: 206 100% 41.6%;
+    /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
+    --background: 210 5% 10%;
+    /* VSCode 2026 Dark: foreground #bfbfbf */
+    --foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: editor.background #121314 — elevated content surface */
+    --card: 210 5% 7.5%;
+    --card-foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: editorWidget.background #202122 */
+    --popover: 210 3% 13%;
+    --popover-foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: button.background #297AA0 */
+    --primary: 200 59% 40%;
     --primary-foreground: 0 0% 100%;
-    /* VSCode Dark Modern: button.secondaryHoverBackground #2B2B2B */
-    --secondary: 0 0% 17%;
-    /* VSCode Dark Modern: button.secondaryForeground #CCCCCC */
-    --secondary-foreground: 0 0% 80%;
-    /* VSCode Dark Modern: input.background #313131 */
-    --muted: 0 0% 19.2%;
-    /* VSCode Dark Modern: panelTitle.inactiveForeground #9D9D9D */
-    --muted-foreground: 0 0% 62%;
-    /* VSCode Dark Modern: textCodeBlock.background #2B2B2B */
-    --accent: 0 0% 17%;
-    --accent-foreground: 0 0% 80%;
-    --destructive: 0 72% 45%;
-    --destructive-foreground: 0 0% 98%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 98%;
-    /* VSCode Dark Modern: sideBar.border #2B2B2B */
-    --border: 0 0% 17%;
-    /* VSCode Dark Modern: input.background #313131 (used for dark:bg-input/30 fill on inputs) */
-    --input: 0 0% 19.2%;
-    /* VSCode Dark Modern: focusBorder #0078D4 */
-    --ring: 206 100% 41.6%;
-    --chart-1: 206 100% 41.6%;
-    --chart-2: 160 63% 39%;
-    --chart-3: 30 94% 55%;
-    --chart-4: 282 60% 62%;
-    --chart-5: 340 78% 61%;
+    /* VSCode 2026 Dark: button.secondaryHoverBackground #FFFFFF10 */
+    --secondary: 210 3% 13%;
+    /* VSCode 2026 Dark: dropdown.foreground #bfbfbf */
+    --secondary-foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: dropdown.background #191A1B */
+    --muted: 210 5% 10%;
+    /* VSCode 2026 Dark: descriptionForeground #8C8C8C */
+    --muted-foreground: 0 0% 55%;
+    /* VSCode 2026 Dark: list.inactiveSelectionBackground #2C2D2E */
+    --accent: 210 2% 18%;
+    --accent-foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
+    --destructive: 5 100% 37%;
+    --destructive-foreground: 0 0% 100%;
+    /* VSCode 2026 Dark: gitDecoration.modifiedResourceForeground #e5ba7d */
+    --warning: 36 69% 69%;
+    --warning-foreground: 0 0% 12.5%;
+    /* VSCode 2026 Dark: sideBar.border #2A2B2C */
+    --border: 210 2% 17%;
+    /* VSCode 2026 Dark: input.border #333536 */
+    --input: 210 2% 21%;
+    /* VSCode 2026 Dark: focusBorder #3994BC (opaque) */
+    --ring: 199 53% 48%;
+    /* VSCode 2026 Dark: charts palette */
+    --chart-1: 200 59% 40%;
+    --chart-2: 151 42% 58%;
+    --chart-3: 36 69% 69%;
+    --chart-4: 275 50% 66%;
+    --chart-5: 5 100% 37%;
   }
 
   * {
@@ -121,6 +130,15 @@
   .lucide {
     stroke-width: 1.5;
   }
+}
+
+/* WKWebView (Tauri/macOS) requires -webkit-backdrop-filter prefix and GPU compositing.
+   Forces the floating overlay onto its own compositor layer so blur renders correctly.
+   blur-sm = 8px per Tailwind v4 theme. */
+.backdrop-blur-sm {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  transform: translateZ(0);
 }
 
 /* Modern thin scrollbars. */
@@ -186,20 +204,35 @@ html.linux #root {
   overflow: hidden;
 }
 
-/* Nested card elevation — contained cards use tighter radius and a hairline
-   border shift to signal depth. Background stays near-identical to avoid
-   jarring contrast jumps; shadow provides the depth cue. */
+/* Card elevation.
+   Panel cards sit flat on the page — not floating. Shadow is a whisper, not an elevation
+   statement. Border (#e6e8ea) defines the card; the ring shadow reinforces it gently.
+   Dark: card uses --popover (#202122) to sit above --background (#181a1b). */
+[data-slot='card'] {
+  border-color: hsl(var(--border));
+  box-shadow:
+    0 0 0 1px hsl(var(--input) / 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.dark [data-slot='card'] {
+  background-color: hsl(var(--popover));
+  border-color: hsl(var(--border));
+  box-shadow: 0 0 0 1px hsl(var(--input) / 0.6);
+}
+
+/* Nested card — recessed one level deeper within the elevated surface. */
 [data-slot='card'] [data-slot='card'] {
   border-radius: calc(var(--radius) - 4px);
-  border-color: hsl(var(--border) / 0.6);
+  border-color: hsl(var(--border));
   box-shadow: none;
 }
 
 .dark [data-slot='card'] [data-slot='card'] {
   border-radius: calc(var(--radius) - 4px);
-  background-color: hsl(0 0% 14%);
-  border-color: hsl(0 0% 20%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--input));
+  box-shadow: none;
 }
 
 /* Git hover actions — CSS hover avoids mouseenter timing issues when rows

@@ -317,7 +317,8 @@ export function SingleLineEditor({
   return (
     <div
       className={cn(
-        'h-8 rounded-md border border-input bg-background dark:bg-input/50 overflow-hidden',
+        'h-9 rounded-md border border-input bg-card dark:bg-input/30 overflow-hidden',
+        'shadow-xs transition-[color,box-shadow]',
         'focus-within:ring-[3px] focus-within:ring-ring/50 focus-within:border-ring',
         disabled && 'cursor-not-allowed opacity-50',
         className,
