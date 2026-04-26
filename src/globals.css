@@ -12,46 +12,46 @@
 
 @layer base {
   :root {
-    /* VSCode Light Modern: sideBar.background #F8F8F8 — shell/sidebar base layer */
-    --background: 0 0% 97.3%;
-    /* VSCode Light Modern: foreground #3B3B3B */
-    --foreground: 0 0% 23%;
-    /* VSCode Light Modern: editor.background #FFFFFF — elevated content surface */
+    /* ratio-derived from dark bg #1C1C1C → light equivalent */
+    --background: 0 0% 96.9%;
+    /* dark fg #D4D4D4 → flip: #2E2E2E */
+    --foreground: 0 0% 18%;
+    /* light top surface — unchanged */
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 23%;
+    --card-foreground: 0 0% 18%;
     /* VSCode Light Modern: dropdown.listBackground #FFFFFF */
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 23%;
-    /* VSCode Light Modern: button.background #005FB8 */
+    --popover-foreground: 0 0% 18%;
+    /* VSCode Light Modern: button.background #005FB8 — unchanged */
     --primary: 209 100% 36.1%;
     --primary-foreground: 0 0% 100%;
-    /* VSCode Light Modern: button.secondaryBackground #E5E5E5 */
-    --secondary: 0 0% 90%;
-    /* VSCode Light Modern: button.secondaryForeground #3B3B3B */
-    --secondary-foreground: 0 0% 23%;
-    /* VSCode Light Modern: list.hoverBackground #F2F2F2 */
-    --muted: 0 0% 95%;
-    /* VSCode Light Modern: tab.inactiveForeground #868686 */
-    --muted-foreground: 0 0% 53%;
-    /* VSCode Light Modern: list.activeSelectionBackground #E8E8E8 */
-    --accent: 0 0% 91%;
-    --accent-foreground: 0 0% 23%;
-    --destructive: 0 84.2% 60.2%;
+    /* dark secondary #2D2D2D → flip: #E8E8E8 */
+    --secondary: 0 0% 91%;
+    --secondary-foreground: 0 0% 18%;
+    /* dark muted #2D2D2D → flip: #EEEEEE */
+    --muted: 0 0% 93.5%;
+    /* Option B fix: was 53% (too washed-out) → 44% (#707070) */
+    --muted-foreground: 0 0% 44%;
+    /* dark accent #2A2A2A → flip, separated from border */
+    --accent: 0 0% 92%;
+    --accent-foreground: 0 0% 18%;
+    --destructive: 0 71% 50%;
     --destructive-foreground: 0 0% 98%;
-    --warning: 38 92% 50%;
+    --warning: 45 90% 42%;
     --warning-foreground: 0 0% 98%;
-    /* VSCode Light Modern: sideBar.border #E5E5E5 */
-    --border: 0 0% 90%;
-    /* VSCode Light Modern: input.border #CECECE */
-    --input: 0 0% 80.8%;
-    /* VSCode Light Modern: focusBorder #005FB8 */
+    /* dark border #3C3C3C → flip: #D9D9D9 — more visible than current #E5E5E5 */
+    --border: 0 0% 85%;
+    /* dark input #3C3C3C → flip: #CCCCCC */
+    --input: 0 0% 80%;
+    /* VSCode Light Modern: focusBorder #005FB8 — unchanged */
     --ring: 209 100% 36.1%;
     --chart-1: 209 100% 36.1%;
     --chart-2: 171 65% 35%;
     --chart-3: 28 91% 52%;
     --chart-4: 283 52% 49%;
     --chart-5: 343 74% 52%;
-    --radius: 0.7rem;
+    /* Option B fix: was 0.7rem (too round for VS Code feel) */
+    --radius: 0.3rem;
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
   }
   .dark {
