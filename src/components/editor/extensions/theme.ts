@@ -55,32 +55,32 @@ export const rocketTheme = EditorView.theme({
     padding: '0 3px',
   },
   '.cm-var-environment': {
-    background: 'rgba(234, 179, 8, 0.15)',
-    color: 'rgb(180, 83, 9)', // amber-700
+    background: 'color-mix(in srgb, #b69500 15%, transparent)',
+    color: '#b69500', // VSCode 2026 Light: notificationsWarningIcon
   },
   '.cm-var-collection': {
-    background: 'hsl(var(--muted-foreground) / 0.15)',
-    color: 'hsl(var(--muted-foreground))',
+    background: 'color-mix(in srgb, #606060 12%, transparent)',
+    color: '#606060', // VSCode 2026 Light: descriptionForeground
   },
   '.cm-var-global': {
-    background: 'rgba(59, 130, 246, 0.15)',
-    color: 'rgb(29, 78, 216)', // blue-700
+    background: 'color-mix(in srgb, #0069cc 12%, transparent)',
+    color: '#0069cc', // VSCode 2026 Light: button.background / focusBorder
   },
   '.cm-var-folder': {
-    background: 'rgba(20, 184, 166, 0.15)',
-    color: 'rgb(15, 118, 110)', // teal-700
+    background: 'color-mix(in srgb, #587c0c 12%, transparent)',
+    color: '#587c0c', // VSCode 2026 Light: gitDecoration.addedResourceForeground
   },
   '.cm-var-request, .cm-var-runtime': {
-    background: 'rgba(34, 197, 94, 0.15)',
-    color: 'rgb(21, 128, 61)', // green-700
+    background: 'color-mix(in srgb, #587c0c 12%, transparent)',
+    color: '#587c0c', // VSCode 2026 Light: gitDecoration.addedResourceForeground
   },
   '.cm-var-process': {
-    background: 'rgba(100, 116, 139, 0.15)',
-    color: 'rgb(51, 65, 85)', // slate-700
+    background: 'color-mix(in srgb, #606060 12%, transparent)',
+    color: '#606060', // VSCode 2026 Light: descriptionForeground
   },
   '.cm-var-dynamic': {
-    background: 'rgba(6, 182, 212, 0.15)',
-    color: 'rgb(14, 116, 144)', // cyan-700
+    background: 'color-mix(in srgb, #0069cc 10%, transparent)',
+    color: '#0069cc', // VSCode 2026 Light: primary
   },
   '.cm-var-unresolved': {
     background: 'hsl(var(--destructive) / 0.15)',
@@ -90,8 +90,8 @@ export const rocketTheme = EditorView.theme({
   '.cm-pathparam': {
     borderRadius: '3px',
     padding: '0 3px',
-    background: 'rgba(139, 92, 246, 0.15)',
-    color: 'rgb(109, 40, 217)', // violet-700
+    background: 'color-mix(in srgb, #652d90 12%, transparent)',
+    color: '#652d90', // VSCode 2026 Light: charts.purple
   },
   '.cm-pathparam-unresolved': {
     borderRadius: '3px',
@@ -103,8 +103,8 @@ export const rocketTheme = EditorView.theme({
   '.cm-querykey': {
     borderRadius: '3px',
     padding: '0 3px',
-    background: 'rgba(168, 85, 247, 0.1)',
-    color: 'rgb(126, 34, 206)', // purple-700
+    background: 'color-mix(in srgb, #652d90 10%, transparent)',
+    color: '#652d90', // VSCode 2026 Light: charts.purple
   },
   // Secret mask.
   '.cm-secret-mask': {
@@ -195,28 +195,40 @@ export const rocketThemeDark = EditorView.theme(
       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
     },
     '.cm-var-environment': {
-      color: 'rgb(253, 224, 71)', // amber-300
+      background: 'color-mix(in srgb, #e5ba7d 15%, transparent)',
+      color: '#e5ba7d', // VSCode 2026 Dark: gitDecoration.modifiedResourceForeground
+    },
+    '.cm-var-collection': {
+      background: 'color-mix(in srgb, #8c8c8c 12%, transparent)',
+      color: '#8c8c8c', // VSCode 2026 Dark: descriptionForeground
     },
     '.cm-var-global': {
-      color: 'rgb(147, 197, 253)', // blue-300
+      background: 'color-mix(in srgb, #3994bc 15%, transparent)',
+      color: '#3994bc', // VSCode 2026 Dark: focusBorder / ring
     },
     '.cm-var-folder': {
-      color: 'rgb(94, 234, 212)', // teal-300
+      background: 'color-mix(in srgb, #73c991 12%, transparent)',
+      color: '#73c991', // VSCode 2026 Dark: gitDecoration.addedResourceForeground
     },
     '.cm-var-request, .cm-var-runtime': {
-      color: 'rgb(134, 239, 172)', // green-300
+      background: 'color-mix(in srgb, #73c991 12%, transparent)',
+      color: '#73c991', // VSCode 2026 Dark: gitDecoration.addedResourceForeground
     },
     '.cm-var-dynamic': {
-      color: 'rgb(103, 232, 249)', // cyan-300
+      background: 'color-mix(in srgb, #3994bc 12%, transparent)',
+      color: '#3994bc', // VSCode 2026 Dark: primary / ring
     },
     '.cm-var-process': {
-      color: 'rgb(203, 213, 225)', // slate-300
+      background: 'color-mix(in srgb, #8c8c8c 12%, transparent)',
+      color: '#8c8c8c', // VSCode 2026 Dark: descriptionForeground
     },
     '.cm-pathparam': {
-      color: 'rgb(196, 181, 253)', // violet-300
+      background: 'color-mix(in srgb, #ad80d7 12%, transparent)',
+      color: '#ad80d7', // VSCode 2026 Dark: charts.purple approx
     },
     '.cm-querykey': {
-      color: 'rgb(216, 180, 254)', // purple-300
+      background: 'color-mix(in srgb, #ad80d7 10%, transparent)',
+      color: '#ad80d7', // VSCode 2026 Dark: charts.purple approx
     },
   },
   { dark: true },
