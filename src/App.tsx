@@ -105,9 +105,10 @@ function App() {
                 <CollectionsSidebar />
               </ErrorBoundary>
             </div>
-            <hr
-              className='h-full w-0.5 shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-primary/50 border-0'
+            <div
+              role='separator'
               aria-orientation='vertical'
+              className='relative h-full w-px shrink-0 cursor-col-resize group z-10 overflow-visible'
               onPointerDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -123,7 +124,12 @@ function App() {
                 window.addEventListener('pointermove', onMove);
                 window.addEventListener('pointerup', onUp);
               }}
-            />
+            >
+              {/* 1px visual line */}
+              <div className='w-px h-full bg-border transition-colors group-hover:bg-primary/60' />
+              {/* expanded hit area — absolutely positioned, doesn't affect layout */}
+              <div className='absolute inset-y-0 -left-[4px] -right-[4px]' />
+            </div>
           </>
         )}
         <main className='flex-1 flex flex-col min-w-0 overflow-hidden'>

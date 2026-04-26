@@ -5,7 +5,7 @@ import { EditorView } from '@codemirror/view';
  * Uses CSS custom properties so it automatically adapts to light/dark mode.
  *
  * The wrapper div (in SingleLineEditor.tsx) provides:
- *   h-8 rounded-md border border-input bg-background
+ *   h-8 rounded-md border border-input bg-background dark:bg-input/50
  *   focus-within:ring-[3px] focus-within:border-ring
  *
  * This theme handles the inner editor content styling only.

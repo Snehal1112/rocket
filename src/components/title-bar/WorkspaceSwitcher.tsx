@@ -1,6 +1,5 @@
 import {
   Briefcase,
-  Check,
   ChevronDown,
   Download,
   FolderOpen,
@@ -126,15 +125,20 @@ export function WorkspaceSwitcher() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant='outline' size='sm' className='gap-1.5 font-medium max-w-[200px]'>
-            <span className='truncate'>{active?.name ?? 'Select workspace'}</span>
-            <ChevronDown className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          <Button
+            variant='outline'
+            size='sm'
+            className='gap-2 font-medium max-w-[220px] border-input bg-muted/40 hover:bg-muted/70 hover:border-input pl-2.5 pr-2'
+          >
+            <Briefcase className='h-3.5 w-3.5 shrink-0' />
+            <span className='truncate text-foreground'>{active?.name ?? 'Select workspace'}</span>
+            <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground ml-0.5' />
           </Button>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent
           align='center'
-          className='min-w-[220px] bg-card/50 backdrop-blur-sm border border-border/70'
+          className='min-w-[220px] bg-card/50 backdrop-blur-sm border border-border'
         >
           {pinned.map(renderWorkspaceRow)}
           {pinned.length > 0 && unpinned.length > 0 && <DropdownMenuSeparator />}
