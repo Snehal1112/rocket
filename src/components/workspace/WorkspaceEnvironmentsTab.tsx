@@ -1,15 +1,16 @@
 // src/components/workspace/WorkspaceEnvironmentsTab.tsx
 
-import { Check, Eye, EyeOff, Plus, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Eye, EyeOff, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { InlineEnvName } from '@/components/environments/InlineEnvName';
 import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { SavedPill } from '@/components/ui/saved-pill';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { Environment, Variable } from '@/lib/tauri-api';
+import { useSaveButton } from '@/hooks/use-save-button';
+import type { Variable } from '@/lib/tauri-api';
 import { deleteGlobalEnvironment, saveGlobalEnvironment } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
@@ -25,9 +26,20 @@ export function WorkspaceEnvironmentsTab() {
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
   const [newEnvName, setNewEnvName] = useState('');
-  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveSettings = useCallback(async () => {
+    if (!selectedName) return;
+    const env = environments.find((e) => e.name === selectedName);
+    if (!env) return;
+    await updateEnvironment({ ...env, variables: editingVars });
+    setIsDirty(false);
+  }, [selectedName, environments, editingVars, updateEnvironment]);
+
+  const { state: saveState, trigger: triggerSave } = useSaveButton(
+    saveSettings,
+    'Failed to save changes',
+  );
 
   // Load workspace-level environments when the tab mounts.
   useEffect(() => {
@@ -46,74 +58,37 @@ export function WorkspaceEnvironmentsTab() {
   useEffect(() => {
     const env = environments.find((e) => e.name === selectedName);
     setEditingVars(env ? env.variables.slice() : []);
+    setIsDirty(false);
   }, [selectedName, environments]);
 
-  // Clear the save pill only when switching to a different environment.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger, not used inside the body.
-  useEffect(() => {
-    setSavedAt(null);
-  }, [selectedName]);
-
-  // Persist env to backend with debounce.
-  const persistEnv = useCallback(
-    (env: Environment) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        updateEnvironment(env)
-          .then(() => setSavedAt(Date.now()))
-          .catch((err) => {
-            console.error('[WorkspaceEnvironmentsTab] failed to save environment', err);
-            toast.error('Failed to save changes');
-          });
-      }, 400);
-    },
-    [updateEnvironment],
-  );
-
-  // Apply a variable update at index and persist.
+  // Apply a variable update at index.
   const updateVar = useCallback(
     (idx: number, patch: Partial<Variable>) => {
       if (!selectedName) return;
       const updated = editingVars.slice();
       updated[idx] = { ...updated[idx], ...patch };
       setEditingVars(updated);
-      const env = environments.find((e) => e.name === selectedName);
-      if (env) {
-        persistEnv({ ...env, variables: updated });
-      }
+      setIsDirty(true);
     },
-    [selectedName, editingVars, environments, persistEnv],
+    [selectedName, editingVars],
   );
 
   // Add an empty variable row.
   const addVar = useCallback(() => {
     if (!selectedName) return;
-    const newVar: Variable = {
-      key: '',
-      value: '',
-      enabled: true,
-      secret: false,
-    };
-    const updated = [...editingVars, newVar];
-    setEditingVars(updated);
-    const env = environments.find((e) => e.name === selectedName);
-    if (env) {
-      persistEnv({ ...env, variables: updated });
-    }
-  }, [selectedName, editingVars, environments, persistEnv]);
+    const newVar: Variable = { key: '', value: '', enabled: true, secret: false };
+    setEditingVars((prev) => [...prev, newVar]);
+    setIsDirty(true);
+  }, [selectedName]);
 
   // Remove a variable row by index.
   const removeVar = useCallback(
     (idx: number) => {
       if (!selectedName) return;
-      const updated = editingVars.filter((_, i) => i !== idx);
-      setEditingVars(updated);
-      const env = environments.find((e) => e.name === selectedName);
-      if (env) {
-        persistEnv({ ...env, variables: updated });
-      }
+      setEditingVars((prev) => prev.filter((_, i) => i !== idx));
+      setIsDirty(true);
     },
-    [selectedName, editingVars, environments, persistEnv],
+    [selectedName],
   );
 
   // Add a new environment by name.
@@ -238,109 +213,124 @@ export function WorkspaceEnvironmentsTab() {
       {/* Right panel: variable editor. */}
       <div className='flex-1 flex flex-col min-w-0'>
         {selectedName ? (
-          <>
-            {/* Column headers */}
-            <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
-              {/* checkbox placeholder */}
-              <div className='w-4 shrink-0' />
-              <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-                Key
-              </p>
-              <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-                Value
-              </p>
-              <div className='w-[52px] shrink-0 flex items-center justify-end'>
-                {savedAt !== null && <SavedPill key={savedAt} />}
+          <Card className='flex-1 flex flex-col min-w-0 overflow-hidden'>
+            <CardContent className='p-0 flex flex-col h-full'>
+              {/* Column headers */}
+              <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
+                {/* checkbox placeholder */}
+                <div className='w-4 shrink-0' />
+                <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                  Key
+                </p>
+                <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                  Value
+                </p>
+                <div className='w-[52px] shrink-0' />
               </div>
-            </div>
-            <ScrollArea className='flex-1'>
-              <div className='px-3 pt-2 pb-1 space-y-1'>
-                {editingVars.map((variable, idx) => {
-                  return (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
-                    <div
-                      key={idx}
-                      className={cn(
-                        'flex gap-1.5 items-center py-0.5 group',
-                        !variable.enabled && 'opacity-50',
-                      )}
-                    >
-                      {/* Enabled toggle. */}
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        onClick={() => updateVar(idx, { enabled: !variable.enabled })}
+              <ScrollArea className='flex-1'>
+                <div className='px-3 pt-2 pb-1 space-y-1'>
+                  {editingVars.map((variable, idx) => {
+                    return (
+                      <div
+                        // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
+                        key={idx}
                         className={cn(
-                          'w-4 h-4 rounded border p-0 shrink-0',
-                          variable.enabled
-                            ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                            : 'border-border hover:bg-muted',
+                          'flex gap-1.5 items-center py-0.5 group',
+                          !variable.enabled && 'opacity-50',
                         )}
-                        title={variable.enabled ? 'Disable variable' : 'Enable variable'}
                       >
-                        {variable.enabled && <Check className='h-3 w-3' />}
-                      </Button>
+                        {/* Enabled toggle. */}
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          onClick={() => updateVar(idx, { enabled: !variable.enabled })}
+                          className={cn(
+                            'w-4 h-4 rounded border p-0 shrink-0',
+                            variable.enabled
+                              ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
+                              : 'border-border hover:bg-muted',
+                          )}
+                          title={variable.enabled ? 'Disable variable' : 'Enable variable'}
+                        >
+                          {variable.enabled && <Check className='h-3 w-3' />}
+                        </Button>
 
-                      {/* Key input. */}
-                      <Input
-                        placeholder='Key'
-                        value={variable.key}
-                        onChange={(e) => updateVar(idx, { key: e.target.value })}
-                        className='flex-1 text-xs h-7 font-mono'
-                      />
+                        {/* Key input. */}
+                        <Input
+                          placeholder='Key'
+                          value={variable.key}
+                          onChange={(e) => updateVar(idx, { key: e.target.value })}
+                          className='flex-1 text-xs h-7 font-mono'
+                        />
 
-                      {/* Value input, masked when secret. */}
-                      <Input
-                        placeholder='Value'
-                        type={variable.secret ? 'password' : 'text'}
-                        value={variable.value}
-                        onChange={(e) => updateVar(idx, { value: e.target.value })}
-                        className='flex-1 text-xs h-7 font-mono'
-                      />
+                        {/* Value input, masked when secret. */}
+                        <Input
+                          placeholder='Value'
+                          type={variable.secret ? 'password' : 'text'}
+                          value={variable.value}
+                          onChange={(e) => updateVar(idx, { value: e.target.value })}
+                          className='flex-1 text-xs h-7 font-mono'
+                        />
 
-                      {/* Secret toggle. */}
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                        onClick={() => updateVar(idx, { secret: !variable.secret })}
-                        title={variable.secret ? 'Show value' : 'Hide value'}
-                      >
-                        {variable.secret ? (
-                          <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
-                        ) : (
-                          <Eye className='h-3.5 w-3.5 text-muted-foreground' />
-                        )}
-                      </Button>
+                        {/* Secret toggle. */}
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
+                          onClick={() => updateVar(idx, { secret: !variable.secret })}
+                          title={variable.secret ? 'Show value' : 'Hide value'}
+                        >
+                          {variable.secret ? (
+                            <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
+                          ) : (
+                            <Eye className='h-3.5 w-3.5 text-muted-foreground' />
+                          )}
+                        </Button>
 
-                      {/* Delete row. */}
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                        onClick={() => removeVar(idx)}
-                        title='Delete variable'
-                      >
-                        <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
-                      </Button>
-                    </div>
-                  );
-                })}
+                        {/* Delete row. */}
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
+                          onClick={() => removeVar(idx)}
+                          title='Delete variable'
+                        >
+                          <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+
+              <div className='px-3 py-2 border-t border-border/40 shrink-0 flex items-center justify-between'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={addVar}
+                  className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
+                >
+                  <Plus className='h-3.5 w-3.5' />
+                  Add Variable
+                </Button>
+                <Button
+                  size='sm'
+                  onClick={() => void triggerSave()}
+                  disabled={!isDirty || saveState !== 'idle'}
+                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                >
+                  {saveState === 'saving' ? (
+                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  ) : saveState === 'success' ? (
+                    <Check className='h-3.5 w-3.5' />
+                  ) : (
+                    <Save className='h-3.5 w-3.5' />
+                  )}
+                  {saveState === 'success' ? 'Saved' : 'Save'}
+                </Button>
               </div>
-            </ScrollArea>
-
-            <div className='px-3 py-2 border-t border-border/40 shrink-0'>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={addVar}
-                className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
-              >
-                <Plus className='h-3.5 w-3.5' />
-                Add Variable
-              </Button>
-            </div>
-          </>
+            </CardContent>
+          </Card>
         ) : (
           <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-card/60'>
             <RocketIdle className='w-36 h-36 opacity-70' />
