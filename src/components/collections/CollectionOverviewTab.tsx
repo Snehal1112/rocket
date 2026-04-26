@@ -20,18 +20,18 @@ import {
   apiAuthToOAuth2State,
   oauth2StateToApiAuth,
 } from '@/lib/oauth2-mapping';
-import type { Auth } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
-import { useEnvStore } from '@/stores/env-store';
 import {
+  type Auth,
   type Collection,
   type CollectionItem,
   type CollectionVariable,
   getCollection,
   saveCollectionSettings,
 } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type {
   AuthState,
@@ -619,33 +619,35 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'variables' && (
           <ScrollArea className='h-full'>
             <div className='p-6 max-w-3xl mx-auto space-y-6'>
-              <div className='space-y-4'>
-                <CollectionVariablesEditor
-                  variables={variables}
-                  onChange={(v) => {
-                    setVariables(v);
-                    setIsDirty(true);
-                  }}
-                />
+              <Card>
+                <CardContent className='space-y-4 p-4'>
+                  <CollectionVariablesEditor
+                    variables={variables}
+                    onChange={(v) => {
+                      setVariables(v);
+                      setIsDirty(true);
+                    }}
+                  />
 
-                <div className='flex justify-end'>
-                  <Button
-                    size='sm'
-                    onClick={() => void triggerSave()}
-                    disabled={!isDirty || saveState !== 'idle'}
-                    className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                  >
-                    {saveState === 'saving' ? (
-                      <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                    ) : saveState === 'success' ? (
-                      <Check className='h-3.5 w-3.5' />
-                    ) : (
-                      <Save className='h-3.5 w-3.5' />
-                    )}
-                    {saveState === 'success' ? 'Saved' : 'Save'}
-                  </Button>
-                </div>
-              </div>
+                  <div className='flex justify-end'>
+                    <Button
+                      size='sm'
+                      onClick={() => void triggerSave()}
+                      disabled={!isDirty || saveState !== 'idle'}
+                      className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                    >
+                      {saveState === 'saving' ? (
+                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                      ) : saveState === 'success' ? (
+                        <Check className='h-3.5 w-3.5' />
+                      ) : (
+                        <Save className='h-3.5 w-3.5' />
+                      )}
+                      {saveState === 'success' ? 'Saved' : 'Save'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </ScrollArea>
         )}
