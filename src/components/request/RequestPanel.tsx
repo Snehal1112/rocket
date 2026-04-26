@@ -17,8 +17,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -936,90 +938,96 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             </div>
           ))}
         {activeSection === 'settings' && (
-          <div className='space-y-4'>
-            {/* Security group. */}
-            <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
-              <div className='flex items-center gap-2 mb-1'>
-                <ShieldCheck className='h-3.5 w-3.5 text-muted-foreground' />
-                <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
-                  Security
-                </span>
-              </div>
-              <label
-                htmlFor='verify-ssl'
-                className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
-              >
-                <Checkbox
-                  id='verify-ssl'
-                  checked={settings.verifySsl}
-                  onCheckedChange={(checked) => handleSettingsChange({ verifySsl: !!checked })}
-                />
-                <div>
-                  <span className='text-sm'>Verify SSL certificate</span>
-                  <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                    Validate the server's TLS certificate chain.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            {/* Connection group. */}
-            <div className='rounded-md border border-border bg-muted/20 p-3 space-y-3'>
-              <div className='flex items-center gap-2 mb-1'>
-                <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
-                <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
-                  Connection
-                </span>
-              </div>
-              <label
-                htmlFor='follow-redirects'
-                className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
-              >
-                <Checkbox
-                  id='follow-redirects'
-                  checked={settings.followRedirects}
-                  onCheckedChange={(checked) =>
-                    handleSettingsChange({ followRedirects: !!checked })
-                  }
-                />
-                <div>
-                  <span className='text-sm'>Follow redirects</span>
-                  <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                    Automatically follow HTTP 3xx redirects.
-                  </p>
-                </div>
-              </label>
-              <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
-                <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-                <div className='flex items-center gap-2.5 flex-1'>
-                  <div className='flex-1'>
-                    <label htmlFor='timeout-ms' className='text-sm'>
-                      Timeout
-                    </label>
-                    <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                      Max wait time before aborting the request.
-                    </p>
+          <ScrollArea className='h-full'>
+            <div className='p-6 max-w-3xl mx-auto space-y-4'>
+              {/* Security group. */}
+              <Card>
+                <CardContent className='p-4 space-y-3'>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <ShieldCheck className='h-3.5 w-3.5 text-muted-foreground' />
+                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                      Security
+                    </span>
                   </div>
-                  <div className='flex items-center gap-1.5'>
-                    <Input
-                      id='timeout-ms'
-                      type='number'
-                      min={0}
-                      className='h-7 w-24 text-xs text-right tabular-nums'
-                      value={settings.timeoutMs}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (!Number.isNaN(val) && val >= 0) {
-                          handleSettingsChange({ timeoutMs: val });
-                        }
-                      }}
+                  <label
+                    htmlFor='verify-ssl'
+                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+                  >
+                    <Checkbox
+                      id='verify-ssl'
+                      checked={settings.verifySsl}
+                      onCheckedChange={(checked) => handleSettingsChange({ verifySsl: !!checked })}
                     />
-                    <span className='text-[11px] text-muted-foreground'>ms</span>
+                    <div>
+                      <span className='text-sm'>Verify SSL certificate</span>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Validate the server's TLS certificate chain.
+                      </p>
+                    </div>
+                  </label>
+                </CardContent>
+              </Card>
+
+              {/* Connection group. */}
+              <Card>
+                <CardContent className='p-4 space-y-3'>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
+                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                      Connection
+                    </span>
                   </div>
-                </div>
-              </div>
+                  <label
+                    htmlFor='follow-redirects'
+                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
+                  >
+                    <Checkbox
+                      id='follow-redirects'
+                      checked={settings.followRedirects}
+                      onCheckedChange={(checked) =>
+                        handleSettingsChange({ followRedirects: !!checked })
+                      }
+                    />
+                    <div>
+                      <span className='text-sm'>Follow redirects</span>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Automatically follow HTTP 3xx redirects.
+                      </p>
+                    </div>
+                  </label>
+                  <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
+                    <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+                    <div className='flex items-center gap-2.5 flex-1'>
+                      <div className='flex-1'>
+                        <label htmlFor='timeout-ms' className='text-sm'>
+                          Timeout
+                        </label>
+                        <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                          Max wait time before aborting the request.
+                        </p>
+                      </div>
+                      <div className='flex items-center gap-1.5'>
+                        <Input
+                          id='timeout-ms'
+                          type='number'
+                          min={0}
+                          className='h-7 w-24 text-xs text-right tabular-nums'
+                          value={settings.timeoutMs}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            if (!Number.isNaN(val) && val >= 0) {
+                              handleSettingsChange({ timeoutMs: val });
+                            }
+                          }}
+                        />
+                        <span className='text-[11px] text-muted-foreground'>ms</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </div>
+          </ScrollArea>
         )}
         {activeSection === 'docs' && (
           <RequestDocsPanel
