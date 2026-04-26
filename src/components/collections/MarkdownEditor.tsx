@@ -1,13 +1,12 @@
 import { Check, FileText, Loader2, Save } from 'lucide-react';
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { cn } from '@/lib/utils';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface MarkdownEditorProps {
   value: string;
@@ -103,9 +102,7 @@ export function MarkdownEditor({
         {mode === 'preview' && (
           <div className='flex-1 overflow-y-auto px-4 py-3.5'>
             {value.trim() ? (
-              <div className='prose-doc text-xs leading-relaxed'>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
-              </div>
+              <MarkdownRenderer>{value}</MarkdownRenderer>
             ) : (
               <div className='h-full flex flex-col items-center justify-center gap-3 text-center py-8'>
                 <FileText className='w-9 h-9 text-muted-foreground/50' />

@@ -1,7 +1,6 @@
 import { Check, FileText, PenLine } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { Button } from '@/components/ui/button';
 import { Card } from '../ui/card';
 
@@ -88,9 +87,7 @@ export function RequestDocsPanel({
   return (
     <Card className='h-full overflow-y-auto px-3 py-3 bg-transparent'>
       {text.trim() ? (
-        <div className='prose-doc text-xs leading-relaxed'>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-        </div>
+        <MarkdownRenderer>{text}</MarkdownRenderer>
       ) : (
         <div className='h-full flex flex-col items-center justify-center gap-4 text-center py-8'>
           <div className='relative'>
