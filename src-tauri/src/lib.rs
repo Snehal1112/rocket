@@ -242,6 +242,13 @@ pub fn run() {
             // Share the event bus so commands like watch_collections can reuse it.
             app.manage(watcher_bus);
 
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: 1440,
+                    height: 900,
+                }));
+            }
+
             tracing::info!(data_dir = %data_dir.display(), "RocketAPI initialized");
             Ok(())
         })

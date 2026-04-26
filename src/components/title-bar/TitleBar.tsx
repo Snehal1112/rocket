@@ -7,7 +7,7 @@ export function TitleBar() {
 
   return (
     <div
-      className='flex h-11 w-full items-center shrink-0 border-b bg-background'
+      className='relative flex h-10 w-full items-center shrink-0 border-b bg-background'
       data-tauri-drag-region
     >
       {isMac && <div className='w-[72px] shrink-0' data-tauri-drag-region />}

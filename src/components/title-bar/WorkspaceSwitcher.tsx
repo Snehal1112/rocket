@@ -1,4 +1,5 @@
 import {
+  Briefcase,
   Check,
   ChevronDown,
   Download,
@@ -65,7 +66,7 @@ export function WorkspaceSwitcher() {
           if (ws.id !== activeId) void switchWorkspace(ws.id);
         }}
       >
-        <Check className='h-3.5 w-3.5 shrink-0' style={{ opacity: ws.id === activeId ? 1 : 0 }} />
+        <Briefcase className={cn('h-3.5 w-3.5 shrink-0', ws.id === activeId ? 'text-foreground fill-foreground' : 'text-muted-foreground')} />
         <span className='flex-1 truncate'>{ws.name}</span>
       </DropdownMenuItem>
 

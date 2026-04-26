@@ -67,6 +67,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         'fixed inset-0 z-50 flex flex-col border border- items-center justify-center bg-background',
         liftingOff ? 'opacity-0 transition-opacity duration-[400ms] delay-[600ms]' : 'opacity-100',
       )}
+      data-tauri-drag-region
     >
       <div
         className={cn(
