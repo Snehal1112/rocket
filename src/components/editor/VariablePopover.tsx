@@ -148,7 +148,7 @@ export function VariablePopover({
     <div
       role='dialog'
       aria-label={`Edit variable ${varName}`}
-      className='w-80 bg-card/50 backdrop-blur-sm text-popover-foreground rounded-sm border border-border shadow-[0_2px_8px_rgba(0,0,0,0.16)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] overflow-hidden'
+      className='min-w-80 w-max max-w-lg bg-card/50 backdrop-blur-sm text-popover-foreground rounded-sm border border-border shadow-[0_2px_8px_rgba(0,0,0,0.16)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] overflow-hidden'
       // Prevent click inside popover from bubbling to EditorView and closing it.
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -170,15 +170,15 @@ export function VariablePopover({
       </div>
 
       {/* Footer: scope badge + nav link */}
-      <div className='flex items-center justify-between px-2 py-1.5 border-t border-border/50 bg-muted/30'>
-        <div className='flex items-center gap-1.5 text-2xs text-muted-foreground'>
+      <div className='flex items-center justify-between gap-4 px-2 py-1.5 border-t border-border/50 bg-muted/30'>
+        <div className='flex items-center gap-1.5 text-2xs text-muted-foreground whitespace-nowrap'>
           <span className={badgeClass}>{badgeIcon}</span>
           <span>{scopeLabel}</span>
         </div>
         {onNavigateToSource && scopeSource !== null && linkLabel !== null && (
           <button
             type='button'
-            className='text-2xs text-primary hover:underline cursor-pointer'
+            className='text-2xs text-primary hover:underline cursor-pointer whitespace-nowrap'
             onMouseDown={(e) => e.preventDefault()}
             onClick={async () => {
               await handleCommit();

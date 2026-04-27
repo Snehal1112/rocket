@@ -125,8 +125,7 @@ function App() {
                 window.addEventListener('pointerup', onUp);
               }}
             >
-              {/* 1px visual line — bg-input (#d8d8d8) reads at 1.37:1 on sidebar and 1.43:1 on content */}
-              <div className='w-px h-full bg-input transition-colors group-hover:bg-primary/60' />
+              <div className='w-px h-full bg-border transition-colors group-hover:bg-primary/60' />
               {/* expanded hit area — absolutely positioned, doesn't affect layout */}
               <div className='absolute inset-y-0 -left-[4px] -right-[4px]' />
             </div>

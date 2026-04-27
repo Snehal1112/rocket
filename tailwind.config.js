@@ -54,6 +54,39 @@ export default {
   				'3': 'hsl(var(--chart-3))',
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
+  			},
+  			statusbar: {
+  				bg:          'hsl(var(--statusbar-bg))',
+  				border:      'hsl(var(--statusbar-border))',
+  				'item-hover':  'hsl(var(--statusbar-item-hover))',
+  				'item-active': 'hsl(var(--statusbar-item-active))',
+  			},
+  			breadcrumb: {
+  				bg:         'hsl(var(--breadcrumb-bg))',
+  				fg:         'hsl(var(--breadcrumb-fg))',
+  				'focus-fg': 'hsl(var(--breadcrumb-focus-fg))',
+  			},
+  			'disabled-foreground': 'hsl(var(--disabled-foreground))',
+  			'error-foreground':    'hsl(var(--error-foreground))',
+  			'text-link':           'hsl(var(--text-link))',
+  			'text-block-quote-bg': 'hsl(var(--text-block-quote-bg))',
+  			'text-code-bg':        'hsl(var(--text-code-bg))',
+  			'text-preformat-fg':   'hsl(var(--text-preformat-fg))',
+  			git: {
+  				added:      'hsl(var(--git-added))',
+  				modified:   'hsl(var(--git-modified))',
+  				deleted:    'hsl(var(--git-deleted))',
+  				untracked:  'hsl(var(--git-untracked))',
+  				ignored:    'hsl(var(--git-ignored))',
+  				conflicted: 'hsl(var(--git-conflicted))',
+  			},
+  			tab: {
+  				'active-bg':         'hsl(var(--tab-active-bg))',
+  				'inactive-bg':       'hsl(var(--tab-inactive-bg))',
+  				'active-border-top': 'hsl(var(--tab-active-border-top))',
+  			},
+  			toolbar: {
+  				hover: 'var(--toolbar-hover)',
   			}
   		},
   		borderRadius: {

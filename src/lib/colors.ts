@@ -70,11 +70,11 @@ export function timeColor(ms: number): string {
 // ── Git Status Colors ───────────────────────────────────────────────
 
 export const GIT_STATUS_CONFIG: Record<GitStatusKind, { label: string; className: string }> = {
-  modified: { label: 'M', className: 'text-amber-500 dark:text-amber-400' },
-  added: { label: 'A', className: 'text-green-500 dark:text-green-400' },
-  deleted: { label: 'D', className: 'text-red-500 dark:text-red-400' },
-  renamed: { label: 'R', className: 'text-blue-500 dark:text-blue-400' },
-  untracked: { label: 'U', className: 'text-green-500 dark:text-green-400' },
-  conflicted: { label: 'C', className: 'text-red-600 dark:text-red-400' },
-  unchanged: { label: '', className: '' },
+  modified:   { label: 'M', className: 'text-git-modified' },
+  added:      { label: 'A', className: 'text-git-added' },
+  deleted:    { label: 'D', className: 'text-git-deleted' },
+  renamed:    { label: 'R', className: 'text-git-modified' },
+  untracked:  { label: 'U', className: 'text-git-untracked' },
+  conflicted: { label: 'C', className: 'text-git-conflicted' },
+  unchanged:  { label: '', className: '' },
 };

@@ -59,6 +59,36 @@
     --chart-5: 3 93% 35%;
     --radius: 0.5rem;
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    /* VSCode 2026 Light: gitDecoration tokens */
+    --git-added:      88 74% 26%;   /* #587c0c */
+    --git-modified:   72 74% 22%;   /* #667309 */
+    --git-deleted:    3  93% 35%;   /* #ad0707 */
+    --git-untracked:  88 74% 26%;   /* #587c0c */
+    --git-ignored:    0  0%  56%;   /* #8E8E90 */
+    --git-conflicted: 3  93% 35%;   /* #ad0707 */
+    /* VSCode 2026 Light: tab tokens */
+    --tab-active-bg:        0 0% 100%;    /* tab.activeBackground  #FFFFFF */
+    --tab-inactive-bg:      240 50% 99%;  /* tab.inactiveBackground #FAFAFD */
+    --tab-active-border-top: 0 0% 0%;    /* tab.activeBorderTop   #000000 */
+    /* VSCode 2026 Light: toolbar token */
+    --toolbar-hover: rgba(0, 0, 0, 0.063); /* toolbar.hoverBackground #00000010 */
+    /* VSCode 2026 Light: status bar tokens */
+    --statusbar-bg:          240 50% 99%;  /* statusBar.background        #FAFAFD */
+    --statusbar-border:      210 7% 85%;   /* statusBar.border            #F0F1F2 — same as --border light */
+    --statusbar-item-hover:  0 0% 84.7%;   /* statusBarItem.hoverBackground #DADADA4f on white ≈ #D4D4D4 */
+    --statusbar-item-active: 0 0% 93.3%;   /* statusBarItem.activeBackground #EEEEEE */
+    /* VSCode 2026 Light: global tokens */
+    --disabled-foreground: 0 0% 73.3%;    /* disabledForeground  #BBBBBB */
+    --error-foreground:    3 93% 35%;     /* errorForeground     #ad0707 */
+    /* VSCode 2026 Light: text tokens */
+    --text-link:           210 100% 40%;  /* textLink.foreground #0069CC */
+    --text-block-quote-bg: 0 0% 91.8%;   /* textBlockQuote.background #EAEAEA */
+    --text-code-bg:        0 0% 92.5%;   /* textPreformat.background #ECECEC */
+    --text-preformat-fg:   0 0% 37.6%;   /* textPreformat.foreground #606060 */
+    /* VSCode 2026 Light: breadcrumb tokens */
+    --breadcrumb-bg:       0 0% 100%;     /* breadcrumb.background    #FFFFFF */
+    --breadcrumb-fg:       0 0% 37.6%;   /* breadcrumb.foreground    #606060 */
+    --breadcrumb-focus-fg: 0 0% 12.5%;   /* breadcrumb.focusForeground #202020 */
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -103,6 +133,36 @@
     --chart-3: 36 69% 69%;
     --chart-4: 275 50% 66%;
     --chart-5: 5 100% 37%;
+    /* VSCode 2026 Dark: gitDecoration tokens */
+    --git-added:      137 47% 69%;  /* #73c991 */
+    --git-modified:   36  69% 69%;  /* #e5ba7d */
+    --git-deleted:    9   85% 70%;  /* #f48771 */
+    --git-untracked:  137 47% 69%;  /* #73c991 */
+    --git-ignored:    0   0%  55%;  /* #8C8C8C */
+    --git-conflicted: 9   85% 70%;  /* #f48771 */
+    /* VSCode 2026 Dark: tab tokens */
+    --tab-active-bg:        210 5% 7.5%;  /* tab.activeBackground  #121314 */
+    --tab-inactive-bg:      210 5% 10%;   /* tab.inactiveBackground #191A1B */
+    --tab-active-border-top: 199 53% 48%; /* tab.activeBorderTop   #3994BC */
+    /* VSCode 2026 Dark: toolbar token */
+    --toolbar-hover: rgba(255, 255, 255, 0.094); /* toolbar.hoverBackground #FFFFFF18 */
+    /* VSCode 2026 Dark: status bar tokens */
+    --statusbar-bg:          210 5% 10%;   /* statusBar.background        #191A1B */
+    --statusbar-border:      210 2% 17%;   /* statusBar.border            #2A2B2C — same as --border dark */
+    --statusbar-item-hover:  210 3% 15%;   /* statusBarItem.hoverBackground #262728 */
+    --statusbar-item-active: 210 2% 29.6%; /* statusBarItem.activeBackground #4B4C4D */
+    /* VSCode 2026 Dark: global tokens */
+    --disabled-foreground: 0 0% 33.3%;    /* disabledForeground  #555555 */
+    --error-foreground:    9 85% 70%;     /* errorForeground     #f48771 */
+    /* VSCode 2026 Dark: text tokens */
+    --text-link:           199 47% 54%;   /* textLink.foreground #48A0C7 */
+    --text-block-quote-bg: 210 3% 14.5%; /* textBlockQuote.background #242526 */
+    --text-code-bg:        210 3% 14.9%; /* textPreformat.background #262626 */
+    --text-preformat-fg:   0 0% 55%;     /* textPreformat.foreground #8C8C8C */
+    /* VSCode 2026 Dark: breadcrumb tokens */
+    --breadcrumb-bg:       210 5% 7.5%;  /* breadcrumb.background    #121314 */
+    --breadcrumb-fg:       0 0% 55%;     /* breadcrumb.foreground    #8C8C8C */
+    --breadcrumb-focus-fg: 0 0% 75%;     /* breadcrumb.focusForeground #bfbfbf */
   }
 
   * {
@@ -362,7 +422,8 @@ html.linux #root {
 .prose-doc code {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
-  background: hsl(var(--muted));
+  background: hsl(var(--text-code-bg));
+  color: hsl(var(--text-preformat-fg));
   border-radius: 4px;
   padding: 0.15em 0.4em;
 }
@@ -379,11 +440,11 @@ html.linux #root {
   margin: 1.75rem 0;
 }
 .prose-doc a {
-  color: hsl(var(--primary));
+  color: hsl(var(--text-link));
   text-decoration: underline;
 }
 .prose-doc pre {
-  background: hsl(var(--muted));
+  background: hsl(var(--text-code-bg));
   border-radius: 8px;
   padding: 1rem 1.125rem;
   margin-bottom: 1rem;
@@ -399,14 +460,14 @@ html.linux #root {
 .prose-doc blockquote {
   border-left: 3px solid hsl(var(--border));
   padding: 0.25rem 0 0.25rem 1rem;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--text-preformat-fg));
   margin: 0 0 1rem;
-  background: hsl(var(--muted) / 0.4);
+  background: hsl(var(--text-block-quote-bg));
   border-radius: 0 4px 4px 0;
 }
 .prose-doc blockquote p {
   margin-bottom: 0;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--text-preformat-fg));
 }
 .prose-doc table {
   width: 100%;

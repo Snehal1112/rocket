@@ -14,7 +14,7 @@ export function SandboxPopover() {
         <Button
           variant='ghost'
           size='icon'
-          className='h-7 w-7'
+          className='h-7 w-7 hover:bg-toolbar-hover'
           title='JavaScript Sandbox'
           aria-label='JavaScript Sandbox'
         >

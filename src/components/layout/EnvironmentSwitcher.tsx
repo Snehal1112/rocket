@@ -111,7 +111,7 @@ export function EnvironmentSwitcher() {
           <Button
             variant='ghost'
             size='sm'
-            className='h-7 gap-2.5 px-2 text-xs'
+            className='h-7 gap-2.5 px-2 text-xs hover:bg-toolbar-hover'
             aria-label='Switch environment'
           >
             {activeEnvId && (

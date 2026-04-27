@@ -86,7 +86,7 @@ export function TabBar({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for tab drag-and-drop
     <div
-      className={`flex items-center border-b border-border bg-card overflow-x-auto overflow-y-hidden shrink-0 ${isDragOver ? 'ring-2 ring-primary/60 ring-inset' : ''}`}
+      className={`flex items-center border-b border-border bg-tab-inactive-bg overflow-x-auto overflow-y-hidden shrink-0 ${isDragOver ? 'ring-2 ring-primary/60 ring-inset' : ''}`}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -101,7 +101,7 @@ export function TabBar({
             <div>
               {renamingTabId === tab.id ? (
                 // Inline rename input replacing the tab item.
-                <div className='flex items-center px-2 py-1 border-r border-border/70 bg-card border-b-[3px] border-b-primary -mb-px shrink-0'>
+                <div className='flex items-center px-2 py-1 border-r border-border/70 bg-tab-active-bg border-t-2 border-t-tab-active-border-top shrink-0'>
                   <Input
                     autoFocus
                     className='h-5 w-28 text-xs px-1'

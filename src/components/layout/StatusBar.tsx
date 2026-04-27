@@ -24,12 +24,12 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   }, []);
 
   return (
-    <div className='h-7 border-t border-border bg-card px-2 flex items-center gap-1.5 shrink-0'>
+    <div className='h-7 border-t border-statusbar-border bg-statusbar-bg px-2 flex items-center gap-1.5 shrink-0'>
       <Button
         variant='ghost'
         size='icon'
         onClick={toggleTheme}
-        className='h-5 w-5'
+        className='h-5 w-5 hover:bg-statusbar-item-hover'
         title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
@@ -42,7 +42,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
       <Button
         variant='ghost'
         size='sm'
-        className={cn('h-5 px-1.5 text-xs gap-1', isConsoleOpen && 'bg-accent')}
+        className={cn('h-5 px-1.5 text-xs gap-1 hover:bg-statusbar-item-hover', isConsoleOpen && 'bg-statusbar-item-active')}
         onClick={onConsoleToggle}
         aria-label='Toggle Console'
       >
@@ -58,8 +58,8 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         variant='ghost'
         size='sm'
         className={cn(
-          'h-5 px-1.5 text-xs gap-1 ml-auto',
-          requestLayout === 'side-by-side' && 'bg-accent',
+          'h-5 px-1.5 text-xs gap-1 ml-auto hover:bg-statusbar-item-hover',
+          requestLayout === 'side-by-side' && 'bg-statusbar-item-active',
         )}
         onClick={() => setRequestLayout(requestLayout === 'stacked' ? 'side-by-side' : 'stacked')}
         title={requestLayout === 'stacked' ? 'Switch to side by side' : 'Switch to stacked'}
