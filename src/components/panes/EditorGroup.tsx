@@ -39,6 +39,7 @@ import {
   isRequestTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
+import { BreadcrumbBar } from './BreadcrumbBar';
 import { TabBar } from './TabBar';
 
 type EmptyStateVariant = 'default' | 'active-split' | 'inactive-split';
@@ -165,6 +166,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       onMouseDown={() => setActiveGroup(node.groupId)}
     >
       {(hasTabs || isInSplitLayout) && <TabBar node={node} onCloseTab={handleCloseTab} />}
+      {activeTab && <BreadcrumbBar tab={activeTab} />}
       <div className='flex-1 overflow-hidden'>
         {activeTab ? (
           isConflictTab(activeTab) ? (
