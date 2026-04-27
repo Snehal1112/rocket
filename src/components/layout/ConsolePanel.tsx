@@ -84,7 +84,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
   };
 
   return (
-    <div className='shrink-0 border-t border-border bg-card flex flex-col' style={{ height }}>
+    <div className='shrink-0 border-t border-panel-border bg-panel-bg flex flex-col' style={{ height }}>
       {/* Drag handle. */}
       <div
         className='h-1 cursor-row-resize bg-border/40 hover:bg-primary/40 transition-colors shrink-0'

@@ -125,7 +125,7 @@ function App() {
                 window.addEventListener('pointerup', onUp);
               }}
             >
-              <div className='w-px h-full bg-border transition-colors group-hover:bg-primary/60' />
+              <div className='w-px h-full bg-sidebar-border transition-colors group-hover:bg-primary/60' />
               {/* expanded hit area — absolutely positioned, doesn't affect layout */}
               <div className='absolute inset-y-0 -left-[4px] -right-[4px]' />
             </div>

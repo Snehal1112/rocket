@@ -307,7 +307,7 @@ export function CollectionsSidebar() {
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: existing div layout cannot change to nav without layout refactor
-    <div className='h-full flex flex-col bg-background' role='navigation' aria-label='Collections'>
+    <div className='h-full flex flex-col bg-sidebar-bg' role='navigation' aria-label='Collections'>
       <div className='flex-1 flex flex-col overflow-hidden'>
         {/* View tabs and action icons. */}
         <div className='flex items-center justify-between px-3 pt-2.5 pb-1'>
