@@ -113,9 +113,9 @@ function TreeItem({
           data-active={active || undefined}
           className={cn(
             'flex items-center gap-1 px-1 py-1 text-sm cursor-pointer pl-(--tree-indent) w-full text-left bg-transparent border-l-2 border-transparent',
-            'hover:bg-accent/50',
-            'data-selected:bg-accent/30',
-            'data-active:border-primary data-active:bg-accent/60',
+            'hover:bg-list-hover-bg',
+            'data-selected:bg-list-inactive-bg',
+            'data-active:border-list-highlight-fg data-active:bg-list-active-bg data-active:text-list-active-fg',
           )}
           style={{ '--tree-indent': `${(depth + 1) * 8}px` } as React.CSSProperties}
           onClick={handleSelect}
