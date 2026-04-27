@@ -139,6 +139,21 @@
     --chart-orange: 35 90% 46%;   /* charts.orange   #d18616 */
     --chart-green:  113 44% 37%;  /* charts.green    #388A34 */
     --chart-purple: 281 48% 37%;  /* charts.purple   #652D90 */
+    /* VSCode 2026 Light: editor surface tokens */
+    --editor-bg:                  0 0% 100%;     /* editor.background               #FFFFFF */
+    --editor-line-highlight:      0 0% 91.8%;    /* editor.lineHighlightBackground   #EAEAEA */
+    --editor-line-number-fg:      0 0% 37.6%;    /* editorLineNumber.foreground      #606060 */
+    --editor-line-number-active:  0 0% 12.5%;    /* editorLineNumber.activeForeground #202020 */
+    --editor-widget-bg:           240 50% 99%;   /* editorWidget.background          #FAFAFD */
+    --editor-widget-border:       210 7% 90%;    /* editorWidget.border              #E4E5E6 */
+    /* VSCode 2026 Light: gutter decoration tokens */
+    --editor-gutter-added:        88 74% 26%;    /* editorGutter.addedBackground     #587c0c */
+    --editor-gutter-deleted:      3 93% 35%;     /* editorGutter.deletedBackground   #ad0707 */
+    /* VSCode 2026 Light: diff editor tokens */
+    --diff-inserted-text:   rgba(88, 124, 12, 0.149);   /* diffEditor.insertedTextBackground #587c0c26 */
+    --diff-removed-text:    rgba(173, 7, 7, 0.149);     /* diffEditor.removedTextBackground  #ad070726 */
+    --diff-inserted-line:   rgba(88, 124, 12, 0.149);   /* diffEditor.insertedLineBackground */
+    --diff-removed-line:    rgba(173, 7, 7, 0.149);     /* diffEditor.removedLineBackground  */
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -263,6 +278,21 @@
     --chart-orange: 34 67% 46%;   /* charts.orange   #CD861A */
     --chart-green:  120 33% 67%;  /* charts.green    #86CF86 */
     --chart-purple: 274 53% 67%;  /* charts.purple   #AD80D7 */
+    /* VSCode 2026 Dark: editor surface tokens */
+    --editor-bg:                  210 5% 7.5%;   /* editor.background               #121314 */
+    --editor-line-highlight:      210 3% 14.5%;  /* editor.lineHighlightBackground   #242526 */
+    --editor-line-number-fg:      210 2% 53%;    /* editorLineNumber.foreground      #858889 */
+    --editor-line-number-active:  210 1% 74%;    /* editorLineNumber.activeForeground #BBBEBF */
+    --editor-widget-bg:           210 3% 13%;    /* editorWidget.background          #202122 */
+    --editor-widget-border:       210 2% 17%;    /* editorWidget.border              #2A2B2C */
+    /* VSCode 2026 Dark: gutter decoration tokens */
+    --editor-gutter-added:        137 47% 69%;   /* editorGutter.addedBackground     #72C892 */
+    --editor-gutter-deleted:      9 85% 70%;     /* editorGutter.deletedBackground   #F28772 */
+    /* VSCode 2026 Dark: diff editor tokens */
+    --diff-inserted-text:   rgba(87, 171, 90, 0.302);   /* diffEditor.insertedTextBackground #57ab5a4d */
+    --diff-removed-text:    rgba(244, 112, 103, 0.302); /* diffEditor.removedTextBackground  #f470674d */
+    --diff-inserted-line:   rgba(52, 125, 57, 0.149);   /* diffEditor.insertedLineBackground #347d3926 */
+    --diff-removed-line:    rgba(201, 60, 55, 0.149);   /* diffEditor.removedLineBackground  #c93c3726 */
   }
 
   * {
