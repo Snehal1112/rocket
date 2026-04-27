@@ -12,7 +12,7 @@ import {
   Variable,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
@@ -165,19 +165,18 @@ function deriveSegments(
               if (found && found.type === 'folder') items = found.items;
               else break;
             }
-            return items.map((it) => ({
-              id: it.type === 'folder' ? it.name : (it.fileName ?? it.name),
-              label: it.name,
-              icon:
-                it.type === 'folder' ? (
-                  <FolderOpen className='h-3 w-3' />
-                ) : (
+            return items
+              .filter((it) => it.type === 'request')
+              .map((it) => ({
+                id: it.uid,
+                label: it.name,
+                icon: (
                   <span className={`font-semibold text-2xs ${METHOD_TEXT_COLOR[it.method] ?? ''}`}>
                     {it.method}
                   </span>
                 ),
-              isActive: it.name === folderName,
-            }));
+                isActive: false,
+              }));
           },
           onSelect: async (item) => {
             const col = await getCollection(collection);
@@ -188,22 +187,20 @@ function deriveSegments(
               if (found && found.type === 'folder') items = found.items;
               else break;
             }
-            const sibling = items.find((it) =>
-              it.type === 'folder' ? it.name === item.label : (it.fileName ?? it.name) === item.id,
-            );
-            if (!sibling || sibling.type !== 'request') return;
+            const req = items.find((it) => it.type === 'request' && it.uid === item.id);
+            if (!req || req.type !== 'request') return;
             nav.openTab({
-              id: sibling.uid,
-              title: sibling.name,
+              id: req.uid,
+              title: req.name,
               tabType: 'request',
-              request: mapApiRequestToState(sibling, true),
+              request: mapApiRequestToState(req, true),
               response: null,
               isDirty: false,
               source: {
                 collection,
                 path: parentPath
-                  ? `${parentPath}/${sibling.fileName ?? sibling.name}`
-                  : (sibling.fileName ?? sibling.name),
+                  ? `${parentPath}/${req.fileName ?? req.name}`
+                  : (req.fileName ?? req.name),
               },
             });
           },
@@ -234,7 +231,7 @@ function deriveSegments(
           return items
             .filter((it) => it.type === 'request')
             .map((it) => ({
-              id: it.fileName ?? it.name,
+              id: it.uid,
               label: it.name,
               icon: (
                 <span className={`font-semibold text-2xs ${METHOD_TEXT_COLOR[it.method] ?? ''}`}>
@@ -253,9 +250,7 @@ function deriveSegments(
             if (found && found.type === 'folder') items = found.items;
             else break;
           }
-          const req = items.find(
-            (it) => it.type === 'request' && (it.fileName ?? it.name) === item.id,
-          );
+          const req = items.find((it) => it.type === 'request' && it.uid === item.id);
           if (!req || req.type !== 'request') return;
           nav.openTab({
             id: req.uid,
@@ -266,7 +261,9 @@ function deriveSegments(
             isDirty: false,
             source: {
               collection,
-              path: parentPath ? `${parentPath}/${item.id}` : item.id,
+              path: parentPath
+                ? `${parentPath}/${req.fileName ?? req.name}`
+                : (req.fileName ?? req.name),
             },
           });
         },
@@ -522,7 +519,7 @@ function SegmentButton({ seg, isLast, isOpen, onOpenChange }: SegmentButtonProps
       </PopoverTrigger>
       <PopoverContent
         align='start'
-        className='p-0 w-56 max-h-72 overflow-y-auto'
+        className='p-0 min-w-40 w-max max-w-xs max-h-72 overflow-y-auto'
         onKeyDown={handleKeyDown}
       >
         {loading ? (
@@ -579,14 +576,15 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const openTab = usePaneStore((s) => s.openTab);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
 
-  const nav: NavActions = {
-    openCollectionTab,
-    openWorkspaceTabs,
-    openTab,
-    updateCollectionSection,
-  };
+  const nav = useMemo<NavActions>(
+    () => ({ openCollectionTab, openWorkspaceTabs, openTab, updateCollectionSection }),
+    [openCollectionTab, openWorkspaceTabs, openTab, updateCollectionSection],
+  );
 
-  const segments = deriveSegments(tab, workspaceName, workspaces, nav);
+  const segments = useMemo(
+    () => deriveSegments(tab, workspaceName, workspaces, nav),
+    [tab, workspaceName, workspaces, nav],
+  );
   const [openPickerIndex, setOpenPickerIndex] = useState<number | null>(null);
 
   return (
