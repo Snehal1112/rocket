@@ -109,6 +109,28 @@
     --scrollbar-thumb:        rgba(153, 153, 153, 0.149); /* scrollbarSlider.background      #99999926 */
     --scrollbar-thumb-hover:  rgba(153, 153, 153, 0.251); /* scrollbarSlider.hoverBackground #99999940 */
     --scrollbar-thumb-active: rgba(153, 153, 153, 0.333); /* scrollbarSlider.activeBackground #99999955 */
+    /* VSCode 2026 Light: list tokens */
+    --list-active-selection-bg:   210 100% 40% / 0.1; /* list.activeSelectionBackground  #0069CC1A */
+    --list-active-selection-fg:   0 0% 12.5%;          /* list.activeSelectionForeground  #202020 */
+    --list-inactive-selection-bg: 0 0% 85.5%;          /* list.inactiveSelectionBackground #DADADA on white */
+    --list-hover-bg:              0 0% 84.7% / 0.31;   /* list.hoverBackground            #DADADA4f */
+    --list-focus-bg:              210 100% 40% / 0.1;  /* list.focusBackground            #0069CC1A */
+    --list-highlight-fg:          210 100% 40%;        /* list.highlightForeground        #0069CC */
+    --list-error-fg:              3 93% 35%;            /* list.errorForeground            #ad0707 */
+    --list-warning-fg:            72 74% 22%;           /* list.warningForeground          #667309 */
+    /* VSCode 2026 Light: panel tokens */
+    --panel-bg:                   240 50% 99%;          /* panel.background                #FAFAFD */
+    --panel-border:               210 7% 85%;           /* panel.border                    #F0F1F2 */
+    --panel-title-active-border:  0 0% 0%;              /* panelTitle.activeBorder         #000000 */
+    --panel-title-active-fg:      0 0% 12.5%;           /* panelTitle.activeForeground     #202020 */
+    --panel-title-inactive-fg:    0 0% 37.6%;           /* panelTitle.inactiveForeground   #606060 */
+    /* VSCode 2026 Light: sidebar tokens */
+    --sidebar-bg:                 240 50% 99%;          /* sideBar.background              #FAFAFD */
+    --sidebar-border:             210 7% 85%;           /* sideBar.border                  #F0F1F2 */
+    /* VSCode 2026 Light: title bar tokens */
+    --titlebar-bg:                240 50% 99%;          /* titleBar.activeBackground       #FAFAFD */
+    --titlebar-fg:                0 0% 37.6%;           /* titleBar.activeForeground       #606060 */
+    --titlebar-border:            210 7% 85%;           /* titleBar.border                 #F0F1F2 */
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -203,6 +225,28 @@
     --scrollbar-thumb:        rgba(131, 132, 133, 0.200); /* scrollbarSlider.background      #83848533 */
     --scrollbar-thumb-hover:  rgba(131, 132, 133, 0.400); /* scrollbarSlider.hoverBackground #83848566 */
     --scrollbar-thumb-active: rgba(131, 132, 133, 0.600); /* scrollbarSlider.activeBackground #83848599 */
+    /* VSCode 2026 Dark: list tokens */
+    --list-active-selection-bg:   199 53% 48% / 0.149; /* list.activeSelectionBackground  #3994BC26 */
+    --list-active-selection-fg:   0 0% 93%;             /* list.activeSelectionForeground  #ededed */
+    --list-inactive-selection-bg: 210 2% 18%;           /* list.inactiveSelectionBackground #2C2D2E */
+    --list-hover-bg:              0 0% 100% / 0.051;    /* list.hoverBackground            #FFFFFF0D */
+    --list-focus-bg:              199 53% 48% / 0.149;  /* list.focusBackground            #3994BC26 */
+    --list-highlight-fg:          199 47% 54%;          /* list.highlightForeground        #48A0C7 */
+    --list-error-fg:              9 85% 70%;             /* list.errorForeground            #f48771 */
+    --list-warning-fg:            36 69% 69%;            /* list.warningForeground          #e5ba7d */
+    /* VSCode 2026 Dark: panel tokens */
+    --panel-bg:                   210 5% 10%;            /* panel.background                #191A1B */
+    --panel-border:               210 2% 17%;            /* panel.border                    #2A2B2C */
+    --panel-title-active-border:  199 53% 48%;           /* panelTitle.activeBorder         #3994BC */
+    --panel-title-active-fg:      0 0% 75%;              /* panelTitle.activeForeground     #bfbfbf */
+    --panel-title-inactive-fg:    0 0% 55%;              /* panelTitle.inactiveForeground   #8C8C8C */
+    /* VSCode 2026 Dark: sidebar tokens */
+    --sidebar-bg:                 210 5% 10%;            /* sideBar.background              #191A1B */
+    --sidebar-border:             210 2% 17%;            /* sideBar.border                  #2A2B2C */
+    /* VSCode 2026 Dark: title bar tokens */
+    --titlebar-bg:                210 5% 10%;            /* titleBar.activeBackground       #191A1B */
+    --titlebar-fg:                0 0% 55%;              /* titleBar.activeForeground       #8C8C8C */
+    --titlebar-border:            210 2% 17%;            /* titleBar.border                 #2A2B2C */
   }
 
   * {
