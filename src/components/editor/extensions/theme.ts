@@ -195,39 +195,39 @@ export const rocketThemeDark = EditorView.theme(
       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
     },
     '.cm-var-environment': {
-      background: 'color-mix(in srgb, #e5ba7d 15%, transparent)',
+      background: 'hsl(var(--warning) / 0.15)',
       color: '#e5ba7d', // VSCode 2026 Dark: gitDecoration.modifiedResourceForeground
     },
     '.cm-var-collection': {
-      background: 'color-mix(in srgb, #8c8c8c 12%, transparent)',
+      background: 'hsl(var(--muted-foreground) / 0.12)',
       color: '#8c8c8c', // VSCode 2026 Dark: descriptionForeground
     },
     '.cm-var-global': {
-      background: 'color-mix(in srgb, #3994bc 15%, transparent)',
+      background: 'hsl(var(--primary) / 0.15)',
       color: '#3994bc', // VSCode 2026 Dark: focusBorder / ring
     },
     '.cm-var-folder': {
-      background: 'color-mix(in srgb, #73c991 12%, transparent)',
+      background: 'hsl(var(--git-added) / 0.12)',
       color: '#73c991', // VSCode 2026 Dark: gitDecoration.addedResourceForeground
     },
     '.cm-var-request, .cm-var-runtime': {
-      background: 'color-mix(in srgb, #73c991 12%, transparent)',
+      background: 'hsl(var(--git-added) / 0.12)',
       color: '#73c991', // VSCode 2026 Dark: gitDecoration.addedResourceForeground
     },
     '.cm-var-dynamic': {
-      background: 'color-mix(in srgb, #3994bc 12%, transparent)',
+      background: 'hsl(var(--primary) / 0.12)',
       color: '#3994bc', // VSCode 2026 Dark: primary / ring
     },
     '.cm-var-process': {
-      background: 'color-mix(in srgb, #8c8c8c 12%, transparent)',
+      background: 'hsl(var(--muted-foreground) / 0.12)',
       color: '#8c8c8c', // VSCode 2026 Dark: descriptionForeground
     },
     '.cm-pathparam': {
-      background: 'color-mix(in srgb, #ad80d7 12%, transparent)',
+      background: 'hsl(var(--chart-4) / 0.12)',
       color: '#ad80d7', // VSCode 2026 Dark: charts.purple approx
     },
     '.cm-querykey': {
-      background: 'color-mix(in srgb, #ad80d7 10%, transparent)',
+      background: 'hsl(var(--chart-4) / 0.10)',
       color: '#ad80d7', // VSCode 2026 Dark: charts.purple approx
     },
   },
