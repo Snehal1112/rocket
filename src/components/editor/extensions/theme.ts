@@ -55,8 +55,8 @@ export const rocketTheme = EditorView.theme({
     padding: '0 3px',
   },
   '.cm-var-environment': {
-    background: 'color-mix(in srgb, #b69500 15%, transparent)',
-    color: '#b69500', // VSCode 2026 Light: notificationsWarningIcon
+    background: 'hsl(var(--warning) / 0.15)',
+    color: 'hsl(var(--warning))',
   },
   '.cm-var-collection': {
     background: 'color-mix(in srgb, #606060 12%, transparent)',

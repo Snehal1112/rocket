@@ -78,3 +78,15 @@ export const GIT_STATUS_CONFIG: Record<GitStatusKind, { label: string; className
   conflicted: { label: 'C', className: 'text-git-conflicted' },
   unchanged: { label: '', className: '' },
 };
+
+// ── VSCode 2026 Chart Palette ───────────────────────────────────────
+
+/** Named chart colors from VSCode 2026 token set — use for non-method chart elements. */
+export const CHART_COLORS = {
+  blue: 'text-chart-1',
+  green: 'text-chart-green',
+  orange: 'text-chart-orange',
+  purple: 'text-chart-purple',
+  red: 'text-chart-5',
+  yellow: 'text-chart-3',
+} as const;
