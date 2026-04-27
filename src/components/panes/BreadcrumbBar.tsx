@@ -32,8 +32,6 @@ function workspaceSectionLabel(section: WorkspaceTabSection): string {
       return 'Git';
     case 'audit':
       return 'Audit';
-    default:
-      return section;
   }
 }
 
@@ -130,26 +128,36 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
       aria-label='Breadcrumb'
       className='flex items-center h-7 px-3 gap-1 border-b border-border bg-breadcrumb-bg shrink-0 overflow-x-auto overflow-y-hidden'
     >
-      {segments.map((seg, i) => {
-        const isLast = i === segments.length - 1;
-        return (
-          <span key={seg.label} className='flex items-center gap-1 shrink-0'>
-            {i > 0 && (
-              <ChevronRight className='h-3 w-3 text-breadcrumb-fg shrink-0' aria-hidden='true' />
-            )}
-            {seg.icon && (
-              <span className={isLast ? 'text-breadcrumb-focus-fg' : 'text-breadcrumb-fg'}>
-                {seg.icon}
-              </span>
-            )}
-            <span
-              className={`text-xs ${isLast ? 'text-breadcrumb-focus-fg' : 'text-breadcrumb-fg'}`}
-            >
-              {seg.label}
-            </span>
-          </span>
-        );
-      })}
+      {
+        segments.reduce<{ nodes: React.ReactNode[]; path: string }>(
+          (acc, seg, i) => {
+            const segPath = acc.path ? `${acc.path}/${seg.label}` : seg.label;
+            const isLast = i === segments.length - 1;
+            acc.nodes.push(
+              <span key={segPath} className='flex items-center gap-1 shrink-0'>
+                {i > 0 && (
+                  <ChevronRight
+                    className='h-3 w-3 text-breadcrumb-fg shrink-0'
+                    aria-hidden='true'
+                  />
+                )}
+                {seg.icon && (
+                  <span className={isLast ? 'text-breadcrumb-focus-fg' : 'text-breadcrumb-fg'}>
+                    {seg.icon}
+                  </span>
+                )}
+                <span
+                  className={`text-xs ${isLast ? 'text-breadcrumb-focus-fg' : 'text-breadcrumb-fg'}`}
+                >
+                  {seg.label}
+                </span>
+              </span>,
+            );
+            return { nodes: acc.nodes, path: segPath };
+          },
+          { nodes: [], path: '' },
+        ).nodes
+      }
     </nav>
   );
 }
