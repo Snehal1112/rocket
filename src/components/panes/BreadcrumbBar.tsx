@@ -590,7 +590,7 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   return (
     <nav
       aria-label='Breadcrumb'
-      className='flex items-center h-[22px] px-3 gap-0.5 border-b border-border bg-breadcrumb-bg shrink-0 overflow-x-auto overflow-y-hidden'
+      className='flex items-center h-[25px] px-3 gap-0.5 border-border shrink-0 overflow-x-auto overflow-y-hidden'
     >
       {
         segments.reduce<{ nodes: React.ReactNode[]; path: string }>(

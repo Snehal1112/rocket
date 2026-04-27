@@ -113,10 +113,12 @@ export const rocketTheme = EditorView.theme({
 
   // Autocomplete dropdown — matches shadcn DropdownMenuContent tokens exactly.
   '.cm-tooltip.cm-tooltip-autocomplete': {
-    border: '1px solid hsl(var(--border) / 0.6)',
+    border: '1px solid hsl(var(--dropdown-border))',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--card) / 0.5)',
+    background: 'hsl(var(--dropdown-bg) / 0.50)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
     overflow: 'hidden',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul': {
@@ -151,10 +153,12 @@ export const rocketTheme = EditorView.theme({
   },
   // Info panel (resolved value tooltip).
   '.cm-tooltip.cm-completionInfo': {
-    border: '1px solid hsl(var(--border) / 0.6)',
+    border: '1px solid hsl(var(--dropdown-border))',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--card) / 0.5)',
+    background: 'hsl(var(--dropdown-bg) / 0.50)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
     color: 'hsl(var(--muted-foreground))',
     fontSize: '11px',
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
