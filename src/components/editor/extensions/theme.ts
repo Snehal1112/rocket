@@ -59,28 +59,28 @@ export const rocketTheme = EditorView.theme({
     color: 'hsl(var(--warning))',
   },
   '.cm-var-collection': {
-    background: 'color-mix(in srgb, #606060 12%, transparent)',
-    color: '#606060', // VSCode 2026 Light: descriptionForeground
+    background: 'hsl(var(--muted-foreground) / 0.12)',
+    color: 'hsl(var(--muted-foreground))',
   },
   '.cm-var-global': {
-    background: 'color-mix(in srgb, #0069cc 12%, transparent)',
-    color: '#0069cc', // VSCode 2026 Light: button.background / focusBorder
+    background: 'hsl(var(--primary) / 0.12)',
+    color: 'hsl(var(--primary))',
   },
   '.cm-var-folder': {
-    background: 'color-mix(in srgb, #587c0c 12%, transparent)',
-    color: '#587c0c', // VSCode 2026 Light: gitDecoration.addedResourceForeground
+    background: 'hsl(var(--git-added) / 0.12)',
+    color: 'hsl(var(--git-added))',
   },
   '.cm-var-request, .cm-var-runtime': {
-    background: 'color-mix(in srgb, #587c0c 12%, transparent)',
-    color: '#587c0c', // VSCode 2026 Light: gitDecoration.addedResourceForeground
+    background: 'hsl(var(--git-added) / 0.12)',
+    color: 'hsl(var(--git-added))',
   },
   '.cm-var-process': {
-    background: 'color-mix(in srgb, #606060 12%, transparent)',
-    color: '#606060', // VSCode 2026 Light: descriptionForeground
+    background: 'hsl(var(--muted-foreground) / 0.12)',
+    color: 'hsl(var(--muted-foreground))',
   },
   '.cm-var-dynamic': {
-    background: 'color-mix(in srgb, #0069cc 10%, transparent)',
-    color: '#0069cc', // VSCode 2026 Light: primary
+    background: 'hsl(var(--primary) / 0.10)',
+    color: 'hsl(var(--primary))',
   },
   '.cm-var-unresolved': {
     background: 'hsl(var(--destructive) / 0.15)',
@@ -90,8 +90,8 @@ export const rocketTheme = EditorView.theme({
   '.cm-pathparam': {
     borderRadius: '3px',
     padding: '0 3px',
-    background: 'color-mix(in srgb, #652d90 12%, transparent)',
-    color: '#652d90', // VSCode 2026 Light: charts.purple
+    background: 'hsl(var(--chart-4) / 0.12)',
+    color: 'hsl(var(--chart-4))',
   },
   '.cm-pathparam-unresolved': {
     borderRadius: '3px',
@@ -103,8 +103,8 @@ export const rocketTheme = EditorView.theme({
   '.cm-querykey': {
     borderRadius: '3px',
     padding: '0 3px',
-    background: 'color-mix(in srgb, #652d90 10%, transparent)',
-    color: '#652d90', // VSCode 2026 Light: charts.purple
+    background: 'hsl(var(--chart-4) / 0.12)',
+    color: 'hsl(var(--chart-4))',
   },
   // Secret mask.
   '.cm-secret-mask': {

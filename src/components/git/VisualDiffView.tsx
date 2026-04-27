@@ -32,7 +32,7 @@ function DiffField({
   return (
     <>
       {oldValue !== undefined && (
-        <tr className='bg-red-50 dark:bg-red-950/20'>
+        <tr className='bg-diff-removed-line'>
           <td className='py-1 pr-4 text-muted-foreground w-32 align-top'>{label}</td>
           <td className='py-1 pr-2 text-xs text-red-500 dark:text-red-400 w-8 align-top'>old</td>
           <td className='py-1 font-mono text-xs text-red-700 dark:text-red-300 line-through break-all'>
@@ -41,7 +41,7 @@ function DiffField({
         </tr>
       )}
       {newValue !== undefined && (
-        <tr className='bg-green-50 dark:bg-green-950/20'>
+        <tr className='bg-diff-inserted-line'>
           <td className='py-1 pr-4 text-muted-foreground w-32 align-top'>
             {oldValue !== undefined ? '' : label}
           </td>
@@ -58,9 +58,9 @@ function DiffField({
 }
 
 const ROW_BG: Record<RowChange['status'], string> = {
-  added: 'bg-green-50 dark:bg-green-950/20',
-  removed: 'bg-red-50 dark:bg-red-950/20',
-  modified: 'bg-amber-50 dark:bg-amber-950/20',
+  added: 'bg-diff-inserted-line',
+  removed: 'bg-diff-removed-line',
+  modified: 'bg-diff-inserted-line',
   unchanged: '',
 };
 
