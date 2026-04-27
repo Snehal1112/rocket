@@ -89,6 +89,26 @@
     --breadcrumb-bg: 0 0% 100%; /* breadcrumb.background    #FFFFFF */
     --breadcrumb-fg: 0 0% 37.6%; /* breadcrumb.foreground    #606060 */
     --breadcrumb-focus-fg: 0 0% 12.5%; /* breadcrumb.focusForeground #202020 */
+    /* VSCode 2026 Light: button tokens */
+    --button-hover-bg:              210 100% 38%;     /* button.hoverBackground         #0063C1 */
+    --button-border:                240 100% 96%;     /* button.border                  #EEEEF1 */
+    --button-secondary-bg:          0 0% 91.7%;       /* button.secondaryBackground      #EAEAEA */
+    --button-secondary-hover-bg:    210 33% 95%;      /* button.secondaryHoverBackground #F2F3F4 */
+    /* VSCode 2026 Light: checkbox tokens */
+    --checkbox-bg:                  0 0% 91.7%;       /* checkbox.background            #EAEAEA */
+    --checkbox-border:              0 0% 84.7%;       /* checkbox.border                #D8D8D8 */
+    --checkbox-fg:                  0 0% 37.6%;       /* checkbox.foreground            #606060 */
+    /* VSCode 2026 Light: dropdown tokens */
+    --dropdown-bg:                  0 0% 100%;        /* dropdown.background            #FFFFFF */
+    --dropdown-border:              0 0% 84.7%;       /* dropdown.border                #D8D8D8 */
+    --dropdown-fg:                  0 0% 12.5%;       /* dropdown.foreground            #202020 */
+    /* VSCode 2026 Light: badge tokens */
+    --badge-bg:                     210 100% 40%;     /* badge.background               #0069CC */
+    --badge-fg:                     0 0% 100%;        /* badge.foreground               #FFFFFF */
+    /* VSCode 2026 Light: scrollbar tokens */
+    --scrollbar-thumb:        rgba(153, 153, 153, 0.149); /* scrollbarSlider.background      #99999926 */
+    --scrollbar-thumb-hover:  rgba(153, 153, 153, 0.251); /* scrollbarSlider.hoverBackground #99999940 */
+    --scrollbar-thumb-active: rgba(153, 153, 153, 0.333); /* scrollbarSlider.activeBackground #99999955 */
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -163,6 +183,26 @@
     --breadcrumb-bg: 210 5% 7.5%; /* breadcrumb.background    #121314 */
     --breadcrumb-fg: 0 0% 55%; /* breadcrumb.foreground    #8C8C8C */
     --breadcrumb-focus-fg: 0 0% 75%; /* breadcrumb.focusForeground #bfbfbf */
+    /* VSCode 2026 Dark: button tokens */
+    --button-hover-bg:              200 57% 40%;      /* button.hoverBackground         #2B7DA3 */
+    --button-border:                210 2% 21%;       /* button.border                  #333536 */
+    --button-secondary-bg:          210 3% 13%;       /* button.secondaryBackground     #202122 */
+    --button-secondary-hover-bg:    0 0% 100%;        /* button.secondaryHoverBackground #FFFFFF10 */
+    /* VSCode 2026 Dark: checkbox tokens */
+    --checkbox-bg:                  210 3% 14.5%;     /* checkbox.background            #242526 */
+    --checkbox-border:              210 2% 21%;       /* checkbox.border                #333536 */
+    --checkbox-fg:                  0 0% 55%;         /* checkbox.foreground            #8C8C8C */
+    /* VSCode 2026 Dark: dropdown tokens */
+    --dropdown-bg:                  210 5% 10%;       /* dropdown.background            #191A1B */
+    --dropdown-border:              210 2% 21%;       /* dropdown.border                #333536 */
+    --dropdown-fg:                  0 0% 75%;         /* dropdown.foreground            #bfbfbf */
+    /* VSCode 2026 Dark: badge tokens */
+    --badge-bg:                     199 53% 48%;      /* badge.background               #3994BC */
+    --badge-fg:                     0 0% 100%;        /* badge.foreground               #FFFFFF */
+    /* VSCode 2026 Dark: scrollbar tokens */
+    --scrollbar-thumb:        rgba(131, 132, 133, 0.200); /* scrollbarSlider.background      #83848533 */
+    --scrollbar-thumb-hover:  rgba(131, 132, 133, 0.400); /* scrollbarSlider.hoverBackground #83848566 */
+    --scrollbar-thumb-active: rgba(131, 132, 133, 0.600); /* scrollbarSlider.activeBackground #83848599 */
   }
 
   * {
@@ -204,11 +244,11 @@
 /* Modern thin scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 *:hover {
-  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
 }
 
 /* WebKit fallback for older Chrome/Safari. */
@@ -222,12 +262,16 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--border));
+  background-color: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--muted-foreground) / 0.5);
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-active);
 }
 
 ::-webkit-scrollbar-corner {
