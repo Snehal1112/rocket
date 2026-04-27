@@ -69,7 +69,7 @@ export default {
   			'button-hover-bg':        'hsl(var(--button-hover-bg))',
   			'button-border':          'hsl(var(--button-border))',
   			'button-secondary-bg':    'hsl(var(--button-secondary-bg))',
-  			'button-secondary-hover': 'hsl(var(--button-secondary-hover-bg))',
+  			'button-secondary-hover': 'var(--button-secondary-hover-bg)',
   			checkbox: {
   				bg:     'hsl(var(--checkbox-bg))',
   				border: 'hsl(var(--checkbox-border))',

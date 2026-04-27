@@ -187,7 +187,7 @@
     --button-hover-bg:              200 57% 40%;      /* button.hoverBackground         #2B7DA3 */
     --button-border:                210 2% 21%;       /* button.border                  #333536 */
     --button-secondary-bg:          210 3% 13%;       /* button.secondaryBackground     #202122 */
-    --button-secondary-hover-bg:    0 0% 100%;        /* button.secondaryHoverBackground #FFFFFF10 */
+    --button-secondary-hover-bg: rgba(255, 255, 255, 0.063); /* button.secondaryHoverBackground #FFFFFF10 */
     /* VSCode 2026 Dark: checkbox tokens */
     --checkbox-bg:                  210 3% 14.5%;     /* checkbox.background            #242526 */
     --checkbox-border:              210 2% 21%;       /* checkbox.border                #333536 */
