@@ -198,10 +198,7 @@ export function RequestNode({
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className='w-48'
-              onClick={(e) => e.stopPropagation()}
-            >
+            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
                 <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
               </DropdownMenuItem>

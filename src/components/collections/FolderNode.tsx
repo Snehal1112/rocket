@@ -219,10 +219,7 @@ export function FolderNode({
                   <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className='w-48'
-                onClick={(e) => e.stopPropagation()}
-              >
+              <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem
                   onClick={() => {
                     setOpen(true);

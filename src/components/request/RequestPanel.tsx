@@ -1136,9 +1136,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </div>
 
           {/* Response side */}
-          <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>
-            {responseArea}
-          </div>
+          <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>{responseArea}</div>
         </div>
         {dialogs}
       </div>
@@ -1189,9 +1187,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             />
           </div>
 
-          <div className='flex-1 flex flex-col overflow-hidden bg-card min-h-0'>
-            {responseArea}
-          </div>
+          <div className='flex-1 flex flex-col overflow-hidden bg-card min-h-0'>{responseArea}</div>
         </>
       )}
       {dialogs}

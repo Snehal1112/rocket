@@ -42,7 +42,10 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
       <Button
         variant='ghost'
         size='sm'
-        className={cn('h-5 px-1.5 text-xs gap-1 hover:bg-statusbar-item-hover', isConsoleOpen && 'bg-statusbar-item-active')}
+        className={cn(
+          'h-5 px-1.5 text-xs gap-1 hover:bg-statusbar-item-hover',
+          isConsoleOpen && 'bg-statusbar-item-active',
+        )}
         onClick={onConsoleToggle}
         aria-label='Toggle Console'
       >

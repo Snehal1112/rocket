@@ -329,10 +329,7 @@ export function CollectionNode({
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className='w-48'
-              onClick={(e) => e.stopPropagation()}
-            >
+            <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem
                 onClick={(e) => handleDoubleClick(e as unknown as React.MouseEvent)}
               >

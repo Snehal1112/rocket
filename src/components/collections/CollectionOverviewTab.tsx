@@ -441,7 +441,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       <div
         className={cn(
           'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-shadow duration-200',
-          isOverviewScrolled && 'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
+          isOverviewScrolled &&
+            'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
         )}
       >
         <div className='flex items-center gap-2 mb-1'>
@@ -490,7 +491,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {activeSection === 'overview' && (
           <div className='flex h-full overflow-hidden'>
             {/* LEFT — scrollable cards */}
-            <div ref={overviewScrollRef} className='flex-1 min-w-0 border-r border-border overflow-y-auto'>
+            <div
+              ref={overviewScrollRef}
+              className='flex-1 min-w-0 border-r border-border overflow-y-auto'
+            >
               <div className='p-5 flex flex-col gap-5'>
                 <MethodBreakdown items={items} />
 
