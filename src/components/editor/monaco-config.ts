@@ -30,6 +30,31 @@ export const READONLY_OPTIONS: EditorOptions = {
   matchBrackets: 'always' as const,
 };
 
+/** Read a CSS custom property value from the document root. */
+function cssVar(name: string): string {
+  if (typeof document === 'undefined') return '';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** Convert a CSS custom property (HSL triplet or rgba) to a hex string for Monaco. */
+function cssVarHex(name: string): string {
+  const val = cssVar(name);
+  if (!val) return '#000000';
+  if (val.startsWith('#') || val.startsWith('rgb')) return val;
+  // HSL triplet "H S% L%" → hex via canvas
+  const parts = val.split(' ').map((v) => Number.parseFloat(v));
+  const [h, s, l] = parts;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '#000000';
+  ctx.fillStyle = `hsl(${h},${s}%,${l}%)`;
+  ctx.fillRect(0, 0, 1, 1);
+  const d = ctx.getImageData(0, 0, 1, 1).data;
+  return `#${d[0].toString(16).padStart(2, '0')}${d[1].toString(16).padStart(2, '0')}${d[2].toString(16).padStart(2, '0')}`;
+}
+
 // VSCode 2026 Light — sourced from
 // github.com/microsoft/vscode/blob/main/extensions/theme-defaults/themes/2026-light.json
 // Token colors follow the GitHub Light theme (included via light_modern.json inheritance).
@@ -139,81 +164,60 @@ const ROCKET_LIGHT_THEME: monacoNs.editor.IStandaloneThemeData = {
     { token: 'brackethighlighter.unmatched', foreground: '82071e' },
   ],
   colors: {
-    // Surfaces
-    'editor.background': '#FFFFFF',
+    'editor.background': cssVarHex('--editor-bg'),
     'editor.foreground': '#202020',
-    'editorGutter.background': '#FFFFFF',
-    'editorWidget.background': '#FAFAFD',
-    'editorWidget.border': '#E4E5E6',
+    'editorGutter.background': cssVarHex('--editor-bg'),
+    'editorWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorWidget.border': cssVarHex('--editor-widget-border'),
     'editorWidget.foreground': '#202020',
-    'editorSuggestWidget.background': '#FAFAFD',
-    'editorSuggestWidget.border': '#E4E5E6',
+    'editorSuggestWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorSuggestWidget.border': cssVarHex('--editor-widget-border'),
     'editorSuggestWidget.foreground': '#202020',
     'editorSuggestWidget.highlightForeground': '#0069CC',
     'editorSuggestWidget.selectedBackground': '#0069CC26',
-    'editorHoverWidget.background': '#FAFAFD',
-    'editorHoverWidget.border': '#E4E5E6',
-
-    // Cursor & selection
+    'editorHoverWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorHoverWidget.border': cssVarHex('--editor-widget-border'),
     'editorCursor.foreground': '#202020',
     'editor.selectionBackground': '#0069CC40',
     'editor.inactiveSelectionBackground': '#0069CC1A',
     'editor.selectionHighlightBackground': '#0069CC15',
     'editor.wordHighlightBackground': '#0069CC26',
     'editor.wordHighlightStrongBackground': '#0069CC26',
-
-    // Line highlight & find
-    'editor.lineHighlightBackground': '#EAEAEA40',
+    'editor.lineHighlightBackground': cssVarHex('--editor-line-highlight') + '40',
     'editor.findMatchBackground': '#0069CC40',
     'editor.findMatchHighlightBackground': '#0069CC1A',
-    'editor.findRangeHighlightBackground': '#EAEAEA',
-    'editor.rangeHighlightBackground': '#EAEAEA',
-    'editor.hoverHighlightBackground': '#EAEAEA',
-
-    // Line numbers
-    'editorLineNumber.foreground': '#606060',
-    'editorLineNumber.activeForeground': '#202020',
-
-    // Indent guides
+    'editor.findRangeHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editor.rangeHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editor.hoverHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editorLineNumber.foreground': cssVarHex('--editor-line-number-fg'),
+    'editorLineNumber.activeForeground': cssVarHex('--editor-line-number-active'),
     'editorIndentGuide.background1': '#F7F7F7',
     'editorIndentGuide.activeBackground1': '#EEEEEE',
-
-    // Brackets
     'editorBracketMatch.background': '#0069CC40',
     'editorBracketMatch.border': '#F0F1F2',
-
-    // Scrollbar
     'scrollbar.shadow': '#00000000',
     'scrollbarSlider.background': '#99999926',
     'scrollbarSlider.hoverBackground': '#99999940',
     'scrollbarSlider.activeBackground': '#99999955',
-
-    // Minimap
     'minimapSlider.background': '#99999926',
     'minimapSlider.hoverBackground': '#99999940',
     'minimapSlider.activeBackground': '#99999955',
-
-    // Diff editor
     'diffEditor.insertedTextBackground': '#587c0c26',
     'diffEditor.removedTextBackground': '#ad070726',
-
-    // Peek view
     'peekView.border': '#0069CC',
-    'peekViewEditor.background': '#FAFAFD',
+    'peekViewEditor.background': cssVarHex('--editor-widget-bg'),
     'peekViewEditor.matchHighlightBackground': '#0069CC33',
-    'peekViewResult.background': '#FAFAFD',
+    'peekViewResult.background': cssVarHex('--editor-widget-bg'),
     'peekViewResult.fileForeground': '#202020',
     'peekViewResult.lineForeground': '#606060',
     'peekViewResult.matchHighlightBackground': '#0069CC33',
     'peekViewResult.selectionBackground': '#0069CC26',
     'peekViewResult.selectionForeground': '#202020',
-    'peekViewTitle.background': '#FAFAFD',
+    'peekViewTitle.background': cssVarHex('--editor-widget-bg'),
     'peekViewTitleDescription.foreground': '#606060',
     'peekViewTitleLabel.foreground': '#202020',
-
-    // Gutter decorations
-    'editorGutter.addedBackground': '#587c0c',
-    'editorGutter.deletedBackground': '#ad0707',
+    'editorGutter.addedBackground': cssVarHex('--editor-gutter-added'),
+    'editorGutter.deletedBackground': cssVarHex('--editor-gutter-deleted'),
   },
 };
 
@@ -332,83 +336,64 @@ const ROCKET_DARK_THEME: monacoNs.editor.IStandaloneThemeData = {
     { token: 'token.debug-token', foreground: 'B267E6' },
   ],
   colors: {
-    // Surfaces
-    'editor.background': '#121314',
+    'editor.background': cssVarHex('--editor-bg'),
     'editor.foreground': '#BBBEBF',
-    'editorGutter.background': '#121314',
-    'editorWidget.background': '#202122',
-    'editorWidget.border': '#2A2B2C',
+    'editorGutter.background': cssVarHex('--editor-bg'),
+    'editorStickyScroll.background': cssVarHex('--editor-bg'),
+    'editorStickyScrollHover.background': cssVarHex('--editor-widget-bg'),
+    'editorWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorWidget.border': cssVarHex('--editor-widget-border'),
     'editorWidget.foreground': '#bfbfbf',
-    'editorSuggestWidget.background': '#202122',
-    'editorSuggestWidget.border': '#2A2B2C',
+    'editorSuggestWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorSuggestWidget.border': cssVarHex('--editor-widget-border'),
     'editorSuggestWidget.foreground': '#bfbfbf',
     'editorSuggestWidget.highlightForeground': '#bfbfbf',
     'editorSuggestWidget.selectedBackground': '#3994BC26',
-    'editorHoverWidget.background': '#202122',
-    'editorHoverWidget.border': '#2A2B2C',
-
-    // Cursor & selection
+    'editorHoverWidget.background': cssVarHex('--editor-widget-bg'),
+    'editorHoverWidget.border': cssVarHex('--editor-widget-border'),
     'editorCursor.foreground': '#BBBEBF',
     'editor.selectionBackground': '#276782dd',
     'editor.inactiveSelectionBackground': '#27678260',
     'editor.selectionHighlightBackground': '#27678260',
     'editor.wordHighlightBackground': '#27678250',
     'editor.wordHighlightStrongBackground': '#27678280',
-
-    // Line highlight & find
-    'editor.lineHighlightBackground': '#242526',
+    'editor.lineHighlightBackground': cssVarHex('--editor-line-highlight'),
     'editor.findMatchBackground': '#27678290',
     'editor.findMatchHighlightBackground': '#27678280',
-    'editor.findRangeHighlightBackground': '#242526',
-    'editor.rangeHighlightBackground': '#242526',
-    'editor.hoverHighlightBackground': '#242526',
-
-    // Line numbers
-    'editorLineNumber.foreground': '#858889',
-    'editorLineNumber.activeForeground': '#BBBEBF',
-
-    // Indent guides
+    'editor.findRangeHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editor.rangeHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editor.hoverHighlightBackground': cssVarHex('--editor-line-highlight'),
+    'editorLineNumber.foreground': cssVarHex('--editor-line-number-fg'),
+    'editorLineNumber.activeForeground': cssVarHex('--editor-line-number-active'),
     'editorIndentGuide.background1': '#8384854D',
     'editorIndentGuide.activeBackground1': '#838485',
-
-    // Brackets
     'editorBracketMatch.background': '#3994BC55',
     'editorBracketMatch.border': '#2A2B2C',
-
-    // Scrollbar
     'scrollbar.shadow': '#191B1D4D',
     'scrollbarSlider.background': '#83848533',
     'scrollbarSlider.hoverBackground': '#83848566',
     'scrollbarSlider.activeBackground': '#83848599',
-
-    // Minimap
     'minimapSlider.background': '#83848533',
     'minimapSlider.hoverBackground': '#83848566',
     'minimapSlider.activeBackground': '#83848599',
-
-    // Diff editor
-    'diffEditor.insertedLineBackground': '#347d3926',
     'diffEditor.insertedTextBackground': '#57ab5a4d',
-    'diffEditor.removedLineBackground': '#c93c3726',
     'diffEditor.removedTextBackground': '#f470674d',
-
-    // Peek view
+    'diffEditor.insertedLineBackground': '#347d3926',
+    'diffEditor.removedLineBackground': '#c93c3726',
     'peekView.border': '#2A2B2C',
-    'peekViewEditor.background': '#191A1B',
+    'peekViewEditor.background': cssVarHex('--editor-bg'),
     'peekViewEditor.matchHighlightBackground': '#3994BC33',
-    'peekViewResult.background': '#191A1B',
+    'peekViewResult.background': cssVarHex('--editor-bg'),
     'peekViewResult.fileForeground': '#bfbfbf',
     'peekViewResult.lineForeground': '#8C8C8C',
     'peekViewResult.matchHighlightBackground': '#3994BC33',
     'peekViewResult.selectionBackground': '#3994BC26',
     'peekViewResult.selectionForeground': '#bfbfbf',
-    'peekViewTitle.background': '#242526',
+    'peekViewTitle.background': cssVarHex('--editor-widget-bg'),
     'peekViewTitleDescription.foreground': '#8C8C8C',
     'peekViewTitleLabel.foreground': '#bfbfbf',
-
-    // Gutter decorations
-    'editorGutter.addedBackground': '#72C892',
-    'editorGutter.deletedBackground': '#F28772',
+    'editorGutter.addedBackground': cssVarHex('--editor-gutter-added'),
+    'editorGutter.deletedBackground': cssVarHex('--editor-gutter-deleted'),
   },
 };
 
