@@ -2,7 +2,7 @@ import { ChevronRight, FileLock, FolderOpen, GitBranch, LayoutDashboard } from '
 import type React from 'react';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import type { Tab } from '@/types/pane-types';
+import type { CollectionSection, Tab, WorkspaceTabSection } from '@/types/pane-types';
 import {
   isCollectionTab,
   isConflictTab,
@@ -22,7 +22,7 @@ function collectionBasename(absPath: string): string {
   return absPath.split('/').filter(Boolean).pop() ?? absPath;
 }
 
-function workspaceSectionLabel(section: string): string {
+function workspaceSectionLabel(section: WorkspaceTabSection): string {
   switch (section) {
     case 'overview':
       return 'Overview';
@@ -37,7 +37,7 @@ function workspaceSectionLabel(section: string): string {
   }
 }
 
-function collectionSectionLabel(section: string | undefined): string {
+function collectionSectionLabel(section: CollectionSection | undefined): string {
   switch (section) {
     case 'auth':
       return 'Authorization';
@@ -111,7 +111,7 @@ function deriveSegments(tab: Tab, workspaceName: string): Segment[] {
 
   // Exhaustive: all Tab union members are handled above.
   const _exhaustive: never = tab;
-  return [{ label: (_exhaustive as { title: string }).title }];
+  throw new Error(`Unhandled tab type: ${(_exhaustive as { tabType: string }).tabType}`);
 }
 
 interface BreadcrumbBarProps {
@@ -126,7 +126,10 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const segments = deriveSegments(tab, workspaceName);
 
   return (
-    <div className='flex items-center h-7 px-3 gap-1 border-b border-border bg-breadcrumb-bg shrink-0 overflow-x-auto overflow-y-hidden'>
+    <nav
+      aria-label='Breadcrumb'
+      className='flex items-center h-7 px-3 gap-1 border-b border-border bg-breadcrumb-bg shrink-0 overflow-x-auto overflow-y-hidden'
+    >
       {segments.map((seg, i) => {
         const isLast = i === segments.length - 1;
         return (
@@ -147,6 +150,6 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
           </span>
         );
       })}
-    </div>
+    </nav>
   );
 }
