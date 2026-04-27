@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { mapApiRequestToState } from '@/lib/pane-utils';
@@ -509,13 +510,15 @@ function SegmentButton({ seg, isLast, isOpen, onOpenChange }: SegmentButtonProps
   return (
     <Popover open={isOpen} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type='button'
+          variant='ghost'
+          size='sm'
           onKeyDown={handleKeyDown}
-          className={`flex items-center gap-1 px-1 rounded-sm hover:bg-accent/60 transition-colors ${fgClass} ${isOpen ? 'bg-accent/60' : ''}`}
+          className={`h-auto py-0 px-1 rounded-sm font-normal hover:bg-accent/60 transition-colors ${fgClass} ${isOpen ? 'bg-accent/60' : ''}`}
         >
           {inner}
-        </button>
+        </Button>
       </PopoverTrigger>
       <PopoverContent
         align='start'
@@ -531,13 +534,14 @@ function SegmentButton({ seg, isLast, isOpen, onOpenChange }: SegmentButtonProps
         ) : (
           <div ref={listRef} role='listbox' aria-label='Pick item'>
             {items.map((item, idx) => (
-              <button
+              <Button
                 key={item.id}
                 type='button'
+                variant='ghost'
                 role='option'
                 aria-selected={idx === activeIndex}
                 data-active={item.isActive ? 'true' : undefined}
-                className={`w-full flex items-center gap-2 px-3 h-7 text-xs text-left transition-colors ${
+                className={`w-full justify-start gap-2 px-3 h-7 text-xs rounded-none transition-colors ${
                   idx === activeIndex
                     ? 'bg-accent text-accent-foreground'
                     : 'hover:bg-accent/50 text-foreground'
@@ -550,7 +554,7 @@ function SegmentButton({ seg, isLast, isOpen, onOpenChange }: SegmentButtonProps
               >
                 {item.icon && <span className='shrink-0 text-muted-foreground'>{item.icon}</span>}
                 <span className='truncate'>{item.label}</span>
-              </button>
+              </Button>
             ))}
           </div>
         )}
