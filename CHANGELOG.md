@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.6.5](https://github.com/Snehal1112/rocket/compare/v0.6.4...v0.6.5) (2026-04-27)
+
+### Features
+
+* add MarkdownRenderer component with syntax highlighting support ([62422a7](https://github.com/Snehal1112/rocket/commit/62422a76c802b57b5e091c0c0e79beeb03fd6dad))
+* **CollectionNode:** auto-expand active collection in pane store ([f93b46a](https://github.com/Snehal1112/rocket/commit/f93b46a8c75fc1f0b992dde6d985a2b3ae433a60))
+* **panes:** add breadcrumb sibling picker popovers for all segment types ([7112a4c](https://github.com/Snehal1112/rocket/commit/7112a4cf96ef0d63b6c90b10d878b6f3cd4e63eb))
+* **panes:** add BreadcrumbBar component with per-tab segment derivation ([6d732c7](https://github.com/Snehal1112/rocket/commit/6d732c7ce1dbf89e819ed5bafa337d39e2c3af4a))
+* **panes:** mount BreadcrumbBar in EditorGroup below tab strip ([6b492ef](https://github.com/Snehal1112/rocket/commit/6b492efbad59fabd86e72bdc10b721c72716e756))
+* **theme:** add breadcrumb CSS vars from VSCode 2026 tokens ([967bc1b](https://github.com/Snehal1112/rocket/commit/967bc1b8eb932457861d5b520ba580e92b23b775))
+* **theme:** add button/checkbox/dropdown/badge/scrollbar CSS vars from VSCode 2026 ([b1f6125](https://github.com/Snehal1112/rocket/commit/b1f6125f70f82b450207c1a69f0bb62da8454507))
+* **theme:** add editor/diff CSS vars from VSCode 2026 ([1a8e179](https://github.com/Snehal1112/rocket/commit/1a8e179155aa292ad7a97c605f201a82b24bf456))
+* **theme:** add list/panel/sidebar/titlebar CSS vars from VSCode 2026 ([07013f3](https://github.com/Snehal1112/rocket/commit/07013f36c26cfe77be4ac9bc6a6c02fe6ed2c67c))
+* **theme:** add notification and chart CSS vars from VSCode 2026 ([59d263f](https://github.com/Snehal1112/rocket/commit/59d263f494cd71ac4dc00156735bd8ca73143191))
+* **theme:** add VSCode 2026 chart palette and verify CodeMirror warning token ([e25530a](https://github.com/Snehal1112/rocket/commit/e25530a37a0bcc44bd27b24a2e965c8b84fa1405))
+* **theme:** implement VSCode 2026 tokens for list, panel, layout, editor, and diff components ([d7b764c](https://github.com/Snehal1112/rocket/commit/d7b764cd752d62bf23b10e91f5cb267e83241f12))
+* **theme:** update dropdown and context menu styles to use new CSS vars ([5e2c488](https://github.com/Snehal1112/rocket/commit/5e2c488e2f01b72a276e1e3d603bdb76c58d026e))
+* **theme:** wire button/checkbox/dropdown/select/badge to VSCode 2026 tokens ([53ffcb1](https://github.com/Snehal1112/rocket/commit/53ffcb170dcff4f179f9d4c23500e6b453c31e3e))
+* **theme:** wire CodeMirror badge colors and VisualDiffView to CSS vars ([73dbe5e](https://github.com/Snehal1112/rocket/commit/73dbe5e58de8272774bc3a54b283f33b1d2db739))
+* **theme:** wire Monaco editor theme to VSCode 2026 CSS vars ([c0c78d0](https://github.com/Snehal1112/rocket/commit/c0c78d0fc5bd564d699c7c2b86f6c37c5af951e3))
+* **theme:** wire panel/sidebar/titlebar to VSCode 2026 tokens ([614633c](https://github.com/Snehal1112/rocket/commit/614633cd57abfc242acf7f6f5da330344f93d726))
+* **theme:** wire tree list item states to VSCode 2026 list tokens ([5470b44](https://github.com/Snehal1112/rocket/commit/5470b44e9b4d9787b37b23a1a2c5521dc0e08833))
+
+### Bug Fixes
+
+* **cm6:** replace hardcoded rgb() variable-token colors with VSCode 2026 palette ([a400790](https://github.com/Snehal1112/rocket/commit/a400790ce0a760c5c93eaddc16f1396ba08abd10)), closes [#b69500](https://github.com/Snehal1112/rocket/issues/b69500) [#587c0c](https://github.com/Snehal1112/rocket/issues/587c0c) [#0069cc](https://github.com/Snehal1112/rocket/issues/0069cc) [#652d90](https://github.com/Snehal1112/rocket/issues/652d90) [#606060](https://github.com/Snehal1112/rocket/issues/606060) [#e5ba7d](https://github.com/Snehal1112/rocket/issues/e5ba7d) [#73c991](https://github.com/Snehal1112/rocket/issues/73c991) [#3994bc](https://github.com/Snehal1112/rocket/issues/3994bc) [#ad80d7](https://github.com/Snehal1112/rocket/issues/ad80d7) [#8c8c8c](https://github.com/Snehal1112/rocket/issues/8c8c8c)
+* **panes:** replace raw button elements with shadcn Button in BreadcrumbBar ([6082206](https://github.com/Snehal1112/rocket/commit/60822063f07fead97bfd81017cffdb1a90268734))
+* **panes:** stabilise nav memo, fix folder picker items, uid keys, auto-width popover ([e38a636](https://github.com/Snehal1112/rocket/commit/e38a636a7b621eb631dd57d2aead4f177ec71663))
+* **panes:** tighten BreadcrumbBar types, key, ARIA landmark and exhaustiveness ([7489457](https://github.com/Snehal1112/rocket/commit/7489457a54fdce33e9204c5c73a69f58fb770e20))
+* **panes:** unique composite key and exhaustive workspace section switch ([7a39b1c](https://github.com/Snehal1112/rocket/commit/7a39b1c8341e901c7ee96569054d977fa872d15b))
+* **theme:** add sidebar elevation shadow matching VSCode 2026 Light ([a22a0a1](https://github.com/Snehal1112/rocket/commit/a22a0a138a1cb3505603b70566d01dd03894808f))
+* **theme:** apply off-white light theme — reduce glare on card-heavy layout ([95c96ab](https://github.com/Snehal1112/rocket/commit/95c96ab7a5e99f10b647c6c6c3ae1ff2839fe7c5)), closes [#eef0f4](https://github.com/Snehal1112/rocket/issues/eef0f4) [#fafafd](https://github.com/Snehal1112/rocket/issues/fafafd) [#f6f7fa](https://github.com/Snehal1112/rocket/issues/f6f7fa) [#ffffff](https://github.com/Snehal1112/rocket/issues/ffffff) [#f0f2f6](https://github.com/Snehal1112/rocket/issues/f0f2f6) [#fafafd](https://github.com/Snehal1112/rocket/issues/fafafd) [FAFAFD/#FFFFFF](https://github.com/FAFAFD/rocket/issues/FFFFFF)
+* **theme:** calibrate VSCode 2026 light/dark surface hierarchy and border tiers ([e86b41e](https://github.com/Snehal1112/rocket/commit/e86b41ec9e9571d0bb6944cf7c1209ffb3790044)), closes [#e6e8ea](https://github.com/Snehal1112/rocket/issues/e6e8ea) [#c7c7c7](https://github.com/Snehal1112/rocket/issues/c7c7c7) [#e0e0e0](https://github.com/Snehal1112/rocket/issues/e0e0e0) [#c8c8c8](https://github.com/Snehal1112/rocket/issues/c8c8c8) [#fff](https://github.com/Snehal1112/rocket/issues/fff) [#fafafd](https://github.com/Snehal1112/rocket/issues/fafafd) [#202122](https://github.com/Snehal1112/rocket/issues/202122) [#181a1b](https://github.com/Snehal1112/rocket/issues/181a1b) [#2d2e2f](https://github.com/Snehal1112/rocket/issues/2d2e2f)
+* **theme:** remove conflicting text-popover-foreground from dropdown content ([058f468](https://github.com/Snehal1112/rocket/commit/058f468a70530534288cb41bce14c26e2a2210ff))
+* **theme:** replace color-mix calls in dark CodeMirror theme with CSS vars ([204b816](https://github.com/Snehal1112/rocket/commit/204b816a57cf9f7504844ea567d6ef61639c359f))
+* **theme:** surface separation + VSCode 2026 Monaco themes ([9ef5c4a](https://github.com/Snehal1112/rocket/commit/9ef5c4a90cd2fc0686064c23a7f7ddbc506a7788)), closes [#fff](https://github.com/Snehal1112/rocket/issues/fff) [#fafafd](https://github.com/Snehal1112/rocket/issues/fafafd) [#d8d8d8](https://github.com/Snehal1112/rocket/issues/d8d8d8) [#f1f2f3](https://github.com/Snehal1112/rocket/issues/f1f2f3) [#d8d8d8](https://github.com/Snehal1112/rocket/issues/d8d8d8) [#e2e3e5](https://github.com/Snehal1112/rocket/issues/e2e3e5) [#116329](https://github.com/Snehal1112/rocket/issues/116329) [#0a3069](https://github.com/Snehal1112/rocket/issues/0a3069) [#cf222e](https://github.com/Snehal1112/rocket/issues/cf222e) [#8250df](https://github.com/Snehal1112/rocket/issues/8250df) [#FFFFFF](https://github.com/Snehal1112/rocket/issues/FFFFFF) [#7ee787](https://github.com/Snehal1112/rocket/issues/7ee787) [#a5d6ff](https://github.com/Snehal1112/rocket/issues/a5d6ff) [#ff7b72](https://github.com/Snehal1112/rocket/issues/ff7b72) [#d2a8ff](https://github.com/Snehal1112/rocket/issues/d2a8ff) [#121314](https://github.com/Snehal1112/rocket/issues/121314)
+* **theme:** use rgba for dark button-secondary-hover token to preserve opacity ([51217e2](https://github.com/Snehal1112/rocket/commit/51217e287912258bdadcb6f6c661500493456fe8))
+* **ui:** add missing space-y-4 wrapper in variables tab ([0131820](https://github.com/Snehal1112/rocket/commit/0131820fe442db94b8b8a24a1a258823f83d804a))
+* **ui:** move biome-ignore comment to cover key={idx} in EnvironmentDialog ([ff79846](https://github.com/Snehal1112/rocket/commit/ff798462a0734ecac6b780170d0d9962dd9a68c7))
+* **ui:** replace auto-save with explicit save button in EnvironmentDialog ([73c6c2e](https://github.com/Snehal1112/rocket/commit/73c6c2ec739cbe72b34fcc653dfe77a0d0655a68))
+* **ui:** replace auto-save with explicit save button in WorkspaceEnvironmentsTab ([7e9212a](https://github.com/Snehal1112/rocket/commit/7e9212acc900b78af2924c3802991ae77ff9ca7b))
+* **ui:** wrap collection variables tab in Card/CardContent ([1ab5abb](https://github.com/Snehal1112/rocket/commit/1ab5abb5604bc0fa9e7197ab8a895ee0fbc6a597))
+* **ui:** wrap path and query params in Card layout with section headers ([7c2cbf5](https://github.com/Snehal1112/rocket/commit/7c2cbf5a295478f6a55af10bee9fb8d0d6ef8131))
+* **ui:** wrap request settings section in Card/CardContent with ScrollArea ([c6494c9](https://github.com/Snehal1112/rocket/commit/c6494c9cb9560fa3f71b425f864be68bd641a36f))
+* **ux:** elevate collection header when overview left panel is scrolled ([45b5e7f](https://github.com/Snehal1112/rocket/commit/45b5e7f2e82ae175635404b2f851a61090041a80))
+
 ## [0.6.4](https://github.com/Snehal1112/rocket/compare/v0.6.3...v0.6.4) (2026-04-25)
 
 ### Features
