@@ -628,6 +628,15 @@ export const scanCollectionsInPath = (path: string) =>
 export const detectClonedStructure = (path: string) =>
   invoke<ClonedRepoStructure>('detect_cloned_structure', { path });
 
+export const getDefaultSshKeyPath = (): Promise<string | null> =>
+  invoke<string | null>('get_default_ssh_key_path');
+
+export const saveGitCredentials = (creds: GitCredentials): Promise<void> =>
+  invoke<void>('save_git_credentials', { creds });
+
+export const loadGitCredentials = (): Promise<GitCredentials | null> =>
+  invoke<GitCredentials | null>('load_git_credentials');
+
 // ============================================================
 // Realtime events
 // ============================================================
