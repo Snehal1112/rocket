@@ -693,7 +693,11 @@ describe('git-store credential auto-load', () => {
 
   it('auto-loads saved credentials from keychain when collection is a repo', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
-    const savedCreds = { type: 'sshKey' as const, privateKeyPath: '/home/user/.ssh/id_ed25519', passphrase: undefined };
+    const savedCreds = {
+      type: 'sshKey' as const,
+      privateKeyPath: '/home/user/.ssh/id_ed25519',
+      passphrase: undefined,
+    };
     vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as any);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
 

@@ -90,70 +90,85 @@
     --breadcrumb-fg: 0 0% 37.6%; /* breadcrumb.foreground    #606060 */
     --breadcrumb-focus-fg: 0 0% 12.5%; /* breadcrumb.focusForeground #202020 */
     /* VSCode 2026 Light: button tokens */
-    --button-hover-bg:              210 100% 38%;     /* button.hoverBackground         #0063C1 */
-    --button-border:                240 100% 96%;     /* button.border                  #EEEEF1 */
-    --button-secondary-bg:          0 0% 91.7%;       /* button.secondaryBackground      #EAEAEA */
-    --button-secondary-hover-bg:    210 33% 95%;      /* button.secondaryHoverBackground #F2F3F4 */
+    --button-hover-bg: 210 100% 38%; /* button.hoverBackground         #0063C1 */
+    --button-border: 240 100% 96%; /* button.border                  #EEEEF1 */
+    --button-secondary-bg: 0 0% 91.7%; /* button.secondaryBackground      #EAEAEA */
+    --button-secondary-hover-bg: 210 33% 95%; /* button.secondaryHoverBackground #F2F3F4 */
     /* VSCode 2026 Light: checkbox tokens */
-    --checkbox-bg:                  0 0% 91.7%;       /* checkbox.background            #EAEAEA */
-    --checkbox-border:              0 0% 84.7%;       /* checkbox.border                #D8D8D8 */
-    --checkbox-fg:                  0 0% 37.6%;       /* checkbox.foreground            #606060 */
+    --checkbox-bg: 0 0% 91.7%; /* checkbox.background            #EAEAEA */
+    --checkbox-border: 0 0% 84.7%; /* checkbox.border                #D8D8D8 */
+    --checkbox-fg: 0 0% 37.6%; /* checkbox.foreground            #606060 */
     /* VSCode 2026 Light: dropdown tokens */
-    --dropdown-bg:                  0 0% 100%;        /* dropdown.background            #FFFFFF */
-    --dropdown-border:              0 0% 84.7%;       /* dropdown.border                #D8D8D8 */
-    --dropdown-fg:                  0 0% 12.5%;       /* dropdown.foreground            #202020 */
+    --dropdown-bg: 0 0% 100%; /* dropdown.background            #FFFFFF */
+    --dropdown-border: 0 0% 84.7%; /* dropdown.border                #D8D8D8 */
+    --dropdown-fg: 0 0% 12.5%; /* dropdown.foreground            #202020 */
     /* VSCode 2026 Light: badge tokens */
-    --badge-bg:                     210 100% 40%;     /* badge.background               #0069CC */
-    --badge-fg:                     0 0% 100%;        /* badge.foreground               #FFFFFF */
+    --badge-bg: 210 100% 40%; /* badge.background               #0069CC */
+    --badge-fg: 0 0% 100%; /* badge.foreground               #FFFFFF */
     /* VSCode 2026 Light: scrollbar tokens */
-    --scrollbar-thumb:        rgba(153, 153, 153, 0.149); /* scrollbarSlider.background      #99999926 */
-    --scrollbar-thumb-hover:  rgba(153, 153, 153, 0.251); /* scrollbarSlider.hoverBackground #99999940 */
-    --scrollbar-thumb-active: rgba(153, 153, 153, 0.333); /* scrollbarSlider.activeBackground #99999955 */
+    --scrollbar-thumb: rgba(153, 153, 153, 0.149); /* scrollbarSlider.background      #99999926 */
+    --scrollbar-thumb-hover: rgba(
+      153,
+      153,
+      153,
+      0.251
+    ); /* scrollbarSlider.hoverBackground #99999940 */
+    --scrollbar-thumb-active: rgba(
+      153,
+      153,
+      153,
+      0.333
+    ); /* scrollbarSlider.activeBackground #99999955 */
     /* VSCode 2026 Light: list tokens */
-    --list-active-selection-bg:   210 100% 40% / 0.1; /* list.activeSelectionBackground  #0069CC1A */
-    --list-active-selection-fg:   0 0% 12.5%;          /* list.activeSelectionForeground  #202020 */
-    --list-inactive-selection-bg: 0 0% 85.5%;          /* list.inactiveSelectionBackground #DADADA on white */
-    --list-hover-bg:              0 0% 84.7% / 0.31;   /* list.hoverBackground            #DADADA4f */
-    --list-focus-bg:              210 100% 40% / 0.1;  /* list.focusBackground            #0069CC1A */
-    --list-highlight-fg:          210 100% 40%;        /* list.highlightForeground        #0069CC */
-    --list-error-fg:              3 93% 35%;            /* list.errorForeground            #ad0707 */
-    --list-warning-fg:            72 74% 22%;           /* list.warningForeground          #667309 */
+    --list-active-selection-bg: 210 100% 40% / 0.1; /* list.activeSelectionBackground  #0069CC1A */
+    --list-active-selection-fg: 0 0% 12.5%; /* list.activeSelectionForeground  #202020 */
+    --list-inactive-selection-bg: 0 0% 85.5%; /* list.inactiveSelectionBackground #DADADA on white */
+    --list-hover-bg: 0 0% 84.7% / 0.31; /* list.hoverBackground            #DADADA4f */
+    --list-focus-bg: 210 100% 40% / 0.1; /* list.focusBackground            #0069CC1A */
+    --list-highlight-fg: 210 100% 40%; /* list.highlightForeground        #0069CC */
+    --list-error-fg: 3 93% 35%; /* list.errorForeground            #ad0707 */
+    --list-warning-fg: 72 74% 22%; /* list.warningForeground          #667309 */
     /* VSCode 2026 Light: panel tokens */
-    --panel-bg:                   240 50% 99%;          /* panel.background                #FAFAFD */
-    --panel-border:               210 7% 85%;           /* panel.border                    #F0F1F2 */
-    --panel-title-active-border:  0 0% 0%;              /* panelTitle.activeBorder         #000000 */
-    --panel-title-active-fg:      0 0% 12.5%;           /* panelTitle.activeForeground     #202020 */
-    --panel-title-inactive-fg:    0 0% 37.6%;           /* panelTitle.inactiveForeground   #606060 */
+    --panel-bg: 240 50% 99%; /* panel.background                #FAFAFD */
+    --panel-border: 210 7% 85%; /* panel.border                    #F0F1F2 */
+    --panel-title-active-border: 0 0% 0%; /* panelTitle.activeBorder         #000000 */
+    --panel-title-active-fg: 0 0% 12.5%; /* panelTitle.activeForeground     #202020 */
+    --panel-title-inactive-fg: 0 0% 37.6%; /* panelTitle.inactiveForeground   #606060 */
     /* VSCode 2026 Light: sidebar tokens */
-    --sidebar-bg:                 240 50% 99%;          /* sideBar.background              #FAFAFD */
-    --sidebar-border:             210 7% 85%;           /* sideBar.border                  #F0F1F2 */
+    --sidebar-bg: 240 50% 99%; /* sideBar.background              #FAFAFD */
+    --sidebar-border: 210 7% 85%; /* sideBar.border                  #F0F1F2 */
     /* VSCode 2026 Light: title bar tokens */
-    --titlebar-bg:                240 50% 99%;          /* titleBar.activeBackground       #FAFAFD */
-    --titlebar-fg:                0 0% 37.6%;           /* titleBar.activeForeground       #606060 */
-    --titlebar-border:            210 7% 85%;           /* titleBar.border                 #F0F1F2 */
+    --titlebar-bg: 240 50% 99%; /* titleBar.activeBackground       #FAFAFD */
+    --titlebar-fg: 0 0% 37.6%; /* titleBar.activeForeground       #606060 */
+    --titlebar-border: 210 7% 85%; /* titleBar.border                 #F0F1F2 */
     /* VSCode 2026 Light: notification icon tokens */
-    --notification-warning-fg: 49 100% 36%;   /* notificationsWarningIcon.foreground #B69500 */
-    --notification-error-fg:   3 93% 35%;     /* notificationsErrorIcon.foreground   #ad0707 */
-    --notification-info-fg:    210 100% 40%;  /* notificationsInfoIcon.foreground    #0069CC */
+    --notification-warning-fg: 49 100% 36%; /* notificationsWarningIcon.foreground #B69500 */
+    --notification-error-fg: 3 93% 35%; /* notificationsErrorIcon.foreground   #ad0707 */
+    --notification-info-fg: 210 100% 40%; /* notificationsInfoIcon.foreground    #0069CC */
     /* VSCode 2026 Light: remaining chart tokens */
-    --chart-orange: 35 90% 46%;   /* charts.orange   #d18616 */
-    --chart-green:  113 44% 37%;  /* charts.green    #388A34 */
-    --chart-purple: 281 48% 37%;  /* charts.purple   #652D90 */
+    --chart-orange: 35 90% 46%; /* charts.orange   #d18616 */
+    --chart-green: 113 44% 37%; /* charts.green    #388A34 */
+    --chart-purple: 281 48% 37%; /* charts.purple   #652D90 */
     /* VSCode 2026 Light: editor surface tokens */
-    --editor-bg:                  0 0% 100%;     /* editor.background               #FFFFFF */
-    --editor-line-highlight:      0 0% 91.8%;    /* editor.lineHighlightBackground   #EAEAEA */
-    --editor-line-number-fg:      0 0% 37.6%;    /* editorLineNumber.foreground      #606060 */
-    --editor-line-number-active:  0 0% 12.5%;    /* editorLineNumber.activeForeground #202020 */
-    --editor-widget-bg:           240 50% 99%;   /* editorWidget.background          #FAFAFD */
-    --editor-widget-border:       210 7% 90%;    /* editorWidget.border              #E4E5E6 */
+    --editor-bg: 0 0% 100%; /* editor.background               #FFFFFF */
+    --editor-line-highlight: 0 0% 91.8%; /* editor.lineHighlightBackground   #EAEAEA */
+    --editor-line-number-fg: 0 0% 37.6%; /* editorLineNumber.foreground      #606060 */
+    --editor-line-number-active: 0 0% 12.5%; /* editorLineNumber.activeForeground #202020 */
+    --editor-widget-bg: 240 50% 99%; /* editorWidget.background          #FAFAFD */
+    --editor-widget-border: 210 7% 90%; /* editorWidget.border              #E4E5E6 */
     /* VSCode 2026 Light: gutter decoration tokens */
-    --editor-gutter-added:        88 74% 26%;    /* editorGutter.addedBackground     #587c0c */
-    --editor-gutter-deleted:      3 93% 35%;     /* editorGutter.deletedBackground   #ad0707 */
+    --editor-gutter-added: 88 74% 26%; /* editorGutter.addedBackground     #587c0c */
+    --editor-gutter-deleted: 3 93% 35%; /* editorGutter.deletedBackground   #ad0707 */
     /* VSCode 2026 Light: diff editor tokens */
-    --diff-inserted-text:   rgba(88, 124, 12, 0.149);   /* diffEditor.insertedTextBackground #587c0c26 */
-    --diff-removed-text:    rgba(173, 7, 7, 0.149);     /* diffEditor.removedTextBackground  #ad070726 */
-    --diff-inserted-line:   rgba(88, 124, 12, 0.149);   /* diffEditor.insertedLineBackground */
-    --diff-removed-line:    rgba(173, 7, 7, 0.149);     /* diffEditor.removedLineBackground  */
+    --diff-inserted-text: rgba(
+      88,
+      124,
+      12,
+      0.149
+    ); /* diffEditor.insertedTextBackground #587c0c26 */
+    --diff-removed-text: rgba(173, 7, 7, 0.149); /* diffEditor.removedTextBackground  #ad070726 */
+    --diff-inserted-line: rgba(88, 124, 12, 0.149); /* diffEditor.insertedLineBackground */
+    --diff-removed-line: rgba(173, 7, 7, 0.149); /* diffEditor.removedLineBackground  */
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -229,70 +244,100 @@
     --breadcrumb-fg: 0 0% 55%; /* breadcrumb.foreground    #8C8C8C */
     --breadcrumb-focus-fg: 0 0% 75%; /* breadcrumb.focusForeground #bfbfbf */
     /* VSCode 2026 Dark: button tokens */
-    --button-hover-bg:              200 57% 40%;      /* button.hoverBackground         #2B7DA3 */
-    --button-border:                210 2% 21%;       /* button.border                  #333536 */
-    --button-secondary-bg:          210 3% 13%;       /* button.secondaryBackground     #202122 */
-    --button-secondary-hover-bg: rgba(255, 255, 255, 0.063); /* button.secondaryHoverBackground #FFFFFF10 */
+    --button-hover-bg: 200 57% 40%; /* button.hoverBackground         #2B7DA3 */
+    --button-border: 210 2% 21%; /* button.border                  #333536 */
+    --button-secondary-bg: 210 3% 13%; /* button.secondaryBackground     #202122 */
+    --button-secondary-hover-bg: rgba(
+      255,
+      255,
+      255,
+      0.063
+    ); /* button.secondaryHoverBackground #FFFFFF10 */
     /* VSCode 2026 Dark: checkbox tokens */
-    --checkbox-bg:                  210 3% 14.5%;     /* checkbox.background            #242526 */
-    --checkbox-border:              210 2% 21%;       /* checkbox.border                #333536 */
-    --checkbox-fg:                  0 0% 55%;         /* checkbox.foreground            #8C8C8C */
+    --checkbox-bg: 210 3% 14.5%; /* checkbox.background            #242526 */
+    --checkbox-border: 210 2% 21%; /* checkbox.border                #333536 */
+    --checkbox-fg: 0 0% 55%; /* checkbox.foreground            #8C8C8C */
     /* VSCode 2026 Dark: dropdown tokens */
-    --dropdown-bg:                  210 5% 10%;       /* dropdown.background            #191A1B */
-    --dropdown-border:              210 2% 21%;       /* dropdown.border                #333536 */
-    --dropdown-fg:                  0 0% 75%;         /* dropdown.foreground            #bfbfbf */
+    --dropdown-bg: 210 5% 10%; /* dropdown.background            #191A1B */
+    --dropdown-border: 210 2% 21%; /* dropdown.border                #333536 */
+    --dropdown-fg: 0 0% 75%; /* dropdown.foreground            #bfbfbf */
     /* VSCode 2026 Dark: badge tokens */
-    --badge-bg:                     199 53% 48%;      /* badge.background               #3994BC */
-    --badge-fg:                     0 0% 100%;        /* badge.foreground               #FFFFFF */
+    --badge-bg: 199 53% 48%; /* badge.background               #3994BC */
+    --badge-fg: 0 0% 100%; /* badge.foreground               #FFFFFF */
     /* VSCode 2026 Dark: scrollbar tokens */
-    --scrollbar-thumb:        rgba(131, 132, 133, 0.200); /* scrollbarSlider.background      #83848533 */
-    --scrollbar-thumb-hover:  rgba(131, 132, 133, 0.400); /* scrollbarSlider.hoverBackground #83848566 */
-    --scrollbar-thumb-active: rgba(131, 132, 133, 0.600); /* scrollbarSlider.activeBackground #83848599 */
+    --scrollbar-thumb: rgba(131, 132, 133, 0.2); /* scrollbarSlider.background      #83848533 */
+    --scrollbar-thumb-hover: rgba(
+      131,
+      132,
+      133,
+      0.4
+    ); /* scrollbarSlider.hoverBackground #83848566 */
+    --scrollbar-thumb-active: rgba(
+      131,
+      132,
+      133,
+      0.6
+    ); /* scrollbarSlider.activeBackground #83848599 */
     /* VSCode 2026 Dark: list tokens */
-    --list-active-selection-bg:   199 53% 48% / 0.149; /* list.activeSelectionBackground  #3994BC26 */
-    --list-active-selection-fg:   0 0% 93%;             /* list.activeSelectionForeground  #ededed */
-    --list-inactive-selection-bg: 210 2% 18%;           /* list.inactiveSelectionBackground #2C2D2E */
-    --list-hover-bg:              0 0% 100% / 0.051;    /* list.hoverBackground            #FFFFFF0D */
-    --list-focus-bg:              199 53% 48% / 0.149;  /* list.focusBackground            #3994BC26 */
-    --list-highlight-fg:          199 47% 54%;          /* list.highlightForeground        #48A0C7 */
-    --list-error-fg:              9 85% 70%;             /* list.errorForeground            #f48771 */
-    --list-warning-fg:            36 69% 69%;            /* list.warningForeground          #e5ba7d */
+    --list-active-selection-bg: 199 53% 48% / 0.149; /* list.activeSelectionBackground  #3994BC26 */
+    --list-active-selection-fg: 0 0% 93%; /* list.activeSelectionForeground  #ededed */
+    --list-inactive-selection-bg: 210 2% 18%; /* list.inactiveSelectionBackground #2C2D2E */
+    --list-hover-bg: 0 0% 100% / 0.051; /* list.hoverBackground            #FFFFFF0D */
+    --list-focus-bg: 199 53% 48% / 0.149; /* list.focusBackground            #3994BC26 */
+    --list-highlight-fg: 199 47% 54%; /* list.highlightForeground        #48A0C7 */
+    --list-error-fg: 9 85% 70%; /* list.errorForeground            #f48771 */
+    --list-warning-fg: 36 69% 69%; /* list.warningForeground          #e5ba7d */
     /* VSCode 2026 Dark: panel tokens */
-    --panel-bg:                   210 5% 10%;            /* panel.background                #191A1B */
-    --panel-border:               210 2% 17%;            /* panel.border                    #2A2B2C */
-    --panel-title-active-border:  199 53% 48%;           /* panelTitle.activeBorder         #3994BC */
-    --panel-title-active-fg:      0 0% 75%;              /* panelTitle.activeForeground     #bfbfbf */
-    --panel-title-inactive-fg:    0 0% 55%;              /* panelTitle.inactiveForeground   #8C8C8C */
+    --panel-bg: 210 5% 10%; /* panel.background                #191A1B */
+    --panel-border: 210 2% 17%; /* panel.border                    #2A2B2C */
+    --panel-title-active-border: 199 53% 48%; /* panelTitle.activeBorder         #3994BC */
+    --panel-title-active-fg: 0 0% 75%; /* panelTitle.activeForeground     #bfbfbf */
+    --panel-title-inactive-fg: 0 0% 55%; /* panelTitle.inactiveForeground   #8C8C8C */
     /* VSCode 2026 Dark: sidebar tokens */
-    --sidebar-bg:                 210 5% 10%;            /* sideBar.background              #191A1B */
-    --sidebar-border:             210 2% 17%;            /* sideBar.border                  #2A2B2C */
+    --sidebar-bg: 210 5% 10%; /* sideBar.background              #191A1B */
+    --sidebar-border: 210 2% 17%; /* sideBar.border                  #2A2B2C */
     /* VSCode 2026 Dark: title bar tokens */
-    --titlebar-bg:                210 5% 10%;            /* titleBar.activeBackground       #191A1B */
-    --titlebar-fg:                0 0% 55%;              /* titleBar.activeForeground       #8C8C8C */
-    --titlebar-border:            210 2% 17%;            /* titleBar.border                 #2A2B2C */
+    --titlebar-bg: 210 5% 10%; /* titleBar.activeBackground       #191A1B */
+    --titlebar-fg: 0 0% 55%; /* titleBar.activeForeground       #8C8C8C */
+    --titlebar-border: 210 2% 17%; /* titleBar.border                 #2A2B2C */
     /* VSCode 2026 Dark: notification icon tokens */
-    --notification-warning-fg: 45 100% 40%;   /* notificationsWarningIcon.foreground #CCA700 */
-    --notification-error-fg:   9 85% 70%;     /* notificationsErrorIcon.foreground   #f48771 */
-    --notification-info-fg:    199 47% 54%;   /* notificationsInfoIcon.foreground    #3a94bc */
+    --notification-warning-fg: 45 100% 40%; /* notificationsWarningIcon.foreground #CCA700 */
+    --notification-error-fg: 9 85% 70%; /* notificationsErrorIcon.foreground   #f48771 */
+    --notification-info-fg: 199 47% 54%; /* notificationsInfoIcon.foreground    #3a94bc */
     /* VSCode 2026 Dark: remaining chart tokens */
-    --chart-orange: 34 67% 46%;   /* charts.orange   #CD861A */
-    --chart-green:  120 33% 67%;  /* charts.green    #86CF86 */
-    --chart-purple: 274 53% 67%;  /* charts.purple   #AD80D7 */
+    --chart-orange: 34 67% 46%; /* charts.orange   #CD861A */
+    --chart-green: 120 33% 67%; /* charts.green    #86CF86 */
+    --chart-purple: 274 53% 67%; /* charts.purple   #AD80D7 */
     /* VSCode 2026 Dark: editor surface tokens */
-    --editor-bg:                  210 5% 7.5%;   /* editor.background               #121314 */
-    --editor-line-highlight:      210 3% 14.5%;  /* editor.lineHighlightBackground   #242526 */
-    --editor-line-number-fg:      210 2% 53%;    /* editorLineNumber.foreground      #858889 */
-    --editor-line-number-active:  210 1% 74%;    /* editorLineNumber.activeForeground #BBBEBF */
-    --editor-widget-bg:           210 3% 13%;    /* editorWidget.background          #202122 */
-    --editor-widget-border:       210 2% 17%;    /* editorWidget.border              #2A2B2C */
+    --editor-bg: 210 5% 7.5%; /* editor.background               #121314 */
+    --editor-line-highlight: 210 3% 14.5%; /* editor.lineHighlightBackground   #242526 */
+    --editor-line-number-fg: 210 2% 53%; /* editorLineNumber.foreground      #858889 */
+    --editor-line-number-active: 210 1% 74%; /* editorLineNumber.activeForeground #BBBEBF */
+    --editor-widget-bg: 210 3% 13%; /* editorWidget.background          #202122 */
+    --editor-widget-border: 210 2% 17%; /* editorWidget.border              #2A2B2C */
     /* VSCode 2026 Dark: gutter decoration tokens */
-    --editor-gutter-added:        137 47% 69%;   /* editorGutter.addedBackground     #72C892 */
-    --editor-gutter-deleted:      9 85% 70%;     /* editorGutter.deletedBackground   #F28772 */
+    --editor-gutter-added: 137 47% 69%; /* editorGutter.addedBackground     #72C892 */
+    --editor-gutter-deleted: 9 85% 70%; /* editorGutter.deletedBackground   #F28772 */
     /* VSCode 2026 Dark: diff editor tokens */
-    --diff-inserted-text:   rgba(87, 171, 90, 0.302);   /* diffEditor.insertedTextBackground #57ab5a4d */
-    --diff-removed-text:    rgba(244, 112, 103, 0.302); /* diffEditor.removedTextBackground  #f470674d */
-    --diff-inserted-line:   rgba(52, 125, 57, 0.149);   /* diffEditor.insertedLineBackground #347d3926 */
-    --diff-removed-line:    rgba(201, 60, 55, 0.149);   /* diffEditor.removedLineBackground  #c93c3726 */
+    --diff-inserted-text: rgba(
+      87,
+      171,
+      90,
+      0.302
+    ); /* diffEditor.insertedTextBackground #57ab5a4d */
+    --diff-removed-text: rgba(
+      244,
+      112,
+      103,
+      0.302
+    ); /* diffEditor.removedTextBackground  #f470674d */
+    --diff-inserted-line: rgba(
+      52,
+      125,
+      57,
+      0.149
+    ); /* diffEditor.insertedLineBackground #347d3926 */
+    --diff-removed-line: rgba(201, 60, 55, 0.149); /* diffEditor.removedLineBackground  #c93c3726 */
   }
 
   * {

@@ -116,7 +116,7 @@ export function GitCredentialsDialog() {
 
   return (
     <Dialog open={showCredentialsDialog} onOpenChange={setShowCredentialsDialog}>
-      <DialogContent className='sm:max-w-sm'>
+      <DialogContent className='w-auto min-w-[24rem] max-w-[min(90vw,_42rem)]'>
         <DialogHeader>
           <DialogTitle>Git Credentials</DialogTitle>
         </DialogHeader>
@@ -169,7 +169,7 @@ export function GitCredentialsDialog() {
                       : 'border-dashed border-muted-foreground/50 text-muted-foreground italic',
                   ].join(' ')}
                 >
-                  <span className='truncate font-mono'>
+                  <span className='font-mono'>
                     {privateKeyPath || 'Click to select a key file…'}
                   </span>
                   <FolderOpen

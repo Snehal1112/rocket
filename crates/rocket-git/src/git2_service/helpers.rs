@@ -14,6 +14,10 @@ use crate::status::GitStatus;
 /// error on the second call so the operation fails fast instead of looping.
 pub(super) fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'_> {
     let mut callbacks = git2::RemoteCallbacks::new();
+    // Accept any SSH host key — Windows often has an empty known_hosts so
+    // libgit2 raises GIT_ECERTIFICATE (-17) without this. Authentication
+    // is still enforced via the SSH private key credential below.
+    callbacks.certificate_check(|_cert, _host| Ok(git2::CertificateCheckStatus::CertificateOk));
     let creds = creds.clone();
     let mut used = false;
     callbacks.credentials(move |_url, username, _allowed| {
