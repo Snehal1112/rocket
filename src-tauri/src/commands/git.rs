@@ -4,6 +4,7 @@ use rocket_git::{
     FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainError;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 #[tauri::command]
@@ -172,4 +173,74 @@ pub fn git_remove_remote(collection_path: String, name: String, svc: State<'_, G
 #[tauri::command]
 pub fn git_set_remote_url(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.set_remote_url(&collection_path, &name, &url)
+}
+
+const KEYRING_SERVICE: &str = "rocket-api";
+const KEYRING_ACCOUNT: &str = "git-credentials";
+
+/// Serialisable mirror of GitCredentials — used only for keychain persistence.
+/// Kept separate from the domain type so the wire format is stable even if
+/// the domain enum changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GitCredentialsPayload {
+    #[serde(rename_all = "camelCase")]
+    SshKey {
+        private_key_path: String,
+        passphrase: Option<String>,
+    },
+    SshAgent,
+    #[serde(rename_all = "camelCase")]
+    UserPass {
+        username: String,
+        password: String,
+    },
+    Token {
+        token: String,
+    },
+}
+
+/// Return the absolute path of the first default SSH private key found in
+/// `~/.ssh/`, checking id_ed25519 → id_rsa → id_ecdsa → id_dsa in order.
+/// Returns None if the home directory cannot be determined or no key exists.
+#[tauri::command]
+pub fn get_default_ssh_key_path() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let ssh_dir = home.join(".ssh");
+    for name in &["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
+        let path = ssh_dir.join(name);
+        if path.exists() {
+            return path.to_str().map(str::to_owned);
+        }
+    }
+    None
+}
+
+/// Persist git credentials to the OS keychain (macOS Keychain, Windows
+/// Credential Manager, Linux Secret Service). The passphrase, if present,
+/// is stored inside the encrypted keychain entry — never written to disk.
+#[tauri::command]
+pub fn save_git_credentials(creds: GitCredentialsPayload) -> Result<(), String> {
+    let json = serde_json::to_string(&creds).map_err(|e| e.to_string())?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|e| e.to_string())?;
+    entry.set_password(&json).map_err(|e| e.to_string())
+}
+
+/// Load previously saved git credentials from the OS keychain.
+/// Returns None if no entry exists yet (first run). Errors if the keychain
+/// is unavailable (e.g. locked) — callers should treat this as no-credentials.
+#[tauri::command]
+pub fn load_git_credentials() -> Result<Option<GitCredentialsPayload>, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(json) => {
+            let creds: GitCredentialsPayload =
+                serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            Ok(Some(creds))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
