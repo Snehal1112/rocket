@@ -44,6 +44,7 @@ vi.mock('@/lib/tauri-api', () => ({
   gitAddRemote: vi.fn().mockResolvedValue(undefined),
   gitRemoveRemote: vi.fn().mockResolvedValue(undefined),
   gitSetRemoteUrl: vi.fn().mockResolvedValue(undefined),
+  loadGitCredentials: vi.fn().mockResolvedValue(null),
 }));
 
 describe('git-store clearError', () => {
@@ -667,5 +668,59 @@ describe('git-store stash batch operations', () => {
     await useGitStore.getState().dropStashMany([0]);
 
     expect(vi.mocked(gitStatus)).not.toHaveBeenCalled();
+  });
+});
+
+describe('git-store credential auto-load', () => {
+  beforeEach(() => {
+    useGitStore.setState({
+      isRepo: false,
+      collectionPath: null,
+      credentials: null,
+      status: null,
+      branches: null,
+      remotes: [],
+      stashes: [],
+      commitLog: [],
+      conflicts: [],
+      loading: false,
+      error: null,
+      showCredentialsDialog: false,
+      pendingNetworkOp: null,
+    });
+    vi.clearAllMocks();
+  });
+
+  it('auto-loads saved credentials from keychain when collection is a repo', async () => {
+    const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
+    const savedCreds = { type: 'sshKey' as const, privateKeyPath: '/home/user/.ssh/id_ed25519', passphrase: undefined };
+    vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as any);
+    vi.mocked(gitIsRepo).mockResolvedValue(true);
+
+    await useGitStore.getState().setCollection('/some/collection');
+
+    expect(useGitStore.getState().credentials).toEqual(savedCreds);
+  });
+
+  it('leaves credentials null when keychain returns null', async () => {
+    const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
+    vi.mocked(loadGitCredentials).mockResolvedValue(null);
+    vi.mocked(gitIsRepo).mockResolvedValue(true);
+
+    await useGitStore.getState().setCollection('/some/collection');
+
+    expect(useGitStore.getState().credentials).toBeNull();
+  });
+
+  it('does not overwrite already-set credentials when keychain returns null', async () => {
+    const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
+    const existing = { type: 'token' as const, token: 'mytoken' };
+    useGitStore.setState({ credentials: existing as any });
+    vi.mocked(loadGitCredentials).mockResolvedValue(null);
+    vi.mocked(gitIsRepo).mockResolvedValue(true);
+
+    await useGitStore.getState().setCollection('/some/collection');
+
+    expect(useGitStore.getState().credentials).toEqual(existing);
   });
 });

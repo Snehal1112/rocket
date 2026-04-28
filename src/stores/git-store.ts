@@ -20,6 +20,7 @@ import {
   gitIsRepo,
   gitListRemotes,
   gitLog,
+  loadGitCredentials,
   gitMergeBranch,
   gitPull,
   gitPush,
@@ -125,6 +126,15 @@ export const useGitStore = create<GitState>((set, get) => ({
       const isRepo = await gitIsRepo(path);
       set({ isRepo });
       if (isRepo) {
+        // Auto-load persisted credentials if none are set in memory.
+        if (!get().credentials) {
+          try {
+            const saved = await loadGitCredentials();
+            if (saved) set({ credentials: saved });
+          } catch {
+            // Keychain unavailable — proceed without credentials.
+          }
+        }
         const [status] = await Promise.all([
           gitStatus(path),
           get().refreshStashes(),
