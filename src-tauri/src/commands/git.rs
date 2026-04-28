@@ -176,6 +176,7 @@ pub fn git_set_remote_url(collection_path: String, name: String, url: String, sv
 }
 
 const KEYRING_SERVICE: &str = "rocket-api";
+// One global entry per app; not scoped to a collection or workspace.
 const KEYRING_ACCOUNT: &str = "git-credentials";
 
 /// Serialisable mirror of GitCredentials — used only for keychain persistence.
@@ -200,6 +201,32 @@ pub enum GitCredentialsPayload {
     },
 }
 
+impl From<GitCredentials> for GitCredentialsPayload {
+    fn from(c: GitCredentials) -> Self {
+        match c {
+            GitCredentials::SshKey { private_key_path, passphrase } =>
+                GitCredentialsPayload::SshKey { private_key_path, passphrase },
+            GitCredentials::SshAgent => GitCredentialsPayload::SshAgent,
+            GitCredentials::UserPass { username, password } =>
+                GitCredentialsPayload::UserPass { username, password },
+            GitCredentials::Token { token } => GitCredentialsPayload::Token { token },
+        }
+    }
+}
+
+impl From<GitCredentialsPayload> for GitCredentials {
+    fn from(p: GitCredentialsPayload) -> Self {
+        match p {
+            GitCredentialsPayload::SshKey { private_key_path, passphrase } =>
+                GitCredentials::SshKey { private_key_path, passphrase },
+            GitCredentialsPayload::SshAgent => GitCredentials::SshAgent,
+            GitCredentialsPayload::UserPass { username, password } =>
+                GitCredentials::UserPass { username, password },
+            GitCredentialsPayload::Token { token } => GitCredentials::Token { token },
+        }
+    }
+}
+
 /// Return the absolute path of the first default SSH private key found in
 /// `~/.ssh/`, checking id_ed25519 → id_rsa → id_ecdsa → id_dsa in order.
 /// Returns None if the home directory cannot be determined or no key exists.
@@ -207,7 +234,7 @@ pub enum GitCredentialsPayload {
 pub fn get_default_ssh_key_path() -> Option<String> {
     let home = dirs::home_dir()?;
     let ssh_dir = home.join(".ssh");
-    for name in &["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
+    for name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
         let path = ssh_dir.join(name);
         if path.exists() {
             return path.to_str().map(str::to_owned);
@@ -220,27 +247,28 @@ pub fn get_default_ssh_key_path() -> Option<String> {
 /// Credential Manager, Linux Secret Service). The passphrase, if present,
 /// is stored inside the encrypted keychain entry — never written to disk.
 #[tauri::command]
-pub fn save_git_credentials(creds: GitCredentialsPayload) -> Result<(), String> {
-    let json = serde_json::to_string(&creds).map_err(|e| e.to_string())?;
+pub fn save_git_credentials(creds: GitCredentialsPayload) -> Result<(), DomainError> {
+    let json = serde_json::to_string(&creds)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
     let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| e.to_string())?;
-    entry.set_password(&json).map_err(|e| e.to_string())
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    entry.set_password(&json).map_err(|e| DomainError::Internal(e.to_string()))
 }
 
 /// Load previously saved git credentials from the OS keychain.
 /// Returns None if no entry exists yet (first run). Errors if the keychain
 /// is unavailable (e.g. locked) — callers should treat this as no-credentials.
 #[tauri::command]
-pub fn load_git_credentials() -> Result<Option<GitCredentialsPayload>, String> {
+pub fn load_git_credentials() -> Result<Option<GitCredentialsPayload>, DomainError> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
     match entry.get_password() {
         Ok(json) => {
             let creds: GitCredentialsPayload =
-                serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                serde_json::from_str(&json).map_err(|e| DomainError::Internal(e.to_string()))?;
             Ok(Some(creds))
         }
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(DomainError::Internal(e.to_string())),
     }
 }
