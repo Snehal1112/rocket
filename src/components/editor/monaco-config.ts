@@ -58,7 +58,9 @@ function cssVarHex(name: string): string {
 // VSCode 2026 Light — sourced from
 // github.com/microsoft/vscode/blob/main/extensions/theme-defaults/themes/2026-light.json
 // Token colors follow the GitHub Light theme (included via light_modern.json inheritance).
-const ROCKET_LIGHT_THEME: monacoNs.editor.IStandaloneThemeData = {
+// Factory function so cssVarHex() is evaluated at call time (not module load).
+function getRocketLightTheme(): monacoNs.editor.IStandaloneThemeData {
+  return {
   base: 'vs',
   inherit: false,
   rules: [
@@ -219,12 +221,15 @@ const ROCKET_LIGHT_THEME: monacoNs.editor.IStandaloneThemeData = {
     'editorGutter.addedBackground': cssVarHex('--editor-gutter-added'),
     'editorGutter.deletedBackground': cssVarHex('--editor-gutter-deleted'),
   },
-};
+  };
+}
 
 // VSCode 2026 Dark — sourced from
 // github.com/microsoft/vscode/blob/main/extensions/theme-defaults/themes/2026-dark.json
 // Token colors follow the GitHub Dark theme (included via dark_modern.json inheritance).
-const ROCKET_DARK_THEME: monacoNs.editor.IStandaloneThemeData = {
+// Factory function so cssVarHex() is evaluated at call time (not module load).
+function getRocketDarkTheme(): monacoNs.editor.IStandaloneThemeData {
+  return {
   base: 'vs-dark',
   inherit: false,
   rules: [
@@ -395,15 +400,15 @@ const ROCKET_DARK_THEME: monacoNs.editor.IStandaloneThemeData = {
     'editorGutter.addedBackground': cssVarHex('--editor-gutter-added'),
     'editorGutter.deletedBackground': cssVarHex('--editor-gutter-deleted'),
   },
-};
+  };
+}
 
-// Call this once with the locally-bundled monaco instance before any editor
-// mounts. Both MonacoWrapper and DiffViewer call this at module load time so
-// the themes are always registered before the first render, regardless of which
-// component opens first.
+// Call this with the monaco instance whenever the app theme changes so the
+// themes are re-registered with the current CSS variable values. Called at
+// module load time (monaco-setup.ts) and on each theme toggle (useMonacoTheme).
 export function defineMonacoThemes(monacoInstance: typeof monacoNs) {
-  monacoInstance.editor.defineTheme('rocket-light', ROCKET_LIGHT_THEME);
-  monacoInstance.editor.defineTheme('rocket-dark', ROCKET_DARK_THEME);
+  monacoInstance.editor.defineTheme('rocket-light', getRocketLightTheme());
+  monacoInstance.editor.defineTheme('rocket-dark', getRocketDarkTheme());
 }
 
 // Detect Monaco language from body mode or content-type header.

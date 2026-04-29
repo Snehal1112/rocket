@@ -25,10 +25,13 @@ export function useMonacoTheme() {
     };
   }, []);
 
-  // Apply theme change globally so all editors update in real time.
+  // Re-define themes with current CSS variable values, then apply.
+  // Themes must be re-registered on each toggle because their colors are
+  // computed from CSS custom properties that change with the app theme.
   useEffect(() => {
     const name = isDark ? 'rocket-dark' : 'rocket-light';
     loader.init().then((monaco) => {
+      defineMonacoThemes(monaco);
       monaco.editor.setTheme(name);
     });
   }, [isDark]);
