@@ -441,20 +441,20 @@
   box-shadow: none;
 }
 
-/* Linux: transparent window with border and rounded corners.
-   Body padding creates a visible gap for the border to render against the desktop. */
-html.linux body {
-  background: transparent;
-  min-width: 500px;
-}
-
-html.linux #root {
-  background: var(--background);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
-    1px 2px 10px rgba(0, 0, 0, 0.08);
+/* Linux/Windows: decorations off — 1px window border matching VS Code's approach.
+   border-box sizing keeps the border inside the element; no body padding or height hacks needed. */
+html.linux #root,
+html.windows #root {
+  border: 1px solid hsl(var(--border));
+  box-sizing: border-box;
   height: 100%;
   overflow: hidden;
+}
+
+/* Dim the border when the window loses focus, matching VS Code's inactive border treatment. */
+html.linux.window-inactive #root,
+html.windows.window-inactive #root {
+  border-color: hsl(var(--border) / 0.5);
 }
 
 /* Card elevation.

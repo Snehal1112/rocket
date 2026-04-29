@@ -86,8 +86,20 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (osType() === 'linux') {
-      document.documentElement.classList.add('linux');
+    const os = osType();
+    const html = document.documentElement;
+    if (os === 'linux') html.classList.add('linux');
+    if (os === 'windows') html.classList.add('windows');
+
+    if (os === 'linux' || os === 'windows') {
+      const onBlur = () => html.classList.add('window-inactive');
+      const onFocus = () => html.classList.remove('window-inactive');
+      window.addEventListener('blur', onBlur);
+      window.addEventListener('focus', onFocus);
+      return () => {
+        window.removeEventListener('blur', onBlur);
+        window.removeEventListener('focus', onFocus);
+      };
     }
   }, []);
 
