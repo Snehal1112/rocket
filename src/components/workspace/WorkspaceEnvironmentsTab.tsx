@@ -215,16 +215,15 @@ export function WorkspaceEnvironmentsTab() {
           <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
             <div className='p-0 flex flex-col h-full'>
               {/* Column headers */}
-              <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0'>
-                {/* checkbox placeholder */}
-                <div className='w-4 shrink-0' />
-                <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+              <div className='grid items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0' style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}>
+                <div />
+                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
                   Key
                 </p>
-                <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
                   Value
                 </p>
-                <div className='w-[52px] shrink-0' />
+                <div />
               </div>
               <ScrollArea className='flex-1'>
                 <div className='px-3 pt-2 pb-1 space-y-1'>
@@ -234,9 +233,10 @@ export function WorkspaceEnvironmentsTab() {
                         // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
                         key={idx}
                         className={cn(
-                          'flex gap-1.5 items-center py-0.5 group',
+                          'grid items-center gap-1.5 h-8 group',
                           !variable.enabled && 'opacity-50',
                         )}
+                        style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}
                       >
                         {/* Enabled toggle. */}
                         <Button
@@ -259,7 +259,7 @@ export function WorkspaceEnvironmentsTab() {
                           placeholder='Key'
                           value={variable.key}
                           onChange={(e) => updateVar(idx, { key: e.target.value })}
-                          className='flex-1 text-xs h-7 font-mono'
+                          className='text-xs h-7 font-mono'
                         />
 
                         {/* Value input, masked when secret. */}
@@ -268,41 +268,41 @@ export function WorkspaceEnvironmentsTab() {
                           type={variable.secret ? 'password' : 'text'}
                           value={variable.value}
                           onChange={(e) => updateVar(idx, { value: e.target.value })}
-                          className='flex-1 text-xs h-7 font-mono'
+                          className='text-xs h-7 font-mono'
                         />
 
-                        {/* Secret toggle. */}
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                          onClick={() => updateVar(idx, { secret: !variable.secret })}
-                          title={variable.secret ? 'Show value' : 'Hide value'}
-                        >
-                          {variable.secret ? (
-                            <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
-                          ) : (
-                            <Eye className='h-3.5 w-3.5 text-muted-foreground' />
-                          )}
-                        </Button>
-
-                        {/* Delete row. */}
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                          onClick={() => removeVar(idx)}
-                          title='Delete variable'
-                        >
-                          <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
-                        </Button>
+                        {/* Secret toggle + delete row. */}
+                        <div className='flex items-center gap-1 justify-end'>
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
+                            onClick={() => updateVar(idx, { secret: !variable.secret })}
+                            title={variable.secret ? 'Show value' : 'Hide value'}
+                          >
+                            {variable.secret ? (
+                              <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
+                            ) : (
+                              <Eye className='h-3.5 w-3.5 text-muted-foreground' />
+                            )}
+                          </Button>
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
+                            onClick={() => removeVar(idx)}
+                            title='Delete variable'
+                          >
+                            <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </ScrollArea>
 
-              <div className='px-3 py-2 border-t border-border/40 shrink-0 flex items-center justify-between'>
+              <div className='px-3 py-2 border-t border-border border-0 shrink-0 flex items-center justify-between'>
                 <Button
                   variant='ghost'
                   size='sm'
