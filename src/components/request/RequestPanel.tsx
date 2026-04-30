@@ -944,7 +944,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                 <p className='text-xs font-medium text-muted-foreground/70'>
                   No collection attached
                 </p>
-                <p className='text-[11px] text-muted-foreground/40 max-w-[200px] leading-relaxed'>
+                <p className='text-[11px] text-muted-foreground/40 max-w-50 leading-relaxed'>
                   Save this request to a collection to define request-scoped variables.
                 </p>
               </div>

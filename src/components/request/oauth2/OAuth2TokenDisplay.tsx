@@ -111,7 +111,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
             <div className='px-3 pb-3 pt-1 space-y-2'>
               <div className='flex gap-2 items-start'>
                 <Textarea
-                  className='flex-1 text-xs font-mono resize-none min-h-[4.5rem] max-h-40'
+                  className='flex-1 text-xs font-mono resize-none min-h-18 max-h-40'
                   readOnly
                   value={o.accessToken}
                   aria-label='Access token value'
@@ -119,7 +119,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                 <Button
                   variant='outline'
                   size='sm'
-                  className='px-2.5 shrink-0 min-h-[36px]'
+                  className='px-2.5 shrink-0 min-h-9'
                   onClick={() => copy(o.accessToken, 'access')}
                   aria-label={copied === 'access' ? 'Copied!' : 'Copy access token'}
                 >
@@ -297,7 +297,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                   <Button
                     variant='outline'
                     size='sm'
-                    className='px-2.5 shrink-0 min-h-[36px]'
+                    className='px-2.5 shrink-0 min-h-9'
                     onClick={() => copy(o.idToken, 'id')}
                     aria-label={copied === 'id' ? 'Copied!' : 'Copy ID token'}
                   >

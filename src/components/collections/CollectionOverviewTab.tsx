@@ -481,7 +481,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         <div
           className={cn(
             'pointer-events-none absolute inset-x-0 top-0 z-10 h-6 transition-opacity duration-200',
-            'bg-gradient-to-b from-black/10 to-transparent',
+            'bg-linear-to-b from-black/10 to-transparent',
             'dark:from-black/40 dark:to-transparent',
             isScrolled ? 'opacity-100' : 'opacity-0',
           )}
