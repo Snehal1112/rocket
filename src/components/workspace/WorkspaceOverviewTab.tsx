@@ -334,7 +334,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
       />
 
       {/* ── RIGHT COLUMN — Documentation ── */}
-      <div className='flex-1 p-4 flex flex-col overflow-hidden'>
+      <div className='flex-1 p-4 flex flex-col overflow-hidden min-h-0'>
         <MarkdownEditor
           value={docContent}
           onChange={setDocContent}

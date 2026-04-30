@@ -871,7 +871,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const sectionTabs = (
     <div className='flex-1 flex flex-col min-h-0 bg-card'>
       <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
-      <div className='flex-1 overflow-auto p-3'>
+      {activeSection === 'docs' ? (
+        <div className='flex-1 flex flex-col overflow-hidden p-3 min-h-0'>
+          <RequestDocsPanel
+            docs={request.docs}
+            mode={docMode}
+            hasSource={!!(tab.source?.collection && tab.source?.path)}
+            onSave={(docs) => {
+              void handleSaveDocs(docs);
+            }}
+            onSwitchToEdit={() => setDocMode('edit')}
+          />
+        </div>
+      ) : null}
+      <div className={activeSection === 'docs' ? 'hidden' : 'flex-1 overflow-auto p-3'}>
         {activeSection === 'params' && (
           <div className='space-y-3'>
             <PathParamsPanel
@@ -1028,17 +1041,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               </Card>
             </div>
           </ScrollArea>
-        )}
-        {activeSection === 'docs' && (
-          <RequestDocsPanel
-            docs={request.docs}
-            mode={docMode}
-            hasSource={!!(tab.source?.collection && tab.source?.path)}
-            onSave={(docs) => {
-              void handleSaveDocs(docs);
-            }}
-            onSwitchToEdit={() => setDocMode('edit')}
-          />
         )}
       </div>
     </div>

@@ -83,7 +83,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
   const expired = isExpired(o.expiresIn, o.tokenAcquiredAt);
 
   return (
-    <div className='rounded-md border border-border/60 bg-muted/15 overflow-hidden'>
+    <div className='rounded-md border border-border bg-muted/15 overflow-hidden'>
       {o.accessToken && (
         <div>
           <button
@@ -131,7 +131,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                 </Button>
               </div>
               {o.accessTokenClaims && (
-                <div className='rounded border border-border/40 bg-muted/20 p-2.5 space-y-2'>
+                <div className='rounded border border-border bg-muted/20 p-2.5 space-y-2'>
                   <div className='flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-foreground/50'>
                     <ShieldCheck className='h-3 w-3' aria-hidden='true' />
                     Decoded Payload
@@ -198,7 +198,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                     {showRawAccessPayload ? 'Hide' : 'View'} Raw Payload
                   </Button>
                   {showRawAccessPayload && (
-                    <pre className='text-xs font-mono bg-muted/60 border border-border/40 p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
+                    <pre className='text-xs font-mono bg-muted/60 border border-border p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
                       {o.accessTokenClaims.rawPayload}
                     </pre>
                   )}
@@ -210,7 +210,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
       )}
 
       {o.idToken && (
-        <div className={o.accessToken ? 'border-t border-border/40' : ''}>
+        <div className={o.accessToken ? 'border-t border-border' : ''}>
           <button
             type='button'
             className='flex w-full items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring transition-colors'
@@ -281,7 +281,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
                     {showRawPayload ? 'Hide' : 'View'} Raw Payload
                   </Button>
                   {showRawPayload && (
-                    <pre className='text-xs font-mono bg-muted/60 border border-border/40 p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
+                    <pre className='text-xs font-mono bg-muted/60 border border-border p-2.5 rounded max-h-40 overflow-auto whitespace-pre-wrap'>
                       {o.idTokenClaims.rawPayload}
                     </pre>
                   )}
@@ -315,7 +315,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
       )}
 
       {(o.tokenType || o.responseScope) && (
-        <div className='flex flex-wrap gap-4 px-3 py-2 text-xs text-muted-foreground border-t border-border/40 bg-muted/10'>
+        <div className='flex flex-wrap gap-4 px-3 py-2 text-xs text-muted-foreground border-t border-border bg-muted/10'>
           {o.tokenType && (
             <span>
               <span className='font-medium text-foreground/60'>Type:</span> {o.tokenType}

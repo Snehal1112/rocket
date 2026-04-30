@@ -675,7 +675,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
         {/* Documentation tab. */}
         {activeSection === 'documentation' && (
-          <div className='flex-1 flex flex-col p-6'>
+          <div className='flex-1 flex flex-col p-6 overflow-hidden min-h-0'>
             <MarkdownEditor
               value={docs}
               onChange={(v) => {
