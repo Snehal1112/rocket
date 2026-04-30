@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { InlineEnvName } from '@/components/environments/InlineEnvName';
 import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
@@ -215,7 +216,10 @@ export function WorkspaceEnvironmentsTab() {
           <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
             <div className='p-0 flex flex-col h-full'>
               {/* Column headers */}
-              <div className='grid items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0' style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}>
+              <div
+                className='grid items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0'
+                style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}
+              >
                 <div />
                 <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
                   Key
@@ -239,20 +243,12 @@ export function WorkspaceEnvironmentsTab() {
                         style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}
                       >
                         {/* Enabled toggle. */}
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          onClick={() => updateVar(idx, { enabled: !variable.enabled })}
-                          className={cn(
-                            'w-4 h-4 rounded border p-0 shrink-0',
-                            variable.enabled
-                              ? 'bg-primary border-primary text-primary-foreground hover:bg-primary/90'
-                              : 'border-border hover:bg-muted',
-                          )}
-                          title={variable.enabled ? 'Disable variable' : 'Enable variable'}
-                        >
-                          {variable.enabled && <Check className='h-3 w-3' />}
-                        </Button>
+                        <Checkbox
+                          checked={variable.enabled}
+                          onCheckedChange={(checked) => updateVar(idx, { enabled: !!checked })}
+                          aria-label={variable.enabled ? 'Disable variable' : 'Enable variable'}
+                          className='shrink-0'
+                        />
 
                         {/* Key input. */}
                         <Input
@@ -331,7 +327,7 @@ export function WorkspaceEnvironmentsTab() {
             </div>
           </div>
         ) : (
-          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-card/60'>
+          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-linear-to-b from-background to-card/60'>
             <RocketIdle className='w-36 h-36 opacity-70' />
             <div className='space-y-1.5'>
               <p className='text-sm font-medium text-foreground'>No environment selected</p>
