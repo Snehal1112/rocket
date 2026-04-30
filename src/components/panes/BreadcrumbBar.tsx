@@ -116,6 +116,7 @@ function workspaceSectionIcon(section: WorkspaceTabSection): React.ReactNode {
 interface NavActions {
   openCollectionTab: (collection: string, section: CollectionSection) => void;
   openWorkspaceTabs: (workspaceId: string, section: WorkspaceTabSection) => void;
+  switchWorkspace: (id: string) => Promise<void>;
   openTab: (tab: Tab) => void;
   updateCollectionSection: (tabId: string, section: CollectionSection) => void;
 }
@@ -320,7 +321,9 @@ function deriveSegments(
               icon: <LayoutDashboard className='h-3 w-3' />,
               isActive: w.id === tab.workspaceId,
             })),
-          onSelect: (item) => nav.openWorkspaceTabs(item.id, 'overview'),
+          onSelect: (item) => {
+            if (item.id !== tab.workspaceId) void nav.switchWorkspace(item.id);
+          },
         },
       },
       {
@@ -569,6 +572,7 @@ interface BreadcrumbBarProps {
 export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const workspaceName = workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'Workspace';
 
   const openCollectionTab = usePaneStore((s) => s.openCollectionTab);
@@ -577,8 +581,8 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
 
   const nav = useMemo<NavActions>(
-    () => ({ openCollectionTab, openWorkspaceTabs, openTab, updateCollectionSection }),
-    [openCollectionTab, openWorkspaceTabs, openTab, updateCollectionSection],
+    () => ({ openCollectionTab, openWorkspaceTabs, switchWorkspace, openTab, updateCollectionSection }),
+    [openCollectionTab, openWorkspaceTabs, switchWorkspace, openTab, updateCollectionSection],
   );
 
   const segments = useMemo(
@@ -590,7 +594,7 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   return (
     <nav
       aria-label='Breadcrumb'
-      className='flex items-center h-[25px] px-3 gap-0.5 border-border shrink-0 overflow-x-auto overflow-y-hidden'
+      className='flex items-center h-6.25 px-3 gap-0.5 border-b border-border shrink-0 overflow-x-auto overflow-y-hidden'
     >
       {
         segments.reduce<{ nodes: React.ReactNode[]; path: string }>(
