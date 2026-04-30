@@ -150,7 +150,7 @@ export function WorkspaceEnvironmentsTab() {
   return (
     <div className='h-full flex'>
       {/* Left panel: environment list. */}
-      <div className='w-52 border-r border-border/60 flex flex-col bg-card/50'>
+      <div className='w-52 border-r border-border flex flex-col bg-card/50'>
         <div className='px-3 pt-3 pb-1.5'>
           <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
             Environments
@@ -187,7 +187,7 @@ export function WorkspaceEnvironmentsTab() {
             )}
           </div>
         </ScrollArea>
-        <div className='p-2 border-t border-border/60 flex gap-1'>
+        <div className='p-2 flex gap-1'>
           <Button
             variant='ghost'
             size='icon'
@@ -211,9 +211,9 @@ export function WorkspaceEnvironmentsTab() {
       </div>
 
       {/* Right panel: variable editor. */}
-      <div className='flex-1 flex flex-col min-w-0'>
+      <div className='flex-1 flex flex-col min-w-0 border-t border-border'>
         {selectedName ? (
-          <Card className='flex-1 flex flex-col min-w-0 overflow-hidden'>
+          <Card className='flex-1 flex flex-col min-w-0 overflow-hidden .border-0 rounded-none'>
             <CardContent className='p-0 flex flex-col h-full'>
               {/* Column headers */}
               <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
