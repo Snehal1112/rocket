@@ -302,7 +302,7 @@ export function WorkspaceEnvironmentsTab() {
                 </div>
               </ScrollArea>
 
-              <div className='px-3 py-2 border-t border-border border-0 shrink-0 flex items-center justify-between'>
+              <div className='px-3 py-2 border-t border-border/40 shrink-0 flex items-center justify-between'>
                 <Button
                   variant='ghost'
                   size='sm'
