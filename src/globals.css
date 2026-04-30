@@ -74,7 +74,7 @@
     --toolbar-hover: rgba(0, 0, 0, 0.063); /* toolbar.hoverBackground #00000010 */
     /* VSCode 2026 Light: status bar tokens */
     --statusbar-bg: 240 50% 99%; /* statusBar.background        #FAFAFD */
-    --statusbar-border: 210 7% 85%; /* statusBar.border            #F0F1F2 — same as --border light */
+    --statusbar-border: 210 7% 89%; /* statusBar.border            same as --border light */
     --statusbar-item-hover: 0 0% 84.7%; /* statusBarItem.hoverBackground #DADADA4f on white ≈ #D4D4D4 */
     --statusbar-item-active: 0 0% 93.3%; /* statusBarItem.activeBackground #EEEEEE */
     /* VSCode 2026 Light: global tokens */
@@ -130,17 +130,17 @@
     --list-warning-fg: 72 74% 22%; /* list.warningForeground          #667309 */
     /* VSCode 2026 Light: panel tokens */
     --panel-bg: 240 50% 99%; /* panel.background                #FAFAFD */
-    --panel-border: 210 7% 85%; /* panel.border                    #F0F1F2 */
+    --panel-border: 210 7% 89%; /* panel.border                    same as --border light */
     --panel-title-active-border: 0 0% 0%; /* panelTitle.activeBorder         #000000 */
     --panel-title-active-fg: 0 0% 12.5%; /* panelTitle.activeForeground     #202020 */
     --panel-title-inactive-fg: 0 0% 37.6%; /* panelTitle.inactiveForeground   #606060 */
     /* VSCode 2026 Light: sidebar tokens */
     --sidebar-bg: 240 50% 99%; /* sideBar.background              #FAFAFD */
-    --sidebar-border: 210 7% 85%; /* sideBar.border                  #F0F1F2 */
+    --sidebar-border: 210 7% 89%; /* sideBar.border                  same as --border light */
     /* VSCode 2026 Light: title bar tokens */
     --titlebar-bg: 240 50% 99%; /* titleBar.activeBackground       #FAFAFD */
     --titlebar-fg: 0 0% 37.6%; /* titleBar.activeForeground       #606060 */
-    --titlebar-border: 210 7% 85%; /* titleBar.border                 #F0F1F2 */
+    --titlebar-border: 210 7% 89%; /* titleBar.border                 same as --border light */
     /* VSCode 2026 Light: notification icon tokens */
     --notification-warning-fg: 49 100% 36%; /* notificationsWarningIcon.foreground #B69500 */
     --notification-error-fg: 3 93% 35%; /* notificationsErrorIcon.foreground   #ad0707 */
@@ -458,12 +458,14 @@ html.windows.window-inactive #root {
 }
 
 /* Card elevation.
-   Card border sits above structural separators (--border #d6d8db) — cards are elevated
-   surfaces so their border is lighter than panel dividers but still visible.
-   Shadow is a whisper only; dark: --popover sits above --background. */
+   Shell is #EEF0F4 (94.5% L); card face is #F6F7FA (97.3% L).
+   Border #DCDDE0 gives 1.19:1 vs shell and 1.27:1 vs card face — enough to read as
+   an elevated surface. Darker than structural --border (#E1E3E5) because cards sit
+   above the shell and need more definition, not less.
+   Shadow at 8% reinforces the lifted edge. */
 [data-slot="card"] {
-  border-color: #e8e9ea;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-color: #dcdde0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .dark [data-slot="card"] {
