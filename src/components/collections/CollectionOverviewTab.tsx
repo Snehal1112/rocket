@@ -273,7 +273,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     const handleScroll = () => setIsOverviewScrolled(el.scrollTop > 0);
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, [collection]); // re-attach when overview mounts (collection load)
+  }, []);
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
