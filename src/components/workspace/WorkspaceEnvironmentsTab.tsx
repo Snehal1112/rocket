@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import { InlineEnvName } from '@/components/environments/InlineEnvName';
 import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
@@ -211,12 +210,12 @@ export function WorkspaceEnvironmentsTab() {
       </div>
 
       {/* Right panel: variable editor. */}
-      <div className='flex-1 flex flex-col min-w-0 border-t border-border'>
+      <div className='flex-1 flex flex-col min-w-0'>
         {selectedName ? (
-          <Card className='flex-1 flex flex-col min-w-0 overflow-hidden .border-0 rounded-none'>
-            <CardContent className='p-0 flex flex-col h-full'>
+          <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
+            <div className='p-0 flex flex-col h-full'>
               {/* Column headers */}
-              <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0'>
+              <div className='flex items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0'>
                 {/* checkbox placeholder */}
                 <div className='w-4 shrink-0' />
                 <p className='flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
@@ -329,8 +328,8 @@ export function WorkspaceEnvironmentsTab() {
                   {saveState === 'success' ? 'Saved' : 'Save'}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         ) : (
           <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-gradient-to-b from-background to-card/60'>
             <RocketIdle className='w-36 h-36 opacity-70' />
