@@ -117,6 +117,7 @@ interface NavActions {
   openCollectionTab: (collection: string, section: CollectionSection) => void;
   openWorkspaceTabs: (workspaceId: string, section: WorkspaceTabSection) => void;
   switchWorkspace: (id: string) => Promise<void>;
+  switchCollection: (name: string) => void;
   openTab: (tab: Tab) => void;
   updateCollectionSection: (tabId: string, section: CollectionSection) => void;
 }
@@ -144,7 +145,7 @@ function deriveSegments(
             isActive: s.name === collection,
           }));
         },
-        onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+        onSelect: (item) => nav.switchCollection(item.id),
       },
     };
 
@@ -288,7 +289,7 @@ function deriveSegments(
               isActive: s.name === tab.collectionName,
             }));
           },
-          onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+          onSelect: (item) => nav.switchCollection(item.id),
         },
       },
       {
@@ -356,7 +357,7 @@ function deriveSegments(
               isActive: s.name === tab.collectionName,
             }));
           },
-          onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+          onSelect: (item) => nav.switchCollection(item.id),
         },
       },
       { label: 'Git', icon: <GitBranch className='h-3 w-3' /> },
@@ -377,7 +378,7 @@ function deriveSegments(
               isActive: s.name === collection,
             }));
           },
-          onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+          onSelect: (item) => nav.switchCollection(item.id),
         },
       },
       { label: 'Git', icon: <GitBranch className='h-3 w-3' /> },
@@ -399,7 +400,7 @@ function deriveSegments(
               isActive: s.name === collection,
             }));
           },
-          onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+          onSelect: (item) => nav.switchCollection(item.id),
         },
       },
       { label: 'Git', icon: <GitBranch className='h-3 w-3' /> },
@@ -420,7 +421,7 @@ function deriveSegments(
               isActive: s.name === tab.collectionName,
             }));
           },
-          onSelect: (item) => nav.openCollectionTab(item.id, 'overview'),
+          onSelect: (item) => nav.switchCollection(item.id),
         },
       },
       { label: 'Contracts', icon: <FileLock className='h-3 w-3' /> },
@@ -577,12 +578,13 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
 
   const openCollectionTab = usePaneStore((s) => s.openCollectionTab);
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
+  const switchCollection = usePaneStore((s) => s.switchCollection);
   const openTab = usePaneStore((s) => s.openTab);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
 
   const nav = useMemo<NavActions>(
-    () => ({ openCollectionTab, openWorkspaceTabs, switchWorkspace, openTab, updateCollectionSection }),
-    [openCollectionTab, openWorkspaceTabs, switchWorkspace, openTab, updateCollectionSection],
+    () => ({ openCollectionTab, openWorkspaceTabs, switchWorkspace, switchCollection, openTab, updateCollectionSection }),
+    [openCollectionTab, openWorkspaceTabs, switchWorkspace, switchCollection, openTab, updateCollectionSection],
   );
 
   const segments = useMemo(
