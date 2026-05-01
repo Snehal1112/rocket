@@ -144,7 +144,7 @@ impl RequestExecutionService {
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
     /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
     /// `run_load_test` so resolution logic is never duplicated.
-    fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
+    pub(crate) fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
         // Build variable map: collection < env < folder < request.
         let vars = self.build_variable_context(
             input.collection.as_deref(),
