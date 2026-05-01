@@ -217,7 +217,8 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
       if (safetyTimer) clearTimeout(safetyTimer);
       set({
         status: 'error',
-        error: 'All phases must match the selected workload type. Reset phases or switch the toggle.',
+        error:
+          'All phases must match the selected workload type. Reset phases or switch the toggle.',
       });
       get().stopTest();
       return;

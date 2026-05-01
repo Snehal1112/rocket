@@ -94,7 +94,13 @@ describe('useLoadTestStore', () => {
   });
 
   it('setPhases updates phase list', () => {
-    const newPhases = [{ kind: 'Hold' as const, durationSecs: 60, target: { kind: 'concurrency' as const, value: 5 } }];
+    const newPhases = [
+      {
+        kind: 'Hold' as const,
+        durationSecs: 60,
+        target: { kind: 'concurrency' as const, value: 5 },
+      },
+    ];
     useLoadTestStore.getState().setPhases(newPhases);
     expect(useLoadTestStore.getState().phases).toEqual(newPhases);
   });

@@ -461,9 +461,7 @@ export type PhaseKind = 'RampUp' | 'Hold' | 'RampDown';
 
 export type TargetUnit = 'concurrency' | 'rps';
 
-export type PhaseTarget =
-  | { kind: 'concurrency'; value: number }
-  | { kind: 'rps'; value: number };
+export type PhaseTarget = { kind: 'concurrency'; value: number } | { kind: 'rps'; value: number };
 
 export interface LoadTestPhase {
   kind: PhaseKind;
