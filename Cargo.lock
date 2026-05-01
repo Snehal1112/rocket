@@ -4079,6 +4079,7 @@ dependencies = [
  "rocket-workspace",
  "serde",
  "serde_yaml",
+ "tauri",
  "tempfile",
  "tokio",
  "tracing",

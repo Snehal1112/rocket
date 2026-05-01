@@ -21,6 +21,11 @@ chrono.workspace = true
 ulid.workspace = true
 base64.workspace = true
 reqwest.workspace = true
+tauri = { version = "2", optional = true }
+
+[features]
+default = []
+tauri-events = ["rocket-http/tauri-events", "dep:tauri"]
 
 [dev-dependencies]
 tempfile = "3"
