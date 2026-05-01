@@ -158,8 +158,9 @@ export function LoadTestTab({ request, tabId }: Props) {
       >
         {/* Mode toggle */}
         <div className='flex rounded-md border border-border/60 p-0.5'>
-          <button
-            type='button'
+          <Button
+            variant='ghost'
+            size='sm'
             className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
               mode === 'simple'
                 ? 'bg-muted text-foreground'
@@ -169,9 +170,10 @@ export function LoadTestTab({ request, tabId }: Props) {
             disabled={isRunning}
           >
             Simple
-          </button>
-          <button
-            type='button'
+          </Button>
+          <Button
+            variant='ghost'
+            size='sm'
             className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
               mode === 'advanced'
                 ? 'bg-muted text-foreground'
@@ -181,7 +183,7 @@ export function LoadTestTab({ request, tabId }: Props) {
             disabled={isRunning}
           >
             Advanced
-          </button>
+          </Button>
         </div>
 
         {/* Mode-specific config */}
@@ -231,8 +233,9 @@ export function LoadTestTab({ request, tabId }: Props) {
 
               {/* Workload type — chooses concurrency or rps for all phases */}
               <div className='flex rounded-md border border-border/60 p-0.5'>
-                <button
-                  type='button'
+                <Button
+                  variant='ghost'
+                  size='sm'
                   className={`flex-1 rounded py-1 text-[11px] font-medium transition-colors ${
                     targetUnit === 'concurrency'
                       ? 'bg-muted text-foreground'
@@ -242,9 +245,10 @@ export function LoadTestTab({ request, tabId }: Props) {
                   disabled={isRunning}
                 >
                   Concurrent users
-                </button>
-                <button
-                  type='button'
+                </Button>
+                <Button
+                  variant='ghost'
+                  size='sm'
                   className={`flex-1 rounded py-1 text-[11px] font-medium transition-colors ${
                     targetUnit === 'rps'
                       ? 'bg-muted text-foreground'
@@ -254,7 +258,7 @@ export function LoadTestTab({ request, tabId }: Props) {
                   disabled={isRunning}
                 >
                   Throughput
-                </button>
+                </Button>
               </div>
 
               <PhaseBuilder

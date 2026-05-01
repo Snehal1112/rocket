@@ -25,20 +25,27 @@ export function LiveDashboard() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const latestSnapshot = useLoadTestStore((s) => s.latestSnapshot);
   const phases = useLoadTestStore((s) => s.phases);
+  const targetUnit = useLoadTestStore((s) => s.targetUnit);
 
   const idle = status === 'idle' && timeSeries.length === 0;
 
   const currentPhase = latestSnapshot ? phases[latestSnapshot.currentPhaseIndex] : null;
   const phaseName = currentPhase ? (PHASE_NAMES[currentPhase.kind] ?? currentPhase.kind) : null;
 
-  const totalTarget = phases.reduce((sum, p) => sum + p.target.value * p.durationSecs, 0);
+  const totalDurationMs = phases.reduce((sum, p) => sum + p.durationSecs * 1000, 0);
   const completed = latestSnapshot?.completed ?? 0;
+  const elapsedMs = latestSnapshot?.elapsedMs ?? 0;
   const progressPct =
     status === 'complete'
       ? 100
-      : totalTarget > 0
-        ? Math.min(100, (completed / totalTarget) * 100)
-        : 0;
+      : targetUnit === 'rps'
+        ? (() => {
+            const totalExpected = phases.reduce((sum, p) => sum + p.target.value * p.durationSecs, 0);
+            return totalExpected > 0 ? Math.min(100, (completed / totalExpected) * 100) : 0;
+          })()
+        : totalDurationMs > 0
+          ? Math.min(100, (elapsedMs / totalDurationMs) * 100)
+          : 0;
 
   const logRef = useRef<HTMLDivElement>(null);
   const logHeight = useRef<number>(DEFAULT_LOG_HEIGHT);

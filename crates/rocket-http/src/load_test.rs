@@ -498,7 +498,7 @@ impl RunAccumulator {
             return (0.0, 0.0, 0.0);
         }
         let mut sorted = self.latencies.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.total_cmp(b));
         (
             percentile(&sorted, 50.0),
             percentile(&sorted, 95.0),
@@ -722,7 +722,10 @@ pub async fn run_load_test_v2(
     while loop_start.elapsed() < total_duration {
         // Gate spawn rate by the active mode.
         let owned_permit = match (&semaphore, &rate_driver) {
-            (Some(sem), _) => Some(sem.clone().acquire_owned().await.unwrap()),
+            (Some(sem), _) => {
+                let Ok(permit) = sem.clone().acquire_owned().await else { break };
+                Some(permit)
+            },
             (None, Some(driver)) => {
                 let remaining = total_duration.saturating_sub(loop_start.elapsed());
                 if remaining.is_zero() {
@@ -823,7 +826,7 @@ pub async fn run_load_test_v2(
     let acc = accumulator.lock().await;
 
     let mut sorted_latencies = acc.latencies.clone();
-    sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted_latencies.sort_by(|a, b| a.total_cmp(b));
 
     let total_requests = acc.completed;
     let succeeded = acc.succeeded;
@@ -893,7 +896,7 @@ pub async fn run_load_test(
             }
         }
 
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let Ok(permit) = semaphore.clone().acquire_owned().await else { break };
         let req = request.clone();
         let exec = executor.clone();
         let current_seq = seq;
@@ -978,7 +981,7 @@ pub async fn run_load_test(
 
     let failed = failed_transport + failed_status;
     let total_duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-    latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    latencies.sort_by(|a, b| a.total_cmp(b));
 
     let avg = if latencies.is_empty() {
         0.0
