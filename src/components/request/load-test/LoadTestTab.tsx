@@ -323,10 +323,7 @@ export function LoadTestTab({ request, tabId }: Props) {
               Stop
             </Button>
           ) : (
-            <Button
-              className='w-full bg-chart-4 text-primary-foreground hover:bg-chart-4/80'
-              onClick={() => startTest(request, tabId)}
-            >
+            <Button className='w-full' onClick={() => startTest(request, tabId)}>
               <Play className='mr-2 h-3.5 w-3.5' />
               Run load test
             </Button>
