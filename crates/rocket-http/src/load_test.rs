@@ -1,6 +1,7 @@
 use crate::{HttpExecutor, HttpRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -248,6 +249,324 @@ enum Outcome {
     /// Executor returned Err (connection refused, TLS error, timeout, ...).
     /// No latency sample.
     TransportFail,
+}
+
+struct RunAccumulator {
+    latencies: Vec<f64>,
+    log: RingBuffer<RequestLogEntry>,
+    time_series: Vec<TimeSeriesPoint>,
+    phase_timeline: Vec<PhaseMarker>,
+    succeeded: u32,
+    failed_status: u32,
+    failed_transport: u32,
+    completed: u32,
+    /// Completion timestamps in the last 2 s for rolling RPS.
+    recent_completions: VecDeque<std::time::Instant>,
+}
+
+impl RunAccumulator {
+    fn new(ring_buffer_size: usize) -> Self {
+        Self {
+            latencies: Vec::new(),
+            log: RingBuffer::new(ring_buffer_size),
+            time_series: Vec::new(),
+            phase_timeline: Vec::new(),
+            succeeded: 0,
+            failed_status: 0,
+            failed_transport: 0,
+            completed: 0,
+            recent_completions: VecDeque::new(),
+        }
+    }
+
+    fn record_completion(&mut self, now: std::time::Instant) {
+        let window = std::time::Duration::from_secs(2);
+        while self
+            .recent_completions
+            .front()
+            .map(|t| now.duration_since(*t) > window)
+            .unwrap_or(false)
+        {
+            self.recent_completions.pop_front();
+        }
+        self.recent_completions.push_back(now);
+    }
+
+    fn rolling_rps(&mut self) -> f64 {
+        let now = std::time::Instant::now();
+        let window = std::time::Duration::from_secs(2);
+        while self
+            .recent_completions
+            .front()
+            .map(|t| now.duration_since(*t) > window)
+            .unwrap_or(false)
+        {
+            self.recent_completions.pop_front();
+        }
+        self.recent_completions.len() as f64 / 2.0
+    }
+
+    fn current_percentiles(&self) -> (f64, f64, f64) {
+        if self.latencies.is_empty() {
+            return (0.0, 0.0, 0.0);
+        }
+        let mut sorted = self.latencies.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (
+            percentile(&sorted, 50.0),
+            percentile(&sorted, 95.0),
+            percentile(&sorted, 99.0),
+        )
+    }
+}
+
+/// Phase-aware load test runner with optional Tauri event emission.
+///
+/// Drives a `PhaseScheduler` whose per-second checkpoints reshape semaphore
+/// capacity at phase boundaries, accumulates a `RingBuffer<RequestLogEntry>`,
+/// and (when the `tauri-events` feature is enabled) emits `load_test_progress`
+/// every 250 ms and `load_test_complete` on finish.
+pub async fn run_load_test_v2(
+    executor: Arc<dyn HttpExecutor>,
+    request: &HttpRequest,
+    config: &LoadTestConfigV2,
+    #[cfg(feature = "tauri-events")] app: &AppHandle,
+) -> LoadTestResult {
+    use tokio::time::interval;
+
+    let scheduler = Arc::new(PhaseScheduler::new(config.phases.clone()));
+    let initial_conc = config
+        .phases
+        .first()
+        .map(|p| p.target_concurrency)
+        .unwrap_or(1)
+        .max(1) as usize;
+
+    let semaphore = Arc::new(Semaphore::new(initial_conc));
+    let current_permits = Arc::new(AtomicU32::new(initial_conc as u32));
+    let active_concurrent = Arc::new(AtomicU32::new(0));
+    let accumulator = Arc::new(tokio::sync::Mutex::new(RunAccumulator::new(
+        config.ring_buffer_size,
+    )));
+    let success_rule = config.success_rule.clone();
+    let run_start = std::time::Instant::now();
+
+    // --- Phase scheduler task: rewrites semaphore capacity each second. ---
+    let phase_sem = Arc::clone(&semaphore);
+    let phase_perm = Arc::clone(&current_permits);
+    let checkpoints = scheduler.checkpoints();
+    let phase_handle = tokio::spawn(async move {
+        let phase_start = std::time::Instant::now();
+        for (target_secs, target_conc) in checkpoints {
+            let now_secs = phase_start.elapsed().as_secs();
+            if target_secs > now_secs {
+                tokio::time::sleep(Duration::from_secs(target_secs - now_secs)).await;
+            }
+            let current = phase_perm.load(Ordering::SeqCst);
+            if target_conc > current {
+                phase_sem.add_permits((target_conc - current) as usize);
+                phase_perm.store(target_conc, Ordering::SeqCst);
+            } else if target_conc < current {
+                let to_remove = (current - target_conc) as u32;
+                let sem = Arc::clone(&phase_sem);
+                let perm = Arc::clone(&phase_perm);
+                tokio::spawn(async move {
+                    if let Ok(p) = sem.acquire_many(to_remove).await {
+                        p.forget();
+                        perm.fetch_sub(to_remove, Ordering::SeqCst);
+                    }
+                });
+            }
+        }
+    });
+
+    // --- 250 ms snapshot + event emission task ---
+    let acc_snap = Arc::clone(&accumulator);
+    let active_snap = Arc::clone(&active_concurrent);
+    let scheduler_snap = Arc::clone(&scheduler);
+    #[cfg(feature = "tauri-events")]
+    let app_clone = app.clone();
+
+    let snapshot_handle = tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_millis(250));
+        ticker.tick().await; // skip the immediate first tick at t=0
+        let start = std::time::Instant::now();
+        let mut last_phase: Option<usize> = None;
+
+        loop {
+            ticker.tick().await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let elapsed_secs = elapsed_ms / 1000;
+            let phase_idx = scheduler_snap.phase_index_at(elapsed_secs);
+            let active = active_snap.load(Ordering::SeqCst);
+
+            let mut acc = acc_snap.lock().await;
+            let rps = acc.rolling_rps();
+            let (p50, p95, p99) = acc.current_percentiles();
+
+            if last_phase != Some(phase_idx) {
+                acc.phase_timeline.push(PhaseMarker {
+                    phase_index: phase_idx,
+                    started_at_ms: elapsed_ms,
+                });
+                last_phase = Some(phase_idx);
+            }
+
+            let error_rate = if acc.completed > 0 {
+                (acc.failed_status + acc.failed_transport) as f64 / acc.completed as f64 * 100.0
+            } else {
+                0.0
+            };
+
+            acc.time_series.push(TimeSeriesPoint {
+                elapsed_ms,
+                rps,
+                p50_ms: p50,
+                p95_ms: p95,
+                p99_ms: p99,
+                error_rate_pct: error_rate,
+                active_concurrent: active,
+            });
+
+            #[cfg(feature = "tauri-events")]
+            let event = LoadTestProgressEvent {
+                elapsed_ms,
+                completed: acc.completed,
+                active_concurrent: active,
+                succeeded: acc.succeeded,
+                failed_status: acc.failed_status,
+                failed_transport: acc.failed_transport,
+                requests_per_second: rps,
+                p50_ms: p50,
+                p95_ms: p95,
+                p99_ms: p99,
+                current_phase_index: phase_idx,
+            };
+
+            drop(acc);
+
+            #[cfg(feature = "tauri-events")]
+            {
+                let _ = app_clone.emit("load_test_progress", &event);
+            }
+        }
+    });
+
+    // --- Per-request spawning loop (duration-based) ---
+    let total_duration = Duration::from_secs(config.total_duration_secs() as u64);
+    let loop_start = std::time::Instant::now();
+    let mut seq: u32 = 0;
+    let mut join_handles = Vec::new();
+
+    while loop_start.elapsed() < total_duration {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let req = request.clone();
+        let exec = Arc::clone(&executor);
+        let acc = Arc::clone(&accumulator);
+        let active = Arc::clone(&active_concurrent);
+        let rule = success_rule.clone();
+        let phase_idx = scheduler.phase_index_at(loop_start.elapsed().as_secs());
+        let current_seq = seq;
+        seq += 1;
+
+        let handle = tokio::spawn(async move {
+            active.fetch_add(1, Ordering::SeqCst);
+            let t0 = std::time::Instant::now();
+            let outcome = exec.execute(&req).await;
+            let latency_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let now = std::time::Instant::now();
+
+            let mut acc = acc.lock().await;
+            acc.completed += 1;
+            acc.record_completion(now);
+            match outcome {
+                Ok(resp) => {
+                    acc.latencies.push(latency_ms);
+                    if resp.status < rule.status_below {
+                        acc.succeeded += 1;
+                    } else {
+                        acc.failed_status += 1;
+                    }
+                    acc.log.push(RequestLogEntry {
+                        seq: current_seq,
+                        status: Some(resp.status),
+                        latency_ms,
+                        response_bytes: resp.size_bytes as u64,
+                        error: None,
+                        phase_index: phase_idx,
+                    });
+                }
+                Err(e) => {
+                    acc.failed_transport += 1;
+                    acc.log.push(RequestLogEntry {
+                        seq: current_seq,
+                        status: None,
+                        latency_ms: 0.0,
+                        response_bytes: 0,
+                        error: Some(e.to_string()),
+                        phase_index: phase_idx,
+                    });
+                }
+            }
+            drop(acc);
+            active.fetch_sub(1, Ordering::SeqCst);
+            drop(permit);
+        });
+        join_handles.push(handle);
+    }
+
+    // Wait for in-flight requests to drain.
+    for h in join_handles {
+        let _ = h.await;
+    }
+
+    snapshot_handle.abort();
+    phase_handle.abort();
+
+    let total_duration_ms = run_start.elapsed().as_secs_f64() * 1000.0;
+    let acc = accumulator.lock().await;
+
+    let mut sorted_latencies = acc.latencies.clone();
+    sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let total_requests = acc.completed;
+    let succeeded = acc.succeeded;
+    let failed = acc.failed_status + acc.failed_transport;
+    let rps = if total_duration_ms > 0.0 {
+        total_requests as f64 / (total_duration_ms / 1000.0)
+    } else {
+        0.0
+    };
+
+    let result = LoadTestResult {
+        total_requests,
+        succeeded,
+        failed,
+        failed_status: acc.failed_status,
+        failed_transport: acc.failed_transport,
+        min_latency_ms: sorted_latencies.first().copied().unwrap_or(0.0),
+        avg_latency_ms: if sorted_latencies.is_empty() {
+            0.0
+        } else {
+            sorted_latencies.iter().sum::<f64>() / sorted_latencies.len() as f64
+        },
+        p50_latency_ms: percentile(&sorted_latencies, 50.0),
+        p95_latency_ms: percentile(&sorted_latencies, 95.0),
+        p99_latency_ms: percentile(&sorted_latencies, 99.0),
+        max_latency_ms: sorted_latencies.last().copied().unwrap_or(0.0),
+        requests_per_second: rps,
+        total_duration_ms,
+        phase_timeline: acc.phase_timeline.clone(),
+        request_log: acc.log.snapshot(),
+        time_series: acc.time_series.clone(),
+    };
+
+    #[cfg(feature = "tauri-events")]
+    {
+        let _ = app.emit("load_test_complete", &result);
+    }
+
+    result
 }
 
 /// Fires `config.total_requests` concurrent HTTP requests, bounded by `config.concurrency`,
