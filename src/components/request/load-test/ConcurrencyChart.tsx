@@ -1,12 +1,17 @@
+import { useMemo } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
 export function ConcurrencyChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
-  const data = timeSeries.map((p) => ({
-    t: (p.elapsedMs / 1000).toFixed(1),
-    conc: p.activeConcurrent,
-  }));
+  const data = useMemo(
+    () =>
+      timeSeries.map((p) => ({
+        t: (p.elapsedMs / 1000).toFixed(1),
+        conc: p.activeConcurrent,
+      })),
+    [timeSeries],
+  );
 
   return (
     <div className='flex h-full flex-col'>

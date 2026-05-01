@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
@@ -6,12 +7,16 @@ const BUCKETS = [0, 50, 100, 200, 500, 1000, 2000, 5000];
 export function HistogramChart() {
   const requestLog = useLoadTestStore((s) => s.requestLog);
 
-  const data = BUCKETS.map((lo, i) => {
-    const hi = BUCKETS[i + 1] ?? Infinity;
-    const label = hi === Infinity ? `>${lo}` : `${lo}–${hi}`;
-    const count = requestLog.filter((e) => e.latencyMs >= lo && e.latencyMs < hi).length;
-    return { label, count };
-  });
+  const data = useMemo(
+    () =>
+      BUCKETS.map((lo, i) => {
+        const hi = BUCKETS[i + 1] ?? Infinity;
+        const label = hi === Infinity ? `>${lo}` : `${lo}–${hi}`;
+        const count = requestLog.filter((e) => e.latencyMs >= lo && e.latencyMs < hi).length;
+        return { label, count };
+      }),
+    [requestLog],
+  );
 
   return (
     <div className='flex h-full flex-col'>

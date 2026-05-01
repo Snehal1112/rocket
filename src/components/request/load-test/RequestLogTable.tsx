@@ -1,8 +1,9 @@
+import { useMemo } from 'react';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
 export function RequestLogTable() {
   const requestLog = useLoadTestStore((s) => s.requestLog);
-  const recent = requestLog.slice(-50);
+  const recent = useMemo(() => requestLog.slice(-50), [requestLog]);
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>

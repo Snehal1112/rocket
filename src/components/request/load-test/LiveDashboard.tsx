@@ -1,4 +1,5 @@
 import { useLoadTestStore } from '@/stores/load-test-store';
+import { ConcurrencyChart } from './ConcurrencyChart';
 import { ErrorRateChart } from './ErrorRateChart';
 import { HistogramChart } from './HistogramChart';
 import { LatencyChart } from './LatencyChart';
@@ -20,7 +21,7 @@ export function LiveDashboard() {
         </div>
       ) : (
         <>
-          <div className='grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-2 p-2 pb-0'>
+          <div className='grid min-h-0 flex-1 grid-cols-3 grid-rows-2 gap-2 p-2 pb-0'>
             <div className='rounded-md border border-border/40 bg-background p-2'>
               <LatencyChart />
             </div>
@@ -31,8 +32,12 @@ export function LiveDashboard() {
               <ErrorRateChart />
             </div>
             <div className='rounded-md border border-border/40 bg-background p-2'>
+              <ConcurrencyChart />
+            </div>
+            <div className='rounded-md border border-border/40 bg-background p-2'>
               <HistogramChart />
             </div>
+            <div className='rounded-md border border-border/40 bg-background p-2' />
           </div>
           <div className='h-36 shrink-0 overflow-hidden border-t border-border/40'>
             <RequestLogTable />

@@ -1,12 +1,17 @@
+import { useMemo } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
 export function ErrorRateChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
-  const data = timeSeries.map((p) => ({
-    t: (p.elapsedMs / 1000).toFixed(1),
-    err: +p.errorRatePct.toFixed(2),
-  }));
+  const data = useMemo(
+    () =>
+      timeSeries.map((p) => ({
+        t: (p.elapsedMs / 1000).toFixed(1),
+        err: +p.errorRatePct.toFixed(2),
+      })),
+    [timeSeries],
+  );
 
   return (
     <div className='flex h-full flex-col'>
