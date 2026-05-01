@@ -1,8 +1,96 @@
 use crate::{HttpExecutor, HttpRequest};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+
+#[cfg(feature = "tauri-events")]
+use tauri::{AppHandle, Emitter};
+
+/// Fixed-capacity circular buffer. When full, the oldest entry is overwritten.
+pub struct RingBuffer<T> {
+    inner: VecDeque<T>,
+    capacity: usize,
+}
+
+impl<T: Clone> RingBuffer<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    pub fn push(&mut self, item: T) {
+        if self.inner.len() == self.capacity {
+            self.inner.pop_front();
+        }
+        self.inner.push_back(item);
+    }
+
+    pub fn snapshot(&self) -> Vec<T> {
+        self.inner.iter().cloned().collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+/// Drives phase transitions during a load test. Produces per-second concurrency
+/// checkpoints derived from the phase definitions; the runner polls these to
+/// adjust semaphore permits at phase boundaries.
+pub struct PhaseScheduler {
+    phases: Vec<LoadTestPhase>,
+}
+
+impl PhaseScheduler {
+    pub fn new(phases: Vec<LoadTestPhase>) -> Self {
+        Self { phases }
+    }
+
+    /// Returns one `(elapsed_secs, target_concurrency)` checkpoint per second
+    /// across all phases. RampUp / RampDown linearly interpolate; Hold stays flat.
+    pub fn checkpoints(&self) -> Vec<(u64, u32)> {
+        let mut result = Vec::new();
+        let mut elapsed: u64 = 0;
+        for phase in &self.phases {
+            let start_conc = result.last().map(|(_, c)| *c).unwrap_or(0);
+            let end_conc = phase.target_concurrency;
+            let steps = phase.duration_secs as u64;
+            for step in 1..=steps {
+                let t = elapsed + step;
+                let conc = if phase.kind == PhaseKind::Hold {
+                    end_conc
+                } else {
+                    let progress = step as f64 / steps as f64;
+                    (start_conc as f64 + (end_conc as f64 - start_conc as f64) * progress)
+                        .round() as u32
+                };
+                result.push((t, conc));
+            }
+            elapsed += steps;
+        }
+        result
+    }
+
+    /// Which phase index is active at `elapsed_secs`?
+    pub fn phase_index_at(&self, elapsed_secs: u64) -> usize {
+        let mut boundary: u64 = 0;
+        for (i, phase) in self.phases.iter().enumerate() {
+            boundary += phase.duration_secs as u64;
+            if elapsed_secs < boundary {
+                return i;
+            }
+        }
+        self.phases.len().saturating_sub(1)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -267,6 +355,71 @@ mod tests {
     use async_trait::async_trait;
     use rocket_shared::error::DomainResult;
     use rocket_shared::types::{Auth, HttpMethod};
+
+    #[test]
+    fn ring_buffer_overwrites_when_full() {
+        let mut rb: RingBuffer<u32> = RingBuffer::new(3);
+        rb.push(1);
+        rb.push(2);
+        rb.push(3);
+        rb.push(4); // overwrites 1
+        assert_eq!(rb.snapshot(), vec![2, 3, 4]);
+        assert_eq!(rb.len(), 3);
+    }
+
+    #[test]
+    fn ring_buffer_partial_fill() {
+        let mut rb: RingBuffer<u32> = RingBuffer::new(10);
+        rb.push(42);
+        assert_eq!(rb.snapshot(), vec![42]);
+        assert_eq!(rb.len(), 1);
+    }
+
+    #[test]
+    fn ring_buffer_empty_snapshot() {
+        let rb: RingBuffer<u32> = RingBuffer::new(5);
+        assert_eq!(rb.snapshot(), Vec::<u32>::new());
+        assert!(rb.is_empty());
+    }
+
+    #[test]
+    fn phase_scheduler_hold_checkpoints() {
+        let sched = PhaseScheduler::new(vec![LoadTestPhase {
+            kind: PhaseKind::Hold,
+            duration_secs: 3,
+            target_concurrency: 10,
+        }]);
+        let cps = sched.checkpoints();
+        assert_eq!(cps.len(), 3);
+        assert!(cps.iter().all(|(_, c)| *c == 10));
+    }
+
+    #[test]
+    fn phase_scheduler_rampup_linear() {
+        let sched = PhaseScheduler::new(vec![LoadTestPhase {
+            kind: PhaseKind::RampUp,
+            duration_secs: 4,
+            target_concurrency: 4,
+        }]);
+        let cps = sched.checkpoints();
+        assert_eq!(cps.len(), 4);
+        let concs: Vec<u32> = cps.iter().map(|(_, c)| *c).collect();
+        assert_eq!(concs, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn phase_index_at_correct_boundaries() {
+        let sched = PhaseScheduler::new(vec![
+            LoadTestPhase { kind: PhaseKind::RampUp, duration_secs: 10, target_concurrency: 25 },
+            LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 40, target_concurrency: 25 },
+            LoadTestPhase { kind: PhaseKind::RampDown, duration_secs: 10, target_concurrency: 0 },
+        ]);
+        assert_eq!(sched.phase_index_at(0), 0);
+        assert_eq!(sched.phase_index_at(9), 0);
+        assert_eq!(sched.phase_index_at(10), 1);
+        assert_eq!(sched.phase_index_at(50), 2);
+        assert_eq!(sched.phase_index_at(999), 2);
+    }
 
     struct MockExecutor;
 
