@@ -4,6 +4,109 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum PhaseKind {
+    RampUp,
+    Hold,
+    RampDown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadTestPhase {
+    pub kind: PhaseKind,
+    pub duration_secs: u32,
+    pub target_concurrency: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuccessRule {
+    pub status_below: u16,
+}
+
+impl Default for SuccessRule {
+    fn default() -> Self {
+        Self { status_below: 400 }
+    }
+}
+
+/// Phase-based load test configuration (v2).
+/// The existing flat `LoadTestConfig` is kept for backwards compat with existing tests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadTestConfigV2 {
+    pub phases: Vec<LoadTestPhase>,
+    #[serde(default)]
+    pub success_rule: SuccessRule,
+    #[serde(default = "default_ring_buffer_size")]
+    pub ring_buffer_size: usize,
+}
+
+fn default_ring_buffer_size() -> usize { 5000 }
+
+impl LoadTestConfigV2 {
+    /// Returns the maximum concurrency across all phases.
+    pub fn max_concurrency(&self) -> u32 {
+        self.phases.iter().map(|p| p.target_concurrency).max().unwrap_or(1)
+    }
+
+    /// Returns total planned duration in seconds.
+    pub fn total_duration_secs(&self) -> u32 {
+        self.phases.iter().map(|p| p.duration_secs).sum()
+    }
+}
+
+/// Emitted via Tauri event every 250 ms during a running load test.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadTestProgressEvent {
+    pub elapsed_ms: u64,
+    pub completed: u32,
+    pub active_concurrent: u32,
+    pub succeeded: u32,
+    pub failed_status: u32,
+    pub failed_transport: u32,
+    /// Rolling requests-per-second over the last 2 seconds.
+    pub requests_per_second: f64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub p99_ms: f64,
+    pub current_phase_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeSeriesPoint {
+    pub elapsed_ms: u64,
+    pub rps: f64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub p99_ms: f64,
+    pub error_rate_pct: f64,
+    pub active_concurrent: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogEntry {
+    pub seq: u32,
+    /// `None` means transport-level failure (no HTTP response received).
+    pub status: Option<u16>,
+    pub latency_ms: f64,
+    pub response_bytes: u64,
+    pub error: Option<String>,
+    pub phase_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseMarker {
+    pub phase_index: usize,
+    pub started_at_ms: u64,
+}
+
 /// Configuration for a load test run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +134,12 @@ pub struct LoadTestResult {
     pub max_latency_ms: f64,
     pub requests_per_second: f64,
     pub total_duration_ms: f64,
+    #[serde(default)]
+    pub phase_timeline: Vec<PhaseMarker>,
+    #[serde(default)]
+    pub request_log: Vec<RequestLogEntry>,
+    #[serde(default)]
+    pub time_series: Vec<TimeSeriesPoint>,
 }
 
 /// Returns the value at percentile p (0–100) from a sorted slice.
@@ -145,6 +254,9 @@ pub async fn run_load_test(
             0.0
         },
         total_duration_ms,
+        phase_timeline: vec![],
+        request_log: vec![],
+        time_series: vec![],
     }
 }
 
@@ -367,6 +479,84 @@ mod tests {
             "expected >= 100ms, got {}",
             result.total_duration_ms
         );
+    }
+
+    #[test]
+    fn config_v2_max_concurrency() {
+        let config = LoadTestConfigV2 {
+            phases: vec![
+                LoadTestPhase { kind: PhaseKind::RampUp, duration_secs: 10, target_concurrency: 25 },
+                LoadTestPhase { kind: PhaseKind::Hold,   duration_secs: 40, target_concurrency: 25 },
+                LoadTestPhase { kind: PhaseKind::RampDown, duration_secs: 10, target_concurrency: 0 },
+            ],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 5000,
+        };
+        assert_eq!(config.max_concurrency(), 25);
+        assert_eq!(config.total_duration_secs(), 60);
+    }
+
+    #[test]
+    fn config_v2_empty_phases() {
+        let config = LoadTestConfigV2 {
+            phases: vec![],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 5000,
+        };
+        assert_eq!(config.max_concurrency(), 1);
+        assert_eq!(config.total_duration_secs(), 0);
+    }
+
+    #[test]
+    fn success_rule_default_is_400() {
+        let rule = SuccessRule::default();
+        assert_eq!(rule.status_below, 400);
+    }
+
+    #[test]
+    fn phase_kind_roundtrips_serde() {
+        let json = serde_json::to_string(&PhaseKind::RampUp).unwrap();
+        let back: PhaseKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, PhaseKind::RampUp);
+    }
+
+    #[test]
+    fn request_log_entry_status_none_roundtrips() {
+        let entry = RequestLogEntry {
+            seq: 1,
+            status: None,
+            latency_ms: 0.0,
+            response_bytes: 0,
+            error: Some("connection refused".into()),
+            phase_index: 0,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: RequestLogEntry = serde_json::from_str(&json).unwrap();
+        assert!(back.status.is_none());
+        assert_eq!(back.error.as_deref(), Some("connection refused"));
+    }
+
+    #[test]
+    fn load_test_result_new_fields_default_on_missing() {
+        let json = r#"{
+            "totalRequests": 10,
+            "succeeded": 10,
+            "failed": 0,
+            "failedTransport": 0,
+            "failedStatus": 0,
+            "minLatencyMs": 1.0,
+            "avgLatencyMs": 2.0,
+            "p50LatencyMs": 2.0,
+            "p95LatencyMs": 3.0,
+            "p99LatencyMs": 3.5,
+            "maxLatencyMs": 4.0,
+            "requestsPerSecond": 5.0,
+            "totalDurationMs": 2000.0
+        }"#;
+        let result: LoadTestResult = serde_json::from_str(json).unwrap();
+        assert!(result.phase_timeline.is_empty());
+        assert!(result.request_log.is_empty());
+        assert!(result.time_series.is_empty());
     }
 
     #[tokio::test]

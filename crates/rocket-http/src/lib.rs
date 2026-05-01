@@ -14,7 +14,19 @@ pub use cookie::{Cookie, CookieJar};
 pub use cookie_repository::CookieRepository;
 pub use executor::HttpExecutor;
 pub use jwt::{decode_jwt, JwtClaims};
-pub use load_test::{run_load_test, LoadTestConfig, LoadTestResult};
+pub use load_test::{
+    run_load_test,
+    LoadTestConfig,
+    LoadTestConfigV2,
+    LoadTestPhase,
+    LoadTestProgressEvent,
+    LoadTestResult,
+    PhaseKind,
+    PhaseMarker,
+    RequestLogEntry,
+    SuccessRule,
+    TimeSeriesPoint,
+};
 pub use oauth2::{acquire_token, apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig, OAuthToken};
 pub use request::{HttpRequest, RequestOptions};
 pub use response::HttpResponse;
