@@ -27,7 +27,7 @@ export function HistogramChart() {
             <XAxis dataKey='label' tick={{ fontSize: 9 }} interval='preserveStartEnd' />
             <YAxis tick={{ fontSize: 10 }} width={36} />
             <Tooltip contentStyle={{ fontSize: 11 }} />
-            <Bar dataKey='count' fill='#7F77DD' radius={[2, 2, 0, 0]} />
+            <Bar dataKey='count' fill='hsl(var(--chart-4))' radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

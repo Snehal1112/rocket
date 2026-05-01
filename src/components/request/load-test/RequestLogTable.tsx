@@ -1,4 +1,13 @@
 import { useMemo } from 'react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
 export function RequestLogTable() {
@@ -9,48 +18,59 @@ export function RequestLogTable() {
     <div className='flex h-full flex-col overflow-hidden'>
       <div className='border-b border-border/40 bg-muted/30 px-3 py-1.5'>
         <span className='text-[11px] font-medium text-muted-foreground'>Per-request log</span>
-        <span className='ml-2 text-[10px] font-normal'>showing last 50 of {requestLog.length}</span>
+        <span className='ml-2 text-[10px] font-normal text-muted-foreground'>
+          showing last 50 of {requestLog.length}
+        </span>
       </div>
       <div className='overflow-y-auto'>
-        <table className='w-full text-[11px]'>
-          <thead className='sticky top-0 bg-muted/50'>
-            <tr>
-              <th className='px-3 py-1 text-left font-medium'>#</th>
-              <th className='px-3 py-1 text-left font-medium'>Status</th>
-              <th className='px-3 py-1 text-left font-medium'>Latency</th>
-              <th className='px-3 py-1 text-left font-medium'>Size</th>
-              <th className='px-3 py-1 text-left font-medium'>Phase</th>
-              <th className='px-3 py-1 text-left font-medium'>Error</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className='h-7 text-xs'>#</TableHead>
+              <TableHead className='h-7 text-xs'>Status</TableHead>
+              <TableHead className='h-7 text-xs'>Latency</TableHead>
+              <TableHead className='h-7 text-xs'>Size</TableHead>
+              <TableHead className='h-7 text-xs'>Phase</TableHead>
+              <TableHead className='h-7 text-xs'>Error</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {recent.length === 0 ? (
-              <tr>
-                <td colSpan={6} className='px-3 py-4 text-center text-muted-foreground'>
+              <TableRow>
+                <TableCell colSpan={6} className='py-4 text-center text-xs text-muted-foreground'>
                   No requests yet
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : (
               recent.map((entry) => {
                 const ok = entry.status !== null && entry.status < 400;
                 return (
-                  <tr key={entry.seq} className='border-b border-border/20'>
-                    <td className='px-3 py-1'>{entry.seq}</td>
-                    <td className='px-3 py-1' style={ok ? { color: '#1D9E75' } : undefined}>
-                      <span className={ok ? '' : 'text-destructive'}>{entry.status ?? 'ERR'}</span>
-                    </td>
-                    <td className='px-3 py-1'>{entry.latencyMs.toFixed(1)}ms</td>
-                    <td className='px-3 py-1'>{entry.responseBytes}b</td>
-                    <td className='px-3 py-1'>{entry.phaseIndex}</td>
-                    <td className='max-w-[200px] truncate px-3 py-1 text-muted-foreground'>
+                  <TableRow key={entry.seq}>
+                    <TableCell className='px-3 py-1 text-xs text-muted-foreground'>
+                      {entry.seq}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        'px-3 py-1 text-xs font-medium',
+                        ok ? 'text-chart-2' : 'text-destructive',
+                      )}
+                    >
+                      {entry.status ?? 'ERR'}
+                    </TableCell>
+                    <TableCell className='px-3 py-1 text-xs'>
+                      {entry.latencyMs.toFixed(1)}ms
+                    </TableCell>
+                    <TableCell className='px-3 py-1 text-xs'>{entry.responseBytes}b</TableCell>
+                    <TableCell className='px-3 py-1 text-xs'>{entry.phaseIndex}</TableCell>
+                    <TableCell className='max-w-[200px] truncate px-3 py-1 text-xs text-muted-foreground'>
                       {entry.error ?? '—'}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

@@ -22,7 +22,13 @@ export function ErrorRateChart() {
             <XAxis dataKey='t' tick={{ fontSize: 10 }} interval='preserveStartEnd' />
             <YAxis tick={{ fontSize: 10 }} width={36} domain={[0, 100]} />
             <Tooltip contentStyle={{ fontSize: 11 }} />
-            <Line type='monotone' dataKey='err' stroke='#E24B4A' dot={false} strokeWidth={1.5} />
+            <Line
+              type='monotone'
+              dataKey='err'
+              stroke='hsl(var(--destructive))'
+              dot={false}
+              strokeWidth={1.5}
+            />
           </LineChart>
         </ResponsiveContainer>
       </div>

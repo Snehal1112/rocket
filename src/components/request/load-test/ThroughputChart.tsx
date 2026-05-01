@@ -25,8 +25,8 @@ export function ThroughputChart() {
             <Area
               type='monotone'
               dataKey='rps'
-              stroke='#7F77DD'
-              fill='rgba(127,119,221,0.12)'
+              stroke='hsl(var(--chart-4))'
+              fill='hsl(var(--chart-4) / 0.12)'
               strokeWidth={1.5}
             />
           </AreaChart>

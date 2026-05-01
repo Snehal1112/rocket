@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
 interface StatProps {
@@ -6,11 +7,11 @@ interface StatProps {
   className?: string;
 }
 
-function Stat({ label, value, className = '' }: StatProps) {
+function Stat({ label, value, className }: StatProps) {
   return (
     <div className='rounded-md bg-muted/50 px-3 py-2'>
       <p className='text-[10px] uppercase tracking-wider text-muted-foreground'>{label}</p>
-      <p className={'mt-0.5 text-sm font-medium ' + className}>{value}</p>
+      <p className={cn('mt-0.5 text-sm font-medium', className)}>{value}</p>
     </div>
   );
 }
@@ -63,15 +64,15 @@ export function StatBar() {
   return (
     <div className='grid grid-cols-6 gap-2 border-b border-border/40 bg-background px-3 py-2'>
       <Stat label='Completed' value={String(completed)} />
-      <Stat label='Succeeded' value={String(succeeded)} className='text-[#1D9E75]' />
+      <Stat label='Succeeded' value={String(succeeded)} className='text-chart-2' />
       <Stat
         label='Failed'
         value={String(failed)}
         className={failed > 0 ? 'text-destructive' : ''}
       />
-      <Stat label='Req / sec' value={rps.toFixed(1)} className='text-[#7F77DD]' />
-      <Stat label='p95 latency' value={p95.toFixed(0) + 'ms'} />
-      <Stat label='Elapsed' value={(elapsedMs / 1000).toFixed(1) + 's'} />
+      <Stat label='Req / sec' value={rps.toFixed(1)} className='text-chart-4' />
+      <Stat label='p95 latency' value={`${p95.toFixed(0)}ms`} />
+      <Stat label='Elapsed' value={`${(elapsedMs / 1000).toFixed(1)}s`} />
     </div>
   );
 }

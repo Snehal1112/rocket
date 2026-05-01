@@ -25,12 +25,24 @@ export function LatencyChart() {
             <YAxis tick={{ fontSize: 10 }} width={36} />
             <Tooltip contentStyle={{ fontSize: 11 }} />
             <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-            <Line type='monotone' dataKey='p50' stroke='#7F77DD' dot={false} strokeWidth={1.5} />
-            <Line type='monotone' dataKey='p95' stroke='#1D9E75' dot={false} strokeWidth={1.5} />
+            <Line
+              type='monotone'
+              dataKey='p50'
+              stroke='hsl(var(--chart-4))'
+              dot={false}
+              strokeWidth={1.5}
+            />
+            <Line
+              type='monotone'
+              dataKey='p95'
+              stroke='hsl(var(--chart-2))'
+              dot={false}
+              strokeWidth={1.5}
+            />
             <Line
               type='monotone'
               dataKey='p99'
-              stroke='#E24B4A'
+              stroke='hsl(var(--destructive))'
               strokeDasharray='3 2'
               dot={false}
               strokeWidth={1.5}

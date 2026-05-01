@@ -25,8 +25,8 @@ export function ConcurrencyChart() {
             <Area
               type='monotone'
               dataKey='conc'
-              stroke='#1D9E75'
-              fill='rgba(29,158,117,0.12)'
+              stroke='hsl(var(--chart-2))'
+              fill='hsl(var(--chart-2) / 0.12)'
               strokeWidth={1.5}
             />
           </AreaChart>
