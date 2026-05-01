@@ -1,4 +1,4 @@
-import { Braces, Clock, Loader2, RotateCw, Send, ShieldCheck, Zap } from 'lucide-react';
+import { Braces, Loader2, Send, ShieldCheck, Tag, X, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SingleLineEditor } from '@/components/editor';
@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -28,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
@@ -134,6 +136,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [requestVariables, setRequestVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
   const [requestVarCount, setRequestVarCount] = useState(0);
+  const [tagInput, setTagInput] = useState('');
 
   // Resizable split: request height as percentage.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -381,9 +384,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const expandFull =
     activeSection === 'docs' || activeSection === 'settings' || activeSection === 'load-test';
   // Use safe access in case settings is absent on a request loaded from an older saved state.
-  const settings = request.settings ?? { verifySsl: true, followRedirects: true, timeoutMs: 30000 };
+  const settings = request.settings ?? {
+    verifySsl: true,
+    followRedirects: true,
+    maxRedirects: 5,
+    timeoutMs: 0,
+    encodeUrl: true,
+  };
   const settingsModified =
-    !settings.verifySsl || !settings.followRedirects || settings.timeoutMs !== 30000;
+    !settings.verifySsl ||
+    !settings.followRedirects ||
+    settings.timeoutMs !== 0 ||
+    settings.maxRedirects !== 5 ||
+    !settings.encodeUrl ||
+    (request.tags ?? []).length > 0;
 
   const pathParamMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -521,11 +535,33 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       const current = request.settings ?? {
         verifySsl: true,
         followRedirects: true,
-        timeoutMs: 30000,
+        maxRedirects: 5,
+        timeoutMs: 0,
+        encodeUrl: true,
       };
       updateRequest(tab.id, { settings: { ...current, ...patch } });
     },
     [tab.id, updateRequest, request.settings],
+  );
+
+  const handleAddTag = useCallback(
+    (raw: string) => {
+      const tag = raw.trim().replace(/,/g, '');
+      if (!tag) return;
+      const current = request.tags ?? [];
+      if (current.includes(tag)) return;
+      updateRequest(tab.id, { tags: [...current, tag] });
+      setTagInput('');
+    },
+    [tab.id, updateRequest, request.tags],
+  );
+
+  const handleRemoveTag = useCallback(
+    (tag: string) => {
+      const current = request.tags ?? [];
+      updateRequest(tab.id, { tags: current.filter((t) => t !== tag) });
+    },
+    [tab.id, updateRequest, request.tags],
   );
 
   const handlePathParamsChange = useCallback(
@@ -985,8 +1021,157 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           ))}
         {activeSection === 'settings' && (
           <ScrollArea className='h-full'>
-            <div className='p-6 max-w-3xl mx-auto space-y-4'>
-              {/* Security group. */}
+            <div className='p-6 max-w-2xl mx-auto space-y-4'>
+              {/* Tags */}
+              <Card>
+                <CardContent className='p-4 space-y-3'>
+                  <div className='flex items-center gap-2 mb-1'>
+                    <Tag className='h-3.5 w-3.5 text-muted-foreground' />
+                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
+                      Tags
+                    </span>
+                  </div>
+                  <Input
+                    placeholder='e.g. smoke, regression etc'
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value.replace(/,/g, ''))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ',') {
+                        e.preventDefault();
+                        handleAddTag(tagInput);
+                      }
+                    }}
+                    className='h-8 text-sm'
+                  />
+                  {(request.tags ?? []).length > 0 && (
+                    <div className='flex flex-wrap gap-1.5 pt-0.5'>
+                      {(request.tags ?? []).map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant='secondary'
+                          className='gap-1 pl-2 pr-1 py-0.5 text-xs font-normal'
+                        >
+                          <Tag className='h-2.5 w-2.5 text-muted-foreground' />
+                          {tag}
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon'
+                            onClick={() => handleRemoveTag(tag)}
+                            className='ml-0.5 h-4 w-4 rounded-sm opacity-60 hover:opacity-100'
+                            aria-label={`Remove tag ${tag}`}
+                          >
+                            <X className='h-2.5 w-2.5' />
+                          </Button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Request settings */}
+              <Card>
+                <CardContent className='p-4 space-y-0 divide-y divide-border'>
+                  {/* URL Encoding */}
+                  <div className='flex items-center justify-between py-3'>
+                    <div>
+                      <p className='text-sm font-medium'>URL Encoding</p>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Automatically encode query parameters in the URL
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.encodeUrl}
+                      onCheckedChange={(checked) => handleSettingsChange({ encodeUrl: checked })}
+                    />
+                  </div>
+
+                  {/* Follow Redirects */}
+                  <div className='flex items-center justify-between py-3'>
+                    <div>
+                      <p className='text-sm font-medium'>Automatically Follow Redirects</p>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Follow HTTP redirects automatically
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.followRedirects}
+                      onCheckedChange={(checked) =>
+                        handleSettingsChange({ followRedirects: checked })
+                      }
+                    />
+                  </div>
+
+                  {/* Max Redirects */}
+                  <div className='flex items-center justify-between py-3'>
+                    <div>
+                      <p
+                        className={cn(
+                          'text-sm font-medium',
+                          !settings.followRedirects && 'text-muted-foreground',
+                        )}
+                      >
+                        Max Redirects
+                      </p>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Set a limit for the number of redirects to follow
+                      </p>
+                    </div>
+                    <Input
+                      type='number'
+                      min={0}
+                      disabled={!settings.followRedirects}
+                      className='h-8 w-24 text-sm text-right tabular-nums'
+                      value={settings.maxRedirects}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (!Number.isNaN(val) && val >= 0) {
+                          handleSettingsChange({ maxRedirects: val });
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Timeout */}
+                  <div className='flex items-center justify-between py-3'>
+                    <div>
+                      <p className='text-sm font-medium'>Timeout (ms)</p>
+                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
+                        Set maximum time to wait before aborting the request
+                      </p>
+                    </div>
+                    <div className='flex items-center gap-1.5'>
+                      <Input
+                        type='number'
+                        min={0}
+                        className='h-8 w-24 text-sm text-right tabular-nums'
+                        value={settings.timeoutMs}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (!Number.isNaN(val) && val >= 0) {
+                            handleSettingsChange({ timeoutMs: val });
+                          }
+                        }}
+                      />
+                      {settings.timeoutMs > 0 && (
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon'
+                          onClick={() => handleSettingsChange({ timeoutMs: 0 })}
+                          className='h-6 w-6 text-muted-foreground hover:text-foreground'
+                          aria-label='Clear timeout'
+                        >
+                          <X className='h-3.5 w-3.5' />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Security */}
               <Card>
                 <CardContent className='p-4 space-y-3'>
                   <div className='flex items-center gap-2 mb-1'>
@@ -1011,65 +1196,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                       </p>
                     </div>
                   </label>
-                </CardContent>
-              </Card>
-
-              {/* Connection group. */}
-              <Card>
-                <CardContent className='p-4 space-y-3'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    <RotateCw className='h-3.5 w-3.5 text-muted-foreground' />
-                    <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
-                      Connection
-                    </span>
-                  </div>
-                  <label
-                    htmlFor='follow-redirects'
-                    className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1 cursor-pointer transition-colors hover:bg-muted/60'
-                  >
-                    <Checkbox
-                      id='follow-redirects'
-                      checked={settings.followRedirects}
-                      onCheckedChange={(checked) =>
-                        handleSettingsChange({ followRedirects: !!checked })
-                      }
-                    />
-                    <div>
-                      <span className='text-sm'>Follow redirects</span>
-                      <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                        Automatically follow HTTP 3xx redirects.
-                      </p>
-                    </div>
-                  </label>
-                  <div className='flex items-center gap-2.5 rounded-md px-2 py-1.5 -mx-1'>
-                    <Clock className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-                    <div className='flex items-center gap-2.5 flex-1'>
-                      <div className='flex-1'>
-                        <label htmlFor='timeout-ms' className='text-sm'>
-                          Timeout
-                        </label>
-                        <p className='text-[11px] text-muted-foreground leading-tight mt-0.5'>
-                          Max wait time before aborting the request.
-                        </p>
-                      </div>
-                      <div className='flex items-center gap-1.5'>
-                        <Input
-                          id='timeout-ms'
-                          type='number'
-                          min={0}
-                          className='h-7 w-24 text-xs text-right tabular-nums'
-                          value={settings.timeoutMs}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            if (!Number.isNaN(val) && val >= 0) {
-                              handleSettingsChange({ timeoutMs: val });
-                            }
-                          }}
-                        />
-                        <span className='text-[11px] text-muted-foreground'>ms</span>
-                      </div>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1134,44 +1260,50 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       <div ref={containerRef} className='flex h-full flex-col overflow-hidden bg-transparent'>
         {urlBar}
         <div className='flex flex-1 min-h-0'>
-          {/* Request side */}
+          {/* Request side — full width when response is suppressed. */}
           <div
             className='flex flex-col overflow-hidden bg-card min-w-[20%] max-w-[80%]'
-            style={{ width: `${requestWidth}%` }}
+            style={{ width: expandFull ? '100%' : `${requestWidth}%` }}
           >
             {sectionTabs}
           </div>
 
-          {/* Vertical separator */}
-          {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
-          <div
-            role='separator'
-            tabIndex={0}
-            aria-orientation='vertical'
-            aria-label='Resize request and response panels'
-            aria-valuemin={20}
-            aria-valuemax={80}
-            aria-valuenow={Math.round(requestWidth)}
-            onPointerDown={handleVerticalSeparatorDown}
-            onKeyDown={handleVerticalSeparatorKeyDown}
-            className={cn(
-              'w-3 flex items-center justify-center cursor-col-resize select-none border-x transition-colors',
-              'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
-              isDragging
-                ? 'bg-primary/15 border-primary/50'
-                : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
-            )}
-          >
-            <div
-              className={cn(
-                'rounded-full transition-all',
-                isDragging ? 'h-24 w-1.5 bg-primary' : 'h-16 w-1 bg-muted-foreground/40',
-              )}
-            />
-          </div>
+          {!expandFull && (
+            <>
+              {/* Vertical separator */}
+              {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
+              <div
+                role='separator'
+                tabIndex={0}
+                aria-orientation='vertical'
+                aria-label='Resize request and response panels'
+                aria-valuemin={20}
+                aria-valuemax={80}
+                aria-valuenow={Math.round(requestWidth)}
+                onPointerDown={handleVerticalSeparatorDown}
+                onKeyDown={handleVerticalSeparatorKeyDown}
+                className={cn(
+                  'w-3 flex items-center justify-center cursor-col-resize select-none border-x transition-colors',
+                  'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
+                  isDragging
+                    ? 'bg-primary/15 border-primary/50'
+                    : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
+                )}
+              >
+                <div
+                  className={cn(
+                    'rounded-full transition-all',
+                    isDragging ? 'h-24 w-1.5 bg-primary' : 'h-16 w-1 bg-muted-foreground/40',
+                  )}
+                />
+              </div>
 
-          {/* Response side */}
-          <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>{responseArea}</div>
+              {/* Response side */}
+              <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>
+                {responseArea}
+              </div>
+            </>
+          )}
         </div>
         {dialogs}
       </div>
