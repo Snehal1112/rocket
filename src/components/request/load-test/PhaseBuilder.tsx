@@ -27,6 +27,12 @@ const KIND_COLORS: Record<PhaseKind, string> = {
 export function PhaseBuilder({ phases, onChange, disabled }: Props) {
   const dragIndex = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const phaseIds = useRef<string[]>([]);
+  // Keep phaseIds in sync with phases length.
+  while (phaseIds.current.length < phases.length) {
+    phaseIds.current.push(crypto.randomUUID());
+  }
+  phaseIds.current = phaseIds.current.slice(0, phases.length);
 
   const update = (index: number, patch: Partial<LoadTestPhase>) => {
     onChange(phases.map((p, i) => (i === index ? { ...p, ...patch } : p)));
@@ -72,10 +78,9 @@ export function PhaseBuilder({ phases, onChange, disabled }: Props) {
   return (
     <div className='flex flex-col gap-2'>
       {phases.map((phase, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: phases are ordered and edited in place.
         // biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop reorder handle
         <div
-          key={i}
+          key={phaseIds.current[i]}
           draggable={!disabled}
           onDragStart={() => handleDragStart(i)}
           onDragOver={(e) => handleDragOver(e, i)}
