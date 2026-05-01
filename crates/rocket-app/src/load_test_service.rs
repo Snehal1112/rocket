@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use rocket_http::{run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestResult};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
 
@@ -18,6 +18,15 @@ impl LoadTestService {
         config: LoadTestConfigV2,
         app: Option<&tauri::AppHandle>,
     ) -> DomainResult<LoadTestResult> {
+        if !config.has_uniform_target_unit() {
+            return Err(DomainError::InvalidInput(
+                "Load test phases must all use the same target unit \
+                 (either all concurrency-based or all rps-based). \
+                 Mixing units in a single run is not supported."
+                    .into(),
+            ));
+        }
+
         let resolved = execution_service.resolve_request(&input)?;
         let result = run_load_test_v2(executor, &resolved, &config, app).await;
         Ok(result)
@@ -36,7 +45,7 @@ mod tests {
     use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
     use rocket_http::{
         CookieJar, CookieRepository, HttpRequest, HttpResponse, LoadTestPhase, PhaseKind,
-        RequestOptions, SuccessRule,
+        PhaseTarget, RequestOptions, SuccessRule,
     };
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
@@ -303,7 +312,7 @@ mod tests {
             phases: vec![LoadTestPhase {
                 kind: PhaseKind::Hold,
                 duration_secs: 1,
-                target_concurrency: 1,
+                target: PhaseTarget::Concurrency(1),
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
@@ -326,5 +335,32 @@ mod tests {
         // The URL captured by the executor proves variable resolution happened.
         let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
         assert_eq!(url, "https://auth.local/api/data");
+    }
+
+    #[test]
+    fn mixed_unit_config_validation() {
+        // Verify the validation method that the service uses returns false
+        // for mixed-unit configs. We don't actually run() here because that
+        // requires wiring the full RequestExecutionService — see the existing
+        // integration test in this file for the full setup pattern.
+        use rocket_http::{LoadTestConfigV2, LoadTestPhase, PhaseKind, PhaseTarget, SuccessRule};
+
+        let mixed = LoadTestConfigV2 {
+            phases: vec![
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 5,
+                    target: PhaseTarget::Concurrency(10),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 5,
+                    target: PhaseTarget::Rps(50),
+                },
+            ],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 100,
+        };
+        assert!(!mixed.has_uniform_target_unit());
     }
 }

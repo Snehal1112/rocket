@@ -1,4 +1,4 @@
-import { Activity, GripVertical, Play, ShieldCheck, Square } from 'lucide-react';
+import { Activity, GripVertical, Play, Settings, Square } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,7 +22,7 @@ interface Props {
 
 function SectionHeader({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
   return (
-    <div className='flex items-center gap-2 mb-1'>
+    <div className='mb-1 flex items-center gap-2'>
       <Icon className='h-3.5 w-3.5 text-muted-foreground' />
       <span className='text-[11px] font-medium uppercase tracking-wider text-muted-foreground'>
         {label}
@@ -31,13 +31,67 @@ function SectionHeader({ icon: Icon, label }: { icon: React.ElementType; label: 
   );
 }
 
+function IntegerField({
+  id,
+  label,
+  value,
+  min,
+  disabled,
+  optional,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number | undefined;
+  min?: number;
+  disabled: boolean;
+  optional?: boolean;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <div className='flex flex-col gap-1.5'>
+      <Label htmlFor={id} className='text-xs'>
+        {label}
+      </Label>
+      <Input
+        id={id}
+        type='number'
+        step={1}
+        min={min}
+        value={value ?? ''}
+        placeholder={optional ? 'None' : undefined}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (optional && raw === '') {
+            onChange(undefined);
+          } else {
+            const n = Math.floor(Number(raw));
+            if (!Number.isNaN(n)) onChange(n);
+          }
+        }}
+        disabled={disabled}
+        className='h-7 text-xs'
+      />
+    </div>
+  );
+}
+
 export function LoadTestTab({ request, tabId }: Props) {
+  const mode = useLoadTestStore((s) => s.mode);
+  const simpleConfig = useLoadTestStore((s) => s.simpleConfig);
   const phases = useLoadTestStore((s) => s.phases);
+  const targetUnit = useLoadTestStore((s) => s.targetUnit);
   const successStatusBelow = useLoadTestStore((s) => s.successStatusBelow);
+  const ringBufferSize = useLoadTestStore((s) => s.ringBufferSize);
   const status = useLoadTestStore((s) => s.status);
   const error = useLoadTestStore((s) => s.error);
+
+  const setMode = useLoadTestStore((s) => s.setMode);
+  const setSimpleConfig = useLoadTestStore((s) => s.setSimpleConfig);
   const setPhases = useLoadTestStore((s) => s.setPhases);
+  const setTargetUnit = useLoadTestStore((s) => s.setTargetUnit);
   const setSuccessStatusBelow = useLoadTestStore((s) => s.setSuccessStatusBelow);
+  const setRingBufferSize = useLoadTestStore((s) => s.setRingBufferSize);
   const startTest = useLoadTestStore((s) => s.startTest);
   const stopTest = useLoadTestStore((s) => s.stopTest);
 
@@ -49,7 +103,6 @@ export function LoadTestTab({ request, tabId }: Props) {
   const onMoveRef = useRef<((ev: MouseEvent) => void) | null>(null);
   const onUpRef = useRef<(() => void) | null>(null);
 
-  // Apply persisted width on mount.
   useEffect(() => {
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     if (saved) {
@@ -61,7 +114,6 @@ export function LoadTestTab({ request, tabId }: Props) {
     }
   }, []);
 
-  // Remove any dangling drag listeners when the component unmounts.
   useEffect(() => {
     return () => {
       if (onMoveRef.current) window.removeEventListener('mousemove', onMoveRef.current);
@@ -104,9 +156,121 @@ export function LoadTestTab({ request, tabId }: Props) {
         style={{ width: DEFAULT_WIDTH }}
         className='flex shrink-0 flex-col gap-3 overflow-y-auto bg-background p-3'
       >
+        {/* Mode toggle */}
+        <div className='flex rounded-md border border-border/60 p-0.5'>
+          <button
+            type='button'
+            className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
+              mode === 'simple'
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => setMode('simple')}
+            disabled={isRunning}
+          >
+            Simple
+          </button>
+          <button
+            type='button'
+            className={`flex-1 rounded py-1 text-xs font-medium transition-colors ${
+              mode === 'advanced'
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => setMode('advanced')}
+            disabled={isRunning}
+          >
+            Advanced
+          </button>
+        </div>
+
+        {/* Mode-specific config */}
+        {mode === 'simple' ? (
+          <Card>
+            <CardContent className='space-y-3 p-3'>
+              <SectionHeader icon={Settings} label='Configuration' />
+              <IntegerField
+                id='concurrency'
+                label='Concurrency'
+                value={simpleConfig.concurrency}
+                min={1}
+                disabled={isRunning}
+                onChange={(v) => setSimpleConfig({ concurrency: v ?? 1 })}
+              />
+              <IntegerField
+                id='total-requests'
+                label='Total requests'
+                value={simpleConfig.totalRequests}
+                min={1}
+                disabled={isRunning}
+                onChange={(v) => setSimpleConfig({ totalRequests: v ?? 1 })}
+              />
+              <IntegerField
+                id='interval-ms'
+                label='Delay between (ms)'
+                value={simpleConfig.intervalMs}
+                min={0}
+                disabled={isRunning}
+                onChange={(v) => setSimpleConfig({ intervalMs: v ?? 0 })}
+              />
+              <IntegerField
+                id='duration-cap'
+                label='Duration cap (s)'
+                value={simpleConfig.durationCapSecs}
+                min={1}
+                disabled={isRunning}
+                optional
+                onChange={(v) => setSimpleConfig({ durationCapSecs: v })}
+              />
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className='space-y-2 p-3'>
+              <SectionHeader icon={Activity} label='Ramp-up phases' />
+
+              {/* Workload type — chooses concurrency or rps for all phases */}
+              <div className='flex rounded-md border border-border/60 p-0.5'>
+                <button
+                  type='button'
+                  className={`flex-1 rounded py-1 text-[11px] font-medium transition-colors ${
+                    targetUnit === 'concurrency'
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setTargetUnit('concurrency')}
+                  disabled={isRunning}
+                >
+                  Concurrent users
+                </button>
+                <button
+                  type='button'
+                  className={`flex-1 rounded py-1 text-[11px] font-medium transition-colors ${
+                    targetUnit === 'rps'
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setTargetUnit('rps')}
+                  disabled={isRunning}
+                >
+                  Throughput
+                </button>
+              </div>
+
+              <PhaseBuilder
+                phases={phases}
+                onChange={setPhases}
+                disabled={isRunning}
+                unit={targetUnit}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Configuration — always visible */}
         <Card>
-          <CardContent className='p-3 space-y-2'>
-            <SectionHeader icon={ShieldCheck} label='Success rule' />
+          <CardContent className='space-y-3 p-3'>
+            <SectionHeader icon={Settings} label='Configuration' />
             <div className='flex flex-col gap-1.5'>
               <Label htmlFor='success-status-below' className='text-xs'>
                 Success if status &lt;
@@ -122,17 +286,31 @@ export function LoadTestTab({ request, tabId }: Props) {
                 className='h-7 text-xs'
               />
             </div>
+            {mode === 'advanced' && (
+              <div className='flex flex-col gap-1.5'>
+                <Label htmlFor='ring-buffer-size' className='text-xs'>
+                  Request log size
+                </Label>
+                <Input
+                  id='ring-buffer-size'
+                  type='number'
+                  min={100}
+                  max={100000}
+                  step={100}
+                  value={ringBufferSize}
+                  onChange={(e) => {
+                    const n = Math.floor(Number(e.target.value));
+                    if (!Number.isNaN(n) && n > 0) setRingBufferSize(n);
+                  }}
+                  disabled={isRunning}
+                  className='h-7 text-xs'
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className='p-3 space-y-2'>
-            <SectionHeader icon={Activity} label='Ramp-up phases' />
-            <PhaseBuilder phases={phases} onChange={setPhases} disabled={isRunning} />
-          </CardContent>
-        </Card>
-
-        {error && <p className='text-[11px] text-destructive px-1'>{error}</p>}
+        {error && <p className='px-1 text-[11px] text-destructive'>{error}</p>}
 
         <div className='mt-auto flex flex-col gap-2'>
           {isRunning ? (
@@ -155,7 +333,7 @@ export function LoadTestTab({ request, tabId }: Props) {
 
       {/* Drag handle */}
       <div
-        className='w-[5px] shrink-0 cursor-col-resize border-l border-r border-border/40 bg-transparent hover:bg-border/40 transition-colors flex items-center justify-center'
+        className='flex w-[5px] shrink-0 cursor-col-resize items-center justify-center border-l border-r border-border/40 bg-transparent transition-colors hover:bg-border/40'
         onMouseDown={handleResizeStart}
         aria-hidden='true'
       >

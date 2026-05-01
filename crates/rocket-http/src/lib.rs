@@ -24,8 +24,10 @@ pub use load_test::{
     LoadTestResult,
     PhaseKind,
     PhaseMarker,
+    PhaseTarget,
     RequestLogEntry,
     SuccessRule,
+    TargetUnit,
     TimeSeriesPoint,
 };
 pub use oauth2::{acquire_token, apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig, OAuthToken};

@@ -20,17 +20,18 @@ const MIN_LOG_HEIGHT = 72;
 const MAX_LOG_HEIGHT = 400;
 
 export function LiveDashboard() {
+  const mode = useLoadTestStore((s) => s.mode);
   const status = useLoadTestStore((s) => s.status);
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const latestSnapshot = useLoadTestStore((s) => s.latestSnapshot);
   const phases = useLoadTestStore((s) => s.phases);
+
   const idle = status === 'idle' && timeSeries.length === 0;
 
   const currentPhase = latestSnapshot ? phases[latestSnapshot.currentPhaseIndex] : null;
   const phaseName = currentPhase ? (PHASE_NAMES[currentPhase.kind] ?? currentPhase.kind) : null;
 
-  // Total target requests across all phases for progress calculation.
-  const totalTarget = phases.reduce((sum, p) => sum + p.targetConcurrency * p.durationSecs, 0);
+  const totalTarget = phases.reduce((sum, p) => sum + p.target.value * p.durationSecs, 0);
   const completed = latestSnapshot?.completed ?? 0;
   const progressPct =
     status === 'complete'
@@ -68,7 +69,6 @@ export function LiveDashboard() {
     const startH = logHeight.current;
 
     const onMove = (ev: MouseEvent) => {
-      // Dragging up increases height (log grows upward).
       const next = Math.min(
         MAX_LOG_HEIGHT,
         Math.max(MIN_LOG_HEIGHT, startH - (ev.clientY - startY)),
@@ -91,14 +91,30 @@ export function LiveDashboard() {
     window.addEventListener('mouseup', onUp);
   };
 
+  const isSimpleIdle = mode === 'simple' && status === 'idle';
+  const isAdvancedIdle = mode === 'advanced' && idle;
+
   return (
     <div className='flex h-full min-h-0 flex-col'>
       <StatBar />
 
-      {idle ? (
+      {isSimpleIdle || isAdvancedIdle ? (
         <div className='flex flex-1 items-center justify-center text-sm text-muted-foreground'>
-          Configure phases and click Run load test to start.
+          Configure and click Run load test to start.
         </div>
+      ) : mode === 'simple' ? (
+        <>
+          {status === 'running' && (
+            <div className='flex flex-1 items-center justify-center text-sm text-muted-foreground'>
+              Test running…
+            </div>
+          )}
+          {status !== 'running' && (
+            <div className='min-h-0 flex-1 overflow-hidden'>
+              <RequestLogTable />
+            </div>
+          )}
+        </>
       ) : (
         <>
           {/* Progress bar */}
@@ -118,7 +134,7 @@ export function LiveDashboard() {
             )}
           </div>
 
-          {/* 2×2 + concurrency chart grid (5 charts, 2 cols, 3 rows with last row spanning) */}
+          {/* 5-chart grid */}
           <div className='grid min-h-0 flex-1 grid-cols-2 grid-rows-[1fr_1fr_1fr] gap-2 p-2 pb-0'>
             <div className='rounded-md border border-border/40 bg-background p-2'>
               <LatencyChart />
@@ -146,7 +162,7 @@ export function LiveDashboard() {
           <div
             ref={logRef}
             className='shrink-0 overflow-hidden border-t border-border/40'
-            style={{ height: DEFAULT_LOG_HEIGHT }}
+            style={{ height: logHeight.current }}
           >
             <RequestLogTable />
           </div>

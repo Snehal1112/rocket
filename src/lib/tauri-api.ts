@@ -433,6 +433,7 @@ export interface LoadTestConfig {
   concurrency: number;
   totalRequests: number;
   intervalMs: number;
+  durationCapSecs?: number;
 }
 
 export interface LoadTestResult {
@@ -458,10 +459,16 @@ export interface LoadTestResult {
 
 export type PhaseKind = 'RampUp' | 'Hold' | 'RampDown';
 
+export type TargetUnit = 'concurrency' | 'rps';
+
+export type PhaseTarget =
+  | { kind: 'concurrency'; value: number }
+  | { kind: 'rps'; value: number };
+
 export interface LoadTestPhase {
   kind: PhaseKind;
   durationSecs: number;
-  targetConcurrency: number;
+  target: PhaseTarget;
 }
 
 export interface SuccessRule {
@@ -486,6 +493,7 @@ export interface LoadTestProgressEvent {
   p95Ms: number;
   p99Ms: number;
   currentPhaseIndex: number;
+  recentLog: RequestLogEntry[];
 }
 
 export interface TimeSeriesPoint {

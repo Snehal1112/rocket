@@ -20,8 +20,17 @@ export function StatBar() {
   const latestSnapshot = useLoadTestStore((s) => s.latestSnapshot);
   const status = useLoadTestStore((s) => s.status);
   const result = useLoadTestStore((s) => s.result);
+  const targetUnit = useLoadTestStore((s) => s.targetUnit);
+  const phases = useLoadTestStore((s) => s.phases);
 
+  // Prefer final result when complete; fall back to live snapshot during advanced run.
   const src = status === 'complete' && result ? result : latestSnapshot;
+
+  const phaseIndex = latestSnapshot?.currentPhaseIndex ?? 0;
+  const targetRps =
+    targetUnit === 'rps' && phases[phaseIndex]?.target.kind === 'rps'
+      ? phases[phaseIndex].target.value
+      : null;
 
   if (!src) {
     return (
@@ -38,28 +47,12 @@ export function StatBar() {
 
   const isSnapshot = 'elapsedMs' in src;
 
-  let completed: number;
-  let succeeded: number;
-  let failed: number;
-  let rps: number;
-  let p95: number;
-  let elapsedMs: number;
-
-  if (isSnapshot) {
-    completed = src.completed;
-    succeeded = src.succeeded;
-    failed = src.failedStatus + src.failedTransport;
-    rps = src.requestsPerSecond;
-    p95 = src.p95Ms;
-    elapsedMs = src.elapsedMs;
-  } else {
-    completed = src.totalRequests;
-    succeeded = src.succeeded;
-    failed = src.failed;
-    rps = src.requestsPerSecond;
-    p95 = src.p95LatencyMs;
-    elapsedMs = src.totalDurationMs;
-  }
+  const completed = isSnapshot ? src.completed : src.totalRequests;
+  const succeeded = src.succeeded;
+  const failed = isSnapshot ? src.failedStatus + src.failedTransport : src.failed;
+  const rps = isSnapshot ? src.requestsPerSecond : src.requestsPerSecond;
+  const p95 = isSnapshot ? src.p95Ms : src.p95LatencyMs;
+  const elapsedMs = isSnapshot ? src.elapsedMs : src.totalDurationMs;
 
   return (
     <div className='grid grid-cols-6 gap-2 border-b border-border/40 bg-background px-3 py-2'>
@@ -70,7 +63,11 @@ export function StatBar() {
         value={String(failed)}
         className={failed > 0 ? 'text-destructive' : ''}
       />
-      <Stat label='Req / sec' value={rps.toFixed(1)} className='text-chart-4' />
+      <Stat
+        label='Req / sec'
+        value={targetRps !== null ? `${rps.toFixed(1)} / ${targetRps}` : rps.toFixed(1)}
+        className='text-chart-4'
+      />
       <Stat label='p95 latency' value={`${p95.toFixed(0)}ms`} />
       <Stat label='Elapsed' value={`${(elapsedMs / 1000).toFixed(1)}s`} />
     </div>

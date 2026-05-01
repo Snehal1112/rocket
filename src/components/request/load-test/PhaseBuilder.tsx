@@ -10,12 +10,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { LoadTestPhase, PhaseKind } from '@/lib/tauri-api';
+import type { LoadTestPhase, PhaseKind, TargetUnit } from '@/lib/tauri-api';
 
 interface Props {
   phases: LoadTestPhase[];
   onChange: (phases: LoadTestPhase[]) => void;
   disabled?: boolean;
+  unit: TargetUnit;
 }
 
 const KIND_COLORS: Record<PhaseKind, string> = {
@@ -24,7 +25,7 @@ const KIND_COLORS: Record<PhaseKind, string> = {
   RampDown: 'hsl(var(--destructive))',
 };
 
-export function PhaseBuilder({ phases, onChange, disabled }: Props) {
+export function PhaseBuilder({ phases, onChange, disabled, unit }: Props) {
   const dragIndex = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const phaseIds = useRef<string[]>([]);
@@ -43,7 +44,11 @@ export function PhaseBuilder({ phases, onChange, disabled }: Props) {
   };
 
   const addPhase = () => {
-    onChange([...phases, { kind: 'Hold', durationSecs: 30, targetConcurrency: 10 }]);
+    const target =
+      unit === 'rps'
+        ? { kind: 'rps' as const, value: 50 }
+        : { kind: 'concurrency' as const, value: 10 };
+    onChange([...phases, { kind: 'Hold', durationSecs: 30, target }]);
   };
 
   const handleDragStart = (index: number) => {
@@ -141,17 +146,31 @@ export function PhaseBuilder({ phases, onChange, disabled }: Props) {
             </div>
             <div className='flex flex-col gap-1'>
               <Label className='text-[10px] uppercase tracking-wider text-muted-foreground'>
-                Concurrency
+                {phase.target.kind === 'rps' ? 'Rate' : 'Concurrency'}
               </Label>
-              <Input
-                type='number'
-                min={0}
-                value={phase.targetConcurrency}
-                onChange={(e) => update(i, { targetConcurrency: Number(e.target.value) })}
-                disabled={disabled}
-                className='h-6 text-xs'
-                aria-label='Target concurrency'
-              />
+              <div className='flex items-center gap-1'>
+                <Input
+                  type='number'
+                  min={0}
+                  value={phase.target.value}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (Number.isNaN(value)) return;
+                    update(i, {
+                      target:
+                        phase.target.kind === 'rps'
+                          ? { kind: 'rps', value }
+                          : { kind: 'concurrency', value },
+                    });
+                  }}
+                  disabled={disabled}
+                  className='h-6 text-xs'
+                  aria-label='Target value'
+                />
+                <span className='text-[10px] text-muted-foreground whitespace-nowrap'>
+                  {phase.target.kind === 'rps' ? 'req/sec' : 'users'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
