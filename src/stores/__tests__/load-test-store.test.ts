@@ -21,23 +21,6 @@ const MOCK_RESULT = {
 };
 
 vi.mock('@/lib/tauri-api', () => ({
-  runLoadTest: vi.fn().mockResolvedValue({
-    totalRequests: 10,
-    succeeded: 10,
-    failed: 0,
-    failedTransport: 0,
-    failedStatus: 0,
-    minLatencyMs: 5,
-    avgLatencyMs: 10,
-    p50LatencyMs: 10,
-    p95LatencyMs: 15,
-    p99LatencyMs: 18,
-    maxLatencyMs: 20,
-    requestsPerSecond: 50,
-    totalDurationMs: 200,
-    requestLog: [],
-    timeSeries: [],
-  }),
   runLoadTestV2: vi.fn().mockResolvedValue(undefined),
   exportLoadTest: vi.fn().mockResolvedValue(['base64data==', 'json']),
 }));
@@ -133,22 +116,120 @@ describe('useLoadTestStore', () => {
     expect(state.phases.every((p) => p.target.kind === 'concurrency')).toBe(true);
   });
 
-  it('startTest in simple mode transitions to complete with result', async () => {
-    useLoadTestStore.getState().setMode('simple');
-    const fakeRequest = {
-      method: 'GET',
-      url: 'http://test.local',
-      headers: [],
-      queryParams: [],
-      pathParams: [],
-      body: { bodyType: 'none' },
-      auth: { authType: 'none' },
-      settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
-    } as unknown as RequestState;
+  describe('startTest — simple mode', () => {
+    it('calls runLoadTestV2 when mode is simple', async () => {
+      const { runLoadTestV2 } = await import('@/lib/tauri-api');
+      useLoadTestStore.getState().setMode('simple');
+      const fakeRequest = {
+        method: 'GET',
+        url: 'http://test.local',
+        headers: [],
+        queryParams: [],
+        pathParams: [],
+        body: { bodyType: 'none' },
+        auth: { authType: 'none' },
+        settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      } as unknown as RequestState;
 
-    await useLoadTestStore.getState().startTest(fakeRequest, 'tab-1');
-    const state = useLoadTestStore.getState();
-    expect(state.status).toBe('complete');
-    expect(state.result?.totalRequests).toBe(10);
+      await useLoadTestStore.getState().startTest(fakeRequest, 'tab-1');
+
+      expect(runLoadTestV2).toHaveBeenCalled();
+    });
+
+    it('populates requestLog from load_test_complete event in simple mode', async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const listenMock = vi.mocked(listen);
+
+      const sampleLog = [
+        { seq: 0, status: 200, latencyMs: 12.5, responseBytes: 128, error: null, phaseIndex: 0 },
+        { seq: 1, status: 404, latencyMs: 8.0, responseBytes: 64, error: null, phaseIndex: 0 },
+      ];
+
+      let completeHandler: ((event: { payload: unknown }) => void) | null = null;
+      listenMock.mockImplementation(async (eventName, handler) => {
+        if (eventName === 'load_test_complete') {
+          completeHandler = handler as typeof completeHandler;
+        }
+        return () => undefined;
+      });
+
+      useLoadTestStore.getState().setMode('simple');
+      const fakeRequest = {
+        method: 'GET', url: 'http://test.local', headers: [], queryParams: [], pathParams: [],
+        body: { bodyType: 'none' }, auth: { authType: 'none' },
+        settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      } as unknown as RequestState;
+
+      const runPromise = useLoadTestStore.getState().startTest(fakeRequest, 'tab-2');
+
+      await vi.waitFor(() => expect(completeHandler).not.toBeNull());
+      completeHandler!({
+        payload: {
+          totalRequests: 2, succeeded: 1, failed: 1, failedTransport: 0, failedStatus: 1,
+          minLatencyMs: 8, avgLatencyMs: 10.25, p50LatencyMs: 10, p95LatencyMs: 12, p99LatencyMs: 12,
+          maxLatencyMs: 12.5, requestsPerSecond: 10, totalDurationMs: 200,
+          requestLog: sampleLog, timeSeries: [], phaseTimeline: [],
+        },
+      });
+
+      await runPromise;
+
+      const state = useLoadTestStore.getState();
+      expect(state.status).toBe('complete');
+      expect(state.requestLog).toHaveLength(2);
+      expect(state.requestLog[0].seq).toBe(0);
+      expect(state.requestLog[1].status).toBe(404);
+    });
+
+    it('populates requestLog incrementally from load_test_progress events', async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const listenMock = vi.mocked(listen);
+
+      let progressHandler: ((event: { payload: unknown }) => void) | null = null;
+      let completeHandler: ((event: { payload: unknown }) => void) | null = null;
+
+      listenMock.mockImplementation(async (eventName, handler) => {
+        if (eventName === 'load_test_progress') progressHandler = handler as typeof progressHandler;
+        if (eventName === 'load_test_complete') completeHandler = handler as typeof completeHandler;
+        return () => undefined;
+      });
+
+      useLoadTestStore.getState().setMode('simple');
+      const fakeRequest = {
+        method: 'GET', url: 'http://test.local', headers: [], queryParams: [], pathParams: [],
+        body: { bodyType: 'none' }, auth: { authType: 'none' },
+        settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      } as unknown as RequestState;
+
+      const runPromise = useLoadTestStore.getState().startTest(fakeRequest, 'tab-3');
+
+      await vi.waitFor(() => expect(progressHandler).not.toBeNull());
+
+      progressHandler!({
+        payload: {
+          elapsedMs: 500, completed: 1, activeConcurrent: 1, succeeded: 1,
+          failedStatus: 0, failedTransport: 0, requestsPerSecond: 2,
+          p50Ms: 10, p95Ms: 15, p99Ms: 18, currentPhaseIndex: 0,
+          recentLog: [{ seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 }],
+        },
+      });
+
+      expect(useLoadTestStore.getState().requestLog).toHaveLength(1);
+      expect(useLoadTestStore.getState().requestLog[0].seq).toBe(0);
+
+      await vi.waitFor(() => expect(completeHandler).not.toBeNull());
+      completeHandler!({
+        payload: {
+          totalRequests: 1, succeeded: 1, failed: 0, failedTransport: 0, failedStatus: 0,
+          minLatencyMs: 10, avgLatencyMs: 10, p50LatencyMs: 10, p95LatencyMs: 10, p99LatencyMs: 10,
+          maxLatencyMs: 10, requestsPerSecond: 2, totalDurationMs: 500,
+          requestLog: [{ seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 }],
+          timeSeries: [], phaseTimeline: [],
+        },
+      });
+
+      await runPromise;
+      expect(useLoadTestStore.getState().status).toBe('complete');
+    });
   });
 });
