@@ -33,11 +33,20 @@ impl ExportService {
         }
     }
 
+    /// Quote a CSV field per RFC 4180 if it contains a delimiter, quote, or line break.
+    fn csv_quote(s: &str) -> String {
+        if s.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", s.replace('"', "\"\""))
+        } else {
+            s.to_string()
+        }
+    }
+
     fn to_csv(result: &LoadTestResult) -> String {
         let mut out = String::from("seq,status,latency_ms,response_bytes,error,phase_index\n");
         for entry in &result.request_log {
             let status = entry.status.map(|s| s.to_string()).unwrap_or_default();
-            let error = entry.error.as_deref().unwrap_or("").replace(',', ";");
+            let error = Self::csv_quote(entry.error.as_deref().unwrap_or(""));
             out.push_str(&format!(
                 "{},{},{:.2},{},{},{}\n",
                 entry.seq,
@@ -209,5 +218,33 @@ mod tests {
         assert_eq!(ext, "html");
         assert!(s.contains("Chart.js") || s.contains("chart.umd.min.js"));
         assert!(s.contains("Load Test Report"));
+    }
+
+    /// PDF is a passthrough: the service returns HTML bytes, and the Tauri
+    /// command layer hands them to the webview for print-to-PDF rendering.
+    #[test]
+    fn pdf_returns_html_bytes() {
+        let (bytes, ext) = ExportService::export(&minimal_result(), ExportFormat::Pdf).unwrap();
+        let s = String::from_utf8(bytes).unwrap();
+        assert_eq!(ext, "pdf");
+        assert!(s.starts_with("<!DOCTYPE html"));
+    }
+
+    #[test]
+    fn csv_escapes_problematic_error_messages() {
+        let mut result = minimal_result();
+        result.request_log = vec![RequestLogEntry {
+            seq: 0,
+            status: None,
+            latency_ms: 0.0,
+            response_bytes: 0,
+            error: Some("connection failed: \"foo, bar\"\nretrying".into()),
+            phase_index: 0,
+        }];
+        let (bytes, _) = ExportService::export(&result, ExportFormat::Csv).unwrap();
+        let s = String::from_utf8(bytes).unwrap();
+        // Field must be RFC 4180 quoted: outer quotes, inner quotes doubled.
+        assert!(s.contains("\"connection failed: \"\"foo, bar\"\"\nretrying\""));
+        assert!(s.starts_with("seq,status,latency_ms"));
     }
 }
