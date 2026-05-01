@@ -447,7 +447,70 @@ export interface LoadTestResult {
   maxLatencyMs: number;
   requestsPerSecond: number;
   totalDurationMs: number;
+  phaseTimeline?: PhaseMarker[];
+  requestLog?: RequestLogEntry[];
+  timeSeries?: TimeSeriesPoint[];
 }
+
+// ---- Load Test v2 types ----
+
+export type PhaseKind = 'RampUp' | 'Hold' | 'RampDown';
+
+export interface LoadTestPhase {
+  kind: PhaseKind;
+  durationSecs: number;
+  targetConcurrency: number;
+}
+
+export interface SuccessRule {
+  statusBelow: number;
+}
+
+export interface LoadTestConfigV2 {
+  phases: LoadTestPhase[];
+  successRule: SuccessRule;
+  ringBufferSize: number;
+}
+
+export interface LoadTestProgressEvent {
+  elapsedMs: number;
+  completed: number;
+  activeConcurrent: number;
+  succeeded: number;
+  failedStatus: number;
+  failedTransport: number;
+  requestsPerSecond: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  currentPhaseIndex: number;
+}
+
+export interface TimeSeriesPoint {
+  elapsedMs: number;
+  rps: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  errorRatePct: number;
+  activeConcurrent: number;
+}
+
+export interface RequestLogEntry {
+  seq: number;
+  status: number | null;
+  latencyMs: number;
+  responseBytes: number;
+  error: string | null;
+  phaseIndex: number;
+}
+
+export interface PhaseMarker {
+  phaseIndex: number;
+  startedAtMs: number;
+}
+
+export type ExportFormat = 'html' | 'csv' | 'json' | 'pdf';
 
 // ============================================================
 // Request execution
@@ -471,6 +534,25 @@ export const runLoadTest = (
   },
   config: LoadTestConfig,
 ) => invoke<LoadTestResult>('run_load_test_command', { input: request, config });
+
+export const runLoadTestV2 = (
+  request: {
+    method: HttpMethod;
+    url: string;
+    headers: Header[];
+    queryParams: QueryParam[];
+    body?: Body | null;
+    auth: Auth;
+    options: RequestOptions;
+    collection?: string;
+    environmentName?: string;
+    requestPath?: string;
+  },
+  config: LoadTestConfigV2,
+) => invoke<void>('run_load_test_v2_command', { input: request, config });
+
+export const exportLoadTest = (result: LoadTestResult, format: ExportFormat) =>
+  invoke<[string, string]>('export_load_test', { result, format });
 
 // ============================================================
 // History
