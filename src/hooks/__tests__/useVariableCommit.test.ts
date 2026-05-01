@@ -4,10 +4,13 @@ import type { ReactNode } from 'react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { environmentKeys } from '@/lib/queries/environment-queries';
+import { useEnvStore } from '@/stores/env-store';
 import { useVariableCommit } from '../useVariableCommit';
 
-const mockSaveEnvironment = vi.fn().mockResolvedValue(undefined);
-const mockSaveGlobalEnvironment = vi.fn().mockResolvedValue(undefined);
+const { mockSaveEnvironment, mockSaveGlobalEnvironment } = vi.hoisted(() => ({
+  mockSaveEnvironment: vi.fn().mockResolvedValue(undefined),
+  mockSaveGlobalEnvironment: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('@/lib/tauri-api', () => ({
   listEnvironments: vi.fn().mockResolvedValue([]),
@@ -45,8 +48,6 @@ function makeWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Set up env store state.
-  const { useEnvStore } = require('@/stores/env-store');
   useEnvStore.setState({ activeEnvId: 'staging', activeCollection: 'col' });
 });
 

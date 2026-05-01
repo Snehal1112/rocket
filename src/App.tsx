@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
@@ -10,10 +11,12 @@ import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { TitleBar } from '@/components/title-bar';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { environmentKeys } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
-import { listWorkspaces } from '@/lib/tauri-api';
+import { listWorkspaces, type Workspace } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
+import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -95,6 +98,46 @@ function App() {
     return () => {
       unsubPane();
       unsubLayout();
+    };
+  }, []);
+
+  useEffect(() => {
+    const qc = getQueryClient();
+    const unsubs = Promise.all([
+      listen<Workspace>('workspace-created', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<Workspace>('workspace-switched', ({ payload }) => {
+        useWorkspaceStore.getState().setActiveWorkspaceId(payload.id);
+        usePaneStore.getState().closeAll();
+        usePaneStore.getState().openWorkspaceTabs(payload.id);
+        useEnvStore.getState().setActiveCollection(null);
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+        qc.invalidateQueries({ queryKey: workspaceKeys.active });
+        qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+      }),
+      listen<{ id: string; newName: string }>('workspace-renamed', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<{ id: string }>('workspace-closed', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<{ id: string }>('workspace-deleted', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<{ id: string }>('workspace-pinned', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<{ id: string }>('workspace-unpinned', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+      listen<{ id: string; description: string | null }>('workspace-description-updated', () => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.all });
+      }),
+    ]);
+
+    return () => {
+      unsubs.then((fns) => fns.forEach((fn) => fn()));
     };
   }, []);
 
