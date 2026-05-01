@@ -93,7 +93,7 @@ impl PhaseScheduler {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "PascalCase")]
 pub enum PhaseKind {
     RampUp,
     Hold,

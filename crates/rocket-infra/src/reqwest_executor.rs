@@ -254,8 +254,10 @@ impl HttpExecutor for ReqwestExecutor {
         // Apply request body.
         builder = self.apply_body(builder, &request.body)?;
 
-        // Per-request timeout overrides the client-level default.
-        builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
+        // Per-request timeout: 0 means no timeout (unlimited).
+        if request.options.timeout_ms > 0 {
+            builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
+        }
 
         let response = builder
             .send()
