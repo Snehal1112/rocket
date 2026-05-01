@@ -221,7 +221,7 @@
     --git-ignored: 0 0% 55%; /* #8C8C8C */
     --git-conflicted: 9 85% 70%; /* #f48771 */
     /* VSCode 2026 Dark: tab tokens */
-    --tab-active-bg: 210 5% 7.5%; /* tab.activeBackground  #121314 */
+    --tab-active-bg: 210 3% 16%; /* tab.activeBackground  #272829 — elevated above shell */
     --tab-inactive-bg: 210 5% 10%; /* tab.inactiveBackground #191A1B */
     --tab-active-border-top: 199 53% 48%; /* tab.activeBorderTop   #3994BC */
     /* VSCode 2026 Dark: toolbar token */

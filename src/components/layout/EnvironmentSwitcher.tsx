@@ -121,13 +121,13 @@ export function EnvironmentSwitcher() {
             {activeEnvId && (
               <span className='flex items-center gap-1'>
                 <Database className='h-3 w-3 text-muted-foreground shrink-0' />
-                <span className='max-w-[80px] truncate'>{activeEnvId}</span>
+                <span className='max-w-20 truncate'>{activeEnvId}</span>
               </span>
             )}
             {globalEnvName && (
               <span className='flex items-center gap-1'>
                 <Globe className='h-3 w-3 text-muted-foreground shrink-0' />
-                <span className='max-w-[80px] truncate'>{globalEnvName}</span>
+                <span className='max-w-20 truncate'>{globalEnvName}</span>
               </span>
             )}
             {!activeEnvId && !globalEnvName && (
