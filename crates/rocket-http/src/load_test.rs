@@ -511,9 +511,16 @@ pub async fn run_load_test_v2(
         join_handles.push(handle);
     }
 
-    // Wait for in-flight requests to drain.
-    for h in join_handles {
-        let _ = h.await;
+    // Wait for in-flight requests to drain, capped at 60 s to avoid hanging
+    // indefinitely when the target server stops responding (e.g. no per-request
+    // timeout configured).
+    let drain_deadline = tokio::time::sleep(Duration::from_secs(60));
+    tokio::pin!(drain_deadline);
+    for mut h in join_handles {
+        tokio::select! {
+            _ = &mut drain_deadline => { h.abort(); let _ = h.await; }
+            _ = &mut h => {}
+        }
     }
 
     snapshot_handle.abort();

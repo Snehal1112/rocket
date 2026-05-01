@@ -50,7 +50,9 @@ interface LoadTestState {
 let unlistenProgress: UnlistenFn | null = null;
 let unlistenComplete: UnlistenFn | null = null;
 let safetyTimer: ReturnType<typeof setTimeout> | null = null;
-const SAFETY_TIMEOUT_MS = 30_000;
+
+// Safety buffer added on top of total phase duration before declaring a timeout.
+const SAFETY_BUFFER_MS = 60_000;
 
 export const useLoadTestStore = create<LoadTestState>((set, get) => ({
   phases: DEFAULT_PHASES,
@@ -118,15 +120,20 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
       unlistenComplete = null;
     });
 
+    // Safety timeout = total planned phase duration + fixed buffer.
+    // This ensures the timer never fires before the test can legitimately finish.
+    const totalPhaseMs = get().phases.reduce((s, p) => s + p.durationSecs * 1000, 0);
+    const safetyTimeoutMs = totalPhaseMs + SAFETY_BUFFER_MS;
     safetyTimer = setTimeout(() => {
       if (get().status === 'running') {
+        const totalSecs = safetyTimeoutMs / 1000;
         set({
           status: 'error',
-          error: 'Load test timed out — no completion event received after 30 s.',
+          error: `Load test timed out — no completion event received after ${totalSecs} s.`,
         });
         get().stopTest();
       }
-    }, SAFETY_TIMEOUT_MS);
+    }, safetyTimeoutMs);
 
     try {
       const resolved = await resolveRequestFields(tabId, request);
