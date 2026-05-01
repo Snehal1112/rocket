@@ -907,6 +907,9 @@ export interface UiState {
   layoutDirection?: 'stacked' | 'side-by-side';
   activeCollection?: string;
   collectionTabs?: UiStateCollectionTab[];
+  sidebarWidth?: number;
+  isConsoleOpen?: boolean;
+  consoleHeight?: number;
 }
 
 export const loadUiState = () => invoke<UiState | null>('load_ui_state');

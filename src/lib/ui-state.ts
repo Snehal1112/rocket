@@ -24,6 +24,9 @@ export function scheduleSaveUiState() {
     const uiState: UiState = {
       activeMode: isWsMode ? 'workspace' : 'collection',
       layoutDirection: layoutState.requestLayout,
+      sidebarWidth: layoutState.sidebarWidth,
+      isConsoleOpen: layoutState.isConsoleOpen,
+      consoleHeight: layoutState.consoleHeight,
     };
 
     if (isWsMode) {
