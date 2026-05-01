@@ -12,6 +12,8 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
       ? oauth2StateToApiAuth(request.auth.oauth2)
       : toApiAuth(request.auth);
 
+  const s = request.settings;
+
   return {
     uid,
     name,
@@ -25,6 +27,14 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
         ? { mode: request.body.mode, content: request.body.content }
         : undefined,
     auth,
+    tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
+    settings: {
+      timeout: s.timeoutMs,
+      followRedirects: s.followRedirects,
+      verifySsl: s.verifySsl,
+      maxRedirects: s.maxRedirects,
+      encodeUrl: s.encodeUrl,
+    },
   };
 }
 

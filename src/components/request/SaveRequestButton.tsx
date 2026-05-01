@@ -62,14 +62,17 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
       .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
     body: body.mode !== 'none' ? { mode: body.mode, content: body.content } : undefined,
     auth: authForSave(tab.request.auth),
+    tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,
     settings: s
       ? {
           timeout: s.timeoutMs,
           followRedirects: s.followRedirects,
           verifySsl: s.verifySsl,
+          maxRedirects: s.maxRedirects,
+          encodeUrl: s.encodeUrl,
         }
       : undefined,
-    docs: tab.request.docs ?? undefined,
+    docs: tab.request.docs ?? null,
   };
 }
 
