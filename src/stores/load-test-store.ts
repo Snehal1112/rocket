@@ -11,7 +11,6 @@ import {
   type LoadTestProgressEvent,
   type LoadTestResult,
   type RequestLogEntry,
-  runLoadTest,
   runLoadTestV2,
   type TargetUnit,
   type TimeSeriesPoint,
@@ -148,15 +147,78 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
     };
 
     if (get().mode === 'simple') {
-      abortController = new AbortController();
+      // Convert flat config to a single Hold phase so Simple mode gets
+      // live streaming via the same V2 path as Advanced mode.
+      const { concurrency, totalRequests, intervalMs: _intervalMs, durationCapSecs } =
+        get().simpleConfig;
+
+      const simpleV2Config: LoadTestConfigV2 = {
+        phases: [
+          {
+            kind: 'Hold',
+            durationSecs: durationCapSecs ?? Math.ceil((totalRequests / Math.max(concurrency, 1)) * 2),
+            target: { kind: 'concurrency', value: concurrency },
+          },
+        ],
+        successRule: { statusBelow: get().successStatusBelow },
+        ringBufferSize: totalRequests,
+      };
+
+      unlistenProgress = await listen<LoadTestProgressEvent>('load_test_progress', (event) => {
+        set((state) => ({
+          latestSnapshot: event.payload,
+          requestLog: event.payload.recentLog,
+          timeSeries: [
+            ...state.timeSeries,
+            {
+              elapsedMs: event.payload.elapsedMs,
+              rps: event.payload.requestsPerSecond,
+              p50Ms: event.payload.p50Ms,
+              p95Ms: event.payload.p95Ms,
+              p99Ms: event.payload.p99Ms,
+              errorRatePct:
+                event.payload.completed > 0
+                  ? ((event.payload.failedStatus + event.payload.failedTransport) /
+                      event.payload.completed) *
+                    100
+                  : 0,
+              activeConcurrent: event.payload.activeConcurrent,
+            },
+          ],
+        }));
+      });
+
+      unlistenComplete = await listen<LoadTestResult>('load_test_complete', (event) => {
+        if (safetyTimer) clearTimeout(safetyTimer);
+        set({
+          status: 'complete',
+          result: event.payload,
+          requestLog: event.payload.requestLog ?? [],
+          timeSeries: event.payload.timeSeries ?? get().timeSeries,
+        });
+        unlistenProgress?.();
+        unlistenComplete?.();
+        unlistenProgress = null;
+        unlistenComplete = null;
+      });
+
+      const totalPhaseMs = simpleV2Config.phases.reduce((s, p) => s + p.durationSecs * 1000, 0);
+      safetyTimer = setTimeout(() => {
+        if (get().status === 'running') {
+          set({
+            status: 'error',
+            error: `Load test timed out after ${(totalPhaseMs + SAFETY_BUFFER_MS) / 1000}s.`,
+          });
+          get().stopTest();
+        }
+      }, totalPhaseMs + SAFETY_BUFFER_MS);
+
       try {
-        const result = await runLoadTest(httpInput, get().simpleConfig);
-        set({ status: 'complete', result, requestLog: result.requestLog ?? [] });
+        await runLoadTestV2(httpInput, simpleV2Config);
       } catch (err) {
-        if ((err as Error)?.name === 'AbortError') return;
+        if (safetyTimer) clearTimeout(safetyTimer);
         set({ status: 'error', error: String(err) });
-      } finally {
-        abortController = null;
+        get().stopTest();
       }
       return;
     }
