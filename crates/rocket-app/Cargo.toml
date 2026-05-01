@@ -13,6 +13,7 @@ rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-workspace.workspace = true
 serde.workspace = true
+serde_json = { workspace = true }
 serde_yaml.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
