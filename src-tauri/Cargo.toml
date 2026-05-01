@@ -22,7 +22,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
-rocket-app = { workspace = true, features = ["tauri-events"] }
+rocket-app.workspace = true
 rocket-audit.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true

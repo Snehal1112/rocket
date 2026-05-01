@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
-#[cfg(feature = "tauri-events")]
 use tauri::{AppHandle, Emitter};
 
 /// Fixed-capacity circular buffer. When full, the oldest entry is overwritten.
@@ -324,13 +323,13 @@ impl RunAccumulator {
 ///
 /// Drives a `PhaseScheduler` whose per-second checkpoints reshape semaphore
 /// capacity at phase boundaries, accumulates a `RingBuffer<RequestLogEntry>`,
-/// and (when the `tauri-events` feature is enabled) emits `load_test_progress`
+/// and, when an `AppHandle` is provided, emits `load_test_progress`
 /// every 250 ms and `load_test_complete` on finish.
 pub async fn run_load_test_v2(
     executor: Arc<dyn HttpExecutor>,
     request: &HttpRequest,
     config: &LoadTestConfigV2,
-    #[cfg(feature = "tauri-events")] app: &AppHandle,
+    app: Option<&AppHandle>,
 ) -> LoadTestResult {
     use tokio::time::interval;
 
@@ -384,8 +383,7 @@ pub async fn run_load_test_v2(
     let acc_snap = Arc::clone(&accumulator);
     let active_snap = Arc::clone(&active_concurrent);
     let scheduler_snap = Arc::clone(&scheduler);
-    #[cfg(feature = "tauri-events")]
-    let app_clone = app.clone();
+    let app_clone = app.cloned();
 
     let snapshot_handle = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_millis(250));
@@ -428,7 +426,6 @@ pub async fn run_load_test_v2(
                 active_concurrent: active,
             });
 
-            #[cfg(feature = "tauri-events")]
             let event = LoadTestProgressEvent {
                 elapsed_ms,
                 completed: acc.completed,
@@ -445,9 +442,8 @@ pub async fn run_load_test_v2(
 
             drop(acc);
 
-            #[cfg(feature = "tauri-events")]
-            {
-                let _ = app_clone.emit("load_test_progress", &event);
+            if let Some(ref handle) = app_clone {
+                let _ = handle.emit("load_test_progress", &event);
             }
         }
     });
@@ -561,9 +557,8 @@ pub async fn run_load_test_v2(
         time_series: acc.time_series.clone(),
     };
 
-    #[cfg(feature = "tauri-events")]
-    {
-        let _ = app.emit("load_test_complete", &result);
+    if let Some(handle) = app {
+        let _ = handle.emit("load_test_complete", &result);
     }
 
     result
@@ -1043,7 +1038,7 @@ mod tests {
             success_rule: SuccessRule::default(),
             ring_buffer_size: 1000,
         };
-        let result = run_load_test_v2(executor, &test_request(), &config).await;
+        let result = run_load_test_v2(executor, &test_request(), &config, None).await;
         assert!(result.total_requests > 0);
         assert_eq!(result.failed, 0);
         assert_eq!(result.succeeded, result.total_requests);
@@ -1063,7 +1058,7 @@ mod tests {
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
         };
-        let result = run_load_test_v2(executor, &test_request(), &config).await;
+        let result = run_load_test_v2(executor, &test_request(), &config, None).await;
         assert!(result.total_requests > 0);
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed_status, result.total_requests);

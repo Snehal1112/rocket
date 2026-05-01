@@ -33,7 +33,7 @@ pub async fn run_load_test_v2_command(
     exec_svc: State<'_, RequestExecutionService>,
     executor: State<'_, Arc<dyn HttpExecutor>>,
 ) -> Result<(), DomainError> {
-    LoadTestService::run(&exec_svc, Arc::clone(&executor), input, config, &app).await?;
+    LoadTestService::run(&exec_svc, Arc::clone(&executor), input, config, Some(&app)).await?;
     Ok(())
 }
 

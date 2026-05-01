@@ -16,17 +16,10 @@ impl LoadTestService {
         executor: Arc<dyn HttpExecutor>,
         input: ExecuteRequestInput,
         config: LoadTestConfigV2,
-        #[cfg(feature = "tauri-events")] app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
     ) -> DomainResult<LoadTestResult> {
         let resolved = execution_service.resolve_request(&input)?;
-        let result = run_load_test_v2(
-            executor,
-            &resolved,
-            &config,
-            #[cfg(feature = "tauri-events")]
-            app,
-        )
-        .await;
+        let result = run_load_test_v2(executor, &resolved, &config, app).await;
         Ok(result)
     }
 }
@@ -317,7 +310,7 @@ mod tests {
         };
 
         let load_exec: Arc<dyn HttpExecutor> = Arc::new(SharedExec(Arc::clone(&exec_arc)));
-        let result = LoadTestService::run(&svc, load_exec, input, config)
+        let result = LoadTestService::run(&svc, load_exec, input, config, None)
             .await
             .unwrap();
 
