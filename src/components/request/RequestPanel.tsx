@@ -34,6 +34,12 @@ import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
+import {
   type CollectionVariable,
   getCollectionSettings,
   getFolderVariables,
@@ -44,12 +50,6 @@ import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/u
 import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
-import {
-  useEnvironments,
-  useGlobalEnvironment,
-  useGlobalEnvironmentName,
-  useProcessEnvVars,
-} from '@/lib/queries/environment-queries';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -66,6 +66,7 @@ import { isRequestTab } from '@/types/pane-types';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
 import { HeadersEditor } from './HeadersEditor';
+import { LoadTestTab } from './load-test/LoadTestTab';
 import { PathParamsPanel } from './PathParamsPanel';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
@@ -99,7 +100,15 @@ const INHERIT_AUTH_OPTION = {
   value: 'inherit' as AuthState['authType'],
 };
 
-type SectionTab = 'params' | 'headers' | 'body' | 'auth' | 'variables' | 'docs' | 'settings';
+type SectionTab =
+  | 'params'
+  | 'headers'
+  | 'body'
+  | 'auth'
+  | 'variables'
+  | 'docs'
+  | 'settings'
+  | 'load-test';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -369,7 +378,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
   // Docs and Settings don't use the response panel — expand to full height.
-  const expandFull = activeSection === 'docs' || activeSection === 'settings';
+  const expandFull =
+    activeSection === 'docs' || activeSection === 'settings' || activeSection === 'load-test';
   // Use safe access in case settings is absent on a request loaded from an older saved state.
   const settings = request.settings ?? { verifySsl: true, followRedirects: true, timeoutMs: 30000 };
   const settingsModified =
@@ -679,6 +689,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'settings',
         onClick: () => setActiveSection('settings'),
       },
+      {
+        value: 'load-test',
+        label: 'Load test',
+        isActive: activeSection === 'load-test',
+        onClick: () => setActiveSection('load-test'),
+      },
     ],
     [
       activeSection,
@@ -890,7 +906,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           />
         </div>
       ) : null}
-      <div className={activeSection === 'docs' ? 'hidden' : 'flex-1 overflow-auto p-3'}>
+      {activeSection === 'load-test' ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <LoadTestTab request={request} tabId={tab.id} />
+        </div>
+      ) : null}
+      <div
+        className={
+          activeSection === 'docs' || activeSection === 'load-test'
+            ? 'hidden'
+            : 'flex-1 overflow-auto p-3'
+        }
+      >
         {activeSection === 'params' && (
           <div className='space-y-3'>
             <PathParamsPanel
