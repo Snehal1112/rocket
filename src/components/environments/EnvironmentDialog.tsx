@@ -11,7 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
-import type { Variable } from '@/lib/tauri-api';
+import {
+  useDeleteEnvironment,
+  useEnvironments,
+  useSaveEnvironment,
+} from '@/lib/queries/environment-queries';
+import type { Environment, Variable } from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
@@ -24,22 +29,33 @@ interface EnvironmentDialogProps {
 
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
-  const environments = useEnvStore((s) => s.environments);
-  const createEnvironment = useEnvStore((s) => s.createEnvironment);
-  const deleteEnvironmentStore = useEnvStore((s) => s.deleteEnvironment);
+  const activeEnvId = useEnvStore((s) => s.activeEnvId);
+  const setActiveEnvId = useEnvStore((s) => s.setActiveEnvId);
+
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const saveMutation = useSaveEnvironment(activeCollection);
+  const deleteMutation = useDeleteEnvironment(activeCollection);
 
   const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
   const [isAddingEnv, setIsAddingEnv] = useState(false);
   const [newEnvName, setNewEnvName] = useState('');
   const [isDirty, setIsDirty] = useState(false);
 
-  const selectedEnv = environments.find((e) => e.name === selectedName) ?? null;
+  // Local in-flight edit state — avoids writing to the store mid-edit.
+  const [localEnvs, setLocalEnvs] = useState<Environment[]>(environments);
+
+  // Sync local env list when query refreshes (e.g. after save invalidation).
+  useEffect(() => {
+    setLocalEnvs(environments);
+  }, [environments]);
+
+  const selectedEnv = localEnvs.find((e) => e.name === selectedName) ?? null;
 
   const saveSettings = useCallback(async () => {
     if (!selectedEnv || !activeCollection) return;
-    await saveEnvironment(activeCollection, selectedEnv);
+    await saveMutation.mutateAsync(selectedEnv);
     setIsDirty(false);
-  }, [selectedEnv, activeCollection]);
+  }, [selectedEnv, activeCollection, saveMutation]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
     saveSettings,
@@ -58,34 +74,30 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       setIsAddingEnv(false);
       return;
     }
-    await createEnvironment(trimmed);
+    await saveMutation.mutateAsync({ name: trimmed, variables: [] });
     setSelectedName(trimmed);
+    setActiveEnvId(trimmed);
     setIsAddingEnv(false);
     setNewEnvName('');
-  }, [newEnvName, createEnvironment]);
+  }, [newEnvName, saveMutation, setActiveEnvId]);
 
   const handleDeleteEnv = useCallback(async () => {
     if (!selectedName) return;
-    await deleteEnvironmentStore(selectedName);
+    await deleteMutation.mutateAsync(selectedName);
+    if (activeEnvId === selectedName) setActiveEnvId(null);
     setSelectedName(environments.find((e) => e.name !== selectedName)?.name ?? null);
-  }, [selectedName, deleteEnvironmentStore, environments]);
+  }, [selectedName, deleteMutation, environments, activeEnvId, setActiveEnvId]);
 
   const handleRenameEnv = useCallback(
     async (oldName: string, newName: string) => {
-      const env = environments.find((e) => e.name === oldName);
+      const env = localEnvs.find((e) => e.name === oldName);
       if (!env || !activeCollection) return;
       try {
         await saveEnvironment(activeCollection, { ...env, name: newName });
         await deleteEnvironmentApi(activeCollection, oldName);
-        const wasActive = useEnvStore.getState().activeEnvId === oldName;
-        useEnvStore.setState((s) => ({
-          environments: s.environments.map((e) =>
-            e.name === oldName ? { ...e, name: newName } : e,
-          ),
-        }));
-        if (wasActive) {
-          useEnvStore.getState().setActiveEnv(newName);
-        }
+        // Invalidate to refetch fresh list.
+        await saveMutation.mutateAsync({ ...env, name: newName });
+        if (activeEnvId === oldName) setActiveEnvId(newName);
         setSelectedName(newName);
       } catch (err) {
         console.error('[EnvironmentDialog] rename failed:', err);
@@ -93,18 +105,20 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
         throw err;
       }
     },
-    [environments, activeCollection],
+    [localEnvs, activeCollection, saveMutation, activeEnvId, setActiveEnvId],
   );
 
   const updateVariable = useCallback(
     (idx: number, patch: Partial<Variable>) => {
       if (!selectedEnv) return;
-      const variables = selectedEnv.variables.slice();
-      variables[idx] = { ...variables[idx], ...patch };
-      const updated = { ...selectedEnv, variables };
-      useEnvStore.setState((s) => ({
-        environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
-      }));
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          const variables = e.variables.slice();
+          variables[idx] = { ...variables[idx], ...patch };
+          return { ...e, variables };
+        }),
+      );
       setIsDirty(true);
     },
     [selectedEnv],
@@ -112,22 +126,27 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const addVariable = useCallback(() => {
     if (!selectedEnv) return;
-    const variable: Variable = { key: '', value: '', enabled: true, secret: false };
-    const updated = { ...selectedEnv, variables: [...selectedEnv.variables, variable] };
-    useEnvStore.setState((s) => ({
-      environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
-    }));
+    setLocalEnvs((prev) =>
+      prev.map((e) => {
+        if (e.name !== selectedEnv.name) return e;
+        return {
+          ...e,
+          variables: [...e.variables, { key: '', value: '', enabled: true, secret: false }],
+        };
+      }),
+    );
     setIsDirty(true);
   }, [selectedEnv]);
 
   const removeVariable = useCallback(
     (idx: number) => {
       if (!selectedEnv) return;
-      const variables = selectedEnv.variables.filter((_, i) => i !== idx);
-      const updated = { ...selectedEnv, variables };
-      useEnvStore.setState((s) => ({
-        environments: s.environments.map((e) => (e.name === updated.name ? updated : e)),
-      }));
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          return { ...e, variables: e.variables.filter((_, i) => i !== idx) };
+        }),
+      );
       setIsDirty(true);
     },
     [selectedEnv],

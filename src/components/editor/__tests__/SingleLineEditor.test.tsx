@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { SingleLineEditor } from '../SingleLineEditor';
@@ -7,15 +9,16 @@ vi.mock('@/stores/env-store', () => ({
   useEnvStore: (selector: (s: unknown) => unknown) =>
     selector({
       activeEnvId: null,
-      environments: [],
-      globalEnv: null,
-      updateEnvironment: async () => {
-        /* stub */
-      },
-      updateGlobalEnvironment: async () => {
-        /* stub */
-      },
+      activeCollection: null,
     }),
+}));
+
+vi.mock('@/lib/tauri-api', () => ({
+  listEnvironments: vi.fn().mockResolvedValue([]),
+  getGlobalEnvironmentName: vi.fn().mockResolvedValue(null),
+  getGlobalEnvironment: vi.fn().mockResolvedValue(null),
+  listGlobalEnvironments: vi.fn().mockResolvedValue([]),
+  getProcessEnvVars: vi.fn().mockResolvedValue({}),
 }));
 
 function makeContext(
@@ -28,20 +31,25 @@ function makeContext(
   return map;
 }
 
+function wrap(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(React.createElement(QueryClientProvider, { client: qc }, ui));
+}
+
 describe('SingleLineEditor', () => {
   it('renders without crashing', () => {
-    const { container } = render(<SingleLineEditor value='hello' onChange={vi.fn()} />);
+    const { container } = wrap(<SingleLineEditor value='hello' onChange={vi.fn()} />);
     expect(container.querySelector('.cm-editor')).not.toBeNull();
   });
 
   it('displays the initial value', () => {
-    const { container } = render(<SingleLineEditor value='test content' onChange={vi.fn()} />);
+    const { container } = wrap(<SingleLineEditor value='test content' onChange={vi.fn()} />);
     const content = container.querySelector('.cm-content');
     expect(content?.textContent).toContain('test content');
   });
 
   it('renders placeholder when value is empty', () => {
-    const { container } = render(
+    const { container } = wrap(
       <SingleLineEditor value='' onChange={vi.fn()} placeholder='Enter URL' />,
     );
     const ph = container.querySelector('.cm-placeholder');
@@ -52,7 +60,7 @@ describe('SingleLineEditor', () => {
     const ctx = makeContext({
       baseUrl: { source: 'environment', value: 'https://api.example.com' },
     });
-    const { container } = render(
+    const { container } = wrap(
       <SingleLineEditor value='https://{{baseUrl}}/api' onChange={vi.fn()} variableContext={ctx} />,
     );
     const envVars = container.querySelectorAll('.cm-var-environment');
@@ -60,7 +68,7 @@ describe('SingleLineEditor', () => {
   });
 
   it('applies unresolved class for unknown variables', () => {
-    const { container } = render(
+    const { container } = wrap(
       <SingleLineEditor value='{{unknown}}' onChange={vi.fn()} variableContext={new Map()} />,
     );
     const unresolved = container.querySelectorAll('.cm-var-unresolved');
@@ -68,8 +76,7 @@ describe('SingleLineEditor', () => {
   });
 
   it('does not render variable extensions when context is undefined', () => {
-    const { container } = render(<SingleLineEditor value='{{someVar}}' onChange={vi.fn()} />);
-    // No variable decorations applied.
+    const { container } = wrap(<SingleLineEditor value='{{someVar}}' onChange={vi.fn()} />);
     expect(container.querySelectorAll('.cm-var').length).toBe(0);
   });
 });

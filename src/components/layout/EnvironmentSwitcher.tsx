@@ -1,25 +1,35 @@
 import { Check, ChevronDown, Database, Globe, Plus, Settings } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  useEnvironments,
+  useGlobalEnvironmentName,
+  useGlobalEnvironments,
+  useSaveEnvironment,
+  useSaveGlobalEnvironment,
+  useSetGlobalEnvironment,
+} from '@/lib/queries/environment-queries';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 export function EnvironmentSwitcher() {
-  const environments = useEnvStore((s) => s.environments);
+  const activeCollection = useEnvStore((s) => s.activeCollection);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  const setActiveEnv = useEnvStore((s) => s.setActiveEnv);
-  const globalEnvName = useEnvStore((s) => s.globalEnvName);
-  const setGlobalEnv = useEnvStore((s) => s.setGlobalEnv);
-  const globalEnvironments = useEnvStore((s) => s.globalEnvironments);
-  const loadGlobalEnvironments = useEnvStore((s) => s.loadGlobalEnvironments);
-  const createGlobalEnvironment = useEnvStore((s) => s.createGlobalEnvironment);
-  const createEnvironment = useEnvStore((s) => s.createEnvironment);
+  const setActiveEnvId = useEnvStore((s) => s.setActiveEnvId);
+
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnvironments = [] } = useGlobalEnvironments();
+
+  const setGlobalEnvMutation = useSetGlobalEnvironment();
+  const saveEnvMutation = useSaveEnvironment(activeCollection);
+  const saveGlobalMutation = useSaveGlobalEnvironment();
 
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -29,13 +39,6 @@ export function EnvironmentSwitcher() {
   const [newCollectionEnvName, setNewCollectionEnvName] = useState('');
   const createGlobalInFlight = useRef(false);
   const createCollectionInFlight = useRef(false);
-
-  // Load global environments when popover opens if not already loaded.
-  useEffect(() => {
-    if (popoverOpen && globalEnvironments.length === 0) {
-      loadGlobalEnvironments().catch(console.error);
-    }
-  }, [popoverOpen, globalEnvironments.length, loadGlobalEnvironments]);
 
   const handleCreateGlobal = async () => {
     if (createGlobalInFlight.current) return;
@@ -47,7 +50,7 @@ export function EnvironmentSwitcher() {
     }
     createGlobalInFlight.current = true;
     try {
-      await createGlobalEnvironment(name);
+      await saveGlobalMutation.mutateAsync({ name, variables: [] });
     } catch (err) {
       console.error('[EnvironmentSwitcher] create global env failed:', err);
     } finally {
@@ -67,7 +70,9 @@ export function EnvironmentSwitcher() {
     }
     createCollectionInFlight.current = true;
     try {
-      await createEnvironment(name);
+      if (!activeCollection) throw new Error('No active collection');
+      await saveEnvMutation.mutateAsync({ name, variables: [] });
+      setActiveEnvId(name);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('No active collection')) {
@@ -87,7 +92,6 @@ export function EnvironmentSwitcher() {
     const activeId = useWorkspaceStore.getState().activeWorkspaceId;
     if (!activeId) return;
     usePaneStore.getState().openWorkspaceTabs(activeId);
-    // Activate the environments tab.
     const envTabId = `workspace:${activeId}:environments`;
     const { root } = usePaneStore.getState();
     const activateEnvTab = (node: typeof root): void => {
@@ -192,7 +196,7 @@ export function EnvironmentSwitcher() {
                       aria-checked={activeEnvId === null}
                       className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                       onClick={() => {
-                        setActiveEnv(null);
+                        setActiveEnvId(null);
                         setPopoverOpen(false);
                       }}
                     >
@@ -212,7 +216,7 @@ export function EnvironmentSwitcher() {
                         key={env.name}
                         className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                         onClick={() => {
-                          setActiveEnv(env.name);
+                          setActiveEnvId(env.name);
                           setPopoverOpen(false);
                         }}
                       >
@@ -310,7 +314,7 @@ export function EnvironmentSwitcher() {
                       aria-checked={globalEnvName === null}
                       className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                       onClick={() => {
-                        void setGlobalEnv(null);
+                        setGlobalEnvMutation.mutate(null);
                         setPopoverOpen(false);
                       }}
                     >
@@ -330,7 +334,7 @@ export function EnvironmentSwitcher() {
                         key={env.name}
                         className='flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-muted/50 cursor-pointer'
                         onClick={() => {
-                          void setGlobalEnv(env.name);
+                          setGlobalEnvMutation.mutate(env.name);
                           setPopoverOpen(false);
                         }}
                       >

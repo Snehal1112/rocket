@@ -44,6 +44,12 @@ import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/u
 import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
+import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -385,12 +391,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return map;
   }, [request.queryParams]);
 
-  // Select stable state slices instead of calling getter methods outside a memo,
-  // which would produce new object references on every render.
   const activeEnvIdForScope = useEnvStore((s) => s.activeEnvId);
-  const environments = useEnvStore((s) => s.environments);
-  const globalEnv = useEnvStore((s) => s.globalEnv);
-  const processEnvVars = useEnvStore((s) => s.processEnvVars);
+  const activeCollection = useEnvStore((s) => s.activeCollection);
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  const { data: processEnvVars = {} } = useProcessEnvVars();
 
   // Build the scope-aware variable context for all editors in this panel.
   const scopedContext = useMemo(() => {

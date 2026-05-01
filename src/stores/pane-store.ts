@@ -419,9 +419,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       collectionTabState: updatedState,
     });
 
-    // Reload environments whenever the active collection changes.
-    useEnvStore.getState().loadEnvironments(name);
-    void useEnvStore.getState().fetchGlobalEnv();
+    // Sync active collection into env-store so useEnvironments() queries fire.
+    useEnvStore.getState().setActiveCollection(name);
+
+    // Restore active env selection from localStorage.
+    const stored = localStorage.getItem(`rocket-api:active-env:${name}`);
+    useEnvStore.getState().setActiveEnvId(stored ?? null);
   },
 
   getOpenTabCount(collection) {

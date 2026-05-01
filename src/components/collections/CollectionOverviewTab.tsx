@@ -30,6 +30,12 @@ import {
 } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
+import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -199,9 +205,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  const environments = useEnvStore((s) => s.environments);
-  const globalEnv = useEnvStore((s) => s.globalEnv);
-  const processEnvVars = useEnvStore((s) => s.processEnvVars);
+  const activeCollection = useEnvStore((s) => s.activeCollection);
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  const { data: processEnvVars = {} } = useProcessEnvVars();
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);

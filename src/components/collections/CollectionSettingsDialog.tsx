@@ -7,6 +7,12 @@ import { useSaveButton } from '@/hooks/use-save-button';
 import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
+import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
 import { useEnvStore } from '@/stores/env-store';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
 
@@ -34,9 +40,11 @@ export function CollectionSettingsDialog({
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
 
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  const environments = useEnvStore((s) => s.environments);
-  const globalEnv = useEnvStore((s) => s.globalEnv);
-  const processEnvVars = useEnvStore((s) => s.processEnvVars);
+  const activeCollection = useEnvStore((s) => s.activeCollection);
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  const { data: processEnvVars = {} } = useProcessEnvVars();
   const scopedContext = useMemo(() => {
     const envVars: Record<string, string> = {};
     if (activeEnvId) {

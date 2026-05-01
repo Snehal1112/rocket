@@ -35,7 +35,9 @@ import {
   saveRequest,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { environmentKeys } from '@/lib/queries/environment-queries';
 import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
+import { getQueryClient } from '@/lib/query-client';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -262,10 +264,9 @@ export function CollectionsSidebar() {
         const { activeCollection } = useEnvStore.getState();
         if (event.collection === activeCollection) {
           if (envDebounce.current) clearTimeout(envDebounce.current);
-          envDebounce.current = setTimeout(
-            () => void useEnvStore.getState().loadEnvironments(activeCollection),
-            300,
-          );
+          envDebounce.current = setTimeout(() => {
+            getQueryClient().invalidateQueries({ queryKey: environmentKeys.collection(activeCollection) });
+          }, 300);
         }
       }
     }).then((fn) => {

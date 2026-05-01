@@ -1,43 +1,63 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { environmentKeys } from '@/lib/queries/environment-queries';
 import { useVariableCommit } from '../useVariableCommit';
 
-// Mock the env store
-const mockUpdateEnvironment = vi.fn();
-const mockUpdateGlobalEnvironment = vi.fn();
+const mockSaveEnvironment = vi.fn().mockResolvedValue(undefined);
+const mockSaveGlobalEnvironment = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@/stores/env-store', () => ({
-  useEnvStore: (selector: (s: unknown) => unknown) =>
-    selector({
-      activeEnvId: 'staging',
-      environments: [
-        {
-          name: 'staging',
-          variables: [
-            { key: 'baseUrl', value: 'https://staging.api.com', enabled: true, secret: false },
-          ],
-        },
-      ],
-      updateEnvironment: mockUpdateEnvironment,
-      globalEnv: {
-        name: 'global',
-        variables: [{ key: 'apiKey', value: 'old-key', enabled: true, secret: false }],
-      },
-      updateGlobalEnvironment: mockUpdateGlobalEnvironment,
-    }),
+vi.mock('@/lib/tauri-api', () => ({
+  listEnvironments: vi.fn().mockResolvedValue([]),
+  saveEnvironment: mockSaveEnvironment,
+  saveGlobalEnvironment: mockSaveGlobalEnvironment,
+  getGlobalEnvironmentName: vi.fn().mockResolvedValue('global'),
+  getGlobalEnvironment: vi.fn().mockResolvedValue({
+    name: 'global',
+    variables: [{ key: 'apiKey', value: 'old-key', enabled: true, secret: false }],
+  }),
+  listGlobalEnvironments: vi.fn().mockResolvedValue([]),
+  getProcessEnvVars: vi.fn().mockResolvedValue({}),
 }));
+
+const stagingEnv = {
+  name: 'staging',
+  variables: [{ key: 'baseUrl', value: 'https://staging.api.com', enabled: true, secret: false }],
+};
+
+const globalEnv = {
+  name: 'global',
+  variables: [{ key: 'apiKey', value: 'old-key', enabled: true, secret: false }],
+};
+
+function makeWrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Seed cache with test data.
+  qc.setQueryData(environmentKeys.collection('col'), [stagingEnv]);
+  qc.setQueryData(environmentKeys.globalName, 'global');
+  qc.setQueryData(environmentKeys.global('global'), globalEnv);
+
+  return ({ children }: { children: ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: qc }, children);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Set up env store state.
+  const { useEnvStore } = require('@/stores/env-store');
+  useEnvStore.setState({ activeEnvId: 'staging', activeCollection: 'col' });
 });
 
 describe('useVariableCommit', () => {
   it('updates existing env variable', async () => {
-    const { result } = renderHook(() => useVariableCommit());
+    const { result } = renderHook(() => useVariableCommit(), { wrapper: makeWrapper() });
     await act(async () => {
       await result.current('baseUrl', 'https://prod.api.com', 'environment');
     });
-    expect(mockUpdateEnvironment).toHaveBeenCalledWith(
+    expect(mockSaveEnvironment).toHaveBeenCalledWith(
+      'col',
       expect.objectContaining({
         name: 'staging',
         variables: expect.arrayContaining([
@@ -48,11 +68,12 @@ describe('useVariableCommit', () => {
   });
 
   it('adds new env variable when key does not exist', async () => {
-    const { result } = renderHook(() => useVariableCommit());
+    const { result } = renderHook(() => useVariableCommit(), { wrapper: makeWrapper() });
     await act(async () => {
       await result.current('newVar', 'newVal', 'environment');
     });
-    expect(mockUpdateEnvironment).toHaveBeenCalledWith(
+    expect(mockSaveEnvironment).toHaveBeenCalledWith(
+      'col',
       expect.objectContaining({
         variables: expect.arrayContaining([
           expect.objectContaining({ key: 'newVar', value: 'newVal', enabled: true }),
@@ -62,11 +83,11 @@ describe('useVariableCommit', () => {
   });
 
   it('updates global variable', async () => {
-    const { result } = renderHook(() => useVariableCommit());
+    const { result } = renderHook(() => useVariableCommit(), { wrapper: makeWrapper() });
     await act(async () => {
       await result.current('apiKey', 'new-key', 'global');
     });
-    expect(mockUpdateGlobalEnvironment).toHaveBeenCalledWith(
+    expect(mockSaveGlobalEnvironment).toHaveBeenCalledWith(
       expect.objectContaining({
         variables: expect.arrayContaining([
           expect.objectContaining({ key: 'apiKey', value: 'new-key' }),
@@ -76,21 +97,21 @@ describe('useVariableCommit', () => {
   });
 
   it('routes null scope to active environment', async () => {
-    const { result } = renderHook(() => useVariableCommit());
+    const { result } = renderHook(() => useVariableCommit(), { wrapper: makeWrapper() });
     await act(async () => {
       await result.current('unknownVar', 'someValue', null);
     });
-    expect(mockUpdateEnvironment).toHaveBeenCalled();
+    expect(mockSaveEnvironment).toHaveBeenCalled();
   });
 
   it('does nothing for read-only scopes', async () => {
-    const { result } = renderHook(() => useVariableCommit());
+    const { result } = renderHook(() => useVariableCommit(), { wrapper: makeWrapper() });
     for (const scope of ['collection', 'folder', 'request', 'process', 'runtime'] as const) {
       await act(async () => {
         await result.current('someVar', 'someVal', scope);
       });
     }
-    expect(mockUpdateEnvironment).not.toHaveBeenCalled();
-    expect(mockUpdateGlobalEnvironment).not.toHaveBeenCalled();
+    expect(mockSaveEnvironment).not.toHaveBeenCalled();
+    expect(mockSaveGlobalEnvironment).not.toHaveBeenCalled();
   });
 });

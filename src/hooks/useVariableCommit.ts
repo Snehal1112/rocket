@@ -1,4 +1,11 @@
 import { useCallback } from 'react';
+import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useSaveEnvironment,
+  useSaveGlobalEnvironment,
+} from '@/lib/queries/environment-queries';
 import type { VariableSource } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 
@@ -15,10 +22,12 @@ import { useEnvStore } from '@/stores/env-store';
  */
 export function useVariableCommit() {
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  const environments = useEnvStore((s) => s.environments);
-  const updateEnvironment = useEnvStore((s) => s.updateEnvironment);
-  const globalEnv = useEnvStore((s) => s.globalEnv);
-  const updateGlobalEnvironment = useEnvStore((s) => s.updateGlobalEnvironment);
+  const activeCollection = useEnvStore((s) => s.activeCollection);
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  const saveEnvMutation = useSaveEnvironment(activeCollection);
+  const saveGlobalMutation = useSaveGlobalEnvironment();
 
   const commit = useCallback(
     async (varName: string, newValue: string, scope: VariableSource | null) => {
@@ -29,7 +38,7 @@ export function useVariableCommit() {
         if (!globalEnv.variables.some((v) => v.key === varName)) {
           vars.push({ key: varName, value: newValue, enabled: true, secret: false });
         }
-        await updateGlobalEnvironment({ ...globalEnv, variables: vars });
+        await saveGlobalMutation.mutateAsync({ ...globalEnv, variables: vars });
       } else if ((scope === 'environment' || scope === null) && activeEnvId) {
         const env = environments.find((e) => e.name === activeEnvId);
         if (env) {
@@ -39,12 +48,12 @@ export function useVariableCommit() {
           if (!env.variables.some((v) => v.key === varName)) {
             vars.push({ key: varName, value: newValue, enabled: true, secret: false });
           }
-          await updateEnvironment({ ...env, variables: vars });
+          await saveEnvMutation.mutateAsync({ ...env, variables: vars });
         }
       }
       // Collection, folder, request, process, runtime: read-only — no-op.
     },
-    [activeEnvId, environments, updateEnvironment, globalEnv, updateGlobalEnvironment],
+    [activeEnvId, environments, saveEnvMutation, globalEnv, saveGlobalMutation],
   );
 
   return commit;

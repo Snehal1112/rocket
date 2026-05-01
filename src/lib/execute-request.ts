@@ -11,12 +11,49 @@ import {
   oauth2GetToken,
   oauth2RefreshToken,
 } from '@/lib/tauri-api';
+import { environmentKeys } from '@/lib/queries/environment-queries';
+import { getQueryClient } from '@/lib/query-client';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
+import type { Environment } from '@/lib/tauri-api';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
+
+// Reads the active environment's variables from the query cache.
+function getActiveVariables(): Record<string, string> {
+  const { activeEnvId, activeCollection } = useEnvStore.getState();
+  if (!activeEnvId || !activeCollection) return {};
+  const envs = getQueryClient().getQueryData<Environment[]>(
+    environmentKeys.collection(activeCollection),
+  ) ?? [];
+  const env = envs.find((e) => e.name === activeEnvId);
+  if (!env) return {};
+  const vars: Record<string, string> = {};
+  for (const v of env.variables) {
+    if (v.enabled) vars[v.key] = v.value;
+  }
+  return vars;
+}
+
+// Reads the active global environment's variables from the query cache.
+function getGlobalVariables(): Record<string, string> {
+  const globalEnvName = getQueryClient().getQueryData<string | null>(
+    environmentKeys.globalName,
+  ) ?? null;
+  if (!globalEnvName) return {};
+  const env = getQueryClient().getQueryData<Environment>(
+    environmentKeys.global(globalEnvName),
+  );
+  if (!env) return {};
+  return Object.fromEntries(env.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]));
+}
+
+// Reads process env vars from the query cache.
+function getProcessEnvVars(): Record<string, string> {
+  return getQueryClient().getQueryData<Record<string, string>>(environmentKeys.process) ?? {};
+}
 
 // Returns the synthetic request header(s) that the Rust executor adds for a
 // given Auth value, so the console can show the full set of sent headers.
@@ -115,10 +152,9 @@ export async function resolveRequestFields(
   tabId: string,
   request: RequestState,
 ): Promise<ResolvedRequestFields> {
-  const envStore = useEnvStore.getState();
-  const envVars = envStore.getActiveVariables();
-  const globalVars = envStore.getGlobalVariables();
-  const processEnvVars = envStore.processEnvVars;
+  const envVars = getActiveVariables();
+  const globalVars = getGlobalVariables();
+  const processEnvVars = getProcessEnvVars();
 
   const { root } = usePaneStore.getState();
   const found = findTabInTree(root, tabId);
@@ -206,7 +242,7 @@ export async function resolveRequestFields(
     body: resolvedBody,
     auth: resolvedAuth,
     collection,
-    environmentName: envStore.activeEnvId ?? undefined,
+    environmentName: useEnvStore.getState().activeEnvId ?? undefined,
     requestPath,
   };
 }
@@ -363,7 +399,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   // the Tauri command. The backend env_repo only covers the workspace-level
   // (global) environment directory, not collection-scoped environments, so
   // variable resolution for OAuth2 must happen here on the frontend.
-  const preEnvStore = useEnvStore.getState();
   let preCollectionVars: CollectionVariable[] = [];
   if (preCollection) {
     try {
@@ -388,9 +423,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     }
   }
   const preVarCtx = buildVariableContext({
-    processEnvVars: preEnvStore.processEnvVars,
-    globalVars: preEnvStore.getGlobalVariables(),
-    envVars: preEnvStore.getActiveVariables(),
+    processEnvVars: getProcessEnvVars(),
+    globalVars: getGlobalVariables(),
+    envVars: getActiveVariables(),
     collectionVars: preCollectionVars,
     folderVars: preFolderVars,
     requestVars: preRequestVars,

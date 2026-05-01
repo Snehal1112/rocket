@@ -23,8 +23,8 @@ import {
   onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
+import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
 import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
-import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
@@ -39,8 +39,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const workspace = workspaces.find((w) => w.id === (workspaceId || activeWorkspaceId));
   const updateDescriptionMutation = useUpdateWorkspaceDescription();
   const openTab = usePaneStore((s) => s.openTab);
-  const globalEnvironments = useEnvStore((s) => s.globalEnvironments);
-  const loadGlobalEnvironments = useEnvStore((s) => s.loadGlobalEnvironments);
+  const { data: globalEnvironments = [] } = useGlobalEnvironments();
 
   const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -54,13 +53,11 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     setSummaries(cols);
   }, []);
 
-  // Both listCollections and loadGlobalEnvironments return data for the
-  // active backend workspace. Refetch when workspaceId changes.
-  // Also re-fetch when any collection-changed event fires (e.g. sidebar creates/deletes).
+  // Refetch collections when workspaceId changes or a collection-changed event fires.
+  // Global environments are fetched automatically by useGlobalEnvironments().
   // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
   useEffect(() => {
     refresh().catch(console.error);
-    loadGlobalEnvironments().catch(console.error);
 
     let cancelled = false;
     const unlistenPromise = onCollectionChanged(() => {
@@ -71,7 +68,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
       cancelled = true;
       unlistenPromise.then((fn) => fn());
     };
-  }, [workspaceId, refresh, loadGlobalEnvironments]);
+  }, [workspaceId, refresh]);
 
   useEffect(() => {
     setDocContent(workspace?.description ?? '');

@@ -14,7 +14,6 @@ import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import { listWorkspaces } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
-import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -84,17 +83,8 @@ function App() {
         }
       }
 
-      // Load process env vars once at startup — they don't change at runtime.
-      void useEnvStore.getState().loadProcessEnvVars();
-
-      // Global env is workspace-scoped; always load it at startup.
-      void useEnvStore.getState().fetchGlobalEnv();
-
-      // Load environments for the initial collection, if one is active.
-      const initialCollection = usePaneStore.getState().activeCollection;
-      if (initialCollection) {
-        void useEnvStore.getState().loadEnvironments(initialCollection);
-      }
+      // Process env vars, global env, and collection environments are now
+      // fetched automatically by TanStack Query when components mount.
     };
     void init();
   }, []);
