@@ -68,3 +68,7 @@ export function scheduleSaveUiState() {
     saveUiState(uiState).catch(console.error);
   }, 500);
 }
+
+export function subscribeLayoutStoreToUiState(): () => void {
+  return useLayoutStore.subscribe(scheduleSaveUiState);
+}

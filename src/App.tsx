@@ -13,7 +13,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import { listWorkspaces } from '@/lib/tauri-api';
-import { restoreUiState, scheduleSaveUiState } from '@/lib/ui-state';
+import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -23,9 +23,14 @@ import type { CollectionTab } from '@/types/pane-types';
 function App() {
   const root = usePaneStore((s) => s.root);
   const [showSplash, setShowSplash] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
-  const [consoleHeight, setConsoleHeight] = useState(280);
+
+  const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
+  const isConsoleOpen = useLayoutStore((s) => s.isConsoleOpen);
+  const setConsoleOpen = useLayoutStore((s) => s.setConsoleOpen);
+  const consoleHeight = useLayoutStore((s) => s.consoleHeight);
+  const setConsoleHeight = useLayoutStore((s) => s.setConsoleHeight);
+
   useKeyboardShortcuts();
 
   useEffect(() => {
@@ -34,7 +39,6 @@ function App() {
       const workspaces = await listWorkspaces();
       getQueryClient().setQueryData(workspaceKeys.all, workspaces);
 
-      // Set active workspace id in store from the first workspace.
       if (workspaces.length > 0) {
         useWorkspaceStore.getState().setActiveWorkspaceId(workspaces[0].id);
       }
@@ -43,6 +47,16 @@ function App() {
       if (uiState?.layoutDirection) {
         useLayoutStore.getState().setRequestLayout(uiState.layoutDirection);
       }
+      if (uiState?.sidebarWidth) {
+        useLayoutStore.getState().setSidebarWidth(uiState.sidebarWidth);
+      }
+      if (uiState?.isConsoleOpen !== undefined) {
+        useLayoutStore.getState().setConsoleOpen(uiState.isConsoleOpen);
+      }
+      if (uiState?.consoleHeight) {
+        useLayoutStore.getState().setConsoleHeight(uiState.consoleHeight);
+      }
+
       if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
         const { workspaceId } = uiState.workspaceTabs;
         const ws = workspaces.find((w) => w.id === workspaceId);
@@ -64,7 +78,6 @@ function App() {
           usePaneStore.getState().openTab(tab);
         }
       } else {
-        // No saved state — show workspace overview as the default landing page.
         const firstWs = workspaces[0];
         if (firstWs) {
           usePaneStore.getState().openWorkspaceTabs(firstWs.id);
@@ -87,8 +100,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unsub = usePaneStore.subscribe(scheduleSaveUiState);
-    return unsub;
+    const unsubPane = usePaneStore.subscribe(scheduleSaveUiState);
+    const unsubLayout = subscribeLayoutStoreToUiState();
+    return () => {
+      unsubPane();
+      unsubLayout();
+    };
   }, []);
 
   useEffect(() => {
@@ -163,7 +180,7 @@ function App() {
       />
       <StatusBar
         isConsoleOpen={isConsoleOpen}
-        onConsoleToggle={() => setIsConsoleOpen((o) => !o)}
+        onConsoleToggle={() => setConsoleOpen(!isConsoleOpen)}
       />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       <Toaster position='bottom-right' richColors closeButton />
