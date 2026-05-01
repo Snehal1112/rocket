@@ -110,18 +110,9 @@ export function LiveDashboard() {
           Configure and click Run load test to start.
         </div>
       ) : mode === 'simple' ? (
-        <>
-          {status === 'running' && (
-            <div className='flex flex-1 items-center justify-center text-sm text-muted-foreground'>
-              Test running…
-            </div>
-          )}
-          {status !== 'running' && (
-            <div className='min-h-0 flex-1 overflow-hidden'>
-              <RequestLogTable />
-            </div>
-          )}
-        </>
+        <div className='min-h-0 flex-1 overflow-hidden'>
+          <RequestLogTable />
+        </div>
       ) : (
         <>
           {/* Progress bar */}

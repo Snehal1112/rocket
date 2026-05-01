@@ -186,6 +186,13 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
             },
           ],
         }));
+        // Stop early once totalRequests have been completed. V2 is duration-based
+        // so we mark complete first (preventing stopTest from resetting to idle),
+        // then clean up listeners and timers.
+        if (event.payload.completed >= totalRequests) {
+          set({ status: 'complete' });
+          get().stopTest();
+        }
       });
 
       unlistenComplete = await listen<LoadTestResult>('load_test_complete', (event) => {

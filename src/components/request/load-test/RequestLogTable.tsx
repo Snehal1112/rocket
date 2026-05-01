@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -12,14 +11,13 @@ import { useLoadTestStore } from '@/stores/load-test-store';
 
 export function RequestLogTable() {
   const requestLog = useLoadTestStore((s) => s.requestLog);
-  const recent = useMemo(() => requestLog.slice(-50), [requestLog]);
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <div className='border-b border-border/40 bg-muted/30 px-3 py-1.5'>
+      <div className='flex items-baseline gap-2 border-b border-border/40 bg-muted/30 px-3 py-1.5'>
         <span className='text-[11px] font-medium text-muted-foreground'>Per-request log</span>
-        <span className='ml-2 text-[10px] font-normal text-muted-foreground'>
-          showing last 50 of {requestLog.length}
+        <span className='text-[10px] font-normal text-muted-foreground'>
+          · {requestLog.length} {requestLog.length === 1 ? 'entry' : 'entries'}
         </span>
       </div>
       <div className='overflow-y-auto'>
@@ -35,14 +33,14 @@ export function RequestLogTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {recent.length === 0 ? (
+            {requestLog.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className='py-4 text-center text-xs text-muted-foreground'>
                   No requests yet
                 </TableCell>
               </TableRow>
             ) : (
-              recent.map((entry) => {
+              requestLog.map((entry) => {
                 const ok = entry.status !== null && entry.status < 400;
                 return (
                   <TableRow key={entry.seq}>
