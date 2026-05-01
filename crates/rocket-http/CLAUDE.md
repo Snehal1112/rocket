@@ -31,7 +31,7 @@ cargo test -p rocket-http <test_name>
 | `aws_sig` | `sign_request()` → `SignedHeaders` — full AWS Signature Version 4 HMAC chain |
 | `cookie` | `Cookie` and `CookieJar` (in-memory, domain-scoped; `add` replaces by name) |
 | `cookie_repository` | `CookieRepository` trait for persistent cookie storage |
-| `load_test` | `run_load_test()` — fires N concurrent requests bounded by a semaphore, returns `LoadTestResult` with p50/p95/p99 latency stats |
+| `load_test` | Phase-based load testing harness. `run_load_test_v2()` drives a `PhaseScheduler` that adjusts semaphore permits between `RampUp / Hold / RampDown` phases, accumulates a `RingBuffer<RequestLogEntry>` (default 5 000 entries), emits `load_test_progress` Tauri events every 250 ms, and returns a `LoadTestResult` with full `time_series` and `request_log`. The legacy `run_load_test()` is kept for existing tests. |
 
 ## Key Design Rules
 
@@ -42,6 +42,7 @@ cargo test -p rocket-http <test_name>
 - All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
 - `CookieJar::add` silently replaces a cookie with the same name — upsert semantics.
 - `run_load_test` uses a `Semaphore` to cap concurrency and classifies each request as one of three outcomes: `Success` (HTTP status < 400), `StatusFail` (status ≥ 400), or `TransportFail` (executor error). `Success` and `StatusFail` both contribute latency to the stats; only `TransportFail` is excluded (no latency sample). `failed = failed_transport + failed_status`. Optional `interval_ms` on `LoadTestConfig` adds a staggered-start delay between spawns.
+- `LoadTestConfigV2` uses `#[serde(default)]` on `success_rule` and `ring_buffer_size` so callers that omit them get safe defaults (400 / 5 000). The three new fields on `LoadTestResult` (`phase_timeline`, `request_log`, `time_series`) also carry `#[serde(default)]` for backwards-compat with older Tauri call sites.
 
 ## Relationships
 
