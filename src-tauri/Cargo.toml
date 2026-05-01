@@ -22,7 +22,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
-rocket-app.workspace = true
+rocket-app = { workspace = true, features = ["tauri-events"] }
 rocket-audit.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true
@@ -54,6 +54,7 @@ reqwest.workspace = true
 url = "2"
 chrono.workspace = true
 ulid.workspace = true
+base64.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"

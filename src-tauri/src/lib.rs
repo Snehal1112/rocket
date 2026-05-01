@@ -187,9 +187,12 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir.clone())),
                 Box::new(NullEventPublisher),
             );
+            let executor: Arc<dyn rocket_http::HttpExecutor> =
+                Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)));
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
-                Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))),
+                Arc::clone(&executor),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
@@ -228,6 +231,7 @@ pub fn run() {
             app.manage(template_svc);
             app.manage(cookie_svc);
             app.manage(exec_svc);
+            app.manage(executor);
             app.manage(oauth2_svc);
             app.manage(git_svc);
             app.manage(audit_svc);
@@ -288,6 +292,8 @@ pub fn run() {
             commands::environments::delete_global_environment,
             commands::execution::execute_request,
             commands::load_test::run_load_test_command,
+            commands::load_test::run_load_test_v2_command,
+            commands::load_test::export_load_test,
             commands::history::list_history,
             commands::history::get_history_entry,
             commands::history::clear_history,
