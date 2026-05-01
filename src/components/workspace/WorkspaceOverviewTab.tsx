@@ -108,7 +108,10 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   }
 
   const saveDocFn = useCallback(async () => {
-    await updateDescriptionMutation.mutateAsync({ id: workspaceId, description: docContent.trim() || null });
+    await updateDescriptionMutation.mutateAsync({
+      id: workspaceId,
+      description: docContent.trim() || null,
+    });
   }, [workspaceId, docContent, updateDescriptionMutation]);
 
   const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(

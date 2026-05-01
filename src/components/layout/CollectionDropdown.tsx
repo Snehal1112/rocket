@@ -2,11 +2,11 @@ import { Briefcase, ChevronDown, Clock } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { type CollectionSummary, listCollections } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useGitStore } from '@/stores/git-store';
 import { usePaneStore } from '@/stores/pane-store';
-import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 export function CollectionDropdown() {
@@ -19,7 +19,8 @@ export function CollectionDropdown() {
 
   const { data: workspaces = [] } = useWorkspaces();
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'Untitled Workspace';
+  const activeWorkspace =
+    workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'Untitled Workspace';
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
 
   const fetchCollections = useCallback(async () => {

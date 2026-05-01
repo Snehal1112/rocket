@@ -20,6 +20,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tree } from '@/components/ui/tree';
+import { environmentKeys } from '@/lib/queries/environment-queries';
+import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
+import { getQueryClient } from '@/lib/query-client';
 import {
   type CollectionItem,
   type CollectionSummary,
@@ -35,9 +38,6 @@ import {
   saveRequest,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
-import { environmentKeys } from '@/lib/queries/environment-queries';
-import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
-import { getQueryClient } from '@/lib/query-client';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -265,7 +265,9 @@ export function CollectionsSidebar() {
         if (event.collection === activeCollection) {
           if (envDebounce.current) clearTimeout(envDebounce.current);
           envDebounce.current = setTimeout(() => {
-            getQueryClient().invalidateQueries({ queryKey: environmentKeys.collection(activeCollection) });
+            getQueryClient().invalidateQueries({
+              queryKey: environmentKeys.collection(activeCollection),
+            });
           }, 300);
         }
       }

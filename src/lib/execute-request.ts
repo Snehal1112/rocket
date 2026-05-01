@@ -25,9 +25,9 @@ import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/
 function getActiveVariables(): Record<string, string> {
   const { activeEnvId, activeCollection } = useEnvStore.getState();
   if (!activeEnvId || !activeCollection) return {};
-  const envs = getQueryClient().getQueryData<Environment[]>(
-    environmentKeys.collection(activeCollection),
-  ) ?? [];
+  const envs =
+    getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(activeCollection)) ??
+    [];
   const env = envs.find((e) => e.name === activeEnvId);
   if (!env) return {};
   const vars: Record<string, string> = {};
@@ -39,13 +39,10 @@ function getActiveVariables(): Record<string, string> {
 
 // Reads the active global environment's variables from the query cache.
 function getGlobalVariables(): Record<string, string> {
-  const globalEnvName = getQueryClient().getQueryData<string | null>(
-    environmentKeys.globalName,
-  ) ?? null;
+  const globalEnvName =
+    getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
   if (!globalEnvName) return {};
-  const env = getQueryClient().getQueryData<Environment>(
-    environmentKeys.global(globalEnvName),
-  );
+  const env = getQueryClient().getQueryData<Environment>(environmentKeys.global(globalEnvName));
   if (!env) return {};
   return Object.fromEntries(env.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]));
 }

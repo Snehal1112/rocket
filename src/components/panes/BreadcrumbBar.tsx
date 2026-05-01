@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { mapApiRequestToState } from '@/lib/pane-utils';
+import { useSwitchWorkspace, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getCollection, listCollections } from '@/lib/tauri-api';
-import { useWorkspaces, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionSection, Tab, WorkspaceTabSection } from '@/types/pane-types';
@@ -583,11 +583,28 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const openTab = usePaneStore((s) => s.openTab);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
 
-  const switchWorkspace = useCallback((id: string) => switchWorkspaceMutation.mutate(id), [switchWorkspaceMutation]);
+  const switchWorkspace = useCallback(
+    (id: string) => switchWorkspaceMutation.mutate(id),
+    [switchWorkspaceMutation],
+  );
 
   const nav = useMemo<NavActions>(
-    () => ({ openCollectionTab, openWorkspaceTabs, switchWorkspace, switchCollection, openTab, updateCollectionSection }),
-    [openCollectionTab, openWorkspaceTabs, switchWorkspace, switchCollection, openTab, updateCollectionSection],
+    () => ({
+      openCollectionTab,
+      openWorkspaceTabs,
+      switchWorkspace,
+      switchCollection,
+      openTab,
+      updateCollectionSection,
+    }),
+    [
+      openCollectionTab,
+      openWorkspaceTabs,
+      switchWorkspace,
+      switchCollection,
+      openTab,
+      updateCollectionSection,
+    ],
   );
 
   const segments = useMemo(
