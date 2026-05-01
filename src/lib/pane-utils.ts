@@ -94,8 +94,11 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     settings: {
       verifySsl: req.settings?.verifySsl ?? true,
       followRedirects: req.settings?.followRedirects ?? true,
-      timeoutMs: req.settings?.timeout ?? 30000,
+      maxRedirects: req.settings?.maxRedirects ?? 5,
+      timeoutMs: req.settings?.timeout ?? 0,
+      encodeUrl: req.settings?.encodeUrl ?? true,
     },
+    tags: req.tags ?? [],
     docs: req.docs ?? null,
   };
 }
@@ -117,7 +120,14 @@ export function createDefaultRequest(): RequestState {
     auth: {
       authType: 'none',
     },
-    settings: { verifySsl: true, followRedirects: true, timeoutMs: 30000 },
+    settings: {
+      verifySsl: true,
+      followRedirects: true,
+      maxRedirects: 5,
+      timeoutMs: 0,
+      encodeUrl: true,
+    },
+    tags: [],
     docs: null,
   };
 }

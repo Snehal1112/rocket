@@ -79,6 +79,8 @@ export interface ApiRequestSettings {
   timeout?: number;
   followRedirects?: boolean;
   verifySsl?: boolean;
+  maxRedirects?: number;
+  encodeUrl?: boolean;
 }
 
 export interface Request {

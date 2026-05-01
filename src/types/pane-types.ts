@@ -127,7 +127,9 @@ export function isGitTab(tab: Tab): tab is GitTab {
 export interface RequestSettings {
   verifySsl: boolean;
   followRedirects: boolean;
+  maxRedirects: number;
   timeoutMs: number;
+  encodeUrl: boolean;
 }
 
 export interface RequestState {
@@ -141,6 +143,7 @@ export interface RequestState {
   auth: AuthState;
   settings: RequestSettings;
   docs: string | null;
+  tags: string[];
 }
 
 export interface KeyValueEntry {
