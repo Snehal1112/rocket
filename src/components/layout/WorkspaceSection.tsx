@@ -9,8 +9,8 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import type { Workspace } from '@/lib/tauri-api';
+import { useCloseWorkspace, useRenameWorkspace } from '@/lib/queries/workspace-queries';
 import { usePaneStore } from '@/stores/pane-store';
-import { useWorkspaceStore } from '@/stores/workspace-store';
 
 interface WorkspaceSectionProps {
   workspace: Workspace;
@@ -23,6 +23,8 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const renameMutation = useRenameWorkspace();
+  const closeMutation = useCloseWorkspace();
 
   const handleOpenWorkspace = () => {
     usePaneStore.getState().openWorkspaceTabs(workspace.id);
@@ -34,7 +36,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
 
   const handleRename = (newName: string) => {
     if (newName !== workspace.name) {
-      void useWorkspaceStore.getState().renameWorkspace(workspace.id, newName);
+      renameMutation.mutate({ id: workspace.id, newName });
     }
   };
 
@@ -54,7 +56,7 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
   };
 
   const handleClose = () => {
-    void useWorkspaceStore.getState().closeWorkspace(workspace.id);
+    closeMutation.mutate(workspace.id);
   };
 
   return (

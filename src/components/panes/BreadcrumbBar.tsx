@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { mapApiRequestToState } from '@/lib/pane-utils';
 import { getCollection, listCollections } from '@/lib/tauri-api';
+import { useWorkspaces, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionSection, Tab, WorkspaceTabSection } from '@/types/pane-types';
@@ -116,7 +117,7 @@ function workspaceSectionIcon(section: WorkspaceTabSection): React.ReactNode {
 interface NavActions {
   openCollectionTab: (collection: string, section: CollectionSection) => void;
   openWorkspaceTabs: (workspaceId: string, section: WorkspaceTabSection) => void;
-  switchWorkspace: (id: string) => Promise<void>;
+  switchWorkspace: (id: string) => void;
   switchCollection: (name: string) => void;
   openTab: (tab: Tab) => void;
   updateCollectionSection: (tabId: string, section: CollectionSection) => void;
@@ -571,9 +572,9 @@ interface BreadcrumbBarProps {
 }
 
 export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const { data: workspaces = [] } = useWorkspaces();
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const switchWorkspaceMutation = useSwitchWorkspace();
   const workspaceName = workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'Workspace';
 
   const openCollectionTab = usePaneStore((s) => s.openCollectionTab);
@@ -581,6 +582,8 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const switchCollection = usePaneStore((s) => s.switchCollection);
   const openTab = usePaneStore((s) => s.openTab);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
+
+  const switchWorkspace = useCallback((id: string) => switchWorkspaceMutation.mutate(id), [switchWorkspaceMutation]);
 
   const nav = useMemo<NavActions>(
     () => ({ openCollectionTab, openWorkspaceTabs, switchWorkspace, switchCollection, openTab, updateCollectionSection }),

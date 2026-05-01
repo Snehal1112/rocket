@@ -18,8 +18,8 @@ import {
   gitClone,
   openFolderPicker,
 } from '@/lib/tauri-api';
+import { useOpenWorkspaceFromDisk, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import { useGitStore } from '@/stores/git-store';
-import { useWorkspaceStore } from '@/stores/workspace-store';
 
 type Step = 'input' | 'progress' | 'picker';
 
@@ -37,6 +37,8 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
 
   const credentials = useGitStore((s) => s.credentials);
+  const openFromDiskMutation = useOpenWorkspaceFromDisk();
+  const switchWorkspaceMutation = useSwitchWorkspace();
 
   // Reset all state when dialog opens.
   useEffect(() => {
@@ -53,15 +55,15 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const handleOpenWorkspace = useCallback(
     async (workspacePath: string) => {
       try {
-        const ws = await useWorkspaceStore.getState().openWorkspaceFromDisk(workspacePath);
-        await useWorkspaceStore.getState().switchWorkspace(ws.id);
+        const ws = await openFromDiskMutation.mutateAsync(workspacePath);
+        switchWorkspaceMutation.mutate(ws.id);
         onOpenChange(false);
       } catch (e) {
         setError(String(e));
         setStep('input');
       }
     },
-    [onOpenChange],
+    [onOpenChange, openFromDiskMutation, switchWorkspaceMutation],
   );
 
   // Handle post-clone detection: auto-open workspace or show picker.

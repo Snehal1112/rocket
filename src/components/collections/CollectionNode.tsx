@@ -34,6 +34,7 @@ import { createDefaultRequest } from '@/lib/pane-utils';
 import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
+import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
@@ -86,7 +87,7 @@ export function CollectionNode({
   // `<workspace>/collections/<name>/.rocket/contracts/` — we mirror the
   // same construction used by `save_request` on the Rust side.
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const { data: workspaces = [] } = useWorkspaces();
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
   const collectionRoot = activeWorkspace
     ? `${activeWorkspace.path}/collections/${summary.name}`

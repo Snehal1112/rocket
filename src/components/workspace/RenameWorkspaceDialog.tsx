@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { useWorkspaceStore } from '@/stores/workspace-store';
+import { useRenameWorkspace } from '@/lib/queries/workspace-queries';
 
 interface Props {
   open: boolean;
@@ -20,7 +20,7 @@ interface Props {
 export function RenameWorkspaceDialog({ open, onOpenChange, workspaceId, currentName }: Props) {
   const [name, setName] = useState(currentName);
   const [error, setError] = useState('');
-  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
+  const renameMutation = useRenameWorkspace();
 
   // Sync when currentName changes (e.g. re-opened for a different workspace).
   // biome-ignore lint/correctness/useExhaustiveDependencies: open is intentionally included as a reset trigger
@@ -45,7 +45,7 @@ export function RenameWorkspaceDialog({ open, onOpenChange, workspaceId, current
       return;
     }
     try {
-      await renameWorkspace(workspaceId, trimmed);
+      await renameMutation.mutateAsync({ id: workspaceId, newName: trimmed });
       handleClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to rename workspace');

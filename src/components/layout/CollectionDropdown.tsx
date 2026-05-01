@@ -6,6 +6,7 @@ import { type CollectionSummary, listCollections } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useGitStore } from '@/stores/git-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 export function CollectionDropdown() {
@@ -16,11 +17,9 @@ export function CollectionDropdown() {
   const switchCollection = usePaneStore((s) => s.switchCollection);
   const getOpenTabCount = usePaneStore((s) => s.getOpenTabCount);
 
+  const { data: workspaces = [] } = useWorkspaces();
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const activeWorkspace = useWorkspaceStore((s) => {
-    const ws = s.workspaces.find((w) => w.id === s.activeWorkspaceId);
-    return ws?.name ?? 'Untitled Workspace';
-  });
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'Untitled Workspace';
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
 
   const fetchCollections = useCallback(async () => {

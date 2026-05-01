@@ -23,6 +23,7 @@ import {
   onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
+import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -33,8 +34,10 @@ interface WorkspaceOverviewTabProps {
 }
 
 export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps) {
-  const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === workspaceId));
-  const updateDescription = useWorkspaceStore((s) => s.updateDescription);
+  const { data: workspaces = [] } = useWorkspaces();
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspace = workspaces.find((w) => w.id === (workspaceId || activeWorkspaceId));
+  const updateDescriptionMutation = useUpdateWorkspaceDescription();
   const openTab = usePaneStore((s) => s.openTab);
   const globalEnvironments = useEnvStore((s) => s.globalEnvironments);
   const loadGlobalEnvironments = useEnvStore((s) => s.loadGlobalEnvironments);
@@ -108,8 +111,8 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   }
 
   const saveDocFn = useCallback(async () => {
-    await updateDescription(workspaceId, docContent.trim() || null);
-  }, [workspaceId, docContent, updateDescription]);
+    await updateDescriptionMutation.mutateAsync({ id: workspaceId, description: docContent.trim() || null });
+  }, [workspaceId, docContent, updateDescriptionMutation]);
 
   const { state: saveDocState, trigger: triggerSaveDoc } = useSaveButton(
     saveDocFn,

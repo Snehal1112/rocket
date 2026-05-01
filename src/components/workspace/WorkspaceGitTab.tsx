@@ -1,4 +1,5 @@
 import { GitPanel } from '@/components/git/GitPanel';
+import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 interface WorkspaceGitTabProps {
@@ -6,8 +7,9 @@ interface WorkspaceGitTabProps {
 }
 
 export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
-  const workspace = workspaces.find((w) => w.id === workspaceId);
+  const { data: workspaces = [] } = useWorkspaces();
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspace = workspaces.find((w) => w.id === (workspaceId || activeWorkspaceId));
   const workspacePath = workspace?.path ?? null;
 
   if (!workspacePath) {

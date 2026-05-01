@@ -33,17 +33,29 @@ import {
 import { CreateWorkspaceDialog } from '@/components/workspace/CreateWorkspaceDialog';
 import { RenameWorkspaceDialog } from '@/components/workspace/RenameWorkspaceDialog';
 import { openFolderPicker } from '@/lib/tauri-api';
+import {
+  useCloseWorkspace,
+  useDeleteWorkspace,
+  useOpenWorkspaceFromDisk,
+  usePinWorkspace,
+  useSwitchWorkspace,
+  useUnpinWorkspace,
+  useWorkspaces,
+} from '@/lib/queries/workspace-queries';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 type DialogTarget = { id: string; name: string };
 
 export function WorkspaceSwitcher() {
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const { data: workspaces = [] } = useWorkspaces();
   const activeId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
-  const closeWorkspace = useWorkspaceStore((s) => s.closeWorkspace);
-  const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
+  const switchWorkspaceMutation = useSwitchWorkspace();
+  const closeWorkspaceMutation = useCloseWorkspace();
+  const deleteWorkspaceMutation = useDeleteWorkspace();
+  const pinMutation = usePinWorkspace();
+  const unpinMutation = useUnpinWorkspace();
+  const openFromDiskMutation = useOpenWorkspaceFromDisk();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -62,7 +74,7 @@ export function WorkspaceSwitcher() {
       <DropdownMenuItem
         className='flex-1 gap-2'
         onSelect={() => {
-          if (ws.id !== activeId) void switchWorkspace(ws.id);
+          if (ws.id !== activeId) switchWorkspaceMutation.mutate(ws.id);
         }}
       >
         <Briefcase
@@ -82,9 +94,9 @@ export function WorkspaceSwitcher() {
         onClick={(e) => {
           e.stopPropagation();
           if (ws.pinned) {
-            useWorkspaceStore.getState().unpinWorkspace(ws.id);
+            unpinMutation.mutate(ws.id);
           } else {
-            useWorkspaceStore.getState().pinWorkspace(ws.id);
+            pinMutation.mutate(ws.id);
           }
         }}
       >
@@ -159,7 +171,7 @@ export function WorkspaceSwitcher() {
               const path = await openFolderPicker();
               if (path) {
                 try {
-                  await useWorkspaceStore.getState().openWorkspaceFromDisk(path);
+                  await openFromDiskMutation.mutateAsync(path);
                 } catch (err) {
                   console.error('Failed to open workspace:', err);
                 }
@@ -219,7 +231,7 @@ export function WorkspaceSwitcher() {
             <AlertDialogAction
               onClick={() => {
                 if (!closeTarget) return;
-                void closeWorkspace(closeTarget.id);
+                closeWorkspaceMutation.mutate(closeTarget.id);
                 setCloseTarget(null);
               }}
             >
@@ -250,7 +262,7 @@ export function WorkspaceSwitcher() {
               className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               onClick={() => {
                 if (!deleteTarget) return;
-                void deleteWorkspace(deleteTarget.id);
+                deleteWorkspaceMutation.mutate(deleteTarget.id);
                 setDeleteTarget(null);
               }}
             >

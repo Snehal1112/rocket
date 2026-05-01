@@ -35,6 +35,7 @@ import {
   saveRequest,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -54,8 +55,9 @@ export function CollectionsSidebar() {
   const historyTabRef = useRef<HTMLButtonElement>(null);
 
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
   const multiWorkspaceMode = useWorkspaceStore((s) => s.multiWorkspaceMode);
+  const { data: workspaces = [] } = useWorkspaces();
+  const setMultiModeMutation = useSetMultiWorkspaceMode();
   const openWorkspaceTabs = usePaneStore((s) => s.openWorkspaceTabs);
   const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
@@ -420,8 +422,7 @@ export function CollectionsSidebar() {
                     : 'Switch to multi-workspace mode'
                 }
                 onClick={() => {
-                  const store = useWorkspaceStore.getState();
-                  void store.setMultiWorkspaceMode(!store.multiWorkspaceMode);
+                  setMultiModeMutation.mutate(!multiWorkspaceMode);
                 }}
               >
                 <Layers className='h-3.5 w-3.5' />

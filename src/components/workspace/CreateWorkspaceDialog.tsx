@@ -10,8 +10,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useCreateWorkspace, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getAppDataDir, openFolderPicker } from '@/lib/tauri-api';
-import { useWorkspaceStore } from '@/stores/workspace-store';
 
 interface Props {
   open: boolean;
@@ -22,8 +22,8 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
   const [error, setError] = useState('');
-  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const createMutation = useCreateWorkspace();
+  const { data: workspaces = [] } = useWorkspaces();
 
   // Pre-fill path with the default data directory when the dialog opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: path is an intentional guard condition, not a trigger
@@ -72,7 +72,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
       // lives in its own subfolder and can be deleted safely.
       const sep = path.includes('\\') ? '\\' : '/';
       const fullPath = path.endsWith(sep) ? path + trimmedName : path + sep + trimmedName;
-      await createWorkspace(trimmedName, fullPath);
+      await createMutation.mutateAsync({ name: trimmedName, path: fullPath });
       handleClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create workspace');

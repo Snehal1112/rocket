@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './globals.css';
 import App from './App';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { setQueryClient } from '@/lib/query-client';
 
 // Apply theme class synchronously before React renders.
 // This prevents a flash of wrong theme in Monaco and other components
@@ -37,6 +38,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+setQueryClient(queryClient);
 
 // Mount React immediately — Monaco loads on demand when the first editor renders.
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
