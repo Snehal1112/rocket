@@ -1032,6 +1032,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_load_test_v2_hold_phase_counts() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
+        let config = LoadTestConfigV2 {
+            phases: vec![LoadTestPhase {
+                kind: PhaseKind::Hold,
+                duration_secs: 1,
+                target_concurrency: 3,
+            }],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 1000,
+        };
+        let result = run_load_test_v2(executor, &test_request(), &config).await;
+        assert!(result.total_requests > 0);
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.succeeded, result.total_requests);
+        assert!(!result.time_series.is_empty());
+        assert_eq!(result.request_log.len() as u32, result.total_requests);
+    }
+
+    #[tokio::test]
+    async fn run_load_test_v2_status_fail_classified_correctly() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(503));
+        let config = LoadTestConfigV2 {
+            phases: vec![LoadTestPhase {
+                kind: PhaseKind::Hold,
+                duration_secs: 1,
+                target_concurrency: 1,
+            }],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 100,
+        };
+        let result = run_load_test_v2(executor, &test_request(), &config).await;
+        assert!(result.total_requests > 0);
+        assert_eq!(result.succeeded, 0);
+        assert_eq!(result.failed_status, result.total_requests);
+        assert_eq!(result.failed_transport, 0);
+    }
+
+    #[tokio::test]
     async fn load_test_interval_zero_no_delay() {
         // Regression: interval_ms=0 should match pre-interval behaviour.
         // total=10 fast requests should finish well under 500ms.
