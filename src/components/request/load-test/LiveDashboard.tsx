@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useLoadTestStore } from '@/stores/load-test-store';
 import { ConcurrencyChart } from './ConcurrencyChart';
 import { ErrorRateChart } from './ErrorRateChart';
@@ -12,6 +13,11 @@ const PHASE_NAMES: Record<string, string> = {
   Hold: 'hold phase',
   RampDown: 'ramp-down phase',
 };
+
+const LOG_HEIGHT_KEY = 'rocket:load-test:log-height';
+const DEFAULT_LOG_HEIGHT = 144;
+const MIN_LOG_HEIGHT = 72;
+const MAX_LOG_HEIGHT = 400;
 
 export function LiveDashboard() {
   const status = useLoadTestStore((s) => s.status);
@@ -32,6 +38,58 @@ export function LiveDashboard() {
       : totalTarget > 0
         ? Math.min(100, (completed / totalTarget) * 100)
         : 0;
+
+  const logRef = useRef<HTMLDivElement>(null);
+  const logHeight = useRef<number>(DEFAULT_LOG_HEIGHT);
+  const onMoveRef = useRef<((ev: MouseEvent) => void) | null>(null);
+  const onUpRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LOG_HEIGHT_KEY);
+    if (saved) {
+      const h = Number(saved);
+      if (h >= MIN_LOG_HEIGHT && h <= MAX_LOG_HEIGHT) {
+        logHeight.current = h;
+        if (logRef.current) logRef.current.style.height = `${h}px`;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (onMoveRef.current) window.removeEventListener('mousemove', onMoveRef.current);
+      if (onUpRef.current) window.removeEventListener('mouseup', onUpRef.current);
+    };
+  }, []);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = logHeight.current;
+
+    const onMove = (ev: MouseEvent) => {
+      // Dragging up increases height (log grows upward).
+      const next = Math.min(
+        MAX_LOG_HEIGHT,
+        Math.max(MIN_LOG_HEIGHT, startH - (ev.clientY - startY)),
+      );
+      logHeight.current = next;
+      if (logRef.current) logRef.current.style.height = `${next}px`;
+    };
+
+    const onUp = () => {
+      localStorage.setItem(LOG_HEIGHT_KEY, String(logHeight.current));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      onMoveRef.current = null;
+      onUpRef.current = null;
+    };
+
+    onMoveRef.current = onMove;
+    onUpRef.current = onUp;
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   return (
     <div className='flex h-full min-h-0 flex-col'>
@@ -79,8 +137,17 @@ export function LiveDashboard() {
             </div>
           </div>
 
-          {/* Request log */}
-          <div className='h-36 shrink-0 overflow-hidden border-t border-border/40'>
+          {/* Drag handle + request log */}
+          <div
+            aria-hidden='true'
+            className='group h-[5px] shrink-0 cursor-row-resize border-t border-border/40 bg-transparent transition-colors hover:bg-border/40'
+            onMouseDown={handleResizeStart}
+          />
+          <div
+            ref={logRef}
+            className='shrink-0 overflow-hidden border-t border-border/40'
+            style={{ height: DEFAULT_LOG_HEIGHT }}
+          >
             <RequestLogTable />
           </div>
         </>
