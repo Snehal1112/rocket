@@ -178,6 +178,45 @@ pub(crate) fn body_skip_items(body: &PostmanBody, request_name: &str) -> Vec<Ski
     out
 }
 
+use rocket_collection::Request;
+use rocket_shared::types::HttpMethod;
+use std::str::FromStr;
+
+/// Convert a `PostmanRequestItem` into a domain `Request` plus any skip items.
+pub(crate) fn convert_request_item(item: &PostmanRequestItem) -> (Request, Vec<SkippedItem>) {
+    let mut skipped = Vec::new();
+
+    let method = HttpMethod::from_str(&item.request.method).unwrap_or(HttpMethod::Get);
+
+    let mut req = Request::new(item.name.clone(), method, item.request.url.raw().to_string());
+
+    req.headers = convert_headers(&item.request.header);
+    req.query_params = convert_query_params(item.request.url.query_params());
+    req.path_params = convert_path_variables(item.request.url.path_variables());
+
+    if let Some(a) = item.request.auth.as_ref() {
+        if a.auth_type == "oauth2" {
+            skipped.push(SkippedItem {
+                path: item.name.clone(),
+                reason: SkipReason::UnsupportedAuthType("oauth2".into()),
+            });
+        } else if let Some(domain_auth) = convert_auth(a) {
+            req.auth = domain_auth;
+        }
+    }
+
+    if let Some(b) = item.request.body.as_ref() {
+        skipped.extend(body_skip_items(b, &item.name));
+        req.body = convert_body(b);
+    }
+
+    if let Some(d) = item.request.description.as_ref() {
+        req.description = Some(rocket_shared::description::Description::text(d.as_str()));
+    }
+
+    (req, skipped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +496,147 @@ mod tests {
         assert_eq!(out[0].initial_value, "http://localhost:3000");
         assert!(out[0].enabled);
         assert!(!out[0].secret);
+    }
+
+    #[test]
+    fn converts_get_request() {
+        let item = PostmanRequestItem {
+            name: "Get Users".into(),
+            request: PostmanRequest {
+                method: "GET".into(),
+                url: PostmanUrl::Object(PostmanUrlObject {
+                    raw: "{{baseUrl}}/users".into(),
+                    query: vec![PostmanQueryParam {
+                        key: Some("page".into()),
+                        value: Some("1".into()),
+                        disabled: false,
+                    }],
+                    variable: vec![],
+                }),
+                header: vec![PostmanHeader {
+                    key: "Accept".into(),
+                    value: "application/json".into(),
+                    disabled: false,
+                }],
+                auth: None,
+                body: None,
+                description: None,
+            },
+        };
+        let (req, skipped) = convert_request_item(&item);
+        assert_eq!(req.name, "Get Users");
+        assert_eq!(req.method, HttpMethod::Get);
+        assert_eq!(req.url, "{{baseUrl}}/users");
+        assert_eq!(req.query_params.len(), 1);
+        assert_eq!(req.query_params[0].key, "page");
+        assert_eq!(req.headers.len(), 1);
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn converts_post_with_json_body() {
+        let item = PostmanRequestItem {
+            name: "Create User".into(),
+            request: PostmanRequest {
+                method: "POST".into(),
+                url: PostmanUrl::String("{{baseUrl}}/users".into()),
+                header: vec![],
+                auth: None,
+                body: Some(PostmanBody {
+                    mode: "raw".into(),
+                    raw: Some(r#"{"name":"Alice"}"#.into()),
+                    options: Some(PostmanBodyOptions {
+                        raw: Some(PostmanRawBodyOptions {
+                            language: Some("json".into()),
+                        }),
+                    }),
+                    urlencoded: vec![],
+                    formdata: vec![],
+                }),
+                description: None,
+            },
+        };
+        let (req, skipped) = convert_request_item(&item);
+        assert_eq!(req.method, HttpMethod::Post);
+        let body = req.body.unwrap();
+        assert_eq!(body.mode, BodyMode::Json);
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn oauth2_auth_records_skip_and_leaves_auth_none() {
+        let item = PostmanRequestItem {
+            name: "OAuth Request".into(),
+            request: PostmanRequest {
+                method: "GET".into(),
+                url: PostmanUrl::String("https://api.example.com".into()),
+                header: vec![],
+                auth: Some(PostmanAuth {
+                    auth_type: "oauth2".into(),
+                    bearer: vec![],
+                    basic: vec![],
+                    apikey: vec![],
+                    oauth2: vec![],
+                }),
+                body: None,
+                description: None,
+            },
+        };
+        let (req, skipped) = convert_request_item(&item);
+        assert!(matches!(req.auth, Auth::None));
+        assert_eq!(skipped.len(), 1);
+        assert!(matches!(
+            skipped[0].reason,
+            SkipReason::UnsupportedAuthType(_)
+        ));
+    }
+
+    #[test]
+    fn file_body_records_skip_and_leaves_body_none() {
+        let item = PostmanRequestItem {
+            name: "Upload".into(),
+            request: PostmanRequest {
+                method: "POST".into(),
+                url: PostmanUrl::String("https://api.example.com/upload".into()),
+                header: vec![],
+                auth: None,
+                body: Some(PostmanBody {
+                    mode: "file".into(),
+                    raw: None,
+                    options: None,
+                    urlencoded: vec![],
+                    formdata: vec![],
+                }),
+                description: None,
+            },
+        };
+        let (req, skipped) = convert_request_item(&item);
+        assert!(req.body.is_none());
+        assert_eq!(skipped.len(), 1);
+    }
+
+    #[test]
+    fn path_variables_become_path_params() {
+        let item = PostmanRequestItem {
+            name: "Get By ID".into(),
+            request: PostmanRequest {
+                method: "GET".into(),
+                url: PostmanUrl::Object(PostmanUrlObject {
+                    raw: "{{baseUrl}}/users/:id".into(),
+                    query: vec![],
+                    variable: vec![PostmanPathVariable {
+                        key: "id".into(),
+                        value: Some("123".into()),
+                    }],
+                }),
+                header: vec![],
+                auth: None,
+                body: None,
+                description: None,
+            },
+        };
+        let (req, _) = convert_request_item(&item);
+        assert_eq!(req.path_params.len(), 1);
+        assert_eq!(req.path_params[0].name, "id");
     }
 }
