@@ -1,5 +1,5 @@
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
-import { ChevronDown, ChevronRight, Loader2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileJson, Loader2, Plus, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,8 @@ import {
   type ImportReport,
   importBruno,
   importBrunoZip,
+  importPostmanCollection,
+  importPostmanEnvironment,
 } from '@/lib/tauri-api';
 
 interface ImportCollectionDialogProps {
@@ -30,7 +32,8 @@ interface ImportCollectionDialogProps {
   onImportComplete?: () => void;
 }
 
-type SourceKind = 'folder' | 'zip';
+type ImportSource = 'bruno' | 'postman';
+type SourceKind = 'folder' | 'zip' | 'postman-json';
 type DialogState = 'picking' | 'importing' | 'done';
 
 interface SelectedSource {
@@ -46,7 +49,9 @@ export function ImportCollectionDialog({
   createWorkspace,
   onImportComplete,
 }: ImportCollectionDialogProps) {
+  const [importSource, setImportSource] = useState<ImportSource>('bruno');
   const [source, setSource] = useState<SelectedSource | null>(null);
+  const [envFilePath, setEnvFilePath] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<DialogState>('picking');
   const [report, setReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +61,9 @@ export function ImportCollectionDialog({
     onOpenChange(false);
     // Reset state after dialog animates out.
     setTimeout(() => {
+      setImportSource('bruno');
       setSource(null);
+      setEnvFilePath(null);
       setDialogState('picking');
       setReport(null);
       setError(null);
@@ -66,6 +73,13 @@ export function ImportCollectionDialog({
 
   function clearSource() {
     setSource(null);
+    setError(null);
+  }
+
+  function switchImportSource(next: ImportSource) {
+    setImportSource(next);
+    setSource(null);
+    setEnvFilePath(null);
     setError(null);
   }
 
@@ -91,6 +105,28 @@ export function ImportCollectionDialog({
     }
   }
 
+  async function handleChoosePostmanJson() {
+    const path = await openFilePicker({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'Postman Collection', extensions: ['json'] }],
+    });
+    if (typeof path === 'string') {
+      const name = path.split('/').pop() ?? path;
+      setSource({ path, kind: 'postman-json', name });
+      setError(null);
+    }
+  }
+
+  async function handleChooseEnvJson() {
+    const path = await openFilePicker({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'Postman Environment', extensions: ['json'] }],
+    });
+    if (typeof path === 'string') setEnvFilePath(path);
+  }
+
   async function handleImport() {
     if (!source) return;
     setDialogState('importing');
@@ -110,10 +146,17 @@ export function ImportCollectionDialog({
         targetWsId = ws.id;
       }
 
-      const result =
-        source.kind === 'zip'
-          ? await importBrunoZip(source.path, targetWsId, createWorkspace)
-          : await importBruno(source.path, targetWsId, createWorkspace);
+      let result: ImportReport;
+      if (importSource === 'postman') {
+        result = await importPostmanCollection(source.path, targetWsId);
+        if (envFilePath && result.createdCollections.length > 0) {
+          await importPostmanEnvironment(envFilePath, result.createdCollections[0], targetWsId);
+        }
+      } else if (source.kind === 'zip') {
+        result = await importBrunoZip(source.path, targetWsId, createWorkspace);
+      } else {
+        result = await importBruno(source.path, targetWsId, createWorkspace);
+      }
       setReport(result);
       setDialogState('done');
       onImportComplete?.();
@@ -136,12 +179,32 @@ export function ImportCollectionDialog({
             <DialogHeader>
               <DialogTitle>Import Collection</DialogTitle>
               <DialogDescription>
-                Select a collection folder or ZIP archive to import. Collection or workspace is
-                detected automatically.
+                {importSource === 'bruno'
+                  ? 'Select a Bruno collection folder or ZIP archive. Collection or workspace is detected automatically.'
+                  : 'Select a Postman Collection JSON file (v2.0 or v2.1).'}
               </DialogDescription>
             </DialogHeader>
 
             <div className='space-y-3 py-2'>
+              <div className='flex w-fit gap-1 rounded-md border border-border p-0.5'>
+                <Button
+                  variant={importSource === 'bruno' ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='h-7 px-3 text-xs'
+                  onClick={() => switchImportSource('bruno')}
+                >
+                  Bruno
+                </Button>
+                <Button
+                  variant={importSource === 'postman' ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='h-7 px-3 text-xs'
+                  onClick={() => switchImportSource('postman')}
+                >
+                  Postman
+                </Button>
+              </div>
+
               <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
                 Source
               </p>
@@ -158,11 +221,15 @@ export function ImportCollectionDialog({
                 {source ? (
                   <>
                     <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-primary/10 mx-auto text-lg'>
-                      {source.kind === 'zip' ? '🗜️' : '📁'}
+                      {source.kind === 'zip' ? '🗜️' : source.kind === 'postman-json' ? '📄' : '📁'}
                     </div>
                     <p className='text-sm font-semibold text-foreground'>{source.name}</p>
                     <p className='mt-0.5 text-xs text-muted-foreground'>
-                      {source.kind === 'zip' ? 'ZIP archive' : 'Folder'}
+                      {source.kind === 'zip'
+                        ? 'ZIP archive'
+                        : source.kind === 'postman-json'
+                          ? 'Postman Collection JSON'
+                          : 'Folder'}
                     </p>
                   </>
                 ) : (
@@ -171,53 +238,67 @@ export function ImportCollectionDialog({
                       <Upload className='h-4 w-4 text-muted-foreground' />
                     </div>
                     <p className='text-sm font-medium text-muted-foreground'>
-                      Drop a folder or ZIP here
+                      {importSource === 'bruno'
+                        ? 'Drop a folder or ZIP here'
+                        : 'Choose a Postman Collection JSON file'}
                     </p>
                     <p className='mt-0.5 text-xs text-muted-foreground'>
-                      Collection export or extracted directory
+                      {importSource === 'bruno'
+                        ? 'Collection export or extracted directory'
+                        : 'Exported via File → Export in Postman'}
                     </p>
                   </>
                 )}
 
                 <div className='mt-3 flex items-center justify-center gap-1 text-xs text-muted-foreground'>
-                  {source ? (
-                    <>
-                      change:
-                      <button
-                        type='button'
-                        className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                        onClick={() => void handleChooseFolder()}
-                      >
-                        folder
-                      </button>
-                      <span className='text-border'>·</span>
-                      <button
-                        type='button'
-                        className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                        onClick={() => void handleChooseZip()}
-                      >
-                        ZIP
-                      </button>
-                    </>
+                  {importSource === 'bruno' ? (
+                    source ? (
+                      <>
+                        change:
+                        <button
+                          type='button'
+                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                          onClick={() => void handleChooseFolder()}
+                        >
+                          folder
+                        </button>
+                        <span className='text-border'>·</span>
+                        <button
+                          type='button'
+                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                          onClick={() => void handleChooseZip()}
+                        >
+                          ZIP
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        or browse:
+                        <button
+                          type='button'
+                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                          onClick={() => void handleChooseFolder()}
+                        >
+                          choose folder
+                        </button>
+                        <span className='text-border'>·</span>
+                        <button
+                          type='button'
+                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                          onClick={() => void handleChooseZip()}
+                        >
+                          choose ZIP
+                        </button>
+                      </>
+                    )
                   ) : (
-                    <>
-                      or browse:
-                      <button
-                        type='button'
-                        className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                        onClick={() => void handleChooseFolder()}
-                      >
-                        choose folder
-                      </button>
-                      <span className='text-border'>·</span>
-                      <button
-                        type='button'
-                        className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                        onClick={() => void handleChooseZip()}
-                      >
-                        choose ZIP
-                      </button>
-                    </>
+                    <button
+                      type='button'
+                      className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                      onClick={() => void handleChoosePostmanJson()}
+                    >
+                      {source ? 'change file' : 'choose JSON file'}
+                    </button>
                   )}
                 </div>
               </div>
@@ -225,7 +306,9 @@ export function ImportCollectionDialog({
               {/* Selected path row */}
               {source && (
                 <div className='flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5'>
-                  <span className='text-xs'>{source.kind === 'zip' ? '🗜️' : '📁'}</span>
+                  <span className='text-xs'>
+                    {source.kind === 'zip' ? '🗜️' : source.kind === 'postman-json' ? '📄' : '📁'}
+                  </span>
                   <span className='flex-1 truncate font-mono text-[10px] text-muted-foreground'>
                     {source.path}
                   </span>
@@ -237,6 +320,43 @@ export function ImportCollectionDialog({
                   >
                     ✕
                   </button>
+                </div>
+              )}
+
+              {importSource === 'postman' && (
+                <div className='space-y-1'>
+                  <p className='text-[11px] font-medium text-muted-foreground'>
+                    Additional Environment JSON{' '}
+                    <span className='font-normal opacity-60'>
+                      (optional — embedded environments are imported automatically)
+                    </span>
+                  </p>
+                  {envFilePath ? (
+                    <div className='flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-1.5'>
+                      <FileJson className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                      <span className='flex-1 truncate font-mono text-[10px] text-muted-foreground'>
+                        {envFilePath}
+                      </span>
+                      <button
+                        type='button'
+                        className='shrink-0 text-muted-foreground transition-colors hover:text-foreground'
+                        onClick={() => setEnvFilePath(null)}
+                        aria-label='Clear environment file'
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='h-7 w-full text-xs'
+                      onClick={() => void handleChooseEnvJson()}
+                    >
+                      <Plus className='mr-1 h-3 w-3' />
+                      Select environment file
+                    </Button>
+                  )}
                 </div>
               )}
 
