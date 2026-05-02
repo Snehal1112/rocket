@@ -426,6 +426,147 @@ impl ImportService {
         Ok(report)
     }
 
+    /// Import a Postman Collection JSON (v2.0 or v2.1) into the workspace.
+    pub fn import_postman_collection(
+        &self,
+        json_path: &Path,
+        _workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        use crate::converter::postman as pc;
+        use crate::postman::parse_postman_json;
+
+        let mut report = ImportReport::default();
+        report.detected_type = "collection".to_string();
+
+        let collection = parse_postman_json(json_path)?;
+        let col_name = self.resolve_collection_name(&collection.info.name)?;
+
+        self.collection_repo
+            .create(&col_name)
+            .map_err(ImportError::DomainError)?;
+        report.created_collections.push(col_name.clone());
+
+        let variables = pc::convert_collection_variables(&collection.variable);
+        let auth = collection.auth.as_ref().and_then(|a| {
+            if a.auth_type == "oauth2" {
+                report.skipped.push(SkippedItem {
+                    path: col_name.clone(),
+                    reason: SkipReason::UnsupportedAuthType("oauth2".into()),
+                });
+                None
+            } else {
+                pc::convert_auth(a)
+            }
+        });
+        if !variables.is_empty() || auth.is_some() {
+            use rocket_collection::settings::CollectionSettings;
+            let settings = CollectionSettings {
+                auth,
+                variables,
+                ..Default::default()
+            };
+            self.collection_repo
+                .save_settings(&col_name, &settings)
+                .map_err(ImportError::DomainError)?;
+        }
+
+        for postman_env in &collection.environment {
+            let mut env = rocket_environment::Environment::new(&postman_env.name);
+            for v in &postman_env.values {
+                let mut var = rocket_environment::Variable::new(&v.key, &v.value);
+                var.enabled = v.enabled;
+                env.set_variable(var);
+            }
+            self.env_factory
+                .make(&col_name)
+                .save(&env)
+                .map_err(ImportError::DomainError)?;
+        }
+
+        self.write_postman_items(&collection.item, &col_name, "", &mut report)?;
+
+        Ok(report)
+    }
+
+    fn write_postman_items(
+        &self,
+        items: &[crate::postman::ast::PostmanItem],
+        col_name: &str,
+        path_prefix: &str,
+        report: &mut ImportReport,
+    ) -> ImportResult<()> {
+        use crate::converter::postman as pc;
+        use crate::postman::ast::PostmanItem;
+
+        for item in items {
+            match item {
+                PostmanItem::Request(req_item) => {
+                    report.total_files += 1;
+                    let (req, mut skipped) = pc::convert_request_item(req_item);
+                    report.skipped.append(&mut skipped);
+
+                    let slug = sanitize_postman_filename(&req_item.name);
+                    let request_path = if path_prefix.is_empty() {
+                        slug
+                    } else {
+                        format!("{}/{}", path_prefix, slug)
+                    };
+
+                    self.collection_repo
+                        .save_request(col_name, &request_path, &req)
+                        .map_err(ImportError::DomainError)?;
+                    report.imported += 1;
+                }
+                PostmanItem::Folder(folder) => {
+                    let folder_slug = sanitize_postman_filename(&folder.name);
+                    let folder_path = if path_prefix.is_empty() {
+                        folder_slug
+                    } else {
+                        format!("{}/{}", path_prefix, folder_slug)
+                    };
+
+                    self.collection_repo
+                        .create_folder(col_name, &folder_path)
+                        .map_err(ImportError::DomainError)?;
+
+                    self.write_postman_items(&folder.item, col_name, &folder_path, report)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Import a Postman environment JSON file into an existing collection.
+    pub fn import_postman_environment(
+        &self,
+        json_path: &Path,
+        collection_name: &str,
+        _workspace_id: &str,
+    ) -> ImportResult<ImportReport> {
+        use crate::postman::parse_postman_environment;
+        use rocket_environment::{Environment, Variable};
+
+        let mut report = ImportReport::default();
+        report.detected_type = "environment".to_string();
+
+        let postman_env = parse_postman_environment(json_path)?;
+
+        let mut env = Environment::new(&postman_env.name);
+        for v in &postman_env.values {
+            let mut var = Variable::new(&v.key, &v.value);
+            var.enabled = v.enabled;
+            env.set_variable(var);
+        }
+
+        self.env_factory
+            .make(collection_name)
+            .save(&env)
+            .map_err(ImportError::DomainError)?;
+
+        report.imported = postman_env.values.len();
+        Ok(report)
+    }
+
     /// Recursively copy `.yml` files from `src_dir` into `dest_root`, preserving structure.
     ///
     /// Skips:
@@ -480,6 +621,19 @@ impl ImportService {
         }
         Ok(())
     }
+}
+
+/// Sanitize a Postman item name for use as a folder/file path component.
+fn sanitize_postman_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 
