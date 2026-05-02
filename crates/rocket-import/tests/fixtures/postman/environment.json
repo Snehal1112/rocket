@@ -1,0 +1,8 @@
+{
+  "name": "Local",
+  "values": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "enabled": true },
+    { "key": "authToken", "value": "test-token-123", "enabled": true },
+    { "key": "adminPass", "value": "secret", "enabled": false }
+  ]
+}
