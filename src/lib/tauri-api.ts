@@ -976,6 +976,20 @@ export const importBrunoZip = (
   createNewWorkspace?: boolean,
 ) => invoke<ImportReport>('import_bruno_zip', { zipPath, targetWorkspaceId, createNewWorkspace });
 
+export const importPostmanCollection = (path: string, targetWorkspaceId: string) =>
+  invoke<ImportReport>('import_postman_collection', { path, targetWorkspaceId });
+
+export const importPostmanEnvironment = (
+  jsonPath: string,
+  collectionName: string,
+  targetWorkspaceId: string,
+) =>
+  invoke<ImportReport>('import_postman_environment', {
+    jsonPath,
+    collectionName,
+    targetWorkspaceId,
+  });
+
 // ============================================================
 // UI state persistence
 // ============================================================
