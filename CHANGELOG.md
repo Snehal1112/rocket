@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.6.6](https://github.com/Snehal1112/rocket/compare/v0.6.5...v0.6.6) (2026-05-02)
+
+### Features
+
+* add workspace and environment query and mutation hooks ([2be8518](https://github.com/Snehal1112/rocket/commit/2be85181b2c00d33096a0adaa26fefb888295970))
+* App.tsx reads layout state from store, persists and restores on startup ([724100a](https://github.com/Snehal1112/rocket/commit/724100afbac80fd403242de1439142544b98fba5))
+* extend layout-store with sidebar width, console open/height ([095fc98](https://github.com/Snehal1112/rocket/commit/095fc982c0b117d141b6e1bc73177af8fa8a92a8))
+* **frontend:** add LiveDashboard, charts, RequestLogTable, ExportMenu ([ccec8af](https://github.com/Snehal1112/rocket/commit/ccec8afd48338efd2904862c8708b388fd9a5d44))
+* **frontend:** add LoadTestConfigV2, LoadTestProgressEvent, TimeSeriesPoint, RequestLogEntry types and API functions ([3b5e891](https://github.com/Snehal1112/rocket/commit/3b5e891c09ab76ffce69b10fdc021602a21c95cc))
+* **frontend:** add LoadTestTab shell and PhaseBuilder ([75c9fad](https://github.com/Snehal1112/rocket/commit/75c9fad24cb944992c8a09f379529c4441a6c767))
+* **frontend:** add useLoadTestStore with Tauri event streaming and export ([954bece](https://github.com/Snehal1112/rocket/commit/954beceae460014543a1c8f10912d5133eb93067))
+* **frontend:** wire LoadTestTab into RequestPanel section tabs ([a548ab1](https://github.com/Snehal1112/rocket/commit/a548ab19df5a0cb449e920262554e766294bcdfa))
+* **git:** add get_default_ssh_key_path, save/load_git_credentials commands ([0186505](https://github.com/Snehal1112/rocket/commit/0186505fc95ee77952b846ee29399fd255270543))
+* **git:** add getDefaultSshKeyPath, saveGitCredentials, loadGitCredentials API wrappers ([6c9f7c4](https://github.com/Snehal1112/rocket/commit/6c9f7c4f411f730395c66027cadd3813baf3d4a7))
+* **git:** auto-load persisted credentials from OS keychain on collection open ([4f915c8](https://github.com/Snehal1112/rocket/commit/4f915c8510dd8dcd9777cdbeb452909c82646367))
+* **git:** register get_default_ssh_key_path, save/load_git_credentials in Tauri handler ([336b39f](https://github.com/Snehal1112/rocket/commit/336b39fa3baea70ba038b5ecd5066825e7e39f2e))
+* **git:** replace SSH key path input with WCAG AAA file picker and keychain persistence ([a5e899e](https://github.com/Snehal1112/rocket/commit/a5e899e91ab60660a69eac53d2f8779646c49d5e))
+* install TanStack Query and wire QueryClientProvider ([4b0f3f5](https://github.com/Snehal1112/rocket/commit/4b0f3f57029b2389d84a16d1f82234c1e0a36cac))
+* **load-test:** enhanced load testing with phases, streaming UI, and throughput-target mode ([876de41](https://github.com/Snehal1112/rocket/commit/876de415f55b6ac3c6652cbc9fa38d3c11956f63))
+* **load-test:** redesign PhaseBuilder layout ([02fc011](https://github.com/Snehal1112/rocket/commit/02fc0110d17812daef3252dc9723a228a2f1c505))
+* **load-test:** resizable per-request log panel ([9b15fa1](https://github.com/Snehal1112/rocket/commit/9b15fa15397a928aee3a56ef294475ceeddc483f))
+* **load-test:** resizable sidebar with drag handle, default 260px, persisted to localStorage ([d56464e](https://github.com/Snehal1112/rocket/commit/d56464e869a38f4874537fb07e9988ca54462726))
+* **load-test:** route simple mode through v2 streaming for live request log ([d74102e](https://github.com/Snehal1112/rocket/commit/d74102ed0d5fdbdf9eb4f583813826a1487c5cfb))
+* persist sidebarWidth, isConsoleOpen, consoleHeight in UiState ([d6686df](https://github.com/Snehal1112/rocket/commit/d6686dfedab8184293db56ee55290de8d53fa87c))
+* **rocket-app:** add ExportService (HTML/CSV/JSON/PDF) ([f13a0af](https://github.com/Snehal1112/rocket/commit/f13a0afe8cc3055fd1a87ed1d4a4ec32411bc2eb))
+* **rocket-app:** add LoadTestService with variable resolution ([6da6861](https://github.com/Snehal1112/rocket/commit/6da686124eec52ae2513b7065c84c64a17c81365))
+* **rocket-http:** add phase-based load test types ([47ba30b](https://github.com/Snehal1112/rocket/commit/47ba30b0e690958f4f97cc11cb6ff1f0707d8a4c))
+* **rocket-http:** add RingBuffer and PhaseScheduler ([fabd22c](https://github.com/Snehal1112/rocket/commit/fabd22c64bc1781fd83550788c94fae8898db5aa))
+* **rocket-http:** implement run_load_test_v2 with PhaseScheduler, RingBuffer, and event emission ([e15a70d](https://github.com/Snehal1112/rocket/commit/e15a70dc88a6b7833547445d699f57caf68e473a))
+* **save:** include encodeUrl, maxRedirects, tags in auto-save and manual save payloads ([f0e5a88](https://github.com/Snehal1112/rocket/commit/f0e5a88436db429f5096e94defe35f6b1e687fc0))
+* **tauri:** add run_load_test_v2_command and export_load_test commands ([380b7d2](https://github.com/Snehal1112/rocket/commit/380b7d22bf3876b2dd8e1f5ca7d62d7d1166b186))
+* **types:** fix ApiRequestSettings IPC bridge; add encodeUrl/maxRedirects/tags to frontend types ([aa8098c](https://github.com/Snehal1112/rocket/commit/aa8098c3fdc7adcb9506ebb37bf629ef566805e5))
+* **ui:** enhance window decorations for Linux and Windows with focus handling ([1f9f7d2](https://github.com/Snehal1112/rocket/commit/1f9f7d2e97676367d99a31a54cae9365e43641db))
+* **ui:** redesign Settings tab in RequestPanel ([f0a001f](https://github.com/Snehal1112/rocket/commit/f0a001f480d9a023d6193063a5a5f371b23f8af2))
+
+### Bug Fixes
+
+* **breadcrumb:** call switchCollection from breadcrumb collection pickers ([f75971f](https://github.com/Snehal1112/rocket/commit/f75971f74b9fc82a6ad2311c3b73615ce47879cc))
+* **CollectionOverviewTab:** remove unnecessary dependency from useEffect for scroll event ([0d6e85f](https://github.com/Snehal1112/rocket/commit/0d6e85fd92eba4d8a1311d132830910fac82c427))
+* **editor:** re-register Monaco themes on app theme toggle ([d828da1](https://github.com/Snehal1112/rocket/commit/d828da1a80ce95c9b6286031a1ee2299e39d0d26))
+* **git:** auto-size credentials dialog width to fit SSH key path content ([4368619](https://github.com/Snehal1112/rocket/commit/4368619fdf9dbb8cb6e22dbb706ad8b46e191c84))
+* **git:** use DomainError in keychain commands, add From conversions for GitCredentialsPayload ([0423ef1](https://github.com/Snehal1112/rocket/commit/0423ef13528075b5449d245232eb3d7ef176b85e))
+* **load-test:** apply code review fixes to main ([87f9dc0](https://github.com/Snehal1112/rocket/commit/87f9dc0f683fb29c26bb08502f353cc15633f5ab))
+* **load-test:** cap drain deadline and use dynamic safety timeout ([5bb3718](https://github.com/Snehal1112/rocket/commit/5bb3718c24164c791309191ce03083311fcb03d9))
+* **load-test:** improve formatting for PhaseTarget type and error message in load test store ([d63dc33](https://github.com/Snehal1112/rocket/commit/d63dc338ffeed5258e6a02348f2bbf34be1409a7))
+* **load-test:** show request log live during simple mode run and stop at totalRequests ([602a21c](https://github.com/Snehal1112/rocket/commit/602a21c4e4f9fd031045634b4b03a185311bfc34))
+* **load-test:** use default Button variant for Run load test to match VS Code 2026 theme ([e4c142c](https://github.com/Snehal1112/rocket/commit/e4c142c9e7e0f6538ea150c7cbb1ec020a974736))
+* **load-test:** use PascalCase serde for PhaseKind; skip timeout when 0 ([bb65f28](https://github.com/Snehal1112/rocket/commit/bb65f286583acceee2e3c73665f52eeb34785734))
+* **load-test:** use stable IDs for phase list React keys ([7a4204c](https://github.com/Snehal1112/rocket/commit/7a4204c8acb1f2d66a06caf6c6eaec0b1da5702e))
+* **rocket-app:** RFC 4180 CSV quoting; add PDF passthrough test ([b83a9fc](https://github.com/Snehal1112/rocket/commit/b83a9fc63f41fbcd1fc8b866de2eccd9a8173798))
+* **ui:** align input field backgrounds across themes ([a90d024](https://github.com/Snehal1112/rocket/commit/a90d024ca0efaca1f02e90d5cffb8eb834e3255b))
+* **ui:** ensure minimum height for overflow handling in various components ([d2cd7d1](https://github.com/Snehal1112/rocket/commit/d2cd7d18b6e44d2a828995289789fda3c4f3bfed))
+* **ui:** remove Card wrapper and redundant borders from env tab right panel ([a16d393](https://github.com/Snehal1112/rocket/commit/a16d39338c80d318d2b356b198481a9c9c136205))
+* **ui:** remove double-border and button-bar separator from env tab left panel ([fd391bd](https://github.com/Snehal1112/rocket/commit/fd391bd360bcb828978ad6b54607b7683b368e04))
+* **ui:** replace custom button-as-checkbox with shadcn Checkbox in env tab ([ff5b3c3](https://github.com/Snehal1112/rocket/commit/ff5b3c366017cba9c9180ec0231206490fadc50b))
+* **ui:** restore footer border-t to border-border/40 in env tab ([555207a](https://github.com/Snehal1112/rocket/commit/555207a3b5efd99d8f9e000b24df39dc91634e23))
+* **ui:** update styles for select component and adjust text sizes in OAuth2 token display ([bd17128](https://github.com/Snehal1112/rocket/commit/bd17128f91bf9bd21be3ee376604dc17b42f37f7))
+* **ui:** use CSS grid for equal-width key/value fields in env tab ([07c4bc1](https://github.com/Snehal1112/rocket/commit/07c4bc1ef5f78e1723a4a97b4f26381ff6b9dd8b))
+* **workspace:** call switchWorkspace from breadcrumb workspace picker ([c0550c2](https://github.com/Snehal1112/rocket/commit/c0550c2b875b10775de4623d5329c8de77432a7c))
+
+### Performance Improvements
+
+* **frontend:** memoize chart data; wire ConcurrencyChart into LiveDashboard ([cfc4882](https://github.com/Snehal1112/rocket/commit/cfc48821c81713394f1990c5d752b91db6966280))
+
 ## [0.6.5](https://github.com/Snehal1112/rocket/compare/v0.6.4...v0.6.5) (2026-04-27)
 
 ### Features
