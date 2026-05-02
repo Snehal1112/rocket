@@ -44,6 +44,43 @@ pub async fn import_bruno(
         .map_err(|e| e.to_string())
 }
 
+/// Import a Postman Collection JSON file (v2.0 or v2.1).
+#[tauri::command]
+pub async fn import_postman_collection(
+    path: String,
+    target_workspace_id: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<ImportReport, String> {
+    let base = workspace_path
+        .lock()
+        .map_err(|_| "workspace path lock poisoned".to_string())?
+        .clone();
+    make_import_service(base)
+        .import_postman_collection(&PathBuf::from(&path), &target_workspace_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Import a Postman environment JSON file into an existing collection.
+#[tauri::command]
+pub async fn import_postman_environment(
+    json_path: String,
+    collection_name: String,
+    target_workspace_id: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<ImportReport, String> {
+    let base = workspace_path
+        .lock()
+        .map_err(|_| "workspace path lock poisoned".to_string())?
+        .clone();
+    make_import_service(base)
+        .import_postman_environment(
+            &PathBuf::from(&json_path),
+            &collection_name,
+            &target_workspace_id,
+        )
+        .map_err(|e| e.to_string())
+}
+
 /// Extract a Bruno ZIP and import the contained collection or workspace.
 #[tauri::command]
 pub async fn import_bruno_zip(

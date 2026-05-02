@@ -374,6 +374,8 @@ pub fn run() {
             commands::ui_state::save_ui_state,
             commands::import::import_bruno,
             commands::import::import_bruno_zip,
+            commands::import::import_postman_collection,
+            commands::import::import_postman_environment,
             commands::contract::attach_contract,
             commands::contract::update_contract,
             commands::contract::list_contracts,
