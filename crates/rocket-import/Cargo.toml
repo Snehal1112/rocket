@@ -9,6 +9,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-workspace.workspace = true
 serde.workspace = true
+serde_json = "1"
 serde_yaml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -20,6 +20,12 @@ pub enum ImportError {
 
     #[error("zip is empty or contains no top-level directory")]
     EmptyZip,
+
+    #[error("not a Postman collection (missing schema.getpostman.com in info.schema): {0}")]
+    NotAPostmanCollection(std::path::PathBuf),
+
+    #[error("JSON parse error in {path}: {message}")]
+    JsonParseError { path: std::path::PathBuf, message: String },
 }
 
 pub type ImportResult<T> = Result<T, ImportError>;
