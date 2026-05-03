@@ -72,13 +72,16 @@ export function AuthEditor({
 
       {auth.authType === 'basic' && auth.basic && (
         <Card>
-          <CardContent className='space-y-2 p-4'>
-            <div className='flex items-center gap-2'>
-              <User className='h-3.5 w-3.5 text-muted-foreground' />
+          <CardContent className='space-y-3 p-4'>
+            <div className='space-y-1.5'>
+              <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+                <User className='h-3 w-3' />
+                Username
+              </div>
               <SingleLineEditor
                 placeholder='Username'
                 aria-label='Username'
-                className='flex-1 text-sm'
+                className=''
                 value={auth.basic.username}
                 onChange={(newVal) =>
                   onChange({
@@ -90,13 +93,16 @@ export function AuthEditor({
                 onNavigateToSource={onNavigateToSource}
               />
             </div>
-            <div className='flex items-center gap-2'>
-              <Lock className='h-3.5 w-3.5 text-muted-foreground' />
+            <div className='space-y-1.5'>
+              <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+                <Lock className='h-3 w-3' />
+                Password
+              </div>
               <SingleLineEditor
                 placeholder='Password'
                 aria-label='Password'
                 isSecret
-                className='flex-1 text-sm'
+                className='text-sm border-input'
                 value={auth.basic.password}
                 onChange={(newVal) =>
                   onChange({
@@ -114,13 +120,16 @@ export function AuthEditor({
 
       {auth.authType === 'bearer' && auth.bearer && (
         <Card>
-          <CardContent className='flex items-center gap-2 p-4'>
-            <Key className='h-3.5 w-3.5 text-muted-foreground' />
+          <CardContent className='p-4 space-y-1.5'>
+            <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+              <Key className='h-3 w-3' />
+              Token
+            </div>
             <SingleLineEditor
-              placeholder='Token'
+              placeholder='Bearer token'
               aria-label='Bearer token'
               isSecret
-              className='flex-1 text-sm'
+              className='text-sm'
               value={auth.bearer.token}
               onChange={(newVal) =>
                 onChange({
@@ -137,60 +146,69 @@ export function AuthEditor({
 
       {auth.authType === 'api-key' && auth.apiKey && (
         <Card>
-          <CardContent className='space-y-2 p-4'>
-            <SingleLineEditor
-              placeholder='Key'
-              aria-label='API key name'
-              className='text-sm'
-              value={auth.apiKey.key}
-              onChange={(newVal) =>
-                onChange({
-                  ...auth,
-                  apiKey: { ...auth.apiKey, key: newVal } as NonNullable<AuthState['apiKey']>,
-                })
-              }
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-            <SingleLineEditor
-              placeholder='Value'
-              aria-label='API key value'
-              isSecret
-              className='text-sm'
-              value={auth.apiKey.value}
-              onChange={(newVal) =>
-                onChange({
-                  ...auth,
-                  apiKey: { ...auth.apiKey, value: newVal } as NonNullable<AuthState['apiKey']>,
-                })
-              }
-              variableContext={variableContext}
-              onNavigateToSource={onNavigateToSource}
-            />
-            <Select
-              value={auth.apiKey.addTo}
-              onValueChange={(val) =>
-                onChange({
-                  ...auth,
-                  apiKey: {
-                    ...auth.apiKey,
-                    addTo: val as 'header' | 'query',
-                  } as NonNullable<AuthState['apiKey']>,
-                })
-              }
-            >
-              <SelectTrigger className='w-30 text-sm'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='header' className='text-sm'>
-                  Header
-                </SelectItem>
-                <SelectItem value='query' className='text-sm'>
-                  Query Param
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <CardContent className='space-y-3 p-4'>
+            <div className='space-y-1.5'>
+              <p className='text-xs font-medium text-muted-foreground'>Key</p>
+              <SingleLineEditor
+                placeholder='X-API-Key'
+                aria-label='API key name'
+                className='text-sm'
+                value={auth.apiKey.key}
+                onChange={(newVal) =>
+                  onChange({
+                    ...auth,
+                    apiKey: { ...auth.apiKey, key: newVal } as NonNullable<AuthState['apiKey']>,
+                  })
+                }
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+            <div className='space-y-1.5'>
+              <p className='text-xs font-medium text-muted-foreground'>Value</p>
+              <SingleLineEditor
+                placeholder='Your API key value'
+                aria-label='API key value'
+                isSecret
+                className='text-sm'
+                value={auth.apiKey.value}
+                onChange={(newVal) =>
+                  onChange({
+                    ...auth,
+                    apiKey: { ...auth.apiKey, value: newVal } as NonNullable<AuthState['apiKey']>,
+                  })
+                }
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+            </div>
+            <div className='flex items-center gap-3 pt-1 border-t border-border/40'>
+              <p className='text-xs font-medium text-muted-foreground shrink-0'>Add to</p>
+              <Select
+                value={auth.apiKey.addTo}
+                onValueChange={(val) =>
+                  onChange({
+                    ...auth,
+                    apiKey: {
+                      ...auth.apiKey,
+                      addTo: val as 'header' | 'query',
+                    } as NonNullable<AuthState['apiKey']>,
+                  })
+                }
+              >
+                <SelectTrigger className='h-7 w-36 text-xs'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='header' className='text-sm'>
+                    Header
+                  </SelectItem>
+                  <SelectItem value='query' className='text-sm'>
+                    Query Param
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardContent>
         </Card>
       )}

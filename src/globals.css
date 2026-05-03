@@ -49,6 +49,8 @@
     /* VSCode 2026 Light: input.border #D8D8D8 (full opacity) — interactive field borders
        (inputs, selects, SingleLineEditor). 1.43:1 on white. */
     --input: 0 0% 84.7%;
+    /* VSCode 2026 Light: input.background #FFFFFF */
+    --input-bg: 0 0% 100%;
     /* VSCode 2026 Light: focusBorder #0069CC */
     --ring: 210 100% 40%;
     /* VSCode 2026 Light: charts palette */
@@ -188,12 +190,12 @@
     --secondary: 210 3% 13%;
     /* VSCode 2026 Dark: dropdown.foreground #bfbfbf */
     --secondary-foreground: 0 0% 75%;
-    /* VSCode 2026 Dark: dropdown.background #191A1B */
-    --muted: 210 5% 10%;
+    /* VSCode 2026 Dark: slightly above shell, below card — hover/recessed surfaces */
+    --muted: 210 4% 12%;
     /* VSCode 2026 Dark: descriptionForeground #8C8C8C */
     --muted-foreground: 0 0% 55%;
-    /* VSCode 2026 Dark: list.inactiveSelectionBackground #2C2D2E */
-    --accent: 210 2% 18%;
+    /* VSCode 2026 Dark: editorWidget.background #252526 — matches VSCode nested surface */
+    --accent: 210 3% 15%;
     --accent-foreground: 0 0% 75%;
     /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
     --destructive: 5 100% 37%;
@@ -205,6 +207,8 @@
     --border: 210 2% 17%;
     /* VSCode 2026 Dark: input.border #333536 */
     --input: 210 2% 21%;
+    /* VSCode 2026 Dark: input.background #3C3C3C — lighter than border for field visibility */
+    --input-bg: 210 2% 24%;
     /* VSCode 2026 Dark: focusBorder #3994BC (opaque) */
     --ring: 199 53% 48%;
     /* VSCode 2026 Dark: charts palette */
@@ -457,12 +461,19 @@ html.windows.window-inactive #root {
   border-color: hsl(var(--border) / 0.5);
 }
 
-/* Card elevation.
-   Shell is #EEF0F4 (94.5% L); card face is #F6F7FA (97.3% L).
-   Border #DCDDE0 gives 1.19:1 vs shell and 1.27:1 vs card face — enough to read as
-   an elevated surface. Darker than structural --border (#E1E3E5) because cards sit
-   above the shell and need more definition, not less.
-   Shadow at 8% reinforces the lifted edge. */
+/* Card elevation — VSCode 2026 surface layer stack.
+   TWO MECHANISMS, ONE INTENT:
+   1. [data-slot="card"] rules below — override the <Card> shadcn component's bg-card
+      utility. In dark mode this lifts cards to --popover (#202122, L=13%), above the
+      shell (#191A1B, L=10%). Nested <Card> components step up to --accent (#252627, L=15%).
+   2. bg-card utility used directly on plain divs (RequestPanel, EditorGroup, etc.)
+      gets the raw --card token (#121314, L=7.5%), which is intentionally DARKER than
+      the shell. This matches VSCode's editor.background sitting below sideBar.background.
+      Do not "fix" this — it is the correct VSCode Dark elevation for editor surfaces.
+
+   Light: shell #EEF0F4 (L=94.5%) → card #F6F7FA (L=97.3%) — card is elevated (lighter).
+   Dark:  shell #191A1B (L=10%)   → card #202122 (L=13%)   — card is elevated (lighter).
+          editor divs #121314 (L=7.5%) — editor is recessed below shell (correct for VSCode). */
 [data-slot="card"] {
   border-color: #dcdde0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
@@ -474,7 +485,9 @@ html.windows.window-inactive #root {
   box-shadow: 0 0 0 1px hsl(var(--input) / 0.6);
 }
 
-/* Nested card — recessed one level deeper within the elevated surface. */
+/* Nested card — one step deeper: --accent (#252627, L=15%).
+   Input fields inside use --input-bg (#3C3D3E, L=24%) for a 9L contrast step,
+   matching VSCode's input.background over editorWidget.background separation. */
 [data-slot="card"] [data-slot="card"] {
   border-radius: calc(var(--radius) - 4px);
   border-color: hsl(var(--border));

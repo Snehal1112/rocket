@@ -1,11 +1,11 @@
-import { BoxIcon, Check, Loader2, Save } from 'lucide-react';
+import { BoxIcon, Check, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -582,62 +582,63 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         {/* Authorization tab. */}
         {activeSection === 'auth' && (
           <ScrollArea className='h-full'>
-            <div className='p-6 max-w-3xl mx-auto space-y-6'>
-              <div className='space-y-4'>
-                <Card>
-                  <CardContent className='space-y-4 p-4'>
-                    <div className='space-y-1.5'>
-                      <label
-                        htmlFor='col-auth-type'
-                        className='text-sm font-medium text-muted-foreground'
-                      >
-                        Auth Type
-                      </label>
+            <div className='p-6 max-w-2xl mx-auto space-y-6'>
+              <Card>
+                <CardHeader className='pb-3 pt-4 px-4 border-b border-border/40'>
+                  <div className='flex items-center justify-between'>
+                    <div className='flex items-center gap-2'>
+                      <ShieldCheck className='h-4 w-4 text-muted-foreground' />
+                      <CardTitle className='text-sm font-medium'>Authorization</CardTitle>
+                    </div>
+                    <div className='flex items-center gap-2'>
+                      <span className='text-xs text-muted-foreground shrink-0'>Auth type</span>
                       <Select value={auth.authType} onValueChange={handleAuthTypeChange}>
-                        <SelectTrigger id='col-auth-type' className='w-48 h-8 text-sm'>
+                        <SelectTrigger id='col-auth-type' className='h-7 w-40 text-xs'>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {COLLECTION_AUTH_TYPES.map((t) => (
-                            <SelectItem key={t.value} value={t.value}>
+                            <SelectItem key={t.value} value={t.value} className='text-sm'>
                               {t.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+                </CardHeader>
 
-                    <AuthEditor
-                      auth={auth}
-                      onChange={(v) => {
-                        setAuth(v);
-                        setIsDirty(true);
-                      }}
-                      variableContext={scopedContext}
-                      collection={collectionName}
-                      environmentName={activeEnvId ?? undefined}
-                    />
+                <CardContent className='p-4 space-y-4'>
+                  <AuthEditor
+                    auth={auth}
+                    onChange={(v) => {
+                      setAuth(v);
+                      setIsDirty(true);
+                    }}
+                    variableContext={scopedContext}
+                    collection={collectionName}
+                    environmentName={activeEnvId ?? undefined}
+                  />
 
-                    <div className='flex justify-end'>
-                      <Button
-                        size='sm'
-                        onClick={() => void triggerSave()}
-                        disabled={!isDirty || saveState !== 'idle'}
-                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                      >
-                        {saveState === 'saving' ? (
-                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                        ) : saveState === 'success' ? (
-                          <Check className='h-3.5 w-3.5' />
-                        ) : (
-                          <Save className='h-3.5 w-3.5' />
-                        )}
-                        {saveState === 'success' ? 'Saved' : 'Save'}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+                  <div className='flex justify-end pt-2 border-t border-border/40'>
+                    <Button
+                      size='sm'
+                      onClick={() => void triggerSave()}
+                      disabled={!isDirty || saveState !== 'idle'}
+                      className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                    >
+                      {saveState === 'saving' ? (
+                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                      ) : saveState === 'success' ? (
+                        <Check className='h-3.5 w-3.5' />
+                      ) : (
+                        <Save className='h-3.5 w-3.5' />
+                      )}
+                      {saveState === 'success' ? 'Saved' : 'Save'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </ScrollArea>
         )}
