@@ -83,6 +83,13 @@ export function ContractTab({ tab }: ContractTabProps) {
     void loadContracts(tab.collectionRoot);
   }, [tab.collectionRoot, loadContracts]);
 
+  // Pre-load changelogs so ContractCard can show accurate change counts.
+  useEffect(() => {
+    for (const c of contracts) {
+      void loadChangelog(tab.collectionRoot, c.id);
+    }
+  }, [contracts, tab.collectionRoot, loadChangelog]);
+
   // Fetch collection tree to populate the scope folder/request dropdowns.
   useEffect(() => {
     getCollection(tab.collectionName)
