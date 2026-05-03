@@ -65,7 +65,7 @@ export function ContractTab({ tab }: ContractTabProps) {
   const contracts = useContractStore(
     useShallow((s) => s.contractsByRoot[tab.collectionRoot] ?? []),
   );
-  const changelogs = useContractStore((s) => s.changelogs);
+  const changelogs = useContractStore(useShallow((s) => s.changelogs));
   const loadContracts = useContractStore((s) => s.loadContracts);
   const attachContract = useContractStore((s) => s.attachContract);
   const updateContract = useContractStore((s) => s.updateContract);
