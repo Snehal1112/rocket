@@ -36,7 +36,9 @@ pub(crate) struct PostmanFolder {
     pub name: String,
     #[serde(default)]
     pub item: Vec<PostmanItem>,
+    #[allow(dead_code)]
     pub auth: Option<PostmanAuth>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub variable: Vec<PostmanVariable>,
 }
@@ -139,6 +141,7 @@ pub(crate) struct PostmanAuth {
     pub basic: Vec<PostmanKeyValue>,
     #[serde(default)]
     pub apikey: Vec<PostmanKeyValue>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub oauth2: Vec<PostmanKeyValue>,
 }
@@ -220,6 +223,7 @@ pub(crate) enum PostmanDescription {
     String(String),
     Object {
         content: String,
+        #[allow(dead_code)]
         #[serde(rename = "type")]
         content_type: String,
     },
