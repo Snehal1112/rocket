@@ -66,8 +66,34 @@ pub fn save_request(
         let guard = active_workspace_path.lock().unwrap();
         guard.join("collections").join(&collection)
     };
-    let snapshot = RequestSignatureSnapshot::from_request(&path, &saved);
-    let _ = contract_svc.on_request_saved(&collection_root, snapshot);
+    // Build the snapshot path from the actual file name written to disk.
+    // Using `path` (the raw frontend input) risks a mismatch if the infra
+    // layer migrated a .json extension to .yml — the baseline snapshot was
+    // built from the on-disk file name, so the snapshot key must match.
+    let snap_path = saved
+        .file_name
+        .as_deref()
+        .map(|fname| {
+            // Reconstruct the collection-relative path: preserve any folder
+            // prefix from the original `path`, replacing only the filename.
+            let parent = std::path::Path::new(&path).parent();
+            match parent {
+                Some(p) if !p.as_os_str().is_empty() => {
+                    p.join(fname).to_string_lossy().to_string()
+                }
+                _ => fname.to_string(),
+            }
+        })
+        .unwrap_or_else(|| path.clone());
+    let snapshot = RequestSignatureSnapshot::from_request(&snap_path, &saved);
+    if let Err(e) = contract_svc.on_request_saved(&collection_root, snapshot) {
+        tracing::warn!(
+            error = %e,
+            collection = %collection,
+            request_path = %snap_path,
+            "contract audit hook failed — changelog may be incomplete"
+        );
+    }
 
     Ok(saved)
 }
