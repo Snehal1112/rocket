@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { AttachContractInput, CollectionItem, UpdateContractInput } from '@/lib/tauri-api';
@@ -61,15 +62,15 @@ interface ContractTabProps {
 }
 
 export function ContractTab({ tab }: ContractTabProps) {
-  const contractsFor = useContractStore((s) => s.contractsFor);
+  const contracts = useContractStore(
+    useShallow((s) => s.contractsByRoot[tab.collectionRoot] ?? []),
+  );
   const changelogs = useContractStore((s) => s.changelogs);
   const loadContracts = useContractStore((s) => s.loadContracts);
   const attachContract = useContractStore((s) => s.attachContract);
   const updateContract = useContractStore((s) => s.updateContract);
   const removeContract = useContractStore((s) => s.removeContract);
   const loadChangelog = useContractStore((s) => s.loadChangelog);
-
-  const contracts = contractsFor(tab.collectionRoot);
 
   const [view, setView] = useState<View>({ type: 'list' });
   const [form, setForm] = useState<ContractFormValues>(EMPTY_FORM);
@@ -86,9 +87,11 @@ export function ContractTab({ tab }: ContractTabProps) {
   // Pre-load changelogs so ContractCard can show accurate change counts.
   useEffect(() => {
     for (const c of contracts) {
-      void loadChangelog(tab.collectionRoot, c.id);
+      if (!changelogs[c.id]) {
+        void loadChangelog(tab.collectionRoot, c.id);
+      }
     }
-  }, [contracts, tab.collectionRoot, loadChangelog]);
+  }, [contracts, changelogs, tab.collectionRoot, loadChangelog]);
 
   // Fetch collection tree to populate the scope folder/request dropdowns.
   useEffect(() => {
