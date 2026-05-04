@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::atomic_write;
 use rocket_history::{Template, TemplateRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -52,7 +53,7 @@ impl TemplateRepository for FsTemplateRepo {
         fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(template)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
-        fs::write(self.file_path(&template.name), yaml)?;
+        atomic_write(&self.file_path(&template.name), yaml.as_bytes())?;
         Ok(())
     }
 

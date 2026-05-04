@@ -4,6 +4,7 @@ use std::path::Path;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_workspace::{WorkspaceConfig, WorkspaceConfigRepository};
 
+use crate::atomic_write;
 use crate::opencollection::OcWorkspaceConfig;
 
 /// Filesystem implementation of `WorkspaceConfigRepository`.
@@ -58,9 +59,8 @@ impl WorkspaceConfigRepository for FsWorkspaceConfigRepo {
             DomainError::InvalidInput(format!("Failed to serialize workspace.yml: {e}"))
         })?;
 
-        fs::write(&config_path, content).map_err(|e| {
-            DomainError::Io(format!("Failed to write workspace.yml: {e}"))
-        })
+        atomic_write(&config_path, content.as_bytes())
+            .map_err(|e| DomainError::Io(format!("Failed to write workspace.yml: {e}")))
     }
 
     fn read_collection_name(&self, collection_dir: &Path) -> DomainResult<Option<String>> {
