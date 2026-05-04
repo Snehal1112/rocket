@@ -196,6 +196,7 @@ impl CollectionRepository for FsCollectionRepo {
 
     #[tracing::instrument(name = "collection_get", skip(self), fields(collection_name = %name))]
     fn get(&self, name: &str) -> DomainResult<Collection> {
+        Collection::validate_name(name)?;
         let path = self.collection_path(name);
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Collection '{}'", name)));
@@ -244,10 +245,12 @@ impl CollectionRepository for FsCollectionRepo {
 
     #[tracing::instrument(name = "collection_delete", skip(self), fields(collection_name = %name))]
     fn delete(&self, name: &str) -> DomainResult<()> {
+        Collection::validate_name(name)?;
         let path = self.collection_path(name);
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Collection '{}'", name)));
         }
+        reject_symlink(&path)?;
         fs::remove_dir_all(&path)?;
         Ok(())
     }
@@ -268,6 +271,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<rocket_collection::Request> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
 
         // Try .yml first, then .json for backward compatibility.
@@ -302,6 +306,7 @@ impl CollectionRepository for FsCollectionRepo {
 
     #[tracing::instrument(name = "collection_save_request", skip(self, request), fields(collection_name = %collection, request_path = %path))]
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
+        Collection::validate_name(collection)?;
         if request.uid.is_empty() {
             return Err(DomainError::Internal(format!(
                 "save_request: empty uid on request for '{path}' in collection '{collection}'; callers must construct via Request::new()"
@@ -328,6 +333,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let old_file = resolve_request_path(self, &collection_dir, old_path)?;
         let new_ext = if new_path.ends_with(".yml") || new_path.ends_with(".yaml") || new_path.ends_with(".json") {
@@ -341,6 +347,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let file_path = resolve_request_path(self, &collection_dir, path)?;
         if !file_path.exists() {
@@ -351,6 +358,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         fs::create_dir_all(&dir_path)?;
@@ -377,11 +385,13 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let dir_path = self.validate_path(&collection_dir, Path::new(path))?;
         if !dir_path.exists() {
             return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
         }
+        reject_symlink(&dir_path)?;
         fs::remove_dir_all(&dir_path)?;
         Ok(())
     }
@@ -393,6 +403,8 @@ impl CollectionRepository for FsCollectionRepo {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
+        Collection::validate_name(src_collection)?;
+        Collection::validate_name(dst_collection)?;
         let src_collection_dir = self.collection_path(src_collection);
         let dst_collection_dir = self.collection_path(dst_collection);
         let src = self.validate_path(&src_collection_dir, Path::new(src_path))?;
@@ -433,6 +445,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let dir = if folder_path.is_empty() {
             collection_dir.clone()
@@ -449,6 +462,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+        Collection::validate_name(name)?;
         let path = self.settings_path(name);
         if !path.exists() {
             return Ok(CollectionSettings::default());
@@ -483,6 +497,7 @@ impl CollectionRepository for FsCollectionRepo {
     }
 
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
+        Collection::validate_name(name)?;
         let path = self.settings_path(name);
 
         let mut oc: OcCollection = if path.exists() {
@@ -566,6 +581,7 @@ impl CollectionRepository for FsCollectionRepo {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let path = std::path::Path::new(request_path);
         let dir_components: Vec<&str> = path
@@ -600,6 +616,7 @@ impl CollectionRepository for FsCollectionRepo {
         folder_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let folder_dir = if folder_path.is_empty() {
             collection_dir.clone()
@@ -631,6 +648,7 @@ impl CollectionRepository for FsCollectionRepo {
         collection: &str,
         folder_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let folder_dir = if folder_path.is_empty() {
             collection_dir.clone()
@@ -659,6 +677,7 @@ impl CollectionRepository for FsCollectionRepo {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let file_path = resolve_request_path(self, &collection_dir, request_path)?;
         let content = fs::read_to_string(&file_path)?;
@@ -680,6 +699,7 @@ impl CollectionRepository for FsCollectionRepo {
         request_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
+        Collection::validate_name(collection)?;
         let collection_dir = self.collection_path(collection);
         let file_path = resolve_request_path(self, &collection_dir, request_path)?;
         let content = fs::read_to_string(&file_path)?;
@@ -695,6 +715,16 @@ impl CollectionRepository for FsCollectionRepo {
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request file: {e}")))?;
         atomic_write(&file_path, yaml.as_bytes())?;
         Ok(())
+    }
+}
+
+/// Return an error if `path` is a symlink. Protects destructive ops from traversal via symlink.
+fn reject_symlink(path: &Path) -> DomainResult<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(DomainError::InvalidInput(
+            format!("Refusing operation on symlink: {}", path.display()),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -802,6 +832,11 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             continue;
         }
         if path.is_dir() {
+            // Skip symlinked directories to prevent exfiltration.
+            if std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                tracing::warn!(path = %path.display(), "skipping symlinked directory in folder tree");
+                continue;
+            }
             folder.add_subfolder(build_folder_tree(&path)?);
         } else if is_request_file(&path) {
             let content = fs::read_to_string(&path)?;
@@ -1448,5 +1483,50 @@ mod tests {
         });
         assert!(child.is_some(), "child folder should exist after rename");
         assert_eq!(child.unwrap().name, "renamed-child");
+    }
+
+    #[test]
+    fn get_rejects_path_traversal_in_collection_name() {
+        let (_dir, repo) = setup();
+        let err = repo.get("../evil").unwrap_err();
+        assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    }
+
+    #[test]
+    fn delete_rejects_path_traversal_in_collection_name() {
+        let (_dir, repo) = setup();
+        let err = repo.delete("../evil").unwrap_err();
+        assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn delete_rejects_symlinked_collection() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let repo = FsCollectionRepo::new(dir.path().to_path_buf());
+        let target = dir.path().parent().unwrap().join("outside");
+        fs::create_dir_all(&target).unwrap();
+        let link = dir.path().join("evil-collection");
+        symlink(&target, &link).unwrap();
+        let err = repo.delete("evil-collection").unwrap_err();
+        assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+        assert!(target.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn delete_folder_rejects_symlinked_folder() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new().unwrap();
+        let repo = FsCollectionRepo::new(dir.path().to_path_buf());
+        repo.create("my-api").unwrap();
+        let target = dir.path().parent().unwrap().join("important");
+        fs::create_dir_all(&target).unwrap();
+        let link = dir.path().join("my-api").join("evil-folder");
+        symlink(&target, &link).unwrap();
+        let err = repo.delete_folder("my-api", "evil-folder").unwrap_err();
+        assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+        assert!(target.exists());
     }
 }

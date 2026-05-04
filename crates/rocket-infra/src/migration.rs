@@ -118,6 +118,11 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
             if name.starts_with('.') {
                 continue;
             }
+            // Skip symlinked directories — following them during migration can exfiltrate or corrupt files outside the workspace.
+            if std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                tracing::warn!(path = %path.display(), "skipping symlinked directory during migration");
+                continue;
+            }
             // Write folder.yml for subdirectories.
             let folder_yml = path.join("folder.yml");
             if !folder_yml.exists() {
