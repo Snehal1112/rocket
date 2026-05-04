@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::oc_conversions::request_to_oc_http_request;
 use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
+use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
 /// Detected format of a collection directory.
@@ -208,7 +209,7 @@ fn read_legacy_uid_value(dir: &Path) -> String {
             return trimmed;
         }
     }
-    uuid::Uuid::new_v4().to_string()
+    generate_uid()
 }
 
 #[cfg(test)]

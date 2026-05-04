@@ -6,6 +6,7 @@
 use crate::opencollection::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
+use rocket_collection::generate_uid;
 use rocket_collection::settings::{CollectionSettings, CollectionVariable};
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
@@ -930,7 +931,7 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let docs: Option<Documentation> = oc.docs.map(Documentation::text);
 
     Request {
-        uid: oc.uid.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        uid: oc.uid.unwrap_or_else(generate_uid),
         name,
         method,
         url,
@@ -1157,7 +1158,7 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
         .collect();
 
     Folder {
-        uid: uuid::Uuid::new_v4().to_string(),
+        uid: generate_uid(),
         name,
         dir_name: None,
         items,
@@ -1276,7 +1277,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         .collect();
 
     let root = Folder {
-        uid: uuid::Uuid::new_v4().to_string(),
+        uid: generate_uid(),
         name: name.clone(),
         dir_name: None,
         items,

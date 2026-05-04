@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use crate::atomic_write;
 
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable, Folder,
+    generate_uid, Collection, CollectionRepository, CollectionSettings, CollectionSummary,
+    CollectionVariable, Folder,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -79,7 +80,7 @@ fn read_legacy_uid(dir: &Path) -> String {
             return trimmed;
         }
     }
-    uuid::Uuid::new_v4().to_string()
+    generate_uid()
 }
 
 /// Delete the legacy .uid file if it exists.
@@ -220,7 +221,7 @@ impl CollectionRepository for FsCollectionRepo {
         // Write opencollection.yml with basic info.
         let oc = OcCollection {
             opencollection: Some("1.0.0".into()),
-            uid: Some(uuid::Uuid::new_v4().to_string()),
+            uid: Some(generate_uid()),
             info: Some(OcInfo {
                 name: name.into(),
                 summary: None,
@@ -415,7 +416,7 @@ impl CollectionRepository for FsCollectionRepo {
             .unwrap_or_else(|| path.to_string());
         let info = OcFolderInfo {
             name: folder_name,
-            uid: Some(uuid::Uuid::new_v4().to_string()),
+            uid: Some(generate_uid()),
             description: None,
             folder_type: Some("folder".into()),
             seq: None,
@@ -545,7 +546,7 @@ impl CollectionRepository for FsCollectionRepo {
         } else {
             OcCollection {
                 opencollection: Some("1.0.0".into()),
-                uid: Some(uuid::Uuid::new_v4().to_string()),
+                uid: Some(generate_uid()),
                 info: Some(OcInfo {
                     name: name.into(),
                     summary: None,
