@@ -56,6 +56,40 @@ pub struct Request {
     pub settings: Option<RequestSettings>,
 }
 
+/// Maximum number of `"{stem} {n}.yml"` candidates considered before giving up.
+///
+/// Purely a safety bound; current callers always pass a UID-bearing request, so
+/// the collision loop is never taken in practice. Kept for any future migration
+/// path that needs collision-aware naming.
+pub const MAX_FILENAME_COLLISION_RETRIES: u32 = 9_999;
+
+/// Apply the on-disk extension policy for a request file.
+///
+/// - `.yml` / `.yaml` → returned as-is.
+/// - `.json` (legacy format) → rewritten to `.yml`.
+/// - anything else → `.yml` appended.
+///
+/// The on-disk format is a domain choice (OpenCollection stores requests as
+/// `.yml`); persistence layers must call this rather than embedding the rule.
+pub fn request_filename_for(path: &str) -> String {
+    if path.ends_with(".yml") || path.ends_with(".yaml") {
+        path.to_string()
+    } else if let Some(stem) = path.strip_suffix(".json") {
+        format!("{stem}.yml")
+    } else {
+        format!("{path}.yml")
+    }
+}
+
+/// Build a collision-disambiguating candidate filename `"{stem} {n}.yml"`.
+///
+/// `counter` is the disambiguation index (caller advances on `AlreadyExists`).
+/// The format and `.yml` extension are domain rules; persistence layers must
+/// call this rather than constructing their own filename strings.
+pub fn candidate_filename(stem: &str, counter: u32) -> String {
+    format!("{stem} {counter}.yml")
+}
+
 impl Request {
     pub fn new(
         name: impl Into<String>,
@@ -166,5 +200,40 @@ mod tests {
         assert_eq!(req.name, "Test");
         assert!(req.description.is_none());
         assert!(req.tags.is_empty());
+    }
+
+    #[test]
+    fn request_filename_for_keeps_yml() {
+        assert_eq!(request_filename_for("foo.yml"), "foo.yml");
+    }
+
+    #[test]
+    fn request_filename_for_keeps_yaml() {
+        assert_eq!(request_filename_for("foo.yaml"), "foo.yaml");
+    }
+
+    #[test]
+    fn request_filename_for_migrates_json() {
+        assert_eq!(request_filename_for("foo.json"), "foo.yml");
+    }
+
+    #[test]
+    fn request_filename_for_appends_when_missing() {
+        assert_eq!(request_filename_for("foo"), "foo.yml");
+    }
+
+    #[test]
+    fn request_filename_for_handles_subpath_json() {
+        assert_eq!(request_filename_for("auth/login.json"), "auth/login.yml");
+    }
+
+    #[test]
+    fn candidate_filename_format() {
+        assert_eq!(candidate_filename("login", 1), "login 1.yml");
+    }
+
+    #[test]
+    fn candidate_filename_zero_counter_still_works() {
+        assert_eq!(candidate_filename("login", 0), "login 0.yml");
     }
 }
