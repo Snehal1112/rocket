@@ -35,10 +35,8 @@ pub fn diff_signature(
     field_diff!("url_pattern", old.url_pattern, new.url_pattern);
     field_diff!("auth_type", old.auth_type, new.auth_type);
 
-    // Diff auth_detail only when at least one side is non-empty.
-    if old.auth_detail != new.auth_detail
-        && !(old.auth_detail.is_empty() && new.auth_detail.is_empty())
-    {
+    // Diff auth_detail when the values differ.
+    if old.auth_detail != new.auth_detail {
         entries.push(ChangelogEntry {
             timestamp: now,
             request_path: path.clone(),
@@ -92,6 +90,9 @@ pub fn diff_signature(
     entries
 }
 
+// Key uniqueness is not enforced here. If two entries share a key, the first
+// match wins. The snapshot builder (from_request) collects from the UI layer
+// which does not permit duplicate enabled keys, so this is safe in practice.
 /// Compares two key-value lists, emitting Added/Removed/Changed entries.
 fn diff_key_value_list(
     path: &std::path::Path,
@@ -101,13 +102,15 @@ fn diff_key_value_list(
     now: chrono::DateTime<chrono::Utc>,
     out: &mut Vec<ChangelogEntry>,
 ) {
+    let path_buf = path.to_path_buf();
+
     // Detect removed and changed entries.
     for old_entry in old {
         match new.iter().find(|e| e.key == old_entry.key) {
             None => {
                 out.push(ChangelogEntry {
                     timestamp: now,
-                    request_path: path.to_path_buf(),
+                    request_path: path_buf.clone(),
                     field: format!("{}.{}", prefix, old_entry.key),
                     change_type: ChangeType::Removed,
                     old_value: Some(old_entry.value.clone()),
@@ -117,7 +120,7 @@ fn diff_key_value_list(
             Some(new_entry) if new_entry.value != old_entry.value => {
                 out.push(ChangelogEntry {
                     timestamp: now,
-                    request_path: path.to_path_buf(),
+                    request_path: path_buf.clone(),
                     field: format!("{}.{}", prefix, old_entry.key),
                     change_type: ChangeType::Changed,
                     old_value: Some(old_entry.value.clone()),
@@ -133,7 +136,7 @@ fn diff_key_value_list(
         if !old.iter().any(|e| e.key == new_entry.key) {
             out.push(ChangelogEntry {
                 timestamp: now,
-                request_path: path.to_path_buf(),
+                request_path: path_buf.clone(),
                 field: format!("{}.{}", prefix, new_entry.key),
                 change_type: ChangeType::Added,
                 old_value: None,
@@ -312,6 +315,33 @@ mod tests {
         assert_eq!(changes[0].field, "body");
         assert_eq!(changes[0].change_type, ChangeType::Removed);
         assert!(changes[0].new_value.is_none());
+    }
+
+    #[test]
+    fn body_content_added_detected() {
+        let mut old = base_snap_v2();
+        let mut new = base_snap_v2();
+        old.body_content = None;
+        new.body_content = Some(r#"{"amount":100}"#.into());
+        let changes = diff_signature(&old, &new);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "body");
+        assert_eq!(changes[0].change_type, ChangeType::Added);
+        assert_eq!(changes[0].old_value, None);
+        assert_eq!(changes[0].new_value.as_deref(), Some(r#"{"amount":100}"#));
+    }
+
+    #[test]
+    fn form_field_value_change_detected() {
+        let old = base_snap_v2();
+        let mut new = base_snap_v2();
+        new.form_fields = vec![make_kv("name", "Bob")];
+        let mut old2 = base_snap_v2();
+        old2.form_fields = vec![make_kv("name", "Ada")];
+        let changes = diff_signature(&old2, &new);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "form_field.name");
+        assert_eq!(changes[0].change_type, ChangeType::Changed);
     }
 
     #[test]
