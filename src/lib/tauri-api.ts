@@ -1078,14 +1078,26 @@ export interface ContractChangelog {
   entries: ChangelogEntry[];
 }
 
+export interface KeyValueEntry {
+  key: string;
+  value: string;
+}
+
 export interface RequestSignatureSnapshot {
   requestPath: string;
   method: string;
   urlPattern: string;
-  queryParamKeys: string[];
-  headerKeys: string[];
-  bodyFieldKeys: string[];
+  /** Enabled headers with key and value. */
+  headers: KeyValueEntry[];
+  /** Enabled query params with key and value. */
+  queryParams: KeyValueEntry[];
+  /** Raw body string (JSON/XML/Text/Sparql/Binary). Absent for form bodies. */
+  bodyContent?: string;
+  /** Enabled form fields (FormData/FormUrlEncoded) with key and value. */
+  formFields: KeyValueEntry[];
   authType: string;
+  /** Summarised auth credentials for change detection. */
+  authDetail: string;
   capturedAt: string;
 }
 
