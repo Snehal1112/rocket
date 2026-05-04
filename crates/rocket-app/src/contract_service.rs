@@ -615,6 +615,11 @@ mod tests {
             body_field_keys: vec![],
             auth_type: "none".into(),
             captured_at: Utc::now(),
+            headers: vec![],
+            query_params: vec![],
+            body_content: None,
+            form_fields: vec![],
+            auth_detail: String::new(),
         }
     }
 
