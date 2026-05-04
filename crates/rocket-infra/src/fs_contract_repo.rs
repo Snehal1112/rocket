@@ -70,8 +70,9 @@ impl ContractRepository for FsContractRepo {
                 && !name.contains("-changelog")
             {
                 let yaml = std::fs::read_to_string(&path)?;
-                if let Ok(c) = serde_yaml::from_str::<Contract>(&yaml) {
-                    contracts.push(c);
+                match serde_yaml::from_str::<Contract>(&yaml) {
+                    Ok(c) => contracts.push(c),
+                    Err(e) => tracing::warn!(path = %path.display(), error = %e, "skipping malformed contract YAML"),
                 }
             }
         }

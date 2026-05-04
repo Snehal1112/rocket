@@ -1,6 +1,7 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { Calendar, FileText, Layers, Paperclip, Pencil, ScrollText, Trash2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -25,7 +26,7 @@ export function ContractCard({
   onDelete,
 }: ContractCardProps) {
   const contractStatus = useContractStore((s) => s.contractStatus);
-  const changelogs = useContractStore((s) => s.changelogs);
+  const changeCount = useContractStore(useShallow((s) => s.changelogs[contract.id]?.entries.length ?? 0));
   const status = contractStatus(contract);
 
   const statusVariant =
@@ -47,8 +48,6 @@ export function ContractCard({
     ) : (
       <FileText className='h-3 w-3 shrink-0' />
     );
-
-  const changeCount = changelogs[contract.id]?.entries.length ?? 0;
 
   function resolveDocPath(relPath: string): string {
     return `${collectionRoot}/${relPath}`;

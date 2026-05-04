@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use ulid::Ulid;
 
+// camelCase is intentional: this type serves as both the on-disk YAML format
+// and the Tauri IPC wire type. A separate DTO split is tracked as future work.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract {

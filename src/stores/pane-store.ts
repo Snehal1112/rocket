@@ -368,7 +368,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   openContractTab(collectionName, collectionRoot) {
-    const id = `contract:${collectionName}`;
+    const id = `contract:${collectionRoot}`;
     const tab: ContractTab = {
       id,
       title: `Contracts — ${collectionName}`,

@@ -41,10 +41,13 @@ pub fn attach_contract(
 ) -> Result<Contract, String> {
     let root = PathBuf::from(&collection_root);
 
-    // The collection name is the final path component of the collection root.
-    // The frontend always builds `collection_root` as
-    // `<workspace>/collections/<name>`, so this mirrors the convention used
-    // by the save hook in `commands::collections::save_request`.
+    // The collection name is derived from the final path component of the
+    // collection root. This works for embedded collections whose root is
+    // `<workspace>/collections/<name>`. External collections (linked via
+    // WorkspaceService::link_external_collection) have arbitrary roots, so
+    // the stem may not match the name key used by CollectionRepository::get.
+    // Full external-collection support is tracked in the workspace-mismatch
+    // fix (collection_root_for on CollectionRepository).
     let collection_name = root
         .file_name()
         .and_then(|n| n.to_str())

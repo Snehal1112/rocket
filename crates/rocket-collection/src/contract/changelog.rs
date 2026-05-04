@@ -11,6 +11,7 @@ pub enum ChangeType {
     Removed,
 }
 
+// camelCase is intentional: serves as both YAML persistence and Tauri IPC wire type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangelogEntry {
