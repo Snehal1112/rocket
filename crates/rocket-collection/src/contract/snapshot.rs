@@ -15,7 +15,7 @@ pub struct KeyValueEntry {
 }
 
 /// Shape of one request at the moment a contract is signed.
-// camelCase is intentional: serves as both YAML persistence and Tauri IPC wire type.
+/// camelCase is intentional: serves as both YAML persistence and Tauri IPC wire type.
 /// Rebuilt on every save and diffed against this baseline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,18 @@ fn auth_type_name(auth: &Auth) -> String {
 /// Only captures distinguishing credential data — the auth type itself is tracked separately.
 fn auth_detail(auth: &Auth) -> String {
     match auth {
-        Auth::None | Auth::Inherit | Auth::OAuth2(_) => String::new(),
+        Auth::None | Auth::Inherit => String::new(),
+        Auth::OAuth2(flow) => {
+            use rocket_shared::oauth2::OAuth2Flow;
+            match flow {
+                OAuth2Flow::ClientCredentials { credentials, .. }
+                | OAuth2Flow::ResourceOwnerPassword { credentials, .. }
+                | OAuth2Flow::AuthorizationCode { credentials, .. } => {
+                    credentials.client_id.clone()
+                }
+                OAuth2Flow::Implicit { client_id, .. } => client_id.clone(),
+            }
+        }
         Auth::Basic { username, .. }
         | Auth::Wsse { username, .. }
         | Auth::Digest { username, .. }
@@ -142,9 +153,8 @@ fn extract_body_content(body: &Option<Body>) -> Option<String> {
         return None;
     };
     match body.mode {
-        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql | BodyMode::Binary => {
-            body.content.clone()
-        }
+        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => body.content.clone(),
+        BodyMode::Binary => body.file_path.clone(),
         BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::None => None,
     }
 }
@@ -171,7 +181,7 @@ fn extract_form_fields(body: &Option<Body>) -> Vec<KeyValueEntry> {
 }
 
 /// All snapshots for one contract (one entry per covered request).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractSnapshot {
     pub contract_id: Ulid,
@@ -300,6 +310,55 @@ mod tests {
             .with_auth(Auth::Bearer { token: "supersecrettoken".into() });
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "supersec…");
+    }
+
+    #[test]
+    fn from_request_skips_disabled_form_fields() {
+        use rocket_shared::types::{FormDataEntry, FormDataType};
+        let req = Request::new("Post", HttpMethod::Post, "/form").with_body(Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![
+                FormDataEntry { key: "enabled".into(), value: "yes".into(), entry_type: FormDataType::Text, enabled: true, content_type: None, description: None },
+                FormDataEntry { key: "disabled".into(), value: "no".into(), entry_type: FormDataType::Text, enabled: false, content_type: None, description: None },
+            ]),
+            file_path: None,
+        });
+        let snap = RequestSignatureSnapshot::from_request("form.yml", &req);
+        assert_eq!(snap.form_fields.len(), 1);
+        assert_eq!(snap.form_fields[0].key, "enabled");
+    }
+
+    #[test]
+    fn from_request_auth_detail_short_bearer() {
+        use rocket_shared::types::Auth;
+        let req = Request::new("Get", HttpMethod::Get, "/x")
+            .with_auth(Auth::Bearer { token: "short".into() });
+        let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
+        assert_eq!(snap.auth_detail, "short");
+    }
+
+    #[test]
+    fn from_request_auth_detail_oauth2_has_client_id() {
+        use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+        use rocket_shared::types::Auth;
+        let flow = OAuth2Flow::ClientCredentials {
+            access_token_url: "https://auth.example.com/token".into(),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "my-client".into(),
+                client_secret: "secret".into(),
+                placement: None,
+            },
+            scope: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        };
+        let req = Request::new("Get", HttpMethod::Get, "/secure")
+            .with_auth(Auth::OAuth2(flow));
+        let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
+        assert_eq!(snap.auth_detail, "my-client");
     }
 
     #[test]
