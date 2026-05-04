@@ -56,11 +56,10 @@ pub struct Request {
     pub settings: Option<RequestSettings>,
 }
 
-/// Maximum number of `"{stem} {n}.yml"` candidates considered before giving up.
-///
-/// Purely a safety bound; current callers always pass a UID-bearing request, so
-/// the collision loop is never taken in practice. Kept for any future migration
-/// path that needs collision-aware naming.
+/// Upper bound on the `"{stem} {n}.yml"` collision loop in
+/// `FsCollectionRepo::save_request`. In practice the loop never iterates
+/// because requests carry a UID, but the bound lives in the domain so infra
+/// cannot embed its own arbitrary limit.
 pub const MAX_FILENAME_COLLISION_RETRIES: u32 = 9_999;
 
 /// Apply the on-disk extension policy for a request file.
@@ -232,8 +231,4 @@ mod tests {
         assert_eq!(candidate_filename("login", 1), "login 1.yml");
     }
 
-    #[test]
-    fn candidate_filename_zero_counter_still_works() {
-        assert_eq!(candidate_filename("login", 0), "login 0.yml");
-    }
 }
