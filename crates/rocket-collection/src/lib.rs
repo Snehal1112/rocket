@@ -5,6 +5,7 @@ pub mod repository;
 pub mod request;
 pub mod settings;
 pub mod summary;
+pub mod uid;
 
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
@@ -13,3 +14,4 @@ pub use repository::CollectionRepository;
 pub use request::Request;
 pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;
+pub use uid::generate_uid;

@@ -4,16 +4,12 @@ use rocket_shared::description::{Description, Documentation};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam, RequestSettings};
 use serde::{Deserialize, Serialize};
 
-fn generate_uid() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 /// A saved API request definition.
 /// Value object — immutable identity, compared by value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
-    #[serde(default = "generate_uid")]
+    #[serde(default = "crate::generate_uid")]
     pub uid: String,
     pub name: String,
     pub method: HttpMethod,
@@ -67,7 +63,7 @@ impl Request {
         url: impl Into<String>,
     ) -> Self {
         Self {
-            uid: generate_uid(),
+            uid: crate::generate_uid(),
             name: name.into(),
             method,
             url: url.into(),
