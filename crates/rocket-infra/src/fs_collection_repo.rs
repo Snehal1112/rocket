@@ -257,6 +257,7 @@ impl CollectionRepository for FsCollectionRepo {
 
     #[tracing::instrument(name = "collection_rename", skip(self), fields(old_name = %old_name, new_name = %new_name))]
     fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
+        Collection::validate_name(old_name)?;
         Collection::validate_name(new_name)?;
         let old_path = self.collection_path(old_name);
         let new_path = self.collection_path(new_name);
@@ -724,7 +725,8 @@ fn reject_symlink(path: &Path) -> DomainResult<()> {
         Ok(meta) if meta.file_type().is_symlink() => Err(DomainError::InvalidInput(
             format!("Refusing operation on symlink: {}", path.display()),
         )),
-        _ => Ok(()),
+        Ok(_) => Ok(()),
+        Err(e) => Err(DomainError::Io(e.to_string())),
     }
 }
 
