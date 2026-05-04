@@ -1,10 +1,6 @@
 use crate::request::Request;
 use serde::{Deserialize, Serialize};
 
-fn generate_uid() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 /// An opaque protocol item stored as raw YAML for lossless roundtrip.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,7 +31,7 @@ pub enum CollectionItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Folder {
-    #[serde(default = "generate_uid")]
+    #[serde(default = "crate::generate_uid")]
     pub uid: String,
     pub name: String,
     /// Actual on-disk directory name. May differ from `name` when `folder.yml`
@@ -49,7 +45,7 @@ pub struct Folder {
 impl Folder {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            uid: generate_uid(),
+            uid: crate::generate_uid(),
             name: name.into(),
             dir_name: None,
             items: Vec::new(),
