@@ -24,8 +24,10 @@ pub struct RequestSignatureSnapshot {
     pub method: String,
     pub url_pattern: String,
     /// Full key+value pairs for enabled headers.
+    #[serde(default)]
     pub headers: Vec<KeyValueEntry>,
     /// Full key+value pairs for enabled query params.
+    #[serde(default)]
     pub query_params: Vec<KeyValueEntry>,
     /// Raw body string for text-like body modes (Json, Xml, Text, Sparql, Binary).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -35,6 +37,7 @@ pub struct RequestSignatureSnapshot {
     pub form_fields: Vec<KeyValueEntry>,
     pub auth_type: String,
     /// Auth credential summary — does not include the auth type itself.
+    #[serde(default)]
     pub auth_detail: String,
     pub captured_at: DateTime<Utc>,
     // Legacy key-list fields from v0.6.x snapshots. Kept with serde(default) so
@@ -362,6 +365,36 @@ mod tests {
             .with_auth(Auth::OAuth2(flow));
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "my-client");
+    }
+
+    #[test]
+    fn old_format_snapshot_deserialises_without_error() {
+        // Regression test: snapshots written before the full-changelog expansion
+        // used key-list fields only (headerKeys, queryParamKeys, bodyFieldKeys).
+        // The new fields (headers, queryParams, authDetail) must default to empty
+        // rather than causing a serde error that silently breaks the audit hook.
+        let yaml = r#"contractId: 01KQRNJTCG9AA2FR6AV9N1H3QA
+entries:
+- requestPath: get-users.yml
+  method: GET
+  urlPattern: https://api.example.com/users
+  queryParamKeys: []
+  headerKeys:
+  - Authorization
+  bodyFieldKeys: []
+  authType: none
+  capturedAt: 2026-05-04T04:57:42.033432603Z
+"#;
+        let snapshot: ContractSnapshot = serde_yaml::from_str(yaml)
+            .expect("old-format snapshot must deserialise without error");
+        assert_eq!(snapshot.entries.len(), 1);
+        let entry = &snapshot.entries[0];
+        // New fields must default to empty — not an error.
+        assert!(entry.headers.is_empty());
+        assert!(entry.query_params.is_empty());
+        assert!(entry.auth_detail.is_empty());
+        // Legacy fields are still there.
+        assert_eq!(entry.header_keys, vec!["Authorization".to_string()]);
     }
 
     #[test]
