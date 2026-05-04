@@ -6,9 +6,8 @@
 use crate::opencollection::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
-use rocket_collection::generate_uid;
 use rocket_collection::settings::{CollectionSettings, CollectionVariable};
-use rocket_collection::Request;
+use rocket_collection::{generate_uid, Request};
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
 use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};

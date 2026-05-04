@@ -3,10 +3,11 @@
 use std::fs;
 use std::path::Path;
 
-use crate::oc_conversions::request_to_oc_http_request;
-use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
 use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
+
+use crate::oc_conversions::request_to_oc_http_request;
+use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
 
 /// Detected format of a collection directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
