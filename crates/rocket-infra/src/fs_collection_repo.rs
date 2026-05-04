@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use crate::atomic_write;
 
 use rocket_collection::{
-    generate_uid, Collection, CollectionRepository, CollectionSettings, CollectionSummary,
-    CollectionVariable, Folder,
+    generate_uid, request_filename_for, Collection, CollectionRepository, CollectionSettings,
+    CollectionSummary, CollectionVariable, Folder,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -302,80 +302,29 @@ impl CollectionRepository for FsCollectionRepo {
 
     #[tracing::instrument(name = "collection_save_request", skip(self, request), fields(collection_name = %collection, request_path = %path))]
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
+        if request.uid.is_empty() {
+            return Err(DomainError::Internal(
+                "save_request received Request with empty uid; callers must construct via Request::new()".into(),
+            ));
+        }
+
         let collection_dir = self.collection_path(collection);
-        // Use .yml extension instead of .json.
-        let base = if path.ends_with(".yml") || path.ends_with(".yaml") {
-            path.to_string()
-        } else if path.ends_with(".json") {
-            // Strip .json and add .yml for migration.
-            format!("{}.yml", &path[..path.len() - 5])
-        } else {
-            format!("{}.yml", path)
-        };
-        let mut file_path = self.validate_path(&collection_dir, Path::new(&base))?;
+        let normalized = request_filename_for(path);
+        let file_path = self.validate_path(&collection_dir, Path::new(&normalized))?;
 
-        // Hoist these so the create_new retry loop can use them regardless of path.
-        let stem = Path::new(&base).file_stem().unwrap_or_default().to_string_lossy().to_string();
-        let parent_rel = Path::new(&base).parent().unwrap_or(Path::new("")).to_path_buf();
-        let mut counter = 0u32;
-
-        // Convert domain Request to OcHttpRequest, then serialize as YAML.
         let oc = request_to_oc_http_request(request.clone());
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
 
-        // When the request already has a UID the path is stable; overwrite atomically.
-        let actual_path = if !request.uid.is_empty() {
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            atomic_write(&file_path, yaml.as_bytes())?;
-            file_path
-        } else {
-            // No UID: pick a name that does not yet exist, then claim it atomically
-            // with create_new(true) to close the TOCTOU window.
-            loop {
-                if counter > 0 {
-                    // Advance to the next candidate name.
-                    let candidate = if parent_rel.as_os_str().is_empty() {
-                        format!("{} {}.yml", stem, counter)
-                    } else {
-                        format!("{}/{} {}.yml", parent_rel.display(), stem, counter)
-                    };
-                    file_path = self.validate_path(&collection_dir, Path::new(&candidate))?;
-                }
-                if let Some(parent) = file_path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                match std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&file_path)
-                {
-                    Ok(mut f) => {
-                        use std::io::Write;
-                        f.write_all(yaml.as_bytes())
-                            .map_err(|e| DomainError::Io(e.to_string()))?;
-                        break file_path;
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                        counter += 1;
-                        if counter > 9_999 {
-                            return Err(DomainError::Io(
-                                "save_request: too many duplicate filenames (limit 9999)".into(),
-                            ));
-                        }
-                        // Another writer claimed this name concurrently; try next counter.
-                    }
-                    Err(e) => return Err(DomainError::Io(e.to_string())),
-                }
-            }
-        };
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        atomic_write(&file_path, yaml.as_bytes())?;
 
         // Return the actual filename relative to the collection directory.
-        let actual = actual_path
+        let actual = file_path
             .strip_prefix(&collection_dir)
-            .unwrap_or(&actual_path)
+            .unwrap_or(&file_path)
             .to_string_lossy()
             .to_string();
         Ok(actual)
