@@ -145,7 +145,12 @@ fn auth_detail(auth: &Auth) -> String {
             }
         }
         Auth::ApiKey { key, value, placement } => {
-            format!("{}={} ({})", key, value, placement)
+            let truncated = if value.len() > 8 {
+                format!("{}…", value.chars().take(8).collect::<String>())
+            } else {
+                value.clone()
+            };
+            format!("{}={} ({})", key, truncated, placement)
         }
         Auth::AwsSigV4 { access_key, region, service, .. } => {
             format!("{}@{}/{}", access_key, region, service)

@@ -91,8 +91,8 @@ pub fn diff_signature(
 }
 
 // Key uniqueness is not enforced here. If two entries share a key, the first
-// match wins. The snapshot builder (from_request) collects from the UI layer
-// which does not permit duplicate enabled keys, so this is safe in practice.
+// match wins. Uniqueness is guaranteed upstream by from_request's
+// filter(|h| h.enabled) step, which only includes one entry per enabled slot.
 /// Compares two key-value lists, emitting Added/Removed/Changed entries.
 fn diff_key_value_list(
     path: &std::path::Path,
@@ -367,5 +367,21 @@ mod tests {
     fn no_changes_v2_returns_empty() {
         let snap = base_snap_v2();
         assert!(diff_signature(&snap, &snap).is_empty());
+    }
+
+    #[test]
+    fn auth_type_and_detail_both_emitted_when_auth_scheme_changes() {
+        // Switching from bearer to none changes auth_type and clears auth_detail.
+        // Both fields are diffed independently, so both entries must appear.
+        let old = base_snap_v2(); // auth_type: "bearer", auth_detail: "oldtoken…"
+        let mut new = base_snap_v2();
+        new.auth_type = "none".into();
+        new.auth_detail = String::new();
+
+        let changes = diff_signature(&old, &new);
+
+        assert_eq!(changes.len(), 2);
+        assert!(changes.iter().any(|e| e.field == "auth_type" && e.change_type == ChangeType::Changed));
+        assert!(changes.iter().any(|e| e.field == "auth_detail" && e.change_type == ChangeType::Changed));
     }
 }
