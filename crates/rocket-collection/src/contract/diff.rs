@@ -333,12 +333,11 @@ mod tests {
 
     #[test]
     fn form_field_value_change_detected() {
-        let old = base_snap_v2();
+        let mut old = base_snap_v2();
+        old.form_fields = vec![make_kv("name", "Ada")];
         let mut new = base_snap_v2();
         new.form_fields = vec![make_kv("name", "Bob")];
-        let mut old2 = base_snap_v2();
-        old2.form_fields = vec![make_kv("name", "Ada")];
-        let changes = diff_signature(&old2, &new);
+        let changes = diff_signature(&old, &new);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "form_field.name");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
