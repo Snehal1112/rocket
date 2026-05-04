@@ -967,7 +967,7 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
         name: req.name.clone(),
         description: req.description.clone(),
         request_type: Some("http".into()),
-        seq: req.seq.clone(),
+        seq: req.seq,
         tags: req.tags.clone(),
     };
 

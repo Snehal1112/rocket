@@ -318,7 +318,7 @@ impl CollectionRepository for FsCollectionRepo {
         let normalized = request_filename_for(path);
         let file_path = self.validate_path(&collection_dir, Path::new(&normalized))?;
 
-        let oc = request_to_oc_http_request(&request);
+        let oc = request_to_oc_http_request(request);
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
 
