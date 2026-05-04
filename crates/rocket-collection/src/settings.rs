@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rocket_shared::types::{Auth, Header};
 use serde::{Deserialize, Serialize};
 
@@ -35,4 +37,97 @@ pub struct CollectionSettings {
     /// Collection-scoped variables, resolved alongside environment variables.
     #[serde(default)]
     pub variables: Vec<CollectionVariable>,
+}
+
+/// Merge a folder ancestor chain into a single deduplicated, sorted variable set.
+///
+/// `chain` is ordered outermost-first. For each folder, only enabled variables
+/// participate; disabled entries are skipped entirely and do not shadow
+/// enabled variables from outer folders. On key collision, the innermost
+/// (later) folder wins. The returned vector is sorted by `key`.
+pub fn merge_folder_chain_variables(
+    chain: Vec<Vec<CollectionVariable>>,
+) -> Vec<CollectionVariable> {
+    let mut merged: HashMap<String, CollectionVariable> = HashMap::new();
+    for folder_vars in chain {
+        for v in folder_vars {
+            if v.enabled {
+                merged.insert(v.key.clone(), v);
+            }
+        }
+    }
+    let mut out: Vec<CollectionVariable> = merged.into_values().collect();
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(key: &str, value: &str, enabled: bool) -> CollectionVariable {
+        CollectionVariable {
+            key: key.to_string(),
+            value: value.to_string(),
+            initial_value: String::new(),
+            enabled,
+            secret: false,
+        }
+    }
+
+    #[test]
+    fn merge_empty_chain_returns_empty() {
+        assert_eq!(merge_folder_chain_variables(vec![]), vec![]);
+    }
+
+    #[test]
+    fn merge_single_folder_returns_sorted_enabled() {
+        let result = merge_folder_chain_variables(vec![vec![
+            var("z_key", "z_val", true),
+            var("a_key", "a_val", true),
+        ]]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].key, "a_key");
+        assert_eq!(result[1].key, "z_key");
+    }
+
+    #[test]
+    fn merge_inner_wins_on_collision() {
+        let result = merge_folder_chain_variables(vec![
+            vec![var("k", "outer", true)],
+            vec![var("k", "inner", true)],
+        ]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].value, "inner");
+    }
+
+    #[test]
+    fn merge_disabled_does_not_shadow() {
+        let result = merge_folder_chain_variables(vec![
+            vec![var("k", "outer", true)],
+            vec![var("k", "inner_value", false)],
+        ]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].value, "outer");
+    }
+
+    #[test]
+    fn merge_disabled_outer_not_present() {
+        let result = merge_folder_chain_variables(vec![vec![var("x", "val", false)]]);
+        assert_eq!(result, vec![]);
+    }
+
+    #[test]
+    fn merge_three_levels_inner_wins() {
+        let result = merge_folder_chain_variables(vec![
+            vec![var("a", "1", true), var("b", "1", true)],
+            vec![var("a", "2", true)],
+            vec![var("b", "3", true)],
+        ]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].key, "a");
+        assert_eq!(result[0].value, "2");
+        assert_eq!(result[1].key, "b");
+        assert_eq!(result[1].value, "3");
+    }
 }

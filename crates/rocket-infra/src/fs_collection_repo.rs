@@ -627,35 +627,24 @@ impl CollectionRepository for FsCollectionRepo {
             .components()
             .filter_map(|c| c.as_os_str().to_str())
             .collect();
-        // Merge variables from outermost to innermost folder; inner wins on collision.
-        let mut merged: std::collections::HashMap<String, CollectionVariable> =
-            std::collections::HashMap::new();
+
+        let mut chain: Vec<Vec<CollectionVariable>> = Vec::new();
         let mut current = collection_dir.clone();
         for segment in &dir_components {
             current = current.join(segment);
             let folder_yml = current.join("folder.yml");
-            if folder_yml.exists() {
-                if let Ok(content) = fs::read_to_string(&folder_yml) {
-                    if let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
-                        if let Some(req) = info.request {
-                            if let Some(vars) = req.variables {
-                                for v in vars {
-                                    let cv = oc_variable_to_collection_variable(v);
-                                    // Disabled vars are skipped entirely; they don't
-                                    // shadow enabled vars from an outer folder.
-                                    if cv.enabled {
-                                        merged.insert(cv.key.clone(), cv);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            if !folder_yml.exists() { continue; }
+            let Ok(content) = fs::read_to_string(&folder_yml) else { continue; };
+            let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) else { continue; };
+            let Some(req) = info.request else { continue; };
+            let Some(vars) = req.variables else { continue; };
+            chain.push(
+                vars.into_iter()
+                    .map(oc_variable_to_collection_variable)
+                    .collect(),
+            );
         }
-        let mut result: Vec<CollectionVariable> = merged.into_values().collect();
-        result.sort_by(|a, b| a.key.cmp(&b.key));
-        Ok(result)
+        Ok(rocket_collection::settings::merge_folder_chain_variables(chain))
     }
 
     fn save_folder_variables(
@@ -1428,31 +1417,6 @@ mod tests {
     }
 
     #[test]
-    fn folder_chain_inner_wins_on_collision() {
-        let (_dir, repo) = setup();
-        repo.create("my-api").unwrap();
-        repo.create_folder("my-api", "outer").unwrap();
-        repo.create_folder("my-api", "outer/inner").unwrap();
-
-        let outer_vars = vec![
-            CollectionVariable { key: "HOST".into(), value: "".into(), initial_value: "outer-host".into(), enabled: true, secret: false },
-        ];
-        let inner_vars = vec![
-            CollectionVariable { key: "HOST".into(), value: "".into(), initial_value: "inner-host".into(), enabled: true, secret: false },
-        ];
-        repo.save_folder_variables("my-api", "outer", outer_vars).unwrap();
-        repo.save_folder_variables("my-api", "outer/inner", inner_vars).unwrap();
-
-        let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
-        repo.save_request("my-api", "outer/inner/test.yml", &req).unwrap();
-
-        let chain = repo.get_folder_chain_variables("my-api", "outer/inner/test.yml").unwrap();
-        assert_eq!(chain.len(), 1);
-        assert_eq!(chain[0].key, "HOST");
-        assert_eq!(chain[0].initial_value, "inner-host");
-    }
-
-    #[test]
     fn request_variables_roundtrip() {
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
@@ -1473,34 +1437,29 @@ mod tests {
     }
 
     #[test]
-    fn folder_chain_root_request_returns_empty() {
+    fn folder_chain_walks_disk_and_merges() {
+        // Proves that the disk walk feeds into the domain merge correctly.
         let (_dir, repo) = setup();
         repo.create("my-api").unwrap();
-        let req = rocket_collection::Request::new("Root", HttpMethod::Get, "/root");
-        repo.save_request("my-api", "root.yml", &req).unwrap();
+        repo.create_folder("my-api", "outer").unwrap();
+        repo.create_folder("my-api", "outer/inner").unwrap();
 
-        let chain = repo.get_folder_chain_variables("my-api", "root.yml").unwrap();
-        assert!(chain.is_empty());
-    }
-
-    #[test]
-    fn folder_chain_skips_disabled_vars() {
-        let (_dir, repo) = setup();
-        repo.create("my-api").unwrap();
-        repo.create_folder("my-api", "v1").unwrap();
-
-        let vars = vec![
-            CollectionVariable { key: "ENABLED".into(), value: "yes".into(), initial_value: "".into(), enabled: true, secret: false },
-            CollectionVariable { key: "DISABLED".into(), value: "no".into(), initial_value: "".into(), enabled: false, secret: false },
+        let outer_vars = vec![
+            CollectionVariable { key: "k".into(), value: "outer".into(), initial_value: "outer".into(), enabled: true, secret: false },
         ];
-        repo.save_folder_variables("my-api", "v1", vars).unwrap();
+        let inner_vars = vec![
+            CollectionVariable { key: "k".into(), value: "inner".into(), initial_value: "inner".into(), enabled: true, secret: false },
+        ];
+        repo.save_folder_variables("my-api", "outer", outer_vars).unwrap();
+        repo.save_folder_variables("my-api", "outer/inner", inner_vars).unwrap();
 
-        let req = rocket_collection::Request::new("R", HttpMethod::Get, "/r");
-        repo.save_request("my-api", "v1/r.yml", &req).unwrap();
+        let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
+        repo.save_request("my-api", "outer/inner/req.yml", &req).unwrap();
 
-        let chain = repo.get_folder_chain_variables("my-api", "v1/r.yml").unwrap();
-        assert_eq!(chain.len(), 1);
-        assert_eq!(chain[0].key, "ENABLED");
+        let result = repo.get_folder_chain_variables("my-api", "outer/inner/req.yml").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, "k");
+        assert_eq!(result[0].value, "inner");
     }
 
     #[test]
