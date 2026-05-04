@@ -1459,7 +1459,6 @@ mod tests {
         let result = repo.get_folder_chain_variables("my-api", "outer/inner/req.yml").unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].key, "k");
-        // Inner folder wins on collision; value should be "inner".
         assert_eq!(result[0].value, "inner");
     }
 
