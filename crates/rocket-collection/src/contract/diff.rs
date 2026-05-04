@@ -82,15 +82,22 @@ mod tests {
     use std::path::PathBuf;
 
     fn base_snap() -> RequestSignatureSnapshot {
+        use crate::contract::snapshot::KeyValueEntry;
         RequestSignatureSnapshot {
             request_path: PathBuf::from("requests/payment.yml"),
             method: "POST".into(),
             url_pattern: "/payments".into(),
+            headers: vec![KeyValueEntry { key: "Authorization".into(), value: "Bearer token".into() }],
+            query_params: vec![KeyValueEntry { key: "currency".into(), value: "usd".into() }],
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "bearer".into(),
+            auth_detail: "Bearer to…".into(),
+            captured_at: Utc::now(),
+            // Legacy key-list fields for old YAML compat.
             query_param_keys: vec!["currency".into()],
             header_keys: vec!["Authorization".into()],
             body_field_keys: vec!["amount".into(), "currency".into()],
-            auth_type: "bearer".into(),
-            captured_at: Utc::now(),
         }
     }
 

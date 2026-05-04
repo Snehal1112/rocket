@@ -6,7 +6,16 @@ use ulid::Ulid;
 
 use crate::request::Request;
 
+/// A key+value pair used for headers, query params, and form fields.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValueEntry {
+    pub key: String,
+    pub value: String,
+}
+
 /// Shape of one request at the moment a contract is signed.
+// camelCase is intentional: serves as both YAML persistence and Tauri IPC wire type.
 /// Rebuilt on every save and diffed against this baseline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -14,29 +23,60 @@ pub struct RequestSignatureSnapshot {
     pub request_path: PathBuf,
     pub method: String,
     pub url_pattern: String,
-    pub query_param_keys: Vec<String>,
-    pub header_keys: Vec<String>,
-    pub body_field_keys: Vec<String>,
+    /// Full key+value pairs for enabled headers.
+    pub headers: Vec<KeyValueEntry>,
+    /// Full key+value pairs for enabled query params.
+    pub query_params: Vec<KeyValueEntry>,
+    /// Raw body string for text-like body modes (Json, Xml, Text, Sparql, Binary).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_content: Option<String>,
+    /// Key+value pairs for enabled form fields (FormData/FormUrlEncoded modes).
+    #[serde(default)]
+    pub form_fields: Vec<KeyValueEntry>,
     pub auth_type: String,
+    /// Auth credential summary — does not include the auth type itself.
+    pub auth_detail: String,
     pub captured_at: DateTime<Utc>,
+    // Legacy fields kept for backward-compat with old on-disk YAML files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_param_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub header_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub body_field_keys: Vec<String>,
 }
 
 impl RequestSignatureSnapshot {
     /// Build a signature snapshot from a request and its collection-relative path.
     ///
     /// The `Request` struct itself has no authoritative path, so the caller
-    /// supplies it explicitly. Keys are taken as-is (no sorting) — ordering is
-    /// irrelevant for diffing because `diff_signature` uses set-style checks.
+    /// supplies it explicitly.
     pub fn from_request(path: impl AsRef<Path>, request: &Request) -> Self {
         Self {
             request_path: path.as_ref().to_path_buf(),
             method: http_method_name(&request.method),
             url_pattern: request.url.clone(),
-            query_param_keys: request.query_params.iter().map(|q| q.key.clone()).collect(),
-            header_keys: request.headers.iter().map(|h| h.key.clone()).collect(),
-            body_field_keys: extract_body_keys(&request.body),
+            headers: request
+                .headers
+                .iter()
+                .filter(|h| h.enabled)
+                .map(|h| KeyValueEntry { key: h.key.clone(), value: h.value.clone() })
+                .collect(),
+            query_params: request
+                .query_params
+                .iter()
+                .filter(|q| q.enabled)
+                .map(|q| KeyValueEntry { key: q.key.clone(), value: q.value.clone() })
+                .collect(),
+            body_content: extract_body_content(&request.body),
+            form_fields: extract_form_fields(&request.body),
             auth_type: auth_type_name(&request.auth),
+            auth_detail: auth_detail(&request.auth),
             captured_at: Utc::now(),
+            // Legacy fields are empty; old files still deserialize via #[serde(default)].
+            query_param_keys: vec![],
+            header_keys: vec![],
+            body_field_keys: vec![],
         }
     }
 }
@@ -70,7 +110,47 @@ fn auth_type_name(auth: &Auth) -> String {
     .to_string()
 }
 
-fn extract_body_keys(body: &Option<Body>) -> Vec<String> {
+/// Returns a credential summary string for the given auth variant.
+///
+/// Only captures distinguishing credential data — the auth type itself is tracked separately.
+fn auth_detail(auth: &Auth) -> String {
+    match auth {
+        Auth::None | Auth::Inherit | Auth::OAuth2(_) => String::new(),
+        Auth::Basic { username, .. }
+        | Auth::Wsse { username, .. }
+        | Auth::Digest { username, .. }
+        | Auth::Ntlm { username, .. } => username.clone(),
+        Auth::Bearer { token } => {
+            if token.len() > 8 {
+                format!("{}…", token.chars().take(8).collect::<String>())
+            } else {
+                token.clone()
+            }
+        }
+        Auth::ApiKey { key, value, placement } => {
+            format!("{}={} ({})", key, value, placement)
+        }
+        Auth::AwsSigV4 { access_key, region, service, .. } => {
+            format!("{}@{}/{}", access_key, region, service)
+        }
+    }
+}
+
+/// Extracts the raw body string for text-like body modes.
+fn extract_body_content(body: &Option<Body>) -> Option<String> {
+    let Some(body) = body else {
+        return None;
+    };
+    match body.mode {
+        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql | BodyMode::Binary => {
+            body.content.clone()
+        }
+        BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::None => None,
+    }
+}
+
+/// Extracts enabled form field key+value pairs for form body modes.
+fn extract_form_fields(body: &Option<Body>) -> Vec<KeyValueEntry> {
     let Some(body) = body else {
         return vec![];
     };
@@ -78,20 +158,15 @@ fn extract_body_keys(body: &Option<Body>) -> Vec<String> {
         BodyMode::FormUrlEncoded | BodyMode::FormData => body
             .form_data
             .as_ref()
-            .map(|entries| entries.iter().map(|e| e.key.clone()).collect())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|e| e.enabled)
+                    .map(|e| KeyValueEntry { key: e.key.clone(), value: e.value.clone() })
+                    .collect()
+            })
             .unwrap_or_default(),
-        BodyMode::Json => body
-            .content
-            .as_deref()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .and_then(|v| v.as_object().cloned())
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default(),
-        BodyMode::None
-        | BodyMode::Xml
-        | BodyMode::Text
-        | BodyMode::Sparql
-        | BodyMode::Binary => vec![],
+        _ => vec![],
     }
 }
 
@@ -124,7 +199,7 @@ impl ContractSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::types::{Body, BodyMode, HttpMethod, QueryParam};
+    use rocket_shared::types::{Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, QueryParam};
 
     #[test]
     fn from_request_captures_method_url_and_keys() {
@@ -142,8 +217,9 @@ mod tests {
         assert_eq!(snap.request_path, PathBuf::from("users/get-users.yml"));
         assert_eq!(snap.method, "GET");
         assert_eq!(snap.url_pattern, "https://api.example.com/users");
-        assert_eq!(snap.header_keys, vec!["X-Trace-Id".to_string()]);
-        assert_eq!(snap.query_param_keys, vec!["page".to_string()]);
+        // Legacy fields are empty; use the new key+value fields instead.
+        assert_eq!(snap.headers[0].key, "X-Trace-Id");
+        assert_eq!(snap.query_params[0].key, "page");
         assert_eq!(snap.auth_type, "none");
         assert!(snap.body_field_keys.is_empty());
     }
@@ -159,8 +235,84 @@ mod tests {
 
         let snap = RequestSignatureSnapshot::from_request("create.yml", &req);
 
-        let mut keys = snap.body_field_keys.clone();
-        keys.sort();
-        assert_eq!(keys, vec!["email".to_string(), "name".to_string()]);
+        // body_content now stores the raw JSON string.
+        assert_eq!(snap.body_content, Some(r#"{"name":"Ada","email":"a@b.com"}"#.to_string()));
+    }
+
+    #[test]
+    fn from_request_captures_header_key_and_value() {
+        let req = Request::new("Get", HttpMethod::Get, "/users")
+            .with_header("Authorization", "Bearer abc123");
+        let snap = RequestSignatureSnapshot::from_request("get.yml", &req);
+        assert_eq!(snap.headers.len(), 1);
+        assert_eq!(snap.headers[0].key, "Authorization");
+        assert_eq!(snap.headers[0].value, "Bearer abc123");
+    }
+
+    #[test]
+    fn from_request_captures_query_param_key_and_value() {
+        let mut req = Request::new("Get", HttpMethod::Get, "/search");
+        req.query_params.push(QueryParam { key: "q".into(), value: "hello".into(), enabled: true, description: None });
+        let snap = RequestSignatureSnapshot::from_request("search.yml", &req);
+        assert_eq!(snap.query_params.len(), 1);
+        assert_eq!(snap.query_params[0].key, "q");
+        assert_eq!(snap.query_params[0].value, "hello");
+    }
+
+    #[test]
+    fn from_request_captures_raw_body_content() {
+        let req = Request::new("Post", HttpMethod::Post, "/users").with_body(Body {
+            mode: BodyMode::Json,
+            content: Some(r#"{"name":"Ada"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        let snap = RequestSignatureSnapshot::from_request("post.yml", &req);
+        assert_eq!(snap.body_content, Some(r#"{"name":"Ada"}"#.to_string()));
+        assert!(snap.form_fields.is_empty());
+    }
+
+    #[test]
+    fn from_request_captures_form_fields_key_and_value() {
+        let req = Request::new("Post", HttpMethod::Post, "/form").with_body(Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "name".into(),
+                value: "Ada".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        });
+        let snap = RequestSignatureSnapshot::from_request("form.yml", &req);
+        assert_eq!(snap.form_fields.len(), 1);
+        assert_eq!(snap.form_fields[0].key, "name");
+        assert_eq!(snap.form_fields[0].value, "Ada");
+    }
+
+    #[test]
+    fn from_request_captures_auth_detail_bearer() {
+        use rocket_shared::types::Auth;
+        let req = Request::new("Get", HttpMethod::Get, "/secure")
+            .with_auth(Auth::Bearer { token: "supersecrettoken".into() });
+        let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
+        assert_eq!(snap.auth_detail, "supersec…");
+    }
+
+    #[test]
+    fn from_request_skips_disabled_headers_and_params() {
+        let mut req = Request::new("Get", HttpMethod::Get, "/x");
+        req.headers.push(Header { key: "X-Enabled".into(), value: "yes".into(), enabled: true, description: None });
+        req.headers.push(Header { key: "X-Disabled".into(), value: "no".into(), enabled: false, description: None });
+        req.query_params.push(QueryParam { key: "active".into(), value: "1".into(), enabled: true, description: None });
+        req.query_params.push(QueryParam { key: "inactive".into(), value: "0".into(), enabled: false, description: None });
+        let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
+        assert_eq!(snap.headers.len(), 1);
+        assert_eq!(snap.headers[0].key, "X-Enabled");
+        assert_eq!(snap.query_params.len(), 1);
+        assert_eq!(snap.query_params[0].key, "active");
     }
 }
