@@ -15,6 +15,6 @@ mod tests {
         let s = generate_uid();
         let parsed: uuid::Uuid = s.parse().expect("must parse as uuid");
         assert_eq!(parsed.get_version_num(), 4);
-        assert_ne!(s, generate_uid()); // two calls differ
+        assert_ne!(s, generate_uid());
     }
 }

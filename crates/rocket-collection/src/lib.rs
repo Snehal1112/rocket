@@ -5,7 +5,7 @@ pub mod repository;
 pub mod request;
 pub mod settings;
 pub mod summary;
-pub mod uid;
+pub(crate) mod uid;
 
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
