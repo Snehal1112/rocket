@@ -37,7 +37,10 @@ pub struct RequestSignatureSnapshot {
     /// Auth credential summary — does not include the auth type itself.
     pub auth_detail: String,
     pub captured_at: DateTime<Utc>,
-    // Legacy fields kept for backward-compat with old on-disk YAML files.
+    // Legacy key-list fields from v0.6.x snapshots. Kept with serde(default) so
+    // old on-disk files deserialise without error. No longer written by from_request.
+    // The first save after upgrade will emit "added" entries for all current fields
+    // relative to these empty lists — delete old -snapshot.yml files to reset.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_param_keys: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
