@@ -5,8 +5,10 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export domain types that map directly to schema types.
+#[allow(unused_imports)]
 pub use rocket_shared::description::{Description as OcDescription, Documentation as OcDocumentation};
 pub use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
+#[allow(unused_imports)]
 pub use rocket_shared::variable_value::{VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant};
 
 /// OpenCollection Variable — schema field names: name, value, initial, description, disabled.
@@ -309,6 +311,7 @@ pub enum OcHttpRequestBody {
 }
 
 /// HTTP request body variant (named variant with title + selected).
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcHttpRequestBodyVariant {
     pub title: String,
@@ -330,6 +333,7 @@ pub struct OcScript {
 }
 
 /// Type alias for a list of scripts.
+#[allow(dead_code)]
 pub type OcScripts = Vec<OcScript>;
 
 /// External script file reference.

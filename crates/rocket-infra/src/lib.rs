@@ -1,8 +1,8 @@
 mod atomic_write;
 pub mod file_watcher;
 pub(crate) mod migration;
-pub mod oc_conversions;
-pub mod opencollection;
+pub(crate) mod oc_conversions;
+pub(crate) mod opencollection;
 pub mod fs_audit_log_repo;
 pub mod fs_collection_repo;
 pub mod fs_compliance_profile_repo;

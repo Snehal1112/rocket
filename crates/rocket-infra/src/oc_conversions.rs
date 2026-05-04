@@ -1053,6 +1053,7 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
 /// A request that can be any protocol type.
 /// HTTP requests are fully converted to domain types.
 /// Other protocols preserve their YAML data losslessly.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProtocolRequest {
     Http(rocket_collection::Request),
@@ -1063,6 +1064,7 @@ pub enum ProtocolRequest {
 
 /// Convert an OcItem to a ProtocolRequest.
 /// HTTP items are fully converted; others are stored as opaque YAML.
+#[allow(dead_code)]
 pub fn oc_item_to_protocol_request(item: OcItem) -> Option<ProtocolRequest> {
     match item {
         OcItem::Http(oc) => Some(ProtocolRequest::Http(oc_http_request_to_request(oc))),
@@ -1081,6 +1083,7 @@ pub fn oc_item_to_protocol_request(item: OcItem) -> Option<ProtocolRequest> {
 }
 
 /// Convert a ProtocolRequest back to an OcItem for writing.
+#[allow(dead_code)]
 pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
     match pr {
         ProtocolRequest::Http(req) => Some(OcItem::Http(request_to_oc_http_request(req))),
@@ -1101,6 +1104,7 @@ pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
 // ============================================================
 
 /// Convert an OC folder to a domain Folder, recursively converting items.
+#[allow(dead_code)]
 pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
     let name = oc.info.name;
     let items = oc
@@ -1165,6 +1169,7 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
 }
 
 /// Convert a domain Folder back to an OC folder.
+#[allow(dead_code)]
 pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
     let items: Vec<OcItem> = folder
         .items
@@ -1214,6 +1219,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
 // ============================================================
 
 /// Convert an OC collection to a domain Collection.
+#[allow(dead_code)]
 pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
     let name = oc
         .info
@@ -1315,6 +1321,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
 }
 
 /// Convert a domain Collection back to an OC collection.
+#[allow(dead_code)]
 pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
     let items: Vec<OcItem> = col
         .root
