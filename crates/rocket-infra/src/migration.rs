@@ -6,6 +6,7 @@ use std::path::Path;
 use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::atomic_write;
 use crate::oc_conversions::request_to_oc_http_request;
 use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
 
@@ -93,7 +94,7 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
     };
     let yaml = serde_yaml::to_string(&oc)
         .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
-    fs::write(collection_dir.join("opencollection.yml"), yaml)?;
+    atomic_write(&collection_dir.join("opencollection.yml"), yaml.as_bytes())?;
 
     // Clean up legacy .uid at root.
     let uid_path = collection_dir.join(".uid");
@@ -138,7 +139,7 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
                 };
                 let yaml = serde_yaml::to_string(&info)
                     .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-                fs::write(&folder_yml, yaml)?;
+                atomic_write(&folder_yml, yaml.as_bytes())?;
             }
             // Clean up legacy .uid in subfolder.
             let uid_path = path.join(".uid");
@@ -167,13 +168,13 @@ fn migrate_request_file(json_path: &Path) -> DomainResult<()> {
     let request: rocket_collection::Request = serde_json::from_str(&content)
         .map_err(|e| DomainError::Internal(format!("Failed to parse JSON request: {e}")))?;
 
-    let oc = request_to_oc_http_request(request);
+    let oc = request_to_oc_http_request(&request);
     let yaml = serde_yaml::to_string(&oc)
         .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML request: {e}")))?;
 
     // Write .yml file with same stem.
     let yml_path = json_path.with_extension("yml");
-    fs::write(&yml_path, yaml)?;
+    atomic_write(&yml_path, yaml.as_bytes())?;
 
     // Delete original .json.
     fs::remove_file(json_path)?;
@@ -201,7 +202,7 @@ fn migrate_order_file(json_path: &Path) -> DomainResult<()> {
     let yaml = serde_yaml::to_string(&updated)
         .map_err(|e| DomainError::Internal(format!("Failed to serialize _order.yml: {e}")))?;
     let yml_path = json_path.with_extension("yml");
-    fs::write(&yml_path, yaml)?;
+    atomic_write(&yml_path, yaml.as_bytes())?;
     fs::remove_file(json_path)?;
     Ok(())
 }

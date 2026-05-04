@@ -318,7 +318,7 @@ impl CollectionRepository for FsCollectionRepo {
         let normalized = request_filename_for(path);
         let file_path = self.validate_path(&collection_dir, Path::new(&normalized))?;
 
-        let oc = request_to_oc_http_request(request.clone());
+        let oc = request_to_oc_http_request(&request);
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
 
@@ -628,7 +628,7 @@ impl CollectionRepository for FsCollectionRepo {
         let mut info: OcFolderInfo = if folder_yml_path.exists() {
             let content = fs::read_to_string(&folder_yml_path)?;
             serde_yaml::from_str::<OcFolderInfo>(&content)
-                .unwrap_or_default()
+                .map_err(|e| DomainError::Internal(format!("Failed to parse folder.yml: {e}")))?
         } else {
             OcFolderInfo::default()
         };
@@ -854,9 +854,18 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
                         .map_err(|e| DomainError::Internal(e.to_string()))
                 }
             };
-            if let Ok(mut request) = request_result {
-                request.file_name = Some(entry_name.clone());
-                folder.add_request(request);
+            match request_result {
+                Ok(mut request) => {
+                    request.file_name = Some(entry_name.clone());
+                    folder.add_request(request);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "skipping corrupt request file"
+                    );
+                }
             }
         }
     }
@@ -1530,5 +1539,40 @@ mod tests {
         let err = repo.delete_folder("my-api", "evil-folder").unwrap_err();
         assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
         assert!(target.exists());
+    }
+
+    #[test]
+    fn save_folder_variables_rejects_corrupt_folder_yml() {
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        let folder_yml = dir.path().join("my-api").join("auth").join("folder.yml");
+        fs::write(&folder_yml, b"{{{{not valid yaml: [[[").unwrap();
+        let result = repo.save_folder_variables("my-api", "auth", vec![]);
+        assert!(result.is_err(), "expected error on corrupt folder.yml, got Ok");
+        // File must NOT have been silently overwritten.
+        let content = fs::read_to_string(&folder_yml).unwrap();
+        assert!(content.contains("not valid yaml"), "file was silently overwritten");
+    }
+
+    #[test]
+    fn build_folder_tree_skips_corrupt_request_file() {
+        use rocket_shared::types::HttpMethod;
+        let (dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
+        repo.save_request("my-api", "good.yml", &req).unwrap();
+        let bad_path = dir.path().join("my-api").join("bad.yml");
+        fs::write(&bad_path, b"http:\n  method: [[[unclosed").unwrap();
+        let collection = repo.get("my-api").unwrap();
+        let names: Vec<&str> = collection.root.items.iter().filter_map(|item| {
+            if let rocket_collection::CollectionItem::Request(r) = item {
+                Some(r.name.as_str())
+            } else {
+                None
+            }
+        }).collect();
+        assert!(names.contains(&"Good"), "good request missing: {:?}", names);
+        assert!(!names.contains(&"bad"), "corrupt file should be skipped: {:?}", names);
     }
 }

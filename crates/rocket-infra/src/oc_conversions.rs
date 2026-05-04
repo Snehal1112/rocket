@@ -957,46 +957,46 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
 }
 
 /// Convert a domain Request back to an OC HTTP request.
-pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
-    // Extract params, runtime_auth, and settings before req fields are consumed.
+pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
+    // Borrow params, runtime_auth, and settings without consuming req.
     let params = merge_params(&req.query_params, &req.path_params);
-    let runtime_auth = req.runtime_auth.map(OcAuth::from);
-    let settings = req.settings.map(domain_settings_to_oc);
+    let runtime_auth = req.runtime_auth.clone().map(OcAuth::from);
+    let settings = req.settings.clone().map(domain_settings_to_oc);
 
     let info = OcHttpRequestInfo {
-        name: req.name,
-        description: req.description,
+        name: req.name.clone(),
+        description: req.description.clone(),
         request_type: Some("http".into()),
-        seq: req.seq,
-        tags: req.tags,
+        seq: req.seq.clone(),
+        tags: req.tags.clone(),
     };
 
     let http = OcHttpRequestDetails {
         method: req.method.to_string(),
-        url: req.url,
-        headers: req.headers.into_iter().map(OcHttpRequestHeader::from).collect(),
+        url: req.url.clone(),
+        headers: req.headers.iter().cloned().map(OcHttpRequestHeader::from).collect(),
         params,
-        body: req.body.map(OcHttpRequestBody::from),
-        auth: if req.auth == Auth::None { None } else { Some(OcAuth::from(req.auth)) },
+        body: req.body.clone().map(OcHttpRequestBody::from),
+        auth: if req.auth == Auth::None { None } else { Some(OcAuth::from(req.auth.clone())) },
     };
 
     let mut scripts = Vec::new();
-    if let Some(code) = req.pre_request_script {
-        scripts.push(OcScript { script_type: "before-request".into(), code });
+    if let Some(ref code) = req.pre_request_script {
+        scripts.push(OcScript { script_type: "before-request".into(), code: code.clone() });
     }
-    if let Some(code) = req.post_response_script {
-        scripts.push(OcScript { script_type: "after-response".into(), code });
+    if let Some(ref code) = req.post_response_script {
+        scripts.push(OcScript { script_type: "after-response".into(), code: code.clone() });
     }
-    if let Some(code) = req.tests {
-        scripts.push(OcScript { script_type: "tests".into(), code });
+    if let Some(ref code) = req.tests {
+        scripts.push(OcScript { script_type: "tests".into(), code: code.clone() });
     }
 
-    let actions: Vec<OcAction> = req.actions.into_iter().map(|a| {
+    let actions: Vec<OcAction> = req.actions.iter().map(|a| {
         OcAction::SetVariable {
-            description: a.description,
-            phase: a.phase,
-            selector: OcActionSelector { expression: a.selector.expression, method: a.selector.method },
-            variable: OcActionVariable { name: a.variable.name, scope: a.variable.scope },
+            description: a.description.clone(),
+            phase: a.phase.clone(),
+            selector: OcActionSelector { expression: a.selector.expression.clone(), method: a.selector.method.clone() },
+            variable: OcActionVariable { name: a.variable.name.clone(), scope: a.variable.scope.clone() },
             disabled: a.disabled,
         }
     }).collect();
@@ -1008,11 +1008,11 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
         || runtime_auth.is_some();
     let runtime = if has_runtime {
         Some(OcHttpRequestRuntime {
-            variables: req.variables.into_iter()
-                .filter_map(|v| serde_json::from_value::<OcVariable>(v).ok())
+            variables: req.variables.iter()
+                .filter_map(|v| serde_json::from_value::<OcVariable>(v.clone()).ok())
                 .collect(),
             scripts,
-            assertions: req.assertions,
+            assertions: req.assertions.clone(),
             actions,
             auth: runtime_auth,
         })
@@ -1023,20 +1023,20 @@ pub fn request_to_oc_http_request(req: Request) -> OcHttpRequest {
     let examples = if req.examples.is_empty() {
         None
     } else {
-        Some(req.examples.into_iter().map(|e| {
+        Some(req.examples.iter().map(|e| {
             OcHttpRequestExample {
-                name: e.name,
-                description: e.description,
-                request: e.request.and_then(|v| serde_json::from_value(v).ok()),
-                response: e.response.and_then(|v| serde_json::from_value(v).ok()),
+                name: e.name.clone(),
+                description: e.description.clone(),
+                request: e.request.clone().and_then(|v| serde_json::from_value(v).ok()),
+                response: e.response.clone().and_then(|v| serde_json::from_value(v).ok()),
             }
         }).collect())
     };
 
-    let docs = req.docs.and_then(|d| d.content().map(String::from));
+    let docs = req.docs.as_ref().and_then(|d| d.content().map(String::from));
 
     OcHttpRequest {
-        uid: Some(req.uid),
+        uid: Some(req.uid.clone()),
         info,
         http,
         runtime,
@@ -1086,7 +1086,7 @@ pub fn oc_item_to_protocol_request(item: OcItem) -> Option<ProtocolRequest> {
 #[allow(dead_code)]
 pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
     match pr {
-        ProtocolRequest::Http(req) => Some(OcItem::Http(request_to_oc_http_request(req))),
+        ProtocolRequest::Http(req) => Some(OcItem::Http(request_to_oc_http_request(&req))),
         ProtocolRequest::GraphQL(val) => {
             serde_yaml::from_value::<OcGraphQLRequest>(val).ok().map(OcItem::GraphQL)
         }
@@ -1175,7 +1175,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
         .items
         .into_iter()
         .map(|item| match item {
-            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
+            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
             CollectionItem::OpaqueItem(opaque) => {
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
@@ -1328,7 +1328,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         .items
         .into_iter()
         .map(|item| match item {
-            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(req)),
+            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
             CollectionItem::OpaqueItem(opaque) => {
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
@@ -2023,7 +2023,7 @@ docs: "Creates a user."
 "#;
         let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
         let req = oc_http_request_to_request(oc);
-        let back = request_to_oc_http_request(req);
+        let back = request_to_oc_http_request(&req);
         assert_eq!(back.info.name, "Create User");
         assert_eq!(back.info.seq, Some(5));
         assert_eq!(back.http.method, "POST");
@@ -2150,7 +2150,7 @@ http:
         assert!(!req.query_params[1].enabled);
         assert_eq!(req.path_params[0].name, "id");
 
-        let back = request_to_oc_http_request(req);
+        let back = request_to_oc_http_request(&req);
         assert_eq!(back.http.params.len(), 3);
         assert_eq!(back.http.params[0].param_type, Some("query".into()));
         assert_eq!(back.http.params[2].param_type, Some("path".into()));
@@ -2178,7 +2178,7 @@ runtime:
             _ => panic!("expected Bearer"),
         }
 
-        let back = request_to_oc_http_request(req);
+        let back = request_to_oc_http_request(&req);
         let rt = back.runtime.unwrap();
         assert!(rt.auth.is_some());
     }
@@ -2219,7 +2219,7 @@ http:
             }
             _ => panic!("expected OAuth2"),
         }
-        let back = request_to_oc_http_request(req);
+        let back = request_to_oc_http_request(&req);
         let auth = back.http.auth.unwrap();
         match auth {
             OcAuth::Typed(OcAuthTyped::OAuth2 { additional_parameters, token_config, settings, .. }) => {
@@ -2308,7 +2308,7 @@ settings:
         assert!(matches!(s.encode_url, Some(RequestSettingValue::Value(true))));
         assert!(matches!(s.follow_redirects, Some(RequestSettingValue::Inherit(_))));
 
-        let back = request_to_oc_http_request(req);
+        let back = request_to_oc_http_request(&req);
         let os = back.settings.unwrap();
         assert_eq!(os.encode_url, Some(InheritableBoolean::Value(true)));
         assert_eq!(os.timeout, Some(InheritableNumber::Value(30000.0)));
