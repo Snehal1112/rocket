@@ -303,9 +303,9 @@ impl CollectionRepository for FsCollectionRepo {
     #[tracing::instrument(name = "collection_save_request", skip(self, request), fields(collection_name = %collection, request_path = %path))]
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
         if request.uid.is_empty() {
-            return Err(DomainError::Internal(
-                "save_request received Request with empty uid; callers must construct via Request::new()".into(),
-            ));
+            return Err(DomainError::Internal(format!(
+                "save_request: empty uid on request for '{path}' in collection '{collection}'; callers must construct via Request::new()"
+            )));
         }
 
         let collection_dir = self.collection_path(collection);
@@ -316,9 +316,6 @@ impl CollectionRepository for FsCollectionRepo {
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
 
-        if let Some(parent) = file_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         atomic_write(&file_path, yaml.as_bytes())?;
 
         // Return the actual filename relative to the collection directory.
