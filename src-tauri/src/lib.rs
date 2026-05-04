@@ -1,6 +1,7 @@
 mod audit_bridge;
 mod commands;
 mod tauri_event_bus;
+mod tauri_tracing_layer;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -28,11 +29,11 @@ pub fn run() {
     use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter, Registry};
 
     type TauriReloadLayer = reload::Layer<
-        Option<rocket_infra::TauriTracingLayer>,
+        Option<tauri_tracing_layer::TauriTracingLayer>,
         Registry,
     >;
     type TauriReloadHandle = reload::Handle<
-        Option<rocket_infra::TauriTracingLayer>,
+        Option<tauri_tracing_layer::TauriTracingLayer>,
         Registry,
     >;
 
@@ -41,7 +42,7 @@ pub fn run() {
         .unwrap_or_else(|_| EnvFilter::new("info,git2=warn,reqwest=warn,hyper=warn"));
 
     let (tauri_layer, reload_handle): (TauriReloadLayer, TauriReloadHandle) =
-        reload::Layer::new(None::<rocket_infra::TauriTracingLayer>);
+        reload::Layer::new(None::<tauri_tracing_layer::TauriTracingLayer>);
 
     if cfg!(debug_assertions) {
         tracing_subscriber::registry()
@@ -86,7 +87,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             // Activate the Tauri tracing layer now that we have an AppHandle.
-            let tauri_tracing = rocket_infra::TauriTracingLayer::new(app_handle.clone());
+            let tauri_tracing = tauri_tracing_layer::TauriTracingLayer::new(app_handle.clone());
             if let Err(e) = reload_handle.modify(|layer| *layer = Some(tauri_tracing)) {
                 eprintln!("Failed to activate TauriTracingLayer: {e}");
             }

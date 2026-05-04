@@ -4216,7 +4216,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "tauri",
  "tempfile",
  "tokio",
  "tracing",

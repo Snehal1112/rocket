@@ -15,8 +15,6 @@ pub mod fs_workspace_config_repo;
 pub mod fs_workspace_repo;
 pub mod reqwest_executor;
 pub mod shared_path_collection_repo;
-mod tauri_tracing_layer;
-
 pub use atomic_write::atomic_write;
 pub use file_watcher::NotifyFileWatcher;
 pub use fs_audit_log_repo::FsAuditLogRepo;
@@ -31,4 +29,3 @@ pub use fs_workspace_config_repo::FsWorkspaceConfigRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;
 pub use reqwest_executor::ReqwestExecutor;
 pub use shared_path_collection_repo::SharedPathCollectionRepo;
-pub use tauri_tracing_layer::{BackendLogEntry, TauriTracingLayer};
