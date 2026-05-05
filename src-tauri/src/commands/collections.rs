@@ -20,7 +20,7 @@ pub fn get_collection(
     name: String,
     svc: State<'_, CollectionService>,
 ) -> Result<Collection, DomainError> {
-    svc.get_summaries(&name)
+    svc.get(&name)
 }
 
 #[tauri::command]

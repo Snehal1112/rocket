@@ -56,8 +56,8 @@ interface CollectionOverviewTabProps {
 function countRequests(items: CollectionItem[]): number {
   let n = 0;
   for (const item of items) {
-    if (item.type === 'request') n += 1;
-    else n += countRequests(item.items);
+    if (item.type === 'request' || item.type === 'summary') n += 1;
+    else if (item.type === 'folder') n += countRequests(item.items);
   }
   return n;
 }

@@ -29,10 +29,11 @@ function groupItems(items: CollectionItem[]): Group[] {
   for (const item of items) {
     if (item.type === 'request') {
       root.push(item);
-    } else {
+    } else if (item.type === 'folder') {
       const requests = flattenRequests(item.items);
       folderGroups.push({ folderName: item.name, requests });
     }
+    // summary items have no body — skip from this full-detail list view
   }
 
   const groups: Group[] = [];
@@ -47,9 +48,10 @@ function flattenRequests(items: CollectionItem[]): RequestItem[] {
   for (const item of items) {
     if (item.type === 'request') {
       results.push(item);
-    } else {
+    } else if (item.type === 'folder') {
       results.push(...flattenRequests(item.items));
     }
+    // summary items have no body — omit from flat list
   }
   return results;
 }

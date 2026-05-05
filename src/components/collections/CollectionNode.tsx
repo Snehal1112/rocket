@@ -459,6 +459,7 @@ export function CollectionNode({
                 />
               );
             }
+            if (item.type === 'summary') return null;
             return (
               <RequestNode
                 key={`request-${item.uid}`}

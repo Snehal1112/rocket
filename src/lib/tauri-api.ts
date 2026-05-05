@@ -105,7 +105,19 @@ export interface Folder {
   items: CollectionItem[];
 }
 
-export type CollectionItem = ({ type: 'request' } & Request) | ({ type: 'folder' } & Folder);
+/** Lightweight sidebar placeholder — has no body/auth. Call getRequest to load the full item. */
+export interface RequestSummary {
+  uid: string;
+  name: string;
+  method: string;
+  url: string;
+  fileName?: string;
+}
+
+export type CollectionItem =
+  | ({ type: 'request' } & Request)
+  | ({ type: 'folder' } & Folder)
+  | ({ type: 'summary' } & RequestSummary);
 
 export interface Collection {
   name: string;

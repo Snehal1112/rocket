@@ -11,9 +11,9 @@ interface MethodBreakdownProps {
 function countMethods(items: CollectionItem[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const item of items) {
-    if (item.type === 'request') {
+    if (item.type === 'request' || item.type === 'summary') {
       counts[item.method] = (counts[item.method] || 0) + 1;
-    } else {
+    } else if (item.type === 'folder') {
       const sub = countMethods(item.items);
       for (const [k, v] of Object.entries(sub)) counts[k] = (counts[k] || 0) + v;
     }
