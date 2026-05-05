@@ -4,6 +4,8 @@ use rocket_shared::description::{Description, Documentation};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam, RequestSettings};
 use serde::{Deserialize, Serialize};
 
+use crate::settings::CollectionVariable;
+
 /// A saved API request definition.
 /// Value object — immutable identity, compared by value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,7 +48,7 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<Documentation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variables: Vec<crate::settings::CollectionVariable>,
+    pub variables: Vec<CollectionVariable>,
     /// Auth override applied at runtime (e.g. runtime.auth in OC YAML).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_auth: Option<Auth>,

@@ -58,7 +58,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 
 - **`file_name`**: The on-disk filename (e.g. `"Get Users.json"`). `None` at construction; populated by `build_folder_tree` in `rocket-infra` when the collection is loaded from disk.
 - **`runtime_auth`**: An auth override applied at execution time (e.g. from `runtime.auth` in OC YAML). Not persisted as the primary auth; kept separate from `auth`.
-- **`variables`**: Request-level variables typed as `Vec<serde_json::Value>` because `rocket-environment` is not a dependency of this crate. Resolved upstream in `rocket-app`.
+- **`variables`**: Request-level variables typed as `Vec<CollectionVariable>`. Resolved upstream in `rocket-app`.
 - **Scripting/testing fields**: `pre_request_script`, `post_response_script`, `tests` (JS strings), `assertions` (`Vec<Assertion>`), `actions` (`Vec<ActionSetVariable>`), and `examples` (`Vec<HttpRequestExample>`) are all optional and default to empty/`None`. They are executed by `rocket-app`, not this crate.
 - **`settings`**: `Option<RequestSettings>` — per-request execution settings (timeout, encode URL, etc.).
 - **`docs`**: `Option<Documentation>` — structured documentation separate from the free-text `description`.
