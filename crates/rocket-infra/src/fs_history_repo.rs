@@ -22,25 +22,43 @@ impl FsHistoryRepo {
 
 impl HistoryRepository for FsHistoryRepo {
     fn list(&self, limit: Option<usize>) -> DomainResult<Vec<HistoryEntry>> {
-        let mut entries = Vec::new();
         if !self.dir.exists() {
-            return Ok(entries);
+            return Ok(Vec::new());
         }
+
+        // Collect file paths with mtime so we can sort before parsing.
+        let mut paths: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "yml") {
-                let content = fs::read_to_string(&path)?;
-                if let Ok(h) = serde_yaml::from_str::<HistoryEntry>(&content) {
-                    entries.push(h);
-                }
+                let mtime = entry
+                    .metadata()?
+                    .modified()
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                paths.push((mtime, path));
             }
         }
-        // Sort by timestamp descending (most recent first).
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        if let Some(n) = limit {
-            entries.truncate(n);
+        // Most recently written first — mtime is a reliable proxy for entry.timestamp
+        // because history files are written once and never modified.
+        paths.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let cap = limit.unwrap_or(usize::MAX);
+        let mut entries = Vec::with_capacity(cap.min(paths.len()));
+        for (_, path) in paths {
+            if entries.len() >= cap {
+                break;
+            }
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if let Ok(h) = serde_yaml::from_str::<HistoryEntry>(&content) {
+                entries.push(h);
+            }
         }
+        // Secondary sort by timestamp in case mtime ties (same-second writes).
+        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(entries)
     }
 
@@ -247,5 +265,28 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].method, "GET");
         assert_eq!(results[0].status, 200);
+    }
+
+    #[test]
+    fn list_with_limit_reads_only_needed_files() {
+        // This test verifies correctness of the mtime-first approach, not I/O count
+        // (we cannot intercept fs calls in unit tests). It saves 10 entries and asserts
+        // that list(3) returns the 3 most recently *saved* ones.
+        let (_dir, repo) = setup();
+        let mut ids = Vec::new();
+        for i in 0..10u64 {
+            let e = HistoryEntry::new("GET", format!("/path/{}", i), 200, i, 0);
+            ids.push(e.id.clone());
+            repo.save(&e).unwrap();
+            // Sleep 2 ms so mtime is strictly increasing.
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let list = repo.list(Some(3)).unwrap();
+        assert_eq!(list.len(), 3);
+        // The 3 most recently written entries (ids 7, 8, 9) must be returned.
+        let returned_ids: std::collections::HashSet<_> = list.iter().map(|e| e.id.as_str()).collect();
+        for id in &ids[7..] {
+            assert!(returned_ids.contains(id.as_str()), "expected id {} in results", id);
+        }
     }
 }
