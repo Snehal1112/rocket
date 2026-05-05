@@ -1,4 +1,7 @@
 import { findTabInTree } from '@/lib/pane-utils';
+import { environmentKeys } from '@/lib/queries/environment-queries';
+import { getQueryClient } from '@/lib/query-client';
+import type { Environment } from '@/lib/tauri-api';
 import {
   type Auth,
   type Body,
@@ -11,14 +14,11 @@ import {
   oauth2GetToken,
   oauth2RefreshToken,
 } from '@/lib/tauri-api';
-import { environmentKeys } from '@/lib/queries/environment-queries';
-import { getQueryClient } from '@/lib/query-client';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
-import type { Environment } from '@/lib/tauri-api';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
 // Reads the active environment's variables from the query cache.

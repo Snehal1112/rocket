@@ -36,8 +36,12 @@ impl FsAuditLogRepo {
             if line.trim().is_empty() {
                 continue;
             }
-            let ev: SecurityAuditEvent = serde_json::from_str(&line)?;
-            out.push(ev);
+            match serde_json::from_str::<SecurityAuditEvent>(&line) {
+                Ok(ev) => out.push(ev),
+                Err(e) => {
+                    tracing::warn!(error = %e, "skipping corrupt audit log line");
+                }
+            }
         }
         Ok(out)
     }
@@ -198,6 +202,25 @@ mod tests {
         repo.append(&b).unwrap();
         let latest = repo.latest().unwrap().unwrap();
         assert_eq!(latest.hash, b.hash);
+    }
+
+    #[test]
+    fn load_all_skips_corrupt_lines_and_returns_valid_events() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        let repo = FsAuditLogRepo::new(path.clone()).unwrap();
+
+        // Write a file with one valid line, one corrupt line, then another valid line.
+        let a = mk_event("");
+        let b = mk_event(&a.hash);
+        let valid_a = serde_json::to_string(&a).unwrap();
+        let valid_b = serde_json::to_string(&b).unwrap();
+        std::fs::write(&path, format!("{valid_a}\nnot valid json\n{valid_b}\n")).unwrap();
+
+        let events = repo.load_all().unwrap();
+        assert_eq!(events.len(), 2, "expected 2 valid events, got {}", events.len());
+        assert_eq!(events[0].hash, a.hash);
+        assert_eq!(events[1].hash, b.hash);
     }
 
     #[test]

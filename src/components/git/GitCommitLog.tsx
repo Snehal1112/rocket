@@ -46,6 +46,7 @@ export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
     <ScrollArea className='h-full'>
       <div className='p-1'>
         {commitLog.map((commit) => (
+          // biome-ignore lint/a11y/useSemanticElements: contains nested button (copy SHA), so role="button" div is intentional
           <div
             key={commit.fullId}
             role='button'

@@ -32,7 +32,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { CreateWorkspaceDialog } from '@/components/workspace/CreateWorkspaceDialog';
 import { RenameWorkspaceDialog } from '@/components/workspace/RenameWorkspaceDialog';
-import { openFolderPicker } from '@/lib/tauri-api';
 import {
   useCloseWorkspace,
   useDeleteWorkspace,
@@ -42,6 +41,7 @@ import {
   useUnpinWorkspace,
   useWorkspaces,
 } from '@/lib/queries/workspace-queries';
+import { openFolderPicker } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 

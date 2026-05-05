@@ -40,7 +40,10 @@ export function LiveDashboard() {
       ? 100
       : targetUnit === 'rps'
         ? (() => {
-            const totalExpected = phases.reduce((sum, p) => sum + p.target.value * p.durationSecs, 0);
+            const totalExpected = phases.reduce(
+              (sum, p) => sum + p.target.value * p.durationSecs,
+              0,
+            );
             return totalExpected > 0 ? Math.min(100, (completed / totalExpected) * 100) : 0;
           })()
         : totalDurationMs > 0

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GitCredentials } from '@/lib/tauri-api';
 import { useGitStore } from '../git-store';
 
 vi.mock('@/lib/tauri-api', () => ({
@@ -698,7 +699,7 @@ describe('git-store credential auto-load', () => {
       privateKeyPath: '/home/user/.ssh/id_ed25519',
       passphrase: undefined,
     };
-    vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as any);
+    vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
 
     await useGitStore.getState().setCollection('/some/collection');
@@ -719,7 +720,7 @@ describe('git-store credential auto-load', () => {
   it('does not overwrite already-set credentials when keychain returns null', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
     const existing = { type: 'token' as const, token: 'mytoken' };
-    useGitStore.setState({ credentials: existing as any });
+    useGitStore.setState({ credentials: existing as unknown as GitCredentials });
     vi.mocked(loadGitCredentials).mockResolvedValue(null);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
 

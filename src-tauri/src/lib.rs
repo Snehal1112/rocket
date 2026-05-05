@@ -260,6 +260,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::collections::list_collections,
             commands::collections::get_collection,
+            commands::collections::get_collection_summaries,
             commands::collections::create_collection,
             commands::collections::delete_collection,
             commands::collections::rename_collection,

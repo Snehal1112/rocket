@@ -1,9 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './globals.css';
-import App from './App';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setQueryClient } from '@/lib/query-client';
+import App from './App';
 
 // Apply theme class synchronously before React renders.
 // This prevents a flash of wrong theme in Monaco and other components

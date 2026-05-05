@@ -137,7 +137,9 @@ function App() {
     ]);
 
     return () => {
-      unsubs.then((fns) => fns.forEach((fn) => fn()));
+      unsubs.then((fns) => {
+        for (const fn of fns) fn();
+      });
     };
   }, []);
 
@@ -163,40 +165,53 @@ function App() {
     <div className='h-full flex flex-col overflow-hidden bg-background text-sm'>
       <TitleBar />
       <div className='flex-1 flex overflow-hidden'>
-        <>
-          <div
-            style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
-            className='sidebar-elevation w-(--sidebar-w) shrink-0 relative z-[5]'
-          >
-            <ErrorBoundary>
-              <CollectionsSidebar />
-            </ErrorBoundary>
-          </div>
-          <div
-            role='separator'
-            aria-orientation='vertical'
-            className='relative h-full w-px shrink-0 cursor-col-resize group z-10 overflow-visible'
-            onPointerDown={(e) => {
+        <div
+          style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
+          className='sidebar-elevation w-(--sidebar-w) shrink-0 relative z-[5]'
+        >
+          <ErrorBoundary>
+            <CollectionsSidebar />
+          </ErrorBoundary>
+        </div>
+        {/* biome-ignore lint/a11y/useSemanticElements: <hr role="separator"> is a horizontal rule and cannot be a draggable, focusable resize handle */}
+        <div
+          role='separator'
+          aria-orientation='vertical'
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={200}
+          aria-valuemax={500}
+          aria-label='Resize sidebar'
+          tabIndex={0}
+          className='relative h-full w-px shrink-0 cursor-col-resize group z-10 overflow-visible focus-visible:outline-none focus-visible:bg-primary/60'
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = sidebarWidth;
+            const onMove = (ev: PointerEvent) => {
+              const newWidth = Math.min(500, Math.max(200, startWidth + ev.clientX - startX));
+              setSidebarWidth(newWidth);
+            };
+            const onUp = () => {
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+            };
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') {
               e.preventDefault();
-              const startX = e.clientX;
-              const startWidth = sidebarWidth;
-              const onMove = (ev: PointerEvent) => {
-                const newWidth = Math.min(500, Math.max(200, startWidth + ev.clientX - startX));
-                setSidebarWidth(newWidth);
-              };
-              const onUp = () => {
-                window.removeEventListener('pointermove', onMove);
-                window.removeEventListener('pointerup', onUp);
-              };
-              window.addEventListener('pointermove', onMove);
-              window.addEventListener('pointerup', onUp);
-            }}
-          >
-            <div className='w-px h-full bg-sidebar-border transition-colors group-hover:bg-primary/60' />
-            {/* expanded hit area — absolutely positioned, doesn't affect layout */}
-            <div className='absolute inset-y-0 -left-[4px] -right-[4px]' />
-          </div>
-        </>
+              setSidebarWidth(Math.max(200, sidebarWidth - 8));
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              setSidebarWidth(Math.min(500, sidebarWidth + 8));
+            }
+          }}
+        >
+          <div className='w-px h-full bg-sidebar-border transition-colors group-hover:bg-primary/60' />
+          {/* expanded hit area — absolutely positioned, doesn't affect layout */}
+          <div className='absolute inset-y-0 -left-1 -right-1' />
+        </div>
         <main className='flex-1 flex flex-col min-w-0 overflow-hidden'>
           <WorkspaceToolbar />
           <div className='flex-1 min-h-0 overflow-hidden'>

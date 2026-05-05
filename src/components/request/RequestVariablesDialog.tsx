@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
 } from '@/components/ui/dialog';
 import type { CollectionVariable } from '@/lib/tauri-api';
 import { getRequestVariables, saveRequestVariables } from '@/lib/tauri-api';
-import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
 
 interface RequestVariablesDialogProps {
   open: boolean;

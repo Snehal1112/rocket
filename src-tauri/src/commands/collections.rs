@@ -24,6 +24,14 @@ pub fn get_collection(
 }
 
 #[tauri::command]
+pub fn get_collection_summaries(
+    name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Collection, DomainError> {
+    svc.get_summaries(&name)
+}
+
+#[tauri::command]
 pub fn create_collection(
     name: String,
     svc: State<'_, CollectionService>,

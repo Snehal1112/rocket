@@ -26,7 +26,9 @@ export function ContractCard({
   onDelete,
 }: ContractCardProps) {
   const contractStatus = useContractStore((s) => s.contractStatus);
-  const changeCount = useContractStore(useShallow((s) => s.changelogs[contract.id]?.entries.length ?? 0));
+  const changeCount = useContractStore(
+    useShallow((s) => s.changelogs[contract.id]?.entries.length ?? 0),
+  );
   const status = contractStatus(contract);
 
   const statusVariant =

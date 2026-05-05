@@ -39,8 +39,7 @@ export function MarkdownRenderer({ children, className }: MarkdownRendererProps)
             if (match) {
               return (
                 <SyntaxHighlighter
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  style={(isDark ? oneDark : oneLight) as any}
+                  style={(isDark ? oneDark : oneLight) as Record<string, React.CSSProperties>}
                   language={match[1]}
                   PreTag='div'
                   customStyle={{

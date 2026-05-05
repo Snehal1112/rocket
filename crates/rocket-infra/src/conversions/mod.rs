@@ -4,7 +4,6 @@ mod environment;
 mod folder;
 mod header;
 mod param;
-mod protocol;
 mod request;
 mod request_settings;
 mod variables;
@@ -31,8 +30,6 @@ pub use folder::{
 pub use header::*;
 #[allow(unused_imports)]
 pub use param::{merge_params, split_params};
-#[allow(unused_imports)]
-pub use protocol::{oc_item_to_protocol_request, protocol_request_to_oc_item, ProtocolRequest};
 pub use request::{oc_http_request_to_request, request_to_oc_http_request};
 #[allow(unused_imports)]
 pub use variables::*;

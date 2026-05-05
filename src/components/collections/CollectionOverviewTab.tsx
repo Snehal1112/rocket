@@ -21,6 +21,12 @@ import {
   oauth2StateToApiAuth,
 } from '@/lib/oauth2-mapping';
 import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
+import {
   type Auth,
   type Collection,
   type CollectionItem,
@@ -30,12 +36,6 @@ import {
 } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
-import {
-  useEnvironments,
-  useGlobalEnvironment,
-  useGlobalEnvironmentName,
-  useProcessEnvVars,
-} from '@/lib/queries/environment-queries';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';

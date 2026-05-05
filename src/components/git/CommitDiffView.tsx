@@ -1,9 +1,8 @@
 import { lazy, Suspense, useState } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import type { FileDiff } from '@/lib/tauri-api';
-import type { DiffState } from '@/types/pane-types';
 import { GitStatusBadge } from '@/components/git/GitStatusBadge';
-import type { GitStatusKind } from '@/lib/tauri-api';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import type { FileDiff, GitStatusKind } from '@/lib/tauri-api';
+import type { DiffState } from '@/types/pane-types';
 
 const DiffViewer = lazy(() => import('./DiffViewer').then((m) => ({ default: m.DiffViewer })));
 
