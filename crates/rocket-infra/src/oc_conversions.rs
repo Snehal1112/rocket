@@ -7,7 +7,7 @@ use crate::opencollection::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable};
-use rocket_collection::{generate_uid, Request};
+use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
 use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
@@ -930,7 +930,10 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let docs: Option<Documentation> = oc.docs.map(Documentation::text);
 
     Request {
-        uid: oc.uid.unwrap_or_else(generate_uid),
+        uid: oc.uid.unwrap_or_else(|| {
+            tracing::warn!("request file is missing uid field; using empty uid");
+            String::new()
+        }),
         name,
         method,
         url,
@@ -1107,6 +1110,7 @@ pub fn protocol_request_to_oc_item(pr: ProtocolRequest) -> Option<OcItem> {
 #[allow(dead_code)]
 pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
     let name = oc.info.name;
+    let uid = oc.info.uid;
     let items = oc
         .items
         .unwrap_or_default()
@@ -1161,7 +1165,10 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
         .collect();
 
     Folder {
-        uid: generate_uid(),
+        uid: uid.unwrap_or_else(|| {
+            tracing::warn!(folder = %name, "folder.yml is missing uid field; using empty uid");
+            String::new()
+        }),
         name,
         dir_name: None,
         items,
@@ -1226,6 +1233,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         .as_ref()
         .map(|i| i.name.clone())
         .unwrap_or_else(|| "Untitled".into());
+    let collection_uid = oc.uid.clone();
 
     // Convert items into the root folder.
     let items = oc
@@ -1282,7 +1290,10 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         .collect();
 
     let root = Folder {
-        uid: generate_uid(),
+        uid: collection_uid.unwrap_or_else(|| {
+            tracing::warn!(collection = %name, "opencollection.yml is missing uid field; using empty uid");
+            String::new()
+        }),
         name: name.clone(),
         dir_name: None,
         items,
@@ -2519,5 +2530,41 @@ mod workspace_conversion_tests {
         assert_eq!(cfg.collections[1].ref_type, CollectionRefType::External);
         assert_eq!(cfg.environments.active_environment.as_deref(), Some("Staging"));
         assert_eq!(cfg.global_environment.as_deref(), Some("Global"));
+    }
+
+    #[test]
+    fn oc_request_missing_uid_gets_empty_not_minted() {
+        use crate::opencollection::{OcHttpRequestDetails, OcHttpRequestInfo};
+
+        let make_oc = || crate::opencollection::OcHttpRequest {
+            uid: None,
+            info: OcHttpRequestInfo {
+                name: "No UID".into(),
+                description: None,
+                request_type: Some("http".into()),
+                seq: None,
+                tags: vec![],
+            },
+            http: OcHttpRequestDetails {
+                method: "GET".into(),
+                url: "https://example.com".into(),
+                headers: vec![],
+                params: vec![],
+                body: None,
+                auth: None,
+            },
+            runtime: None,
+            settings: None,
+            examples: None,
+            docs: None,
+        };
+
+        let req1 = oc_http_request_to_request(make_oc());
+        let req2 = oc_http_request_to_request(make_oc());
+
+        // Both calls must return the same (empty) uid — not two different minted uids.
+        assert_eq!(req1.uid, req2.uid, "uid must be stable across loads");
+        // The uid must be empty — not a freshly-minted UUID.
+        assert!(req1.uid.is_empty(), "expected empty uid for missing uid field, got: {}", req1.uid);
     }
 }
