@@ -6,7 +6,7 @@ use std::path::Path;
 use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::atomic_write;
+use crate::{atomic_write, atomic_write_bulk};
 use crate::oc_conversions::request_to_oc_http_request;
 use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
 
@@ -111,6 +111,9 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
         .filter_map(|e| e.ok())
         .collect();
 
+    // Collect request file writes to batch-fsync at the end of this directory.
+    let mut request_writes: Vec<(std::path::PathBuf, Vec<u8>)> = Vec::new();
+
     for entry in &entries {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
@@ -149,37 +152,45 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
             // Recurse into subfolder.
             migrate_directory(&path)?;
         } else if is_legacy_request_file(&path) {
-            migrate_request_file(&path)?;
+            // Collect the converted bytes rather than writing one-by-one.
+            if let Some((yml_path, yaml_bytes)) = prepare_request_migration(&path)? {
+                request_writes.push((yml_path, yaml_bytes));
+                // Delete the original .json now — the .yml is written below.
+                fs::remove_file(&path)?;
+            }
         } else if name == "_order.json" {
             migrate_order_file(&path)?;
         }
     }
 
+    // Batch-write all request files in this directory with a single parent-dir fsync.
+    if !request_writes.is_empty() {
+        let refs: Vec<(&std::path::Path, &[u8])> = request_writes
+            .iter()
+            .map(|(p, b)| (p.as_path(), b.as_slice()))
+            .collect();
+        atomic_write_bulk(&refs)?;
+    }
+
     Ok(())
 }
 
-/// Convert a single .json request file to .yml.
-/// Convert a single .json request file to .yml.
-/// Note: legacy request UIDs are not preserved in the YAML output.
-/// The OC format does not have a per-request uid field — UIDs are
-/// generated fresh when loading requests via build_folder_tree().
-fn migrate_request_file(json_path: &Path) -> DomainResult<()> {
+/// Convert a .json request file to YAML bytes without writing to disk.
+/// Returns `(yml_path, yaml_bytes)` on success, or `None` if the JSON can't be parsed.
+fn prepare_request_migration(json_path: &Path) -> DomainResult<Option<(std::path::PathBuf, Vec<u8>)>> {
     let content = fs::read_to_string(json_path)?;
-    let request: rocket_collection::Request = serde_json::from_str(&content)
-        .map_err(|e| DomainError::Internal(format!("Failed to parse JSON request: {e}")))?;
-
+    let request: rocket_collection::Request = match serde_json::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(path = %json_path.display(), error = %e, "skipping unparseable JSON request during migration");
+            return Ok(None);
+        }
+    };
     let oc = request_to_oc_http_request(&request);
     let yaml = serde_yaml::to_string(&oc)
         .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML request: {e}")))?;
-
-    // Write .yml file with same stem.
     let yml_path = json_path.with_extension("yml");
-    atomic_write(&yml_path, yaml.as_bytes())?;
-
-    // Delete original .json.
-    fs::remove_file(json_path)?;
-
-    Ok(())
+    Ok(Some((yml_path, yaml.into_bytes())))
 }
 
 /// Convert _order.json to _order.yml.

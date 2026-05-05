@@ -60,6 +60,64 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Write multiple `(path, content)` pairs atomically using tmp→rename per file,
+/// but with only one parent-dir fsync per unique parent directory at the end.
+///
+/// Use this for bulk imports (Bruno, migration) where per-file fsync latency
+/// adds up. Individual files are still written atomically; only the directory
+/// entry flush is batched.
+pub fn atomic_write_bulk(pairs: &[(&Path, &[u8])]) -> std::io::Result<()> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let pid = std::process::id();
+
+    let mut parents: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for (idx, (path, content)) in pairs.iter().enumerate() {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+                parents.insert(parent.to_path_buf());
+            }
+        }
+
+        let tmp_path = path.with_extension(
+            path.extension()
+                .map(|e| format!("{}.tmp.{pid}_{nanos:08x}_{idx}", e.to_string_lossy()))
+                .unwrap_or_else(|| format!("tmp.{pid}_{nanos:08x}_{idx}")),
+        );
+
+        let write_result = (|| {
+            let mut file = fs::File::create(&tmp_path)?;
+            file.write_all(content)?;
+            // No sync_all here — we batch-fsync parent dirs below.
+            Ok::<(), std::io::Error>(())
+        })();
+
+        if let Err(e) = write_result {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+
+        if let Err(e) = fs::rename(&tmp_path, path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+    }
+
+    // One fsync per unique parent directory to make all renames durable.
+    for parent in &parents {
+        if let Ok(dir_file) = fs::File::open(parent) {
+            let _ = dir_file.sync_all();
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +206,42 @@ mod tests {
             fs::read_to_string(&nested_path).unwrap(),
             "nested: content\n"
         );
+    }
+
+    #[test]
+    fn atomic_write_bulk_writes_all_files() {
+        let dir = TempDir::new().unwrap();
+        let pairs: Vec<(std::path::PathBuf, Vec<u8>)> = (0..5)
+            .map(|i| (dir.path().join(format!("file{i}.yml")), format!("index: {i}\n").into_bytes()))
+            .collect();
+        let refs: Vec<(&std::path::Path, &[u8])> = pairs.iter().map(|(p, c)| (p.as_path(), c.as_slice())).collect();
+        atomic_write_bulk(&refs).unwrap();
+        for (path, content) in &pairs {
+            assert_eq!(std::fs::read(path).unwrap(), *content);
+        }
+    }
+
+    #[test]
+    fn atomic_write_bulk_no_tmp_files_after_success() {
+        let dir = TempDir::new().unwrap();
+        let pairs: Vec<(std::path::PathBuf, Vec<u8>)> = (0..3)
+            .map(|i| (dir.path().join(format!("f{i}.yml")), b"ok\n".to_vec()))
+            .collect();
+        let refs: Vec<(&std::path::Path, &[u8])> = pairs.iter().map(|(p, c)| (p.as_path(), c.as_slice())).collect();
+        atomic_write_bulk(&refs).unwrap();
+        let tmps: Vec<_> = fs::read_dir(dir.path()).unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(tmps.is_empty(), "leftover tmp files: {:?}", tmps);
+    }
+
+    #[test]
+    fn atomic_write_bulk_creates_parent_dirs() {
+        let dir = TempDir::new().unwrap();
+        let nested = dir.path().join("sub").join("nested").join("file.yml");
+        let refs: Vec<(&std::path::Path, &[u8])> = vec![(nested.as_path(), b"content\n")];
+        atomic_write_bulk(&refs).unwrap();
+        assert_eq!(fs::read_to_string(&nested).unwrap(), "content\n");
     }
 }
