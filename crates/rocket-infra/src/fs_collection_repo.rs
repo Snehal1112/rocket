@@ -592,6 +592,19 @@ impl CollectionRepository for FsCollectionRepo {
             .filter_map(|c| c.as_os_str().to_str())
             .collect();
 
+        // Root-level request — no ancestor folders to read.
+        if dir_components.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let _span = tracing::debug_span!(
+            "get_folder_chain_variables",
+            collection,
+            request_path,
+            depth = dir_components.len()
+        )
+        .entered();
+
         let mut chain: Vec<Vec<CollectionVariable>> = Vec::new();
         let mut current = collection_dir.clone();
         for segment in &dir_components {
@@ -1631,5 +1644,38 @@ mod tests {
             }
         }).collect();
         assert_eq!(names, vec!["Gamma", "Beta", "Alpha"]);
+    }
+
+    #[test]
+    fn get_folder_chain_variables_empty_for_root_request() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        let req = rocket_collection::Request::new("Root", HttpMethod::Get, "https://example.com");
+        repo.save_request("my-api", "root.yml", &req).unwrap();
+        // Root-level request has no ancestor folders, so chain variables must be empty.
+        let vars = repo.get_folder_chain_variables("my-api", "root.yml").unwrap();
+        assert!(vars.is_empty(), "expected no chain vars for root request, got {:?}", vars);
+    }
+
+    #[test]
+    fn get_folder_chain_variables_returns_folder_vars() {
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        // Save a variable on the auth folder.
+        repo.save_folder_variables("my-api", "auth", vec![
+            rocket_collection::CollectionVariable {
+                key: "token".to_string(),
+                value: "secret".to_string(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            },
+        ]).unwrap();
+        let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://example.com");
+        repo.save_request("my-api", "auth/login.yml", &req).unwrap();
+        let vars = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].key, "token");
     }
 }
