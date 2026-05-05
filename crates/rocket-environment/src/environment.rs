@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::variable::Variable;
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::description::Description;
 
 /// OpenCollection Extensions — free-form object for custom metadata.
@@ -22,7 +23,7 @@ pub struct Environment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dot_env_file_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub client_certificates: Vec<serde_json::Value>,
+    pub client_certificates: Vec<ClientCertificate>,
 }
 
 impl Environment {

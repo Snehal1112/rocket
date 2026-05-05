@@ -1165,6 +1165,28 @@ fn request_examples_survive_oc_roundtrip() {
 }
 
 #[test]
+fn environment_client_certificates_survive_oc_roundtrip() {
+    use rocket_shared::certificate::ClientCertificate;
+
+    let mut env = Environment::new("prod");
+    env.client_certificates = vec![
+        ClientCertificate::Pem {
+            domain: "api.example.com".to_string(),
+            certificate_file_path: "/certs/client.pem".to_string(),
+            private_key_file_path: "/certs/key.pem".to_string(),
+            passphrase: None,
+        },
+    ];
+    let oc: OcEnvironment = env.clone().into();
+    let back: Environment = oc.into();
+    assert_eq!(back.client_certificates.len(), 1);
+    assert!(matches!(
+        back.client_certificates[0],
+        ClientCertificate::Pem { ref domain, .. } if domain == "api.example.com"
+    ));
+}
+
+#[test]
 fn request_variables_survive_oc_roundtrip() {
     use rocket_collection::settings::CollectionVariable;
     let mut req = Request::new("Vars", HttpMethod::Get, "https://example.com");
