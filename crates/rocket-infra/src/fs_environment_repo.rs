@@ -6,6 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::opencollection::OcEnvironment;
+use crate::yaml_io::delete_if_exists;
 
 pub struct FsEnvironmentRepo {
     dir: PathBuf,
@@ -57,7 +58,6 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn save(&self, env: &Environment) -> DomainResult<()> {
-        fs::create_dir_all(&self.dir)?;
         let oc: OcEnvironment = env.clone().into();
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize environment: {e}")))?;
@@ -66,12 +66,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn delete(&self, name: &str) -> DomainResult<()> {
-        let path = self.file_path(name);
-        if !path.exists() {
-            return Err(DomainError::NotFound(format!("Environment '{}'", name)));
-        }
-        fs::remove_file(&path)?;
-        Ok(())
+        delete_if_exists(&self.file_path(name), &format!("Environment '{}'", name))
     }
 }
 
