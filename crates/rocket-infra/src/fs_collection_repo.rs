@@ -14,8 +14,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::migration::{detect_format, is_migration_interrupted, migrate_collection, CollectionFormat};
 use crate::oc_conversions::{
-    collection_variable_to_oc_variable, oc_http_request_to_request,
-    oc_variable_to_collection_variable, request_to_oc_http_request,
+    oc_http_request_to_request,
+    request_to_oc_http_request,
 };
 use crate::opencollection::{
     OcAuth, OcCollection, OcFolderInfo, OcHttpRequest, OcHttpRequestHeader,
@@ -528,7 +528,7 @@ impl CollectionRepository for FsCollectionRepo {
                     .variables
                     .unwrap_or_default()
                     .into_iter()
-                    .map(oc_variable_to_collection_variable)
+                    .map(CollectionVariable::from)
                     .collect(),
             })
         } else {
@@ -596,7 +596,7 @@ impl CollectionRepository for FsCollectionRepo {
                             .variables
                             .iter()
                             .cloned()
-                            .map(collection_variable_to_oc_variable)
+                            .map(OcVariable::from)
                             .collect(),
                     )
                 },
@@ -661,7 +661,7 @@ impl CollectionRepository for FsCollectionRepo {
             let Some(vars) = req.variables else { continue; };
             chain.push(
                 vars.into_iter()
-                    .map(oc_variable_to_collection_variable)
+                    .map(CollectionVariable::from)
                     .collect(),
             );
         }
@@ -691,7 +691,7 @@ impl CollectionRepository for FsCollectionRepo {
         } else {
             OcFolderInfo::default()
         };
-        let oc_vars: Vec<OcVariable> = vars.into_iter().map(collection_variable_to_oc_variable).collect();
+        let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
         let req_defaults = info.request.take().unwrap_or_default();
         info.request = Some(OcRequestDefaults {
             variables: if oc_vars.is_empty() { None } else { Some(oc_vars) },
@@ -727,7 +727,7 @@ impl CollectionRepository for FsCollectionRepo {
             .and_then(|r| r.variables)
             .unwrap_or_default()
             .into_iter()
-            .map(oc_variable_to_collection_variable)
+            .map(CollectionVariable::from)
             .collect();
         Ok(vars)
     }
@@ -748,7 +748,7 @@ impl CollectionRepository for FsCollectionRepo {
             .map(|r| r.variables)
             .unwrap_or_default()
             .into_iter()
-            .map(oc_variable_to_collection_variable)
+            .map(CollectionVariable::from)
             .collect();
         Ok(vars)
     }
@@ -767,7 +767,7 @@ impl CollectionRepository for FsCollectionRepo {
         let content = fs::read_to_string(&file_path)?;
         let mut req: OcHttpRequest = serde_yaml::from_str(&content)
             .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
-        let oc_vars: Vec<OcVariable> = vars.into_iter().map(collection_variable_to_oc_variable).collect();
+        let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
         let runtime = req.runtime.take().unwrap_or_default();
         req.runtime = Some(OcHttpRequestRuntime {
             variables: oc_vars,

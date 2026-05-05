@@ -693,38 +693,36 @@ fn domain_number_to_inheritable(v: RequestSettingValue<f64>) -> InheritableNumbe
 // Variable conversions
 // ============================================================
 
-/// Convert an OcVariable to a CollectionVariable.
-/// `value` maps to the current value; `initial` maps to the initial/default value.
-/// When `initial` is absent (old YAML files), falls back to `value` for backward compat.
-pub fn oc_variable_to_collection_variable(v: OcVariable) -> CollectionVariable {
-    let current = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
-    // Fall back to the current value if initial is absent (backward compat with old files).
-    let initial = v.initial.as_ref()
-        .map(|vv| vv.data().to_string())
-        .unwrap_or_else(|| current.clone());
-    CollectionVariable {
-        key:           v.name,
-        value:         current,
-        initial_value: initial,
-        enabled:       !v.disabled.unwrap_or(false),
-        secret:        false,
+impl From<OcVariable> for CollectionVariable {
+    fn from(v: OcVariable) -> Self {
+        let current = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
+        // Fall back to the current value if initial is absent (backward compat with old files).
+        let initial = v.initial.as_ref()
+            .map(|vv| vv.data().to_string())
+            .unwrap_or_else(|| current.clone());
+        CollectionVariable {
+            key:           v.name,
+            value:         current,
+            initial_value: initial,
+            enabled:       !v.disabled.unwrap_or(false),
+            secret:        false,
+        }
     }
 }
 
-/// Convert a CollectionVariable to an OcVariable.
-/// `value` stores the current/runtime value; `initial` stores the initial/default value.
-/// Empty strings are serialized as None to keep the YAML clean.
-pub fn collection_variable_to_oc_variable(cv: CollectionVariable) -> OcVariable {
-    OcVariable {
-        name:        cv.key,
-        value:       if cv.value.is_empty() { None } else { Some(VariableValue::simple(cv.value)) },
-        initial:     if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
-        description: None,
-        disabled:    if cv.enabled { None } else { Some(true) },
+impl From<CollectionVariable> for OcVariable {
+    fn from(cv: CollectionVariable) -> Self {
+        OcVariable {
+            name:        cv.key,
+            value:       if cv.value.is_empty() { None } else { Some(VariableValue::simple(cv.value)) },
+            initial:     if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
+            description: None,
+            disabled:    if cv.enabled { None } else { Some(true) },
+        }
     }
 }
 
-// For collection variables use oc_variable_to_collection_variable instead — this
+// For collection variables use CollectionVariable::from(oc_variable) instead — this
 // impl is only for environment variables and silently drops the `initial` field.
 impl From<OcVariable> for Variable {
     fn from(oc: OcVariable) -> Self {
@@ -1314,7 +1312,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
                 .variables
                 .unwrap_or_default()
                 .into_iter()
-                .map(oc_variable_to_collection_variable)
+                .map(CollectionVariable::from)
                 .collect(),
         }
     } else {
@@ -1388,7 +1386,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
                         col.settings
                             .variables
                             .into_iter()
-                            .map(collection_variable_to_oc_variable)
+                            .map(OcVariable::from)
                             .collect(),
                     )
                 },
@@ -1680,7 +1678,7 @@ mod tests {
             enabled: true,
             secret: false,
         };
-        let oc = collection_variable_to_oc_variable(cv);
+        let oc = OcVariable::from(cv);
         assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://production.com"),
             "YAML `value` field should store the current value.");
         assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
@@ -1698,7 +1696,7 @@ mod tests {
             enabled: true,
             secret: false,
         };
-        let oc = collection_variable_to_oc_variable(cv);
+        let oc = OcVariable::from(cv);
         assert_eq!(oc.value, None,
             "YAML `value` should be absent when current value is empty.");
         assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
@@ -1715,8 +1713,8 @@ mod tests {
             enabled: true,
             secret: false,
         };
-        let oc = collection_variable_to_oc_variable(cv);
-        let back = oc_variable_to_collection_variable(oc);
+        let oc = OcVariable::from(cv);
+        let back = CollectionVariable::from(oc);
         assert_eq!(back.value, "http://production.com",
             "current value must round-trip correctly.");
         assert_eq!(back.initial_value, "http://localhost:8080",
@@ -1734,7 +1732,7 @@ mod tests {
             description: None,
             disabled: None,
         };
-        let cv = oc_variable_to_collection_variable(oc);
+        let cv = CollectionVariable::from(oc);
         assert_eq!(cv.value, "2", "current value should be loaded from YAML `value`.");
         assert_eq!(cv.initial_value, "2",
             "initial_value should fall back to `value` when `initial` is absent.");
@@ -1751,7 +1749,7 @@ mod tests {
             enabled: true,
             secret: false,
         };
-        let oc = collection_variable_to_oc_variable(cv);
+        let oc = OcVariable::from(cv);
         // Verify YAML struct has both fields.
         assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("override"));
         assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("default"));
@@ -1760,7 +1758,7 @@ mod tests {
         assert!(yaml_str.contains("value:"), "YAML must contain `value` field.");
         assert!(yaml_str.contains("initial:"), "YAML must contain `initial` field.");
         // Verify loading back produces correct distinct values.
-        let back = oc_variable_to_collection_variable(oc);
+        let back = CollectionVariable::from(oc);
         assert_eq!(back.value, "override");
         assert_eq!(back.initial_value, "default");
     }
