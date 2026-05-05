@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { AttachContractInput, CollectionItem, UpdateContractInput } from '@/lib/tauri-api';
-import { getCollection } from '@/lib/tauri-api';
+import { getCollection, onCollectionChanged } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
 
@@ -92,6 +92,39 @@ export function ContractTab({ tab }: ContractTabProps) {
       }
     }
   }, [contracts, changelogs, tab.collectionRoot, loadChangelog]);
+
+  // Keep refs to the freshest contracts/loadChangelog so the realtime subscription
+  // below can read them without resubscribing on every render.
+  const contractsRef = useRef(contracts);
+  contractsRef.current = contracts;
+  const loadChangelogRef = useRef(loadChangelog);
+  loadChangelogRef.current = loadChangelog;
+
+  // Refresh changelogs when the watcher reports a change inside this collection.
+  // The watcher publishes for any file under <workspace>/collections/, so filter
+  // by collection name to avoid reloading on unrelated edits.
+  const reloadDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const unlistenPromise = onCollectionChanged((event) => {
+      if (cancelled) return;
+      // Branch-switch/merge events fire one event per file touched during the
+      // checkout/merge — skip them to avoid IPC thrash.
+      if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
+      if (event.collection && event.collection !== tab.collectionName) return;
+      if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
+      reloadDebounce.current = setTimeout(() => {
+        for (const c of contractsRef.current) {
+          void loadChangelogRef.current(tab.collectionRoot, c.id);
+        }
+      }, 300);
+    });
+    return () => {
+      cancelled = true;
+      if (reloadDebounce.current) clearTimeout(reloadDebounce.current);
+      unlistenPromise.then((fn) => fn());
+    };
+  }, [tab.collectionRoot, tab.collectionName]);
 
   // Fetch collection tree to populate the scope folder/request dropdowns.
   useEffect(() => {
