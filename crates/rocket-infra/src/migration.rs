@@ -83,8 +83,8 @@ fn copy_legacy_tree(base: &Path, src: &Path, backup_dir: &Path) -> DomainResult<
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        // Skip the backup dir itself and hidden dirs/files.
-        if name == ".legacy_backup" || name.starts_with('.') {
+        // Skip the backup dir itself and hidden entries — except .uid files, which must be backed up.
+        if name == ".legacy_backup" || (name.starts_with('.') && name != ".uid") {
             continue;
         }
         if path.is_dir() {
@@ -539,5 +539,20 @@ mod tests {
         assert!(result.is_err(), "retry of interrupted migration must return Err");
         // Sentinel must still be there (not removed by the error path).
         assert!(col.join(".migration_in_progress").exists());
+    }
+
+    #[test]
+    fn snapshot_backs_up_uid_files() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("uid-api");
+        fs::create_dir(&col).unwrap();
+        fs::write(col.join(".uid"), b"my-legacy-uid").unwrap();
+        fs::write(col.join("a.json"), b"{}").unwrap();
+
+        snapshot_legacy_files(&col).unwrap();
+
+        let backed_up_uid = col.join(".legacy_backup").join(".uid");
+        assert!(backed_up_uid.exists(), ".uid file must be backed up");
+        assert_eq!(fs::read_to_string(&backed_up_uid).unwrap(), "my-legacy-uid");
     }
 }
