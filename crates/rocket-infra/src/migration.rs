@@ -1,7 +1,7 @@
 //! Migration logic for converting legacy JSON collections to OpenCollection YAML.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -112,7 +112,9 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
         .collect();
 
     // Collect request file writes to batch-fsync at the end of this directory.
-    let mut request_writes: Vec<(std::path::PathBuf, Vec<u8>)> = Vec::new();
+    let mut request_writes: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+    // Source paths are removed only after atomic_write_bulk succeeds.
+    let mut source_paths: Vec<PathBuf> = Vec::new();
 
     for entry in &entries {
         let path = entry.path();
@@ -155,8 +157,7 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
             // Collect the converted bytes rather than writing one-by-one.
             if let Some((yml_path, yaml_bytes)) = prepare_request_migration(&path)? {
                 request_writes.push((yml_path, yaml_bytes));
-                // Delete the original .json now — the .yml is written below.
-                fs::remove_file(&path)?;
+                source_paths.push(path.clone());
             }
         } else if name == "_order.json" {
             migrate_order_file(&path)?;
@@ -170,6 +171,10 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
             .map(|(p, b)| (p.as_path(), b.as_slice()))
             .collect();
         atomic_write_bulk(&refs)?;
+        // Delete originals only after the new .yml files are safely written.
+        for src in &source_paths {
+            fs::remove_file(src)?;
+        }
     }
 
     Ok(())
