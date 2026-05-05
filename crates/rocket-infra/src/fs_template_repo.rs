@@ -1,7 +1,7 @@
-use std::fs;
 use std::path::PathBuf;
 
 use crate::atomic_write;
+use crate::yaml_io::{delete_if_exists, read_dir_yaml};
 use rocket_history::{Template, TemplateRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -21,22 +21,12 @@ impl FsTemplateRepo {
 
 impl TemplateRepository for FsTemplateRepo {
     fn list(&self) -> DomainResult<Vec<Template>> {
-        let mut result = Vec::new();
-        if !self.dir.exists() {
-            return Ok(result);
-        }
-        for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                let content = fs::read_to_string(&path)?;
-                if let Ok(t) = serde_yaml::from_str::<Template>(&content) {
-                    result.push(t);
-                }
-            }
-        }
-        result.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(result)
+        let mut items: Vec<Template> = read_dir_yaml::<Template>(&self.dir)?
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+        items.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(items)
     }
 
     fn get(&self, name: &str) -> DomainResult<Template> {
@@ -44,13 +34,12 @@ impl TemplateRepository for FsTemplateRepo {
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Template '{}'", name)));
         }
-        let content = fs::read_to_string(&path)?;
+        let content = std::fs::read_to_string(&path)?;
         serde_yaml::from_str(&content)
             .map_err(|e| DomainError::Internal(format!("Failed to parse YAML: {e}")))
     }
 
     fn save(&self, template: &Template) -> DomainResult<()> {
-        fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(template)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
         atomic_write(&self.file_path(&template.name), yaml.as_bytes())?;
@@ -58,12 +47,7 @@ impl TemplateRepository for FsTemplateRepo {
     }
 
     fn delete(&self, name: &str) -> DomainResult<()> {
-        let path = self.file_path(name);
-        if !path.exists() {
-            return Err(DomainError::NotFound(format!("Template '{}'", name)));
-        }
-        fs::remove_file(&path)?;
-        Ok(())
+        delete_if_exists(&self.file_path(name), &format!("Template '{}'", name))
     }
 }
 
@@ -105,5 +89,12 @@ mod tests {
         repo.save(&t).unwrap();
         repo.delete("temp").unwrap();
         assert!(repo.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_nonexistent_returns_not_found() {
+        let (_dir, repo) = setup();
+        let err = repo.delete("ghost").unwrap_err();
+        assert!(matches!(err, DomainError::NotFound(_)));
     }
 }
