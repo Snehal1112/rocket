@@ -100,8 +100,14 @@ pub struct FsCollectionRepo {
 }
 
 impl FsCollectionRepo {
+    /// Create a repo that shares `locks` with other repo instances (e.g., inside `SharedPathCollectionRepo`).
     pub fn new(base_dir: PathBuf, locks: Arc<DashMap<String, Arc<Mutex<()>>>>) -> Self {
         Self { base_dir, locks }
+    }
+
+    /// Create a standalone repo with its own private lock map. Use this when no lock sharing is needed.
+    pub fn new_standalone(base_dir: PathBuf) -> Self {
+        Self::new(base_dir, Arc::new(DashMap::new()))
     }
 
     /// Return the per-collection mutex, creating it on first access.
@@ -428,14 +434,8 @@ impl CollectionRepository for FsCollectionRepo {
         };
         let mutex1 = self.collection_mutex(first);
         let _guard1 = mutex1.lock().unwrap_or_else(|e| e.into_inner());
-        let mutex2_opt;
-        let _guard2 = if src_collection != dst_collection {
-            mutex2_opt = Some(self.collection_mutex(second));
-            Some(mutex2_opt.as_ref().unwrap().lock().unwrap_or_else(|e| e.into_inner()))
-        } else {
-            mutex2_opt = None;
-            None
-        };
+        let mutex2 = (src_collection != dst_collection).then(|| self.collection_mutex(second));
+        let _guard2 = mutex2.as_ref().map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
         let src_collection_dir = self.collection_path(src_collection);
         let dst_collection_dir = self.collection_path(dst_collection);
         let src = self.validate_path(&src_collection_dir, Path::new(src_path))?;

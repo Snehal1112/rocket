@@ -18,7 +18,7 @@ impl EnvironmentRepositoryFactory for FsEnvFactory {
 fn make_import_service(base: PathBuf) -> ImportService {
     ImportService::new(
         base.clone(),
-        Box::new(FsCollectionRepo::new(base.join("collections"))),
+        Box::new(FsCollectionRepo::new_standalone(base.join("collections"))),
         Box::new(FsEnvFactory(base)),
     )
 }

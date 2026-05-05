@@ -195,7 +195,7 @@ pub fn run() {
                 Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
                 Arc::clone(&executor),
                 Box::new(FsHistoryRepo::new(history_dir)),
-                Box::new(FsCollectionRepo::new(collections_dir.clone())),
+                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(NullEventPublisher),
                 audit_publisher.clone(),
@@ -205,7 +205,7 @@ pub fn run() {
             // Uses its own repo instances pointed at the same paths as the exec service.
             let oauth2_svc = rocket_app::oauth2_service::OAuth2Service::new(
                 Box::new(FsEnvironmentRepo::new(environments_dir)),
-                Box::new(FsCollectionRepo::new(collections_dir.clone())),
+                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
             );
 
             let git_svc = GitAppService::new(

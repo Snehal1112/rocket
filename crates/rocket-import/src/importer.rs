@@ -76,7 +76,7 @@ impl ImportService {
 
         let workspace_path = path.to_path_buf();
         let collection_repo =
-            Box::new(FsCollectionRepo::new(workspace_path.join("collections")));
+            Box::new(FsCollectionRepo::new_standalone(workspace_path.join("collections")));
         let env_factory = Box::new(FsFactory(workspace_path.clone()));
         Self { workspace_path, collection_repo, env_factory }
     }

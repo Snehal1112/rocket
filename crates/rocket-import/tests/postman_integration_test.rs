@@ -20,7 +20,7 @@ fn make_service(workspace_path: &Path) -> ImportService {
     let path = workspace_path.to_path_buf();
     ImportService::new(
         path.clone(),
-        Box::new(FsCollectionRepo::new(path.join("collections"))),
+        Box::new(FsCollectionRepo::new_standalone(path.join("collections"))),
         Box::new(FsEnvFactory(path)),
     )
 }
