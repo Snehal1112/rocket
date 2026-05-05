@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
+import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
+import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
 import {
   type CollectionSummary,
   createCollection,
@@ -23,8 +25,6 @@ import {
   onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
-import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
-import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';

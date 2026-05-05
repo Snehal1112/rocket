@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useOpenWorkspaceFromDisk, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import {
   type ClonedRepoStructure,
   type CollectionScanResult,
@@ -18,7 +19,6 @@ import {
   gitClone,
   openFolderPicker,
 } from '@/lib/tauri-api';
-import { useOpenWorkspaceFromDisk, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import { useGitStore } from '@/stores/git-store';
 
 type Step = 'input' | 'progress' | 'picker';

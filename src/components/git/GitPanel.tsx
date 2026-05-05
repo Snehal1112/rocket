@@ -7,15 +7,16 @@ const ConflictResolver = lazy(() =>
   import('@/components/git/ConflictResolver').then((m) => ({ default: m.ConflictResolver })),
 );
 
+import { CommitDiffView } from '@/components/git/CommitDiffView';
 import { DiffViewForFile } from '@/components/git/DiffViewForFile';
 import { GitCloneDialog } from '@/components/git/GitCloneDialog';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
-import { CommitDiffView } from '@/components/git/CommitDiffView';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
 import { GitFileList } from '@/components/git/GitFileList';
 import { GitLandingPanel } from '@/components/git/GitLandingPanel';
 import { GitLinksSection } from '@/components/git/GitLinksSection';
+import { GitPanelSkeleton } from '@/components/git/GitPanelSkeleton';
 import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,6 @@ import { Separator } from '@/components/ui/separator';
 import type { CommitInfo, ConflictFile, FileDiff, FileStatus } from '@/lib/tauri-api';
 import { gitDiffCommit, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
-import { GitPanelSkeleton } from '@/components/git/GitPanelSkeleton';
 
 type RightPanelView =
   | { kind: 'landing' }

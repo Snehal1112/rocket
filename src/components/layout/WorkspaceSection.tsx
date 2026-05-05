@@ -8,8 +8,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
-import type { Workspace } from '@/lib/tauri-api';
 import { useCloseWorkspace, useRenameWorkspace } from '@/lib/queries/workspace-queries';
+import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 
 interface WorkspaceSectionProps {

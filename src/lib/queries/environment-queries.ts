@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   deleteEnvironment,
   deleteGlobalEnvironment,
+  type Environment,
   getGlobalEnvironment,
   getGlobalEnvironmentName,
   getProcessEnvVars,
@@ -10,7 +11,6 @@ import {
   saveEnvironment,
   saveGlobalEnvironment,
   setGlobalEnvironment,
-  type Environment,
 } from '@/lib/tauri-api';
 
 export const environmentKeys = {
@@ -24,7 +24,7 @@ export const environmentKeys = {
 export function useEnvironments(collectionName: string | null) {
   return useQuery({
     queryKey: environmentKeys.collection(collectionName ?? ''),
-    queryFn: () => listEnvironments(collectionName!),
+    queryFn: () => listEnvironments(collectionName ?? ''),
     enabled: !!collectionName,
   });
 }
@@ -39,7 +39,7 @@ export function useGlobalEnvironmentName() {
 export function useGlobalEnvironment(name: string | null) {
   return useQuery({
     queryKey: environmentKeys.global(name ?? ''),
-    queryFn: () => getGlobalEnvironment(name!),
+    queryFn: () => getGlobalEnvironment(name ?? ''),
     enabled: !!name,
   });
 }
@@ -62,7 +62,7 @@ export function useProcessEnvVars() {
 export function useSaveEnvironment(collectionName: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (env: Environment) => saveEnvironment(collectionName!, env),
+    mutationFn: (env: Environment) => saveEnvironment(collectionName ?? '', env),
     onSuccess: () => {
       if (collectionName) {
         qc.invalidateQueries({ queryKey: environmentKeys.collection(collectionName) });
@@ -74,7 +74,7 @@ export function useSaveEnvironment(collectionName: string | null) {
 export function useDeleteEnvironment(collectionName: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => deleteEnvironment(collectionName!, name),
+    mutationFn: (name: string) => deleteEnvironment(collectionName ?? '', name),
     onSuccess: () => {
       if (collectionName) {
         qc.invalidateQueries({ queryKey: environmentKeys.collection(collectionName) });

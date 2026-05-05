@@ -155,20 +155,39 @@ describe('useLoadTestStore', () => {
 
       useLoadTestStore.getState().setMode('simple');
       const fakeRequest = {
-        method: 'GET', url: 'http://test.local', headers: [], queryParams: [], pathParams: [],
-        body: { bodyType: 'none' }, auth: { authType: 'none' },
+        method: 'GET',
+        url: 'http://test.local',
+        headers: [],
+        queryParams: [],
+        pathParams: [],
+        body: { bodyType: 'none' },
+        auth: { authType: 'none' },
         settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
       } as unknown as RequestState;
 
       const runPromise = useLoadTestStore.getState().startTest(fakeRequest, 'tab-2');
 
       await vi.waitFor(() => expect(completeHandler).not.toBeNull());
-      completeHandler!({
+      const handler = completeHandler as ((event: { payload: unknown }) => void) | null;
+      if (!handler) throw new Error('completeHandler not set');
+      handler({
         payload: {
-          totalRequests: 2, succeeded: 1, failed: 1, failedTransport: 0, failedStatus: 1,
-          minLatencyMs: 8, avgLatencyMs: 10.25, p50LatencyMs: 10, p95LatencyMs: 12, p99LatencyMs: 12,
-          maxLatencyMs: 12.5, requestsPerSecond: 10, totalDurationMs: 200,
-          requestLog: sampleLog, timeSeries: [], phaseTimeline: [],
+          totalRequests: 2,
+          succeeded: 1,
+          failed: 1,
+          failedTransport: 0,
+          failedStatus: 1,
+          minLatencyMs: 8,
+          avgLatencyMs: 10.25,
+          p50LatencyMs: 10,
+          p95LatencyMs: 12,
+          p99LatencyMs: 12,
+          maxLatencyMs: 12.5,
+          requestsPerSecond: 10,
+          totalDurationMs: 200,
+          requestLog: sampleLog,
+          timeSeries: [],
+          phaseTimeline: [],
         },
       });
 
@@ -196,8 +215,13 @@ describe('useLoadTestStore', () => {
 
       useLoadTestStore.getState().setMode('simple');
       const fakeRequest = {
-        method: 'GET', url: 'http://test.local', headers: [], queryParams: [], pathParams: [],
-        body: { bodyType: 'none' }, auth: { authType: 'none' },
+        method: 'GET',
+        url: 'http://test.local',
+        headers: [],
+        queryParams: [],
+        pathParams: [],
+        body: { bodyType: 'none' },
+        auth: { authType: 'none' },
         settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
       } as unknown as RequestState;
 
@@ -205,12 +229,24 @@ describe('useLoadTestStore', () => {
 
       await vi.waitFor(() => expect(progressHandler).not.toBeNull());
 
-      progressHandler!({
+      const pHandler = progressHandler as ((event: { payload: unknown }) => void) | null;
+      if (!pHandler) throw new Error('progressHandler not set');
+      pHandler({
         payload: {
-          elapsedMs: 500, completed: 1, activeConcurrent: 1, succeeded: 1,
-          failedStatus: 0, failedTransport: 0, requestsPerSecond: 2,
-          p50Ms: 10, p95Ms: 15, p99Ms: 18, currentPhaseIndex: 0,
-          recentLog: [{ seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 }],
+          elapsedMs: 500,
+          completed: 1,
+          activeConcurrent: 1,
+          succeeded: 1,
+          failedStatus: 0,
+          failedTransport: 0,
+          requestsPerSecond: 2,
+          p50Ms: 10,
+          p95Ms: 15,
+          p99Ms: 18,
+          currentPhaseIndex: 0,
+          recentLog: [
+            { seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 },
+          ],
         },
       });
 
@@ -218,13 +254,28 @@ describe('useLoadTestStore', () => {
       expect(useLoadTestStore.getState().requestLog[0].seq).toBe(0);
 
       await vi.waitFor(() => expect(completeHandler).not.toBeNull());
-      completeHandler!({
+      const cHandler = completeHandler as ((event: { payload: unknown }) => void) | null;
+      if (!cHandler) throw new Error('completeHandler not set');
+      cHandler({
         payload: {
-          totalRequests: 1, succeeded: 1, failed: 0, failedTransport: 0, failedStatus: 0,
-          minLatencyMs: 10, avgLatencyMs: 10, p50LatencyMs: 10, p95LatencyMs: 10, p99LatencyMs: 10,
-          maxLatencyMs: 10, requestsPerSecond: 2, totalDurationMs: 500,
-          requestLog: [{ seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 }],
-          timeSeries: [], phaseTimeline: [],
+          totalRequests: 1,
+          succeeded: 1,
+          failed: 0,
+          failedTransport: 0,
+          failedStatus: 0,
+          minLatencyMs: 10,
+          avgLatencyMs: 10,
+          p50LatencyMs: 10,
+          p95LatencyMs: 10,
+          p99LatencyMs: 10,
+          maxLatencyMs: 10,
+          requestsPerSecond: 2,
+          totalDurationMs: 500,
+          requestLog: [
+            { seq: 0, status: 200, latencyMs: 10, responseBytes: 100, error: null, phaseIndex: 0 },
+          ],
+          timeSeries: [],
+          phaseTimeline: [],
         },
       });
 

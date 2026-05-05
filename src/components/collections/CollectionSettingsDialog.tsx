@@ -4,15 +4,15 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
 import { useSaveButton } from '@/hooks/use-save-button';
-import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
-import { cn } from '@/lib/utils';
 import {
   useEnvironments,
   useGlobalEnvironment,
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
+import { type Auth, saveCollectionSettings } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
+import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import type { AuthState, KeyValueEntry } from '@/types/pane-types';
 

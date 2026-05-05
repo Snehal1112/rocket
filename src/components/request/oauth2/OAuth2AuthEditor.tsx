@@ -18,8 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { oauth2DecodeJwt, oauth2GetToken, oauth2RefreshToken } from '@/lib/tauri-api';
-import { resolveWithContext } from '@/lib/variable-context';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
+import { resolveWithContext } from '@/lib/variable-context';
 import type { AuthState } from '@/types/pane-types';
 import { OAuth2AdditionalParams } from './OAuth2AdditionalParams';
 import { OAuth2AdvancedSection } from './OAuth2AdvancedSection';
@@ -75,6 +75,7 @@ export function OAuth2AuthEditor({
   varCtxRef.current = varCtx;
   const rv = (s: string) => resolveWithContext(s, varCtxRef.current);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rv reads varCtxRef.current — stable across renders by design
   const handleGetToken = useCallback(async () => {
     setGettingToken(true);
     setTokenError('');
@@ -160,6 +161,7 @@ export function OAuth2AuthEditor({
     }
   }, [o, collection, environmentName, requestPath]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rv reads varCtxRef.current — stable across renders by design
   const handleRefreshToken = useCallback(async () => {
     if (!o.refreshToken || !o.tokenUrl) return;
     setGettingToken(true);

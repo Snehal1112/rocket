@@ -1,4 +1,4 @@
-import { vi, it, expect, beforeEach, describe } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tauri-api', () => ({
   saveUiState: vi.fn().mockResolvedValue(undefined),
@@ -23,7 +23,7 @@ vi.mock('@/stores/layout-store', () => ({
       isConsoleOpen: true,
       consoleHeight: 400,
     }),
-    subscribe: vi.fn(() => () => {}),
+    subscribe: vi.fn(() => () => undefined),
   },
 }));
 

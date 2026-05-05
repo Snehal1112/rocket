@@ -149,14 +149,19 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
     if (get().mode === 'simple') {
       // Convert flat config to a single Hold phase so Simple mode gets
       // live streaming via the same V2 path as Advanced mode.
-      const { concurrency, totalRequests, intervalMs: _intervalMs, durationCapSecs } =
-        get().simpleConfig;
+      const {
+        concurrency,
+        totalRequests,
+        intervalMs: _intervalMs,
+        durationCapSecs,
+      } = get().simpleConfig;
 
       const simpleV2Config: LoadTestConfigV2 = {
         phases: [
           {
             kind: 'Hold',
-            durationSecs: durationCapSecs ?? Math.ceil((totalRequests / Math.max(concurrency, 1)) * 2),
+            durationSecs:
+              durationCapSecs ?? Math.ceil((totalRequests / Math.max(concurrency, 1)) * 2),
             target: { kind: 'concurrency', value: concurrency },
           },
         ],
