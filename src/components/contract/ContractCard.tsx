@@ -148,20 +148,20 @@ export function ContractCard({
               preview ? (
                 <span
                   key={p}
-                  className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'
+                  className='flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 max-w-full'
                 >
                   <Paperclip className='h-3 w-3 shrink-0' />
-                  <span className='truncate'>{p.split('/').pop() ?? p}</span>
+                  <span className='truncate min-w-0'>{p.split('/').pop() ?? p}</span>
                 </span>
               ) : (
                 <button
                   key={p}
                   type='button'
-                  className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit'
+                  className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors min-w-0 max-w-full text-left'
                   onClick={() => openDocument(p, contract.title)}
                 >
                   <Paperclip className='h-3 w-3 shrink-0' />
-                  <span className='truncate'>{p.split('/').pop() ?? p}</span>
+                  <span className='truncate min-w-0'>{p.split('/').pop() ?? p}</span>
                 </button>
               ),
             )}
