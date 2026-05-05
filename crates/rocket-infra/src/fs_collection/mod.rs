@@ -103,6 +103,10 @@ impl CollectionRepository for FsCollectionRepo {
         folders::get(self, name)
     }
 
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        folders::get_summaries(self, name)
+    }
+
     fn create(&self, name: &str) -> DomainResult<Collection> {
         folders::create(self, name)
     }

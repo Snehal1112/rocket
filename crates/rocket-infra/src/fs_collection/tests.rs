@@ -294,6 +294,7 @@ fn reorder_items_writes_order_file_and_get_respects_it() {
             CollectionItem::Request(r) => r.name.as_str(),
             CollectionItem::Folder(f) => f.name.as_str(),
             CollectionItem::OpaqueItem(o) => o.name.as_str(),
+            CollectionItem::Summary(s) => s.name.as_str(),
         }
     }
 
@@ -808,4 +809,53 @@ fn get_folder_chain_variables_returns_folder_vars() {
     let vars = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
     assert_eq!(vars.len(), 1);
     assert_eq!(vars[0].key, "token");
+}
+
+#[test]
+fn get_summaries_returns_collection_with_summary_items() {
+    let (_dir, repo) = setup();
+    repo.create("pets").unwrap();
+    let req = rocket_collection::Request::new("List Pets", HttpMethod::Get, "https://api.example.com/pets");
+    repo.save_request("pets", "list-pets.yml", &req).unwrap();
+
+    let col = repo.get_summaries("pets").unwrap();
+    assert_eq!(col.name, "pets");
+    let summaries = col.root.request_summaries();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].name, "List Pets");
+    assert_eq!(summaries[0].method, "GET");
+    assert_eq!(summaries[0].url, "https://api.example.com/pets");
+    assert!(!summaries[0].uid.is_empty());
+}
+
+#[test]
+fn get_summaries_does_not_load_body_or_auth() {
+    let (_dir, repo) = setup();
+    repo.create("api").unwrap();
+    let mut req = rocket_collection::Request::new("Post Data", HttpMethod::Post, "https://api.example.com/data");
+    req.body = Some(rocket_shared::types::Body { mode: rocket_shared::types::BodyMode::Json, content: Some(r#"{"x":1}"#.to_string()), form_data: None, file_path: None });
+    repo.save_request("api", "post-data.yml", &req).unwrap();
+
+    // get_summaries must succeed and return name/method/url — body is not loaded.
+    let col = repo.get_summaries("api").unwrap();
+    let summaries = col.root.request_summaries();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].name, "Post Data");
+    assert_eq!(summaries[0].method, "POST");
+}
+
+#[test]
+fn get_summaries_preserves_folder_structure() {
+    let (_dir, repo) = setup();
+    repo.create("api").unwrap();
+    repo.create_folder("api", "auth").unwrap();
+    let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+    repo.save_request("api", "auth/login.yml", &req).unwrap();
+
+    let col = repo.get_summaries("api").unwrap();
+    let auth_folder = col.root.subfolders().into_iter().find(|f| f.dir_name.as_deref() == Some("auth"));
+    assert!(auth_folder.is_some(), "auth folder missing from summaries tree");
+    let summaries = auth_folder.unwrap().request_summaries();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].name, "Login");
 }

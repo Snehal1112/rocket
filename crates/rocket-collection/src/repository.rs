@@ -14,6 +14,10 @@ pub trait CollectionRepository: Send + Sync {
     /// Get full collection tree by name.
     fn get(&self, name: &str) -> DomainResult<Collection>;
 
+    /// Get collection tree with lightweight request summaries instead of full Request bodies.
+    /// Use for sidebar loads; call `get_request` for the full body when the user opens a request.
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection>;
+
     /// Create a new empty collection.
     fn create(&self, name: &str) -> DomainResult<Collection>;
 

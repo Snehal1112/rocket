@@ -35,6 +35,11 @@ impl CollectionService {
         self.repo.get(name)
     }
 
+    /// Get collection tree with lightweight request summaries for sidebar display.
+    pub fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        self.repo.get_summaries(name)
+    }
+
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         self.repo.create(name)
@@ -166,6 +171,10 @@ mod tests {
                 .find(|c| c.name == name)
                 .cloned()
                 .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+
+        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+            self.get(name)
         }
 
         fn create(&self, name: &str) -> DomainResult<Collection> {

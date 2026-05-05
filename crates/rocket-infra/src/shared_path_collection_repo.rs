@@ -43,6 +43,10 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().get(name)
     }
 
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        self.repo().get_summaries(name)
+    }
+
     fn create(&self, name: &str) -> DomainResult<Collection> {
         self.repo().create(name)
     }

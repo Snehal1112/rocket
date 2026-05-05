@@ -377,6 +377,8 @@ fn walk_folder<'a>(
                 walk_folder(sub, &next, out);
             }
             CollectionItem::OpaqueItem(_) => {}
+            // Summary items carry no file content; skip for contract audit.
+            CollectionItem::Summary(_) => {}
         }
     }
 }
@@ -508,6 +510,9 @@ mod tests {
                 .find(|c| c.name == name)
                 .cloned()
                 .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+            self.get(name)
         }
         fn create(&self, _: &str) -> DomainResult<Collection> {
             unimplemented!()

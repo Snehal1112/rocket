@@ -1,4 +1,5 @@
 use crate::request::Request;
+use crate::request_summary::RequestSummary;
 use serde::{Deserialize, Serialize};
 
 /// An opaque protocol item stored as raw YAML for lossless roundtrip.
@@ -24,6 +25,9 @@ pub enum CollectionItem {
     /// Raw YAML for non-HTTP protocols (GraphQL, gRPC, WebSocket).
     #[serde(rename = "opaque")]
     OpaqueItem(OpaqueProtocolItem),
+    /// Lightweight request placeholder for sidebar loads (no body/auth).
+    #[serde(rename = "summary")]
+    Summary(RequestSummary),
 }
 
 /// A folder containing requests and sub-folders.
@@ -80,6 +84,7 @@ impl Folder {
     pub fn request_count(&self) -> usize {
         self.items.iter().map(|item| match item {
             CollectionItem::Request(_) => 1,
+            CollectionItem::Summary(_) => 1,
             CollectionItem::Folder(f) => f.request_count(),
             CollectionItem::OpaqueItem(_) => 0,
         }).sum()
@@ -91,6 +96,27 @@ impl Folder {
             CollectionItem::Folder(f) => Some(f.name.as_str()),
             _ => None,
         }).collect()
+    }
+
+    /// Return all sub-folders at this folder level (non-recursive).
+    pub fn subfolders(&self) -> Vec<&Folder> {
+        self.items.iter().filter_map(|item| match item {
+            CollectionItem::Folder(f) => Some(f),
+            _ => None,
+        }).collect()
+    }
+
+    /// Return all `Summary` items at this folder level (non-recursive).
+    pub fn request_summaries(&self) -> Vec<&RequestSummary> {
+        self.items.iter().filter_map(|item| match item {
+            CollectionItem::Summary(s) => Some(s),
+            _ => None,
+        }).collect()
+    }
+
+    /// Add a summary item to this folder.
+    pub fn add_summary(&mut self, summary: RequestSummary) {
+        self.items.push(CollectionItem::Summary(summary));
     }
 }
 

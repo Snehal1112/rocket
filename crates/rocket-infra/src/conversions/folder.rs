@@ -84,6 +84,21 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
         .map(|item| match item {
             CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+            // Summary items should never appear in serialization paths; treat as opaque no-op.
+            CollectionItem::Summary(_) => OcItem::Folder(OcFolder {
+                info: OcFolderInfo {
+                    name: String::new(),
+                    uid: None,
+                    description: None,
+                    folder_type: None,
+                    seq: None,
+                    tags: Vec::new(),
+                    request: None,
+                },
+                items: None,
+                request: None,
+                docs: None,
+            }),
             CollectionItem::OpaqueItem(opaque) => {
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
@@ -237,6 +252,21 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         .map(|item| match item {
             CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
             CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
+            // Summary items should never appear in serialization paths; treat as opaque no-op.
+            CollectionItem::Summary(_) => OcItem::Folder(OcFolder {
+                info: OcFolderInfo {
+                    name: String::new(),
+                    uid: None,
+                    description: None,
+                    folder_type: None,
+                    seq: None,
+                    tags: Vec::new(),
+                    request: None,
+                },
+                items: None,
+                request: None,
+                docs: None,
+            }),
             CollectionItem::OpaqueItem(opaque) => {
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {

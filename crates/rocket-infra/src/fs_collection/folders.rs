@@ -10,7 +10,7 @@ use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
 use rocket_collection::generate_uid;
 
 use super::paths::{count_request_files, read_uid_from_yaml, reject_symlink};
-use super::tree::build_folder_tree;
+use super::tree::{build_folder_tree, build_folder_tree_summaries};
 use super::FsCollectionRepo;
 
 pub(super) fn list(repo: &FsCollectionRepo) -> DomainResult<Vec<CollectionSummary>> {
@@ -77,6 +77,27 @@ pub(super) fn get(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collectio
         migrate_collection(&path)?;
     }
     let root = build_folder_tree(&path)?;
+    let settings = super::settings::get_settings(repo, name).unwrap_or_default();
+    Ok(Collection { name: name.to_string(), root, settings })
+}
+
+pub(super) fn get_summaries(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collection> {
+    Collection::validate_name(name)?;
+    let path = repo.collection_path(name);
+    if !path.exists() {
+        return Err(DomainError::NotFound(format!("Collection '{}'", name)));
+    }
+    if is_migration_interrupted(&path) {
+        return Err(DomainError::Internal(format!(
+            "Collection '{}' has an incomplete migration. \
+             Restore from .legacy_backup/ or remove .migration_in_progress to retry.",
+            name
+        )));
+    }
+    if detect_format(&path) == CollectionFormat::LegacyJson {
+        migrate_collection(&path)?;
+    }
+    let root = build_folder_tree_summaries(&path)?;
     let settings = super::settings::get_settings(repo, name).unwrap_or_default();
     Ok(Collection { name: name.to_string(), root, settings })
 }

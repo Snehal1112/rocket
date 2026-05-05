@@ -182,6 +182,9 @@ mod tests {
         fn get(&self, _: &str) -> DomainResult<Collection> {
             Err(DomainError::NotFound("stub".into()))
         }
+        fn get_summaries(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
         fn create(&self, _: &str) -> DomainResult<Collection> {
             Err(DomainError::NotFound("stub".into()))
         }
