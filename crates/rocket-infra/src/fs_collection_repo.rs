@@ -808,16 +808,16 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             let pos: std::collections::HashMap<String, usize> = ordered
                 .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
             entries.sort_by(|a, b| {
-                let ai = pos.get(&a.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
-                let bi = pos.get(&b.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                let ai = a.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
+                let bi = b.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
                 ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
             });
         } else if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
             let pos: std::collections::HashMap<String, usize> = ordered
                 .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
             entries.sort_by(|a, b| {
-                let ai = pos.get(&a.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
-                let bi = pos.get(&b.file_name().to_string_lossy().into_owned()).copied().unwrap_or(usize::MAX);
+                let ai = a.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
+                let bi = b.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
                 ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
             });
         } else {
@@ -1574,5 +1574,28 @@ mod tests {
         }).collect();
         assert!(names.contains(&"Good"), "good request missing: {:?}", names);
         assert!(!names.contains(&"bad"), "corrupt file should be skipped: {:?}", names);
+    }
+
+    #[test]
+    fn build_folder_tree_respects_order_yml() {
+        let (_dir, repo) = setup();
+        repo.create("ordered").unwrap();
+        let req_a = rocket_collection::Request::new("Alpha", HttpMethod::Get, "https://a.test");
+        let req_b = rocket_collection::Request::new("Beta",  HttpMethod::Get, "https://b.test");
+        let req_c = rocket_collection::Request::new("Gamma", HttpMethod::Get, "https://c.test");
+        repo.save_request("ordered", "c-gamma.yml", &req_c).unwrap();
+        repo.save_request("ordered", "b-beta.yml",  &req_b).unwrap();
+        repo.save_request("ordered", "a-alpha.yml", &req_a).unwrap();
+        let order_path = _dir.path().join("ordered").join("_order.yml");
+        std::fs::write(&order_path, "- c-gamma.yml\n- b-beta.yml\n- a-alpha.yml\n").unwrap();
+        let col = repo.get("ordered").unwrap();
+        let names: Vec<_> = col.root.items.iter().filter_map(|item| {
+            if let rocket_collection::CollectionItem::Request(r) = item {
+                Some(r.name.as_str())
+            } else {
+                None
+            }
+        }).collect();
+        assert_eq!(names, vec!["Gamma", "Beta", "Alpha"]);
     }
 }
