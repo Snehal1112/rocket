@@ -328,6 +328,8 @@ impl CollectionRepository for FsCollectionRepo {
     #[tracing::instrument(name = "collection_save_request", skip(self, request), fields(collection_name = %collection, request_path = %path))]
     fn save_request(&self, collection: &str, path: &str, request: &rocket_collection::Request) -> DomainResult<String> {
         Collection::validate_name(collection)?;
+        let mutex = self.collection_mutex(collection);
+        let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
         if request.uid.is_empty() {
             return Err(DomainError::Internal(format!(
                 "save_request: empty uid on request for '{path}' in collection '{collection}'; callers must construct via Request::new()"
@@ -477,6 +479,8 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
         Collection::validate_name(collection)?;
+        let mutex = self.collection_mutex(collection);
+        let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
         let collection_dir = self.collection_path(collection);
         let dir = if folder_path.is_empty() {
             collection_dir.clone()
