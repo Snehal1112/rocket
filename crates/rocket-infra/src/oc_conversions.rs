@@ -3,7 +3,7 @@
 //! OcDescription is a re-export of Description (same type), so no conversion
 //! is needed for descriptions — they flow through unchanged.
 
-use crate::opencollection::*;
+use crate::oc::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable};
@@ -2454,7 +2454,7 @@ mod docs_roundtrip_tests {
 
     #[test]
     fn collection_docs_roundtrips_through_docs_field() {
-        use crate::opencollection::OcCollection;
+        use crate::oc::OcCollection;
 
         let oc = OcCollection {
             opencollection: Some("1.0.0".into()),
@@ -2532,9 +2532,9 @@ mod workspace_conversion_tests {
 
     #[test]
     fn oc_request_missing_uid_gets_empty_not_minted() {
-        use crate::opencollection::{OcHttpRequestDetails, OcHttpRequestInfo};
+        use crate::oc::{OcHttpRequestDetails, OcHttpRequestInfo};
 
-        let make_oc = || crate::opencollection::OcHttpRequest {
+        let make_oc = || crate::oc::OcHttpRequest {
             uid: None,
             info: OcHttpRequestInfo {
                 name: "No UID".into(),

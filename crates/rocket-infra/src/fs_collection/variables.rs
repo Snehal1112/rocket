@@ -4,7 +4,7 @@ use rocket_collection::{Collection, CollectionVariable};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::opencollection::{OcFolderInfo, OcHttpRequest, OcHttpRequestRuntime, OcRequestDefaults, OcVariable};
+use crate::oc::{OcFolderInfo, OcHttpRequest, OcHttpRequestRuntime, OcRequestDefaults, OcVariable};
 
 use super::paths::resolve_request_path;
 use super::FsCollectionRepo;

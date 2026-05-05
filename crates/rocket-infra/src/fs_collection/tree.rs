@@ -5,7 +5,7 @@ use rocket_collection::Folder;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::oc_conversions::oc_http_request_to_request;
-use crate::opencollection::{OcFolderInfo, OcHttpRequest};
+use crate::oc::{OcFolderInfo, OcHttpRequest};
 
 use super::paths::{is_request_file, read_uid_from_yaml};
 

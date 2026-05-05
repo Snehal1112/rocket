@@ -8,7 +8,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::{atomic_write, atomic_write_bulk};
 use crate::oc_conversions::request_to_oc_http_request;
-use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
+use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
 
 /// Detected format of a collection directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

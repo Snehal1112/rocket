@@ -5,7 +5,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_workspace::{WorkspaceConfig, WorkspaceConfigRepository};
 
 use crate::atomic_write;
-use crate::opencollection::OcWorkspaceConfig;
+use crate::oc::OcWorkspaceConfig;
 
 /// Filesystem implementation of `WorkspaceConfigRepository`.
 /// Reads and writes `workspace.yml` inside each workspace directory.

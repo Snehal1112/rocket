@@ -6,7 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::migration::{detect_format, is_migration_interrupted, migrate_collection, CollectionFormat};
-use crate::opencollection::{OcCollection, OcFolderInfo, OcInfo};
+use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
 use rocket_collection::generate_uid;
 
 use super::paths::{count_request_files, read_uid_from_yaml, reject_symlink};

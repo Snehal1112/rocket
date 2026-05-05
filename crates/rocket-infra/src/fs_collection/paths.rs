@@ -5,7 +5,7 @@ use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::opencollection::{OcCollection, OcFolderInfo};
+use crate::oc::{OcCollection, OcFolderInfo};
 
 use super::FsCollectionRepo;
 

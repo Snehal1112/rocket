@@ -414,7 +414,7 @@ fn opencollection_yml_not_counted_as_request() {
 
 #[test]
 fn legacy_uid_migrated_into_opencollection_yml() {
-    use crate::opencollection::OcCollection;
+    use crate::oc::OcCollection;
 
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();
@@ -445,7 +445,7 @@ fn legacy_uid_migrated_into_opencollection_yml() {
 
 #[test]
 fn legacy_uid_migrated_into_folder_yml() {
-    use crate::opencollection::OcFolderInfo;
+    use crate::oc::OcFolderInfo;
 
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();

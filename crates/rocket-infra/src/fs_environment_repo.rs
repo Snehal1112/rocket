@@ -5,7 +5,7 @@ use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::opencollection::OcEnvironment;
+use crate::oc::OcEnvironment;
 use crate::yaml_io::delete_if_exists;
 
 pub struct FsEnvironmentRepo {
