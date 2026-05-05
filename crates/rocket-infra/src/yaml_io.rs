@@ -17,8 +17,11 @@ pub(crate) fn read_dir_yaml<T: DeserializeOwned>(dir: &Path) -> DomainResult<Vec
         let path = entry?.path();
         if path.extension().is_some_and(|e| e == "yml") {
             let content = fs::read_to_string(&path)?;
-            if let Ok(item) = serde_yaml::from_str::<T>(&content) {
-                out.push((path, item));
+            match serde_yaml::from_str::<T>(&content) {
+                Ok(item) => out.push((path, item)),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping corrupt YAML file");
+                }
             }
         }
     }
