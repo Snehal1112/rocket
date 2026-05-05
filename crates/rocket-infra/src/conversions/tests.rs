@@ -1133,6 +1133,35 @@ fn oc_request_missing_uid_gets_empty_not_minted() {
 }
 
 #[test]
+fn request_examples_survive_oc_roundtrip() {
+    use rocket_shared::action::HttpRequestExample;
+    let mut req = Request::new("With Examples", HttpMethod::Get, "https://example.com");
+    req.examples = vec![
+        HttpRequestExample {
+            name: "Success".to_string(),
+            description: None,
+            request: Some(serde_yaml::Value::Mapping({
+                let mut m = serde_yaml::Mapping::new();
+                m.insert("method".into(), "GET".into());
+                m.insert("url".into(), "https://example.com".into());
+                m
+            })),
+            response: Some(serde_yaml::Value::Mapping({
+                let mut m = serde_yaml::Mapping::new();
+                m.insert("status".into(), serde_yaml::Value::Number(200.into()));
+                m
+            })),
+        },
+    ];
+    let oc = request_to_oc_http_request(&req);
+    let back = oc_http_request_to_request(oc);
+    assert_eq!(back.examples.len(), 1);
+    assert_eq!(back.examples[0].name, "Success");
+    assert!(back.examples[0].request.is_some());
+    assert!(back.examples[0].response.is_some());
+}
+
+#[test]
 fn request_variables_survive_oc_roundtrip() {
     use rocket_collection::settings::CollectionVariable;
     let mut req = Request::new("Vars", HttpMethod::Get, "https://example.com");

@@ -39,9 +39,9 @@ pub struct HttpRequestExample {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<Description>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request: Option<serde_json::Value>, // Nested request snapshot.
+    pub request: Option<serde_yaml::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response: Option<serde_json::Value>, // Nested response snapshot.
+    pub response: Option<serde_yaml::Value>,
 }
 
 #[cfg(test)]
@@ -95,11 +95,11 @@ mod tests {
         let example = HttpRequestExample {
             name: "Success case".into(),
             description: None,
-            request: Some(serde_json::json!({"url": "https://api.example.com", "method": "GET"})),
-            response: Some(serde_json::json!({"status": 200, "body": {"ok": true}})),
+            request: Some(serde_yaml::from_str("url: https://api.example.com\nmethod: GET").unwrap()),
+            response: Some(serde_yaml::from_str("status: 200\nbody:\n  ok: true").unwrap()),
         };
-        let json = serde_json::to_string(&example).unwrap();
-        let back: HttpRequestExample = serde_json::from_str(&json).unwrap();
+        let yaml = serde_yaml::to_string(&example).unwrap();
+        let back: HttpRequestExample = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(example, back);
     }
 }

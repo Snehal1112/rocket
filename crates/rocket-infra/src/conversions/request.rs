@@ -41,8 +41,8 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         .map(|e| HttpRequestExample {
             name: e.name,
             description: e.description,
-            request: e.request.and_then(|r| serde_json::to_value(r).ok()),
-            response: e.response.and_then(|r| serde_json::to_value(r).ok()),
+            request: e.request.and_then(|r| serde_yaml::to_value(r).ok()),
+            response: e.response.and_then(|r| serde_yaml::to_value(r).ok()),
         })
         .collect();
 
@@ -151,8 +151,8 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
             OcHttpRequestExample {
                 name: e.name.clone(),
                 description: e.description.clone(),
-                request: e.request.clone().and_then(|v| serde_json::from_value(v).ok()),
-                response: e.response.clone().and_then(|v| serde_json::from_value(v).ok()),
+                request: e.request.clone().and_then(|v| serde_yaml::from_value(v).ok()),
+                response: e.response.clone().and_then(|v| serde_yaml::from_value(v).ok()),
             }
         }).collect())
     };
