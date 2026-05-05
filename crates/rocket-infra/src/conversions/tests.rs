@@ -1157,8 +1157,11 @@ fn request_examples_survive_oc_roundtrip() {
     let back = oc_http_request_to_request(oc);
     assert_eq!(back.examples.len(), 1);
     assert_eq!(back.examples[0].name, "Success");
-    assert!(back.examples[0].request.is_some());
-    assert!(back.examples[0].response.is_some());
+    let req_snap = back.examples[0].request.as_ref().expect("request snapshot missing");
+    assert_eq!(req_snap["method"], serde_yaml::Value::String("GET".into()));
+    assert_eq!(req_snap["url"], serde_yaml::Value::String("https://example.com".into()));
+    let resp_snap = back.examples[0].response.as_ref().expect("response snapshot missing");
+    assert_eq!(resp_snap["status"], serde_yaml::Value::Number(200.into()));
 }
 
 #[test]

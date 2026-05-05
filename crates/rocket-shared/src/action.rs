@@ -39,9 +39,9 @@ pub struct HttpRequestExample {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<Description>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request: Option<serde_yaml::Value>,
+    pub request: Option<serde_yaml::Value>, // Opaque snapshot of the request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response: Option<serde_yaml::Value>,
+    pub response: Option<serde_yaml::Value>, // Opaque snapshot of the response.
 }
 
 #[cfg(test)]
