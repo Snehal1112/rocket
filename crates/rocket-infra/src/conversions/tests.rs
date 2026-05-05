@@ -1131,3 +1131,32 @@ fn oc_request_missing_uid_gets_empty_not_minted() {
     // The uid must be empty — not a freshly-minted UUID.
     assert!(req1.uid.is_empty(), "expected empty uid for missing uid field, got: {}", req1.uid);
 }
+
+#[test]
+fn request_variables_survive_oc_roundtrip() {
+    use rocket_collection::settings::CollectionVariable;
+    let mut req = Request::new("Vars", HttpMethod::Get, "https://example.com");
+    req.variables = vec![
+        CollectionVariable {
+            key: "token".to_string(),
+            value: "abc".to_string(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        },
+        CollectionVariable {
+            key: "disabled_var".to_string(),
+            value: "nope".to_string(),
+            initial_value: String::new(),
+            enabled: false,
+            secret: false,
+        },
+    ];
+    let oc = request_to_oc_http_request(&req);
+    let back = oc_http_request_to_request(oc);
+    assert_eq!(back.variables.len(), 2);
+    assert_eq!(back.variables[0].key, "token");
+    assert_eq!(back.variables[0].value, "abc");
+    assert_eq!(back.variables[1].key, "disabled_var");
+    assert!(!back.variables[1].enabled);
+}

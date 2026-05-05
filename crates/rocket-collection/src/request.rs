@@ -45,9 +45,8 @@ pub struct Request {
     pub examples: Vec<HttpRequestExample>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<Documentation>,
-    /// Request-level variables. Typed as Value until rocket-environment is wired as a dependency.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variables: Vec<serde_json::Value>,
+    pub variables: Vec<crate::settings::CollectionVariable>,
     /// Auth override applied at runtime (e.g. runtime.auth in OC YAML).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_auth: Option<Auth>,

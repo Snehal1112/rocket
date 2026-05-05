@@ -29,8 +29,8 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
         .map(|r| r.assertions.clone())
         .unwrap_or_default();
     let actions = extract_actions(&oc.runtime);
-    let variables = oc.runtime.as_ref()
-        .map(|r| r.variables.iter().map(|v| serde_json::to_value(v).unwrap_or_default()).collect())
+    let variables: Vec<rocket_collection::settings::CollectionVariable> = oc.runtime.as_ref()
+        .map(|r| r.variables.iter().cloned().map(rocket_collection::settings::CollectionVariable::from).collect())
         .unwrap_or_default();
     let runtime_auth = oc.runtime.as_ref()
         .and_then(|r| r.auth.clone())
@@ -134,9 +134,7 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
         || runtime_auth.is_some();
     let runtime = if has_runtime {
         Some(OcHttpRequestRuntime {
-            variables: req.variables.iter()
-                .filter_map(|v| serde_json::from_value::<OcVariable>(v.clone()).ok())
-                .collect(),
+            variables: req.variables.iter().cloned().map(OcVariable::from).collect(),
             scripts,
             assertions: req.assertions.clone(),
             actions,
