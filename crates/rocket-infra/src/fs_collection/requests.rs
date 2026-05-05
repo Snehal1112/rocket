@@ -5,7 +5,7 @@ use rocket_collection::{request_filename_for, Collection, Request};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::oc_conversions::{oc_http_request_to_request, request_to_oc_http_request};
+use crate::conversions::{oc_http_request_to_request, request_to_oc_http_request};
 use crate::oc::OcHttpRequest;
 
 use super::paths::resolve_request_path;

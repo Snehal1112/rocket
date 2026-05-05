@@ -2,7 +2,7 @@ mod atomic_write;
 mod yaml_io;
 pub mod file_watcher;
 pub(crate) mod migration;
-pub(crate) mod oc_conversions;
+pub(crate) mod conversions;
 pub(crate) mod oc;
 pub mod fs_audit_log_repo;
 pub mod fs_collection;
