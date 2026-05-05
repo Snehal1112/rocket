@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.6.7](https://github.com/Snehal1112/rocket/compare/v0.6.6...v0.6.7) (2026-05-05)
+
+### Features
+
+* **api:** importPostmanCollection + importPostmanEnvironment bindings ([2786ff7](https://github.com/Snehal1112/rocket/commit/2786ff7d5e4d0fcecc7218960ae7388a95523cc9))
+* **contract:** diff full key-value fields, body content, and auth detail ([e5e81a9](https://github.com/Snehal1112/rocket/commit/e5e81a912aea1b010ede7e0d33266f7e55c7123e))
+* **contract:** expand snapshot to capture full key-value fields and auth detail ([ad7bcb1](https://github.com/Snehal1112/rocket/commit/ad7bcb17108c2bf27e3bffc20bf925dcf15ee228))
+* **contract:** update RequestSignatureSnapshot type with full field data ([7c5ef8d](https://github.com/Snehal1112/rocket/commit/7c5ef8d2c4f06b7703325c7aba28c7fe70c7972d))
+* **import:** import_postman_collection + import_postman_environment on ImportService ([ac3827a](https://github.com/Snehal1112/rocket/commit/ac3827a07c6971e0efab286114162b2e33c41a2b))
+* **import:** postman AST structs + error variants + serde_json dep ([0b7d65b](https://github.com/Snehal1112/rocket/commit/0b7d65b9f2b05f8aa5b4b8cfadd41f1270c8d1f8))
+* **import:** postman converter — auth, headers, params, body, variables ([db4ffd2](https://github.com/Snehal1112/rocket/commit/db4ffd2d6f72323b8228231cab806400f1cc3570))
+* **import:** postman JSON parser + environment parser ([6a2c717](https://github.com/Snehal1112/rocket/commit/6a2c717fffcbd6dcd27895004f4f4e39a27e489c))
+* **import:** postman request item converter ([6a038f3](https://github.com/Snehal1112/rocket/commit/6a038f3d8fd2c6b843cfde559342a476a95953c8))
+* **infra:** add yaml_io module with read_dir_yaml, read_dir_by_mtime, delete_if_exists ([2e0a4c7](https://github.com/Snehal1112/rocket/commit/2e0a4c70f16b1a332aee2f39e03549d80a2d20b1))
+* **infra:** implement performance improvements by adding get_summaries, replacing serde_json::Value with concrete types ([dbbb591](https://github.com/Snehal1112/rocket/commit/dbbb59155cd5388686c28b79165d4a6f0884c58e))
+* **tauri:** expose get_collection_summaries command wired to get_summaries ([8189bf0](https://github.com/Snehal1112/rocket/commit/8189bf0cfac38b986e1a60c47d75802ec51b1d3b))
+* **tauri:** register import_postman_collection and import_postman_environment commands ([4bcb831](https://github.com/Snehal1112/rocket/commit/4bcb8310372bb5cda8a26b512baded3609efc707))
+* **ui:** ImportDialog source toggle — Bruno / Postman with env file picker ([6068519](https://github.com/Snehal1112/rocket/commit/606851984a650691ec5292d59c3fa9df56e4a6ae))
+
+### Bug Fixes
+
+* **collections:** use on-disk filename for contract snapshot key ([56247b4](https://github.com/Snehal1112/rocket/commit/56247b4a1862b731ff05b404b981c7f417f6d672))
+* **contract-tab:** pre-load changelogs for all contracts on list view ([ea526a5](https://github.com/Snehal1112/rocket/commit/ea526a566d6d68048d3c80740daedf474cd57cb6))
+* **contract-tab:** stabilise changelogs selector with useShallow ([0b88081](https://github.com/Snehal1112/rocket/commit/0b8808196eb0aaabf9a9bdd8b9ef751cebfa87e3))
+* **contract-tab:** stabilize contracts selector and skip loaded changelogs ([ab92fa1](https://github.com/Snehal1112/rocket/commit/ab92fa1b527c42c627ec8d02a7c9c8790adc7e86))
+* **contract:** add serde(default) to headers, query_params, auth_detail for backward compat ([32a4872](https://github.com/Snehal1112/rocket/commit/32a48725375982851cf9640ff6f7a2db0318f4d8))
+* **contract:** document duplicate-key invariant, add missing diff tests, minor cleanup ([398a289](https://github.com/Snehal1112/rocket/commit/398a289878529479d13ea495dcb1091df950e440))
+* **contract:** OAuth2 auth detail, binary body file_path, PartialEq on ContractSnapshot ([1b3072e](https://github.com/Snehal1112/rocket/commit/1b3072ea9c456523c3a26d8fc79f3871926c5120))
+* **contract:** refresh changelog count on file watcher events ([0b48f29](https://github.com/Snehal1112/rocket/commit/0b48f294e403fa76adf4c4bea9f857ccd1f7f4b3))
+* **contract:** remove unused variable in form_field diff test ([9481e04](https://github.com/Snehal1112/rocket/commit/9481e046d7b47e587b92576b5d012b77a42fee95))
+* **contract:** truncate ApiKey secret in auth_detail; rename SnapshotKeyValue to avoid type collision ([6f7635c](https://github.com/Snehal1112/rocket/commit/6f7635c3d5502c1228fa2980fe7d63cb34577b30))
+* **contract:** truncate long document filenames in ContractCard ([4535a57](https://github.com/Snehal1112/rocket/commit/4535a5734bf67cfdd13724436fd3ff44e6d378e7))
+* **contract:** update struct literals for expanded RequestSignatureSnapshot ([d73e43f](https://github.com/Snehal1112/rocket/commit/d73e43f2722c594638b2c3a2e61799af48efd09d))
+* **frontend:** revert get_collection to full load; add summary type to CollectionItem union with guards ([e82dde9](https://github.com/Snehal1112/rocket/commit/e82dde925c7b1f905d0915574940fdd1a3f4f549))
+* **import:** suppress dead_code warns, clean unused re-exports ([c9f34bc](https://github.com/Snehal1112/rocket/commit/c9f34bcda9a9390911436f90025dd1188e218b1a))
+* **infra:** acquire per-collection mutex in rename_request to prevent RMW race ([d8591f7](https://github.com/Snehal1112/rocket/commit/d8591f7121b61afabf2b8cae81416568205743be))
+* **infra:** add per-collection Arc<Mutex> map to serialize RMW ops in save_settings, save_folder_variables, save_request_variables, move_item ([4576e9c](https://github.com/Snehal1112/rocket/commit/4576e9cabe1d06d3fcb14e03177e29f8c449cf04))
+* **infra:** add per-collection Arc<Mutex> map to serialize RMW ops; add new_standalone() for call sites without shared locks ([aed9e7a](https://github.com/Snehal1112/rocket/commit/aed9e7a7ed5cbd9a78c81f5673e654b4ec235079))
+* **infra:** align FsEnvironmentRepo::list with warn-on-corrupt pattern from yaml_io ([9f8add7](https://github.com/Snehal1112/rocket/commit/9f8add7d657bae28f69e7d4c3151d74e058de906))
+* **infra:** complete Phase 1 safety refactor with poison recovery, per-collection locking, and transactional migration ([5a38ecf](https://github.com/Snehal1112/rocket/commit/5a38ecf336738402927e11318facabcbab217884))
+* **infra:** delete .json only after atomic_write_bulk succeeds in migration ([86f1191](https://github.com/Snehal1112/rocket/commit/86f11912ab1a5da7aafd25eaa0e24baba4adee77))
+* **infra:** extend collection RMW lock to save_request and reorder_items ([96f7988](https://github.com/Snehal1112/rocket/commit/96f7988cd91a587a3c3d4ea8f7bfec6f572c3399))
+* **infra:** filter Summary items in folder_to_oc_folder/collection_to_oc_collection instead of emitting empty folder ([74a149f](https://github.com/Snehal1112/rocket/commit/74a149f768eb5aff802c719f0bc0ec273fe7f340))
+* **infra:** harden atomic_write — sync_all, parent-dir fsync, pid+nanos collision-resistant suffix ([5436795](https://github.com/Snehal1112/rocket/commit/54367959e0887515ac397e68ae808af6b3f8c91b))
+* **infra:** include .uid files in legacy backup; add snapshot_backs_up_uid_files test ([3567790](https://github.com/Snehal1112/rocket/commit/35677901ada46e4bfe2a16a3aaa83b1792c7c247))
+* **infra:** reject symlinks in delete/delete_folder/build_folder_tree/migration; validate_name on all public methods ([ed64cd0](https://github.com/Snehal1112/rocket/commit/ed64cd0b222b49f0b4636aa1eef82d428994444e))
+* **infra:** remove needless borrow and clone_on_copy clippy warnings ([2c04f5a](https://github.com/Snehal1112/rocket/commit/2c04f5a86f354fccda75b1dc70f3ebe66db2e8c4))
+* **infra:** replace expect(lock poisoned) with into_inner() recovery in audit, watcher, and shared-path repo ([2d10258](https://github.com/Snehal1112/rocket/commit/2d102582689ad147458714f31e827a02f541338e))
+* **infra:** skip corrupt JSONL lines in audit log read instead of aborting ([fdc6d13](https://github.com/Snehal1112/rocket/commit/fdc6d1370ec48a52bfbbc1e4735e898beab93fbd))
+* **infra:** suppress expected unused-import warnings on pub(crate) re-exports; remove two genuinely unused imports in tests ([bf87ba4](https://github.com/Snehal1112/rocket/commit/bf87ba4f5c1599339bce9d66b3017bb317699ea6))
+* **infra:** surface interrupted migration error in get(); wire is_migration_interrupted ([a563353](https://github.com/Snehal1112/rocket/commit/a563353ef25947374029c8b5b77590b71edc1a90))
+* **infra:** switch workspace_config, migration, and template writes to atomic_write ([0244041](https://github.com/Snehal1112/rocket/commit/02440418d4178ed91d0c5b2d58b689a8ee6a0ef7))
+* **infra:** transactional migration — sentinel file + .legacy_backup snapshot; expose is_migration_interrupted ([e1114f1](https://github.com/Snehal1112/rocket/commit/e1114f1a524f5b6824c6f443bf584ce4afbe8c9b))
+* **infra:** validate old_name in rename; propagate I/O errors from reject_symlink ([92cf676](https://github.com/Snehal1112/rocket/commit/92cf676b74f06441f87346433240d04a27f2ccfa))
+* **infra:** warn on corrupt YAML in read_dir_yaml instead of silently skipping ([c49bd56](https://github.com/Snehal1112/rocket/commit/c49bd56b6d619659b5c6c05476a5a1f7206ba7c1))
+* **infra:** warn on missing uid instead of silently minting in OC deserialization ([9f20068](https://github.com/Snehal1112/rocket/commit/9f2006841aa597bfaf55aaaab996a7fc5ca2935a))
+
+### Performance Improvements
+
+* **collection:** replace variables Value with CollectionVariable ([29746f8](https://github.com/Snehal1112/rocket/commit/29746f8cc5a823d21ba11217bf2598552763c581))
+* **environment:** replace client_certificates serde_json::Value with ClientCertificate ([178d867](https://github.com/Snehal1112/rocket/commit/178d8678563ef24e2f76acf92e42e1844301f343))
+* **infra:** add atomic_write_bulk with batched parent-dir fsync; use in migration ([9649355](https://github.com/Snehal1112/rocket/commit/9649355f99e88dbf0c3b0bcb85f87f3395503966))
+* **infra:** add get_summaries for lightweight sidebar tree ([508cfc5](https://github.com/Snehal1112/rocket/commit/508cfc533e3a91b3897c8f2725fc551350bfdf54))
+* **infra:** early-return for root requests in get_folder_chain_variables; add tracing span ([5a53784](https://github.com/Snehal1112/rocket/commit/5a537847e91460f6a0bac7fcbb1b39a00075ea39))
+* **infra:** list() sorts history by mtime before parsing, stopping early once limit is reached ([1b057a8](https://github.com/Snehal1112/rocket/commit/1b057a8d0eed88b70741446ea76dcf49c2ed522a))
+* **infra:** parse folder.yml once per folder in build_folder_tree, eliminating P3 double-parse ([1c28c37](https://github.com/Snehal1112/rocket/commit/1c28c3796348be6fef6f0e3f5e245488142c9d2d))
+* **infra:** replace into_owned() in sort comparator with borrowed to_str() lookup ([602255b](https://github.com/Snehal1112/rocket/commit/602255bfc6dc000a95261d74f9b8bca4d9949637))
+* **infra:** take &Request in request_to_oc_http_request, eliminating deep-clone on save ([e33601f](https://github.com/Snehal1112/rocket/commit/e33601f6488bfcffe2f8b9cb02ef5644764480b3))
+* **shared:** use serde_yaml::Value for HttpRequestExample snapshots ([6c1086d](https://github.com/Snehal1112/rocket/commit/6c1086db01bbc618b9f44cd50ff9fcb5e7d61f0f))
+* **tauri:** use get_summaries for sidebar collection loads ([4d34a04](https://github.com/Snehal1112/rocket/commit/4d34a0433d951885d4dbada884575d57417e2782))
+
 ## [0.6.6](https://github.com/Snehal1112/rocket/compare/v0.6.5...v0.6.6) (2026-05-02)
 
 ### Features
