@@ -81,26 +81,13 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
     let items: Vec<OcItem> = folder
         .items
         .into_iter()
-        .map(|item| match item {
-            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
-            CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
-            // Summary items should never appear in serialization paths; treat as opaque no-op.
-            CollectionItem::Summary(_) => OcItem::Folder(OcFolder {
-                info: OcFolderInfo {
-                    name: String::new(),
-                    uid: None,
-                    description: None,
-                    folder_type: None,
-                    seq: None,
-                    tags: Vec::new(),
-                    request: None,
-                },
-                items: None,
-                request: None,
-                docs: None,
-            }),
+        .filter_map(|item| match item {
+            CollectionItem::Request(req) => Some(OcItem::Http(request_to_oc_http_request(&req))),
+            CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
+            // Summary items carry no body/auth — they must not be serialized to disk.
+            CollectionItem::Summary(_) => None,
             CollectionItem::OpaqueItem(opaque) => {
-                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+                Some(serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
                         info: OcFolderInfo {
                             name: opaque.name,
@@ -115,7 +102,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
                         request: None,
                         docs: None,
                     })
-                })
+                }))
             }
         })
         .collect();
@@ -249,26 +236,13 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         .root
         .items
         .into_iter()
-        .map(|item| match item {
-            CollectionItem::Request(req) => OcItem::Http(request_to_oc_http_request(&req)),
-            CollectionItem::Folder(f) => OcItem::Folder(folder_to_oc_folder(f)),
-            // Summary items should never appear in serialization paths; treat as opaque no-op.
-            CollectionItem::Summary(_) => OcItem::Folder(OcFolder {
-                info: OcFolderInfo {
-                    name: String::new(),
-                    uid: None,
-                    description: None,
-                    folder_type: None,
-                    seq: None,
-                    tags: Vec::new(),
-                    request: None,
-                },
-                items: None,
-                request: None,
-                docs: None,
-            }),
+        .filter_map(|item| match item {
+            CollectionItem::Request(req) => Some(OcItem::Http(request_to_oc_http_request(&req))),
+            CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
+            // Summary items carry no body/auth — they must not be serialized to disk.
+            CollectionItem::Summary(_) => None,
             CollectionItem::OpaqueItem(opaque) => {
-                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+                Some(serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
                         info: OcFolderInfo {
                             name: opaque.name,
@@ -283,7 +257,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
                         request: None,
                         docs: None,
                     })
-                })
+                }))
             }
         })
         .collect();
