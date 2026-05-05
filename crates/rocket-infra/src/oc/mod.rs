@@ -30,10 +30,13 @@ pub use workspace::*;
 // Re-export the type aliases that opencollection.rs re-exported from shared crates.
 #[allow(unused_imports)]
 pub use rocket_shared::description::{Description as OcDescription, Documentation as OcDocumentation};
+#[allow(unused_imports)]
 pub use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
 #[allow(unused_imports)]
 pub use rocket_shared::variable_value::{VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant};
+#[allow(unused_imports)]
 pub use rocket_shared::assertion::Assertion as OcAssertion;
+#[allow(unused_imports)]
 pub use rocket_shared::certificate::ClientCertificate as OcClientCertificate;
 
 #[cfg(test)]

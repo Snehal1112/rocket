@@ -1,7 +1,7 @@
 use super::*;
 use crate::oc::*;
 use rocket_collection::collection::Collection;
-use rocket_collection::folder::{CollectionItem, Folder};
+use rocket_collection::folder::CollectionItem;
 use rocket_collection::settings::CollectionVariable;
 use rocket_collection::Request;
 use rocket_environment::environment::Environment;
@@ -1044,7 +1044,7 @@ fn collection_docs_roundtrips_through_docs_field() {
 
 #[test]
 fn workspace_config_to_oc_workspace_config() {
-    use rocket_workspace::{CollectionRefType, WorkspaceConfig};
+    use rocket_workspace::WorkspaceConfig;
     use std::path::PathBuf;
 
     let mut cfg = WorkspaceConfig::new("My API");
