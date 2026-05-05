@@ -780,18 +780,29 @@ fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     let mut folder = Folder::new(&dir_name);
-    folder.uid = read_uid_from_yaml(current);
+    // Clear the auto-generated UID; we'll load the actual one from disk or legacy sources.
+    folder.uid = String::new();
 
-    // Read folder.yml for metadata if present. The `name` field in folder.yml
-    // is the display name and may differ from the directory name. We preserve
-    // the directory name in `dir_name` so the frontend can use it for paths.
+    // Parse folder.yml once to extract both uid and display name.
+    // For the collection root, folder.yml does not exist — fall back to read_uid_from_yaml
+    // which reads opencollection.yml instead.
     let folder_yml = current.join("folder.yml");
     if folder_yml.exists() {
         if let Ok(content) = fs::read_to_string(&folder_yml) {
             if let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
+                if let Some(ref uid) = info.uid {
+                    if !uid.is_empty() {
+                        folder.uid = uid.clone();
+                    }
+                }
                 folder.name = info.name;
             }
         }
+        if folder.uid.is_empty() {
+            folder.uid = read_uid_from_yaml(current);
+        }
+    } else {
+        folder.uid = read_uid_from_yaml(current);
     }
     folder.dir_name = Some(dir_name);
 
@@ -1049,6 +1060,29 @@ mod tests {
         assert_eq!(loaded.auth, settings.auth);
         assert_eq!(loaded.headers.len(), 1);
         assert_eq!(loaded.docs, Some("My API docs".into()));
+    }
+
+    #[test]
+    fn folder_uid_and_name_are_loaded_from_single_parse() {
+        use rocket_collection::CollectionItem;
+
+        let (_dir, repo) = setup();
+        repo.create("my-api").unwrap();
+        repo.create_folder("my-api", "auth").unwrap();
+        // get() must load the folder's UID and name without error.
+        let col = repo.get("my-api").unwrap();
+        let auth_folder = col.root.items.iter().find_map(|item| {
+            if let CollectionItem::Folder(f) = item {
+                if f.dir_name.as_deref() == Some("auth") {
+                    return Some(f);
+                }
+            }
+            None
+        });
+        assert!(auth_folder.is_some(), "auth folder not found in tree");
+        let auth = auth_folder.unwrap();
+        // UID must be a non-empty string (generated on create).
+        assert!(!auth.uid.is_empty(), "folder uid must not be empty");
     }
 
     #[test]
