@@ -134,7 +134,7 @@ export function CollectionSettingsDialog({
       </div>
 
       {/* Tab content. */}
-      <div className='min-h-[12rem]'>
+      <div className='min-h-48'>
         {activeTab === 'auth' && (
           <AuthEditor
             auth={auth}
