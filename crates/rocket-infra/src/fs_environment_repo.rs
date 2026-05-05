@@ -31,13 +31,16 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                let content = fs::read_to_string(&path)?;
-                if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
-                    result.push(Environment::from(oc));
-                } else if let Ok(env) = serde_yaml::from_str::<Environment>(&content) {
-                    result.push(env);
-                }
+            if !path.extension().is_some_and(|e| e == "yml") {
+                continue;
+            }
+            let content = fs::read_to_string(&path)?;
+            if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
+                result.push(Environment::from(oc));
+            } else if let Ok(env) = serde_yaml::from_str::<Environment>(&content) {
+                result.push(env);
+            } else {
+                tracing::warn!(path = %path.display(), "skipping corrupt environment YAML file");
             }
         }
         result.sort_by(|a, b| a.name.cmp(&b.name));
