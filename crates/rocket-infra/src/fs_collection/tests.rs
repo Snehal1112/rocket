@@ -859,3 +859,50 @@ fn get_summaries_preserves_folder_structure() {
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].name, "Login");
 }
+
+#[test]
+fn rename_request_holds_collection_mutex() {
+    // Structural invariant: rename_request must acquire the per-collection mutex
+    // before doing any I/O, matching every other RMW method on FsCollectionRepo.
+    // We verify this by holding the mutex on the test thread and showing that a
+    // rename_request call from another thread blocks until we drop the guard.
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    let (_dir, repo) = setup();
+    let repo = Arc::new(repo);
+    repo.create("col").unwrap();
+    let req = rocket_collection::Request::new("R", HttpMethod::Get, "https://example.com");
+    repo.save_request("col", "req.yml", &req).unwrap();
+
+    let mutex = repo.collection_mutex("col");
+    let guard = mutex.lock().unwrap();
+
+    let started = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let repo_t = Arc::clone(&repo);
+    let started_t = Arc::clone(&started);
+    let finished_t = Arc::clone(&finished);
+    let handle = thread::spawn(move || {
+        started_t.store(true, Ordering::SeqCst);
+        repo_t.rename_request("col", "req.yml", "req2.yml").unwrap();
+        finished_t.store(true, Ordering::SeqCst);
+    });
+
+    // Wait for the worker to actually start.
+    while !started.load(Ordering::SeqCst) {
+        thread::sleep(Duration::from_millis(1));
+    }
+    // Give it ample time to attempt the rename. It must not finish while we hold the lock.
+    thread::sleep(Duration::from_millis(50));
+    assert!(
+        !finished.load(Ordering::SeqCst),
+        "rename_request finished while the per-collection mutex was held — mutex guard missing"
+    );
+
+    drop(guard);
+    handle.join().unwrap();
+    assert!(finished.load(Ordering::SeqCst));
+    assert!(repo.collection_path("col").join("req2.yml").exists());
+}

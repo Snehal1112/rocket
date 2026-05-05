@@ -77,6 +77,8 @@ pub(super) fn save_request(repo: &FsCollectionRepo, collection: &str, path: &str
 
 pub(super) fn rename_request(repo: &FsCollectionRepo, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()> {
     Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
     let collection_dir = repo.collection_path(collection);
     let old_file = resolve_request_path(repo, &collection_dir, old_path)?;
     let new_ext = if new_path.ends_with(".yml") || new_path.ends_with(".yaml") || new_path.ends_with(".json") {
