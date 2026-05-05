@@ -12,7 +12,7 @@ use rocket_collection::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::migration::{detect_format, migrate_collection, CollectionFormat};
+use crate::migration::{detect_format, is_migration_interrupted, migrate_collection, CollectionFormat};
 use crate::oc_conversions::{
     collection_variable_to_oc_variable, oc_http_request_to_request,
     oc_variable_to_collection_variable, request_to_oc_http_request,
@@ -220,6 +220,14 @@ impl CollectionRepository for FsCollectionRepo {
         let path = self.collection_path(name);
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Collection '{}'", name)));
+        }
+        // Surface interrupted migrations before attempting to load.
+        if is_migration_interrupted(&path) {
+            return Err(DomainError::Internal(format!(
+                "Collection '{}' has an incomplete migration. \
+                 Restore from .legacy_backup/ or remove .migration_in_progress to retry.",
+                name
+            )));
         }
         // Auto-migrate legacy JSON if needed.
         if detect_format(&path) == CollectionFormat::LegacyJson {
