@@ -5,6 +5,7 @@ use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
+use crate::yaml_io::{read_dir_by_mtime, read_dir_yaml};
 
 pub struct FsHistoryRepo {
     dir: PathBuf,
@@ -22,27 +23,7 @@ impl FsHistoryRepo {
 
 impl HistoryRepository for FsHistoryRepo {
     fn list(&self, limit: Option<usize>) -> DomainResult<Vec<HistoryEntry>> {
-        if !self.dir.exists() {
-            return Ok(Vec::new());
-        }
-
-        // Collect file paths with mtime so we can sort before parsing.
-        let mut paths: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
-        for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                let mtime = entry
-                    .metadata()?
-                    .modified()
-                    .unwrap_or(std::time::UNIX_EPOCH);
-                paths.push((mtime, path));
-            }
-        }
-        // Most recently written first — mtime is a reliable proxy for entry.timestamp
-        // because history files are written once and never modified.
-        paths.sort_by(|a, b| b.0.cmp(&a.0));
-
+        let paths = read_dir_by_mtime(&self.dir)?;
         let cap = limit.unwrap_or(usize::MAX);
         let mut entries = Vec::with_capacity(cap.min(paths.len()));
         for (_, path) in paths {
@@ -73,7 +54,6 @@ impl HistoryRepository for FsHistoryRepo {
     }
 
     fn save(&self, entry: &HistoryEntry) -> DomainResult<()> {
-        fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(entry)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
         atomic_write(&self.file_path(&entry.id), yaml.as_bytes())?;
@@ -81,38 +61,15 @@ impl HistoryRepository for FsHistoryRepo {
     }
 
     fn clear(&self) -> DomainResult<()> {
-        if self.dir.exists() {
-            for entry in fs::read_dir(&self.dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "yml") {
-                    fs::remove_file(&path)?;
-                }
-            }
+        for (path, _) in read_dir_yaml::<HistoryEntry>(&self.dir)? {
+            fs::remove_file(&path)?;
         }
         Ok(())
     }
 
     fn search(&self, filter: &HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
         const SEARCH_LIMIT: usize = 200;
-
-        if !self.dir.exists() {
-            return Ok(vec![]);
-        }
-
-        // Collect and sort file paths by modified-time descending before reading,
-        // so we return the most-recent matches and can stop early once the cap is hit.
-        let mut paths: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
-        for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                let mtime = entry.metadata()?.modified().unwrap_or(std::time::UNIX_EPOCH);
-                paths.push((mtime, path));
-            }
-        }
-        paths.sort_by(|a, b| b.0.cmp(&a.0));
-
+        let paths = read_dir_by_mtime(&self.dir)?;
         let mut results = Vec::new();
         for (_, path) in paths {
             if results.len() >= SEARCH_LIMIT {
@@ -269,21 +226,16 @@ mod tests {
 
     #[test]
     fn list_with_limit_reads_only_needed_files() {
-        // This test verifies correctness of the mtime-first approach, not I/O count
-        // (we cannot intercept fs calls in unit tests). It saves 10 entries and asserts
-        // that list(3) returns the 3 most recently *saved* ones.
         let (_dir, repo) = setup();
         let mut ids = Vec::new();
         for i in 0..10u64 {
             let e = HistoryEntry::new("GET", format!("/path/{}", i), 200, i, 0);
             ids.push(e.id.clone());
             repo.save(&e).unwrap();
-            // Sleep 2 ms so mtime is strictly increasing.
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let list = repo.list(Some(3)).unwrap();
         assert_eq!(list.len(), 3);
-        // The 3 most recently written entries (ids 7, 8, 9) must be returned.
         let returned_ids: std::collections::HashSet<_> = list.iter().map(|e| e.id.as_str()).collect();
         for id in &ids[7..] {
             assert!(returned_ids.contains(id.as_str()), "expected id {} in results", id);
