@@ -84,7 +84,7 @@ impl Folder {
     pub fn request_count(&self) -> usize {
         self.items.iter().map(|item| match item {
             CollectionItem::Request(_) => 1,
-            CollectionItem::Summary(_) => 1,
+            CollectionItem::Summary(_) => 1, // one summary = one request on disk
             CollectionItem::Folder(f) => f.request_count(),
             CollectionItem::OpaqueItem(_) => 0,
         }).sum()
