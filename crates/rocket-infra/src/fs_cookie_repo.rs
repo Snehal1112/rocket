@@ -2,9 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use rocket_http::{CookieJar, CookieRepository};
-use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::error::DomainResult;
 
 use crate::atomic_write;
+use crate::yaml_io::read_dir_yaml;
 
 pub struct FsCookieRepo {
     dir: PathBuf,
@@ -24,21 +25,10 @@ impl FsCookieRepo {
 
 impl CookieRepository for FsCookieRepo {
     fn get_all(&self) -> DomainResult<Vec<CookieJar>> {
-        let mut result = Vec::new();
-        if !self.dir.exists() {
-            return Ok(result);
-        }
-        for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                let content = fs::read_to_string(&path)?;
-                if let Ok(jar) = serde_yaml::from_str::<CookieJar>(&content) {
-                    result.push(jar);
-                }
-            }
-        }
-        Ok(result)
+        Ok(read_dir_yaml::<CookieJar>(&self.dir)?
+            .into_iter()
+            .map(|(_, jar)| jar)
+            .collect())
     }
 
     fn get_by_domain(&self, domain: &str) -> DomainResult<Option<CookieJar>> {
@@ -48,27 +38,20 @@ impl CookieRepository for FsCookieRepo {
         }
         let content = fs::read_to_string(&path)?;
         let jar = serde_yaml::from_str(&content)
-            .map_err(|e| DomainError::Internal(format!("Failed to parse YAML: {e}")))?;
+            .map_err(|e| rocket_shared::error::DomainError::Internal(format!("Failed to parse YAML: {e}")))?;
         Ok(Some(jar))
     }
 
     fn save(&self, jar: &CookieJar) -> DomainResult<()> {
-        fs::create_dir_all(&self.dir)?;
         let yaml = serde_yaml::to_string(jar)
-            .map_err(|e| DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
+            .map_err(|e| rocket_shared::error::DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
         atomic_write(&self.file_path(&jar.domain), yaml.as_bytes())?;
         Ok(())
     }
 
     fn clear(&self) -> DomainResult<()> {
-        if self.dir.exists() {
-            for entry in fs::read_dir(&self.dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "yml") {
-                    fs::remove_file(&path)?;
-                }
-            }
+        for (path, _) in read_dir_yaml::<CookieJar>(&self.dir)? {
+            fs::remove_file(&path)?;
         }
         Ok(())
     }
@@ -124,6 +107,13 @@ mod tests {
         repo.save(&sample_jar("a.com")).unwrap();
         repo.save(&sample_jar("b.com")).unwrap();
         repo.clear().unwrap();
+        assert!(repo.get_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_all_returns_empty_when_dir_missing() {
+        let dir = TempDir::new().unwrap();
+        let repo = FsCookieRepo::new(dir.path().join("cookies"));
         assert!(repo.get_all().unwrap().is_empty());
     }
 }
