@@ -45,7 +45,7 @@ impl FsAuditLogRepo {
 
 impl AuditLogRepository for FsAuditLogRepo {
     fn append(&self, event: &SecurityAuditEvent) -> DomainResult<()> {
-        let _guard = self.write_lock.lock().expect("audit write-lock poisoned");
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -198,5 +198,24 @@ mod tests {
         repo.append(&b).unwrap();
         let latest = repo.latest().unwrap().unwrap();
         assert_eq!(latest.hash, b.hash);
+    }
+
+    #[test]
+    fn append_is_callable_multiple_times() {
+        let dir = TempDir::new().unwrap();
+        let repo = FsAuditLogRepo::new(dir.path().join("audit.jsonl")).unwrap();
+        for i in 0..3u64 {
+            let ev = SecurityAuditEvent::new(
+                "test_actor",
+                None,
+                AuditEventKind::CollectionDeleted {
+                    collection: format!("coll-{i}"),
+                },
+                "",
+            );
+            repo.append(&ev).unwrap();
+        }
+        let events = repo.load_all().unwrap();
+        assert_eq!(events.len(), 3);
     }
 }
