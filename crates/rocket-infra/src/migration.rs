@@ -64,6 +64,58 @@ fn is_legacy_request_file(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "json")
 }
 
+/// Return `true` if a previous migration of this collection was interrupted.
+/// Callers can surface a warning instead of showing a broken collection.
+pub fn is_migration_interrupted(collection_dir: &Path) -> bool {
+    collection_dir.join(".migration_in_progress").exists()
+}
+
+/// Copy all `.json` and `.uid` files from `collection_dir` (recursively) into
+/// `collection_dir/.legacy_backup/`, preserving the relative directory structure.
+pub(crate) fn snapshot_legacy_files(collection_dir: &Path) -> DomainResult<()> {
+    let backup_dir = collection_dir.join(".legacy_backup");
+    fs::create_dir_all(&backup_dir)?;
+    copy_legacy_tree(collection_dir, collection_dir, &backup_dir)
+}
+
+fn copy_legacy_tree(base: &Path, src: &Path, backup_dir: &Path) -> DomainResult<()> {
+    let entries = fs::read_dir(src)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Skip the backup dir itself and hidden dirs/files.
+        if name == ".legacy_backup" || name.starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            // Skip symlinked directories.
+            if std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let rel = path.strip_prefix(base).map_err(|e| {
+                DomainError::Internal(format!("Failed to strip prefix during backup: {e}"))
+            })?;
+            fs::create_dir_all(backup_dir.join(rel))?;
+            copy_legacy_tree(base, &path, backup_dir)?;
+        } else if path.extension().is_some_and(|e| e == "json")
+            || path.file_name().is_some_and(|n| n == ".uid")
+        {
+            let rel = path.strip_prefix(base).map_err(|e| {
+                DomainError::Internal(format!("Failed to strip prefix during backup: {e}"))
+            })?;
+            let dst = backup_dir.join(rel);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&path, &dst)?;
+        }
+    }
+    Ok(())
+}
+
 /// Migrate a legacy JSON collection to OpenCollection YAML format.
 /// Idempotent — does nothing if already in OC format.
 pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
@@ -71,38 +123,71 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
         return Ok(());
     }
 
+    let sentinel = collection_dir.join(".migration_in_progress");
+
+    // Refuse to restart a migration that was previously interrupted — backup is still available.
+    if sentinel.exists() {
+        return Err(DomainError::Internal(format!(
+            "Previous migration of '{}' was interrupted. \
+             Restore from .legacy_backup/ or remove .migration_in_progress to retry.",
+            collection_dir.display()
+        )));
+    }
+
+    // Snapshot originals before touching anything.
+    snapshot_legacy_files(collection_dir)?;
+
+    // Write sentinel: migration is now in progress.
+    atomic_write(&sentinel, b"")?;
+
     let name = collection_dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Untitled".into());
 
-    // Migrate the directory tree recursively.
-    migrate_directory(collection_dir)?;
+    // Perform the migration. If anything fails, sentinel + backup stay for recovery.
+    let result = (|| -> DomainResult<()> {
+        migrate_directory(collection_dir)?;
 
-    // Write opencollection.yml at the root.
-    let uid = read_legacy_uid_value(collection_dir);
-    let oc = OcCollection {
-        opencollection: Some("0.1".into()),
-        uid: Some(uid),
-        info: Some(OcInfo { name, summary: None, version: None, authors: None }),
-        config: None,
-        items: None,
-        request: None,
-        docs: None,
-        bundled: None,
-        extensions: None,
-    };
-    let yaml = serde_yaml::to_string(&oc)
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
-    atomic_write(&collection_dir.join("opencollection.yml"), yaml.as_bytes())?;
+        let uid = read_legacy_uid_value(collection_dir);
+        let oc = OcCollection {
+            opencollection: Some("0.1".into()),
+            uid: Some(uid),
+            info: Some(OcInfo { name, summary: None, version: None, authors: None }),
+            config: None,
+            items: None,
+            request: None,
+            docs: None,
+            bundled: None,
+            extensions: None,
+        };
+        let yaml = serde_yaml::to_string(&oc)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+        atomic_write(&collection_dir.join("opencollection.yml"), yaml.as_bytes())?;
 
-    // Clean up legacy .uid at root.
-    let uid_path = collection_dir.join(".uid");
-    if uid_path.exists() {
-        let _ = fs::remove_file(&uid_path);
+        let uid_path = collection_dir.join(".uid");
+        if uid_path.exists() {
+            let _ = fs::remove_file(&uid_path);
+        }
+
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            // Remove sentinel and backup on success.
+            let _ = fs::remove_file(&sentinel);
+            let backup_dir = collection_dir.join(".legacy_backup");
+            if backup_dir.exists() {
+                let _ = fs::remove_dir_all(&backup_dir);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            // Sentinel stays. Backup stays. Caller can check is_migration_interrupted().
+            Err(e)
+        }
     }
-
-    Ok(())
 }
 
 /// Migrate a single directory: convert .json requests to .yml, create folder.yml for subdirs.
@@ -378,5 +463,81 @@ mod tests {
         assert!(!col.join("_order.json").exists());
         let content = fs::read_to_string(col.join("_order.yml")).unwrap();
         assert!(content.contains("a.yml"));
+    }
+
+    #[test]
+    fn sentinel_file_removed_on_successful_migration() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("my-api");
+        fs::create_dir(&col).unwrap();
+        let json = r#"{"uid":"1","name":"A","method":"GET","url":"/a","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col.join("a.json"), json).unwrap();
+
+        migrate_collection(&col).unwrap();
+
+        assert!(!col.join(".migration_in_progress").exists(), "sentinel must be removed on success");
+        assert!(col.join("opencollection.yml").exists());
+    }
+
+    #[test]
+    fn is_migration_interrupted_false_when_no_sentinel() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("clean-api");
+        fs::create_dir(&col).unwrap();
+        assert!(!is_migration_interrupted(&col));
+    }
+
+    #[test]
+    fn is_migration_interrupted_true_when_sentinel_exists() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("broken-api");
+        fs::create_dir(&col).unwrap();
+        fs::write(col.join(".migration_in_progress"), b"").unwrap();
+        assert!(is_migration_interrupted(&col));
+    }
+
+    #[test]
+    fn legacy_backup_removed_after_successful_migration() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("my-api");
+        fs::create_dir(&col).unwrap();
+        let json = r#"{"uid":"2","name":"B","method":"POST","url":"/b","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col.join("b.json"), json).unwrap();
+
+        migrate_collection(&col).unwrap();
+
+        assert!(!col.join(".legacy_backup").exists(), ".legacy_backup must be cleaned up on success");
+    }
+
+    #[test]
+    fn snapshot_preserves_json_files() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("snap-api");
+        fs::create_dir(&col).unwrap();
+        let json = r#"{"uid":"3","name":"C","method":"GET","url":"/c","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col.join("c.json"), json).unwrap();
+
+        snapshot_legacy_files(&col).unwrap();
+
+        let backup_file = col.join(".legacy_backup").join("c.json");
+        assert!(backup_file.exists(), "backup file must exist");
+        let content = fs::read_to_string(&backup_file).unwrap();
+        assert!(content.contains("\"uid\""));
+    }
+
+    #[test]
+    fn interrupted_migration_returns_error_on_retry() {
+        let dir = TempDir::new().unwrap();
+        let col = dir.path().join("broken-api");
+        fs::create_dir(&col).unwrap();
+        // Simulate interrupted migration: JSON file present + sentinel exists.
+        let json = r#"{"uid":"4","name":"D","method":"GET","url":"/d","headers":[],"body":null,"auth":{"authType":"none"}}"#;
+        fs::write(col.join("d.json"), json).unwrap();
+        fs::write(col.join(".migration_in_progress"), b"").unwrap();
+
+        let result = migrate_collection(&col);
+        assert!(result.is_err(), "retry of interrupted migration must return Err");
+        // Sentinel must still be there (not removed by the error path).
+        assert!(col.join(".migration_in_progress").exists());
     }
 }
