@@ -42,6 +42,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"]
 tracing-log = "0.2"
 async-trait = "0.1"
 ulid = { version = "1", features = ["serde"] }
+dashmap = "6"
 
 # Internal crates
 rocket-shared = { path = "crates/rocket-shared" }

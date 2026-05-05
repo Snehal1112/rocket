@@ -1,5 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use dashmap::DashMap;
 
 use crate::atomic_write;
 
@@ -93,11 +96,22 @@ fn cleanup_legacy_uid(dir: &Path) {
 
 pub struct FsCollectionRepo {
     base_dir: PathBuf,
+    locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl FsCollectionRepo {
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    pub fn new(base_dir: PathBuf, locks: Arc<DashMap<String, Arc<Mutex<()>>>>) -> Self {
+        Self { base_dir, locks }
+    }
+
+    /// Return the per-collection mutex, creating it on first access.
+    fn collection_mutex(&self, name: &str) -> Arc<Mutex<()>> {
+        Arc::clone(
+            self.locks
+                .entry(name.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .value(),
+        )
     }
 
     fn collection_path(&self, name: &str) -> PathBuf {
@@ -406,6 +420,22 @@ impl CollectionRepository for FsCollectionRepo {
     ) -> DomainResult<()> {
         Collection::validate_name(src_collection)?;
         Collection::validate_name(dst_collection)?;
+        // Acquire locks in sorted order to prevent deadlock.
+        let (first, second) = if src_collection <= dst_collection {
+            (src_collection, dst_collection)
+        } else {
+            (dst_collection, src_collection)
+        };
+        let mutex1 = self.collection_mutex(first);
+        let _guard1 = mutex1.lock().unwrap_or_else(|e| e.into_inner());
+        let mutex2_opt;
+        let _guard2 = if src_collection != dst_collection {
+            mutex2_opt = Some(self.collection_mutex(second));
+            Some(mutex2_opt.as_ref().unwrap().lock().unwrap_or_else(|e| e.into_inner()))
+        } else {
+            mutex2_opt = None;
+            None
+        };
         let src_collection_dir = self.collection_path(src_collection);
         let dst_collection_dir = self.collection_path(dst_collection);
         let src = self.validate_path(&src_collection_dir, Path::new(src_path))?;
@@ -499,6 +529,8 @@ impl CollectionRepository for FsCollectionRepo {
 
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
         Collection::validate_name(name)?;
+        let mutex = self.collection_mutex(name);
+        let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.settings_path(name);
 
         let mut oc: OcCollection = if path.exists() {
@@ -631,6 +663,8 @@ impl CollectionRepository for FsCollectionRepo {
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
         Collection::validate_name(collection)?;
+        let mutex = self.collection_mutex(collection);
+        let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
         let collection_dir = self.collection_path(collection);
         let folder_dir = if folder_path.is_empty() {
             collection_dir.clone()
@@ -714,6 +748,8 @@ impl CollectionRepository for FsCollectionRepo {
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
         Collection::validate_name(collection)?;
+        let mutex = self.collection_mutex(collection);
+        let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
         let collection_dir = self.collection_path(collection);
         let file_path = resolve_request_path(self, &collection_dir, request_path)?;
         let content = fs::read_to_string(&file_path)?;
@@ -906,7 +942,7 @@ mod tests {
 
     fn setup() -> (TempDir, FsCollectionRepo) {
         let dir = TempDir::new().unwrap();
-        let repo = FsCollectionRepo::new(dir.path().to_path_buf());
+        let repo = FsCollectionRepo::new(dir.path().to_path_buf(), Arc::new(DashMap::new()));
         (dir, repo)
     }
 
@@ -1562,7 +1598,7 @@ mod tests {
     fn delete_rejects_symlinked_collection() {
         use std::os::unix::fs::symlink;
         let dir = TempDir::new().unwrap();
-        let repo = FsCollectionRepo::new(dir.path().to_path_buf());
+        let repo = FsCollectionRepo::new(dir.path().to_path_buf(), Arc::new(DashMap::new()));
         let target = dir.path().parent().unwrap().join("outside");
         fs::create_dir_all(&target).unwrap();
         let link = dir.path().join("evil-collection");
@@ -1577,7 +1613,7 @@ mod tests {
     fn delete_folder_rejects_symlinked_folder() {
         use std::os::unix::fs::symlink;
         let dir = TempDir::new().unwrap();
-        let repo = FsCollectionRepo::new(dir.path().to_path_buf());
+        let repo = FsCollectionRepo::new(dir.path().to_path_buf(), Arc::new(DashMap::new()));
         repo.create("my-api").unwrap();
         let target = dir.path().parent().unwrap().join("important");
         fs::create_dir_all(&target).unwrap();
@@ -1655,6 +1691,31 @@ mod tests {
         // Root-level request has no ancestor folders, so chain variables must be empty.
         let vars = repo.get_folder_chain_variables("my-api", "root.yml").unwrap();
         assert!(vars.is_empty(), "expected no chain vars for root request, got {:?}", vars);
+    }
+
+    #[test]
+    fn concurrent_save_settings_does_not_corrupt_file() {
+        use std::thread;
+
+        let dir = TempDir::new().unwrap();
+        let locks: Arc<DashMap<String, Arc<Mutex<()>>>> = Arc::new(DashMap::new());
+        let repo = Arc::new(FsCollectionRepo::new(dir.path().to_path_buf(), Arc::clone(&locks)));
+        repo.create("race-api").unwrap();
+
+        let threads: Vec<_> = (0..8).map(|i| {
+            let repo = Arc::clone(&repo);
+            thread::spawn(move || {
+                let _ = i;
+                let settings = rocket_collection::CollectionSettings::default();
+                repo.save_settings("race-api", &settings).unwrap();
+                // Verify get_settings also works without panic.
+                repo.get_settings("race-api").unwrap();
+            })
+        }).collect();
+
+        for t in threads {
+            t.join().unwrap();
+        }
     }
 
     #[test]

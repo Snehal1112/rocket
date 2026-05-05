@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use dashmap::DashMap;
+
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
     Request,
@@ -15,16 +17,20 @@ use crate::FsCollectionRepo;
 /// at runtime without rebuilding the Tauri service graph.
 pub struct SharedPathCollectionRepo {
     active_workspace_path: Arc<Mutex<PathBuf>>,
+    collection_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl SharedPathCollectionRepo {
     pub fn new(active_workspace_path: Arc<Mutex<PathBuf>>) -> Self {
-        Self { active_workspace_path }
+        Self {
+            active_workspace_path,
+            collection_locks: Arc::new(DashMap::new()),
+        }
     }
 
     fn repo(&self) -> FsCollectionRepo {
         let base = self.active_workspace_path.lock().unwrap_or_else(|e| e.into_inner()).join("collections");
-        FsCollectionRepo::new(base)
+        FsCollectionRepo::new(base, Arc::clone(&self.collection_locks))
     }
 }
 
