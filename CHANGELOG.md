@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.8](https://github.com/Snehal1112/rocket/compare/v0.6.7...v0.6.8) (2026-05-06)
+
+### Bug Fixes
+
+* **auth:** persist enabled state for OAuth2 additional parameters ([cbdfdba](https://github.com/Snehal1112/rocket/commit/cbdfdbab4bbf9cd9c75cbab389cda151fdf3449c))
+* **collection:** self-heal request files missing uid field on read ([9dd8262](https://github.com/Snehal1112/rocket/commit/9dd82624e6305919a716bf06bb00389092ce3371))
+
 ## [0.6.7](https://github.com/Snehal1112/rocket/compare/v0.6.6...v0.6.7) (2026-05-05)
 
 ### Features
