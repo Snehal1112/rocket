@@ -53,10 +53,7 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let docs: Option<Documentation> = oc.docs.map(Documentation::text);
 
     Request {
-        uid: oc.uid.unwrap_or_else(|| {
-            tracing::warn!("request file is missing uid field; using empty uid");
-            String::new()
-        }),
+        uid: oc.uid.unwrap_or_default(),
         name,
         method,
         url,

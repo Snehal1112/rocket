@@ -110,7 +110,7 @@ pub(super) fn count_request_files(dir: &Path) -> usize {
 pub(super) fn is_request_file(path: &Path) -> bool {
     // Exclude reserved sidecar and config files.
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if matches!(name, "collection.json" | "_order.json" | "_order.yml" | "opencollection.yml" | "folder.yml") {
+        if matches!(name, "collection.json" | "_order.json" | "_order.yml" | "opencollection.yml" | "folder.yml" | "workspace.yml") {
             return false;
         }
     }

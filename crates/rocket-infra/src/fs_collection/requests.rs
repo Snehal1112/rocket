@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use rocket_collection::{request_filename_for, Collection, Request};
+use rocket_collection::{generate_uid, request_filename_for, Collection, Request};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -30,6 +30,14 @@ pub(super) fn get_request(repo: &FsCollectionRepo, collection: &str, path: &str)
                 .map_err(|e| DomainError::Internal(format!("Failed to parse YAML request: {e}")))?;
             let mut req = oc_http_request_to_request(oc);
             req.file_name = file_path.file_name().map(|n| n.to_string_lossy().to_string());
+            if req.uid.is_empty() {
+                req.uid = generate_uid();
+                // Self-heal: write the generated UID back so the file is valid next time.
+                let oc_with_uid = crate::conversions::request_to_oc_http_request(&req);
+                if let Ok(yaml) = serde_yaml::to_string(&oc_with_uid) {
+                    let _ = crate::atomic_write(&file_path, yaml.as_bytes());
+                }
+            }
             return Ok(req);
         }
     }
