@@ -732,11 +732,13 @@ fn oauth2_auth_code_full_roundtrip() {
                 name: "nonce".into(),
                 value: "abc123".into(),
                 placement: Some("query".into()),
+                enabled: true,
             }]),
             access_token_request: Some(vec![OAuth2AdditionalParameter {
                 name: "audience".into(),
                 value: "api/v1".into(),
                 placement: Some("body".into()),
+                enabled: true,
             }]),
             refresh_token_request: None,
         }),

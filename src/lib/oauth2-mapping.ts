@@ -23,6 +23,7 @@ interface ApiOAuth2AdditionalParameter {
   name: string;
   value: string;
   placement?: string | null;
+  enabled?: boolean;
 }
 
 interface ApiOAuth2AdditionalParameters {
@@ -73,13 +74,12 @@ type OAuth2State = NonNullable<AuthState['oauth2']>;
 // ─── Frontend → IPC (save path) ─────────────────────────────────────
 
 function frontendParamsToApi(params: OAuth2AdditionalParam[]): ApiOAuth2AdditionalParameter[] {
-  return params
-    .filter((p) => p.enabled)
-    .map((p) => ({
-      name: p.key,
-      value: p.value,
-      placement: p.sendIn === 'queryparams' ? 'query' : 'body',
-    }));
+  return params.map((p) => ({
+    name: p.key,
+    value: p.value,
+    placement: p.sendIn === 'queryparams' ? 'query' : 'body',
+    enabled: p.enabled,
+  }));
 }
 
 export function oauth2StateToApiAuth(state: OAuth2State): ApiOAuth2Auth {
@@ -196,7 +196,7 @@ function apiParamsToFrontend(
     key: p.name,
     value: p.value,
     sendIn: p.placement === 'query' ? 'queryparams' : 'body',
-    enabled: true,
+    enabled: p.enabled ?? true,
   }));
 }
 

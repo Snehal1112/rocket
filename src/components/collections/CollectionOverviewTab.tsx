@@ -246,6 +246,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     });
   }, [activeEnvId, environments, globalEnv, processEnvVars, variables]);
 
+  // Stable ref so the onChange callback can write to the auth store even when
+  // the component is unmounted (e.g. user switches tabs mid-OAuth2 browser flow).
+  const collectionNameRef = useRef(collectionName);
+  collectionNameRef.current = collectionName;
+  const setCollectionAuthRef = useRef(setCollectionAuth);
+  setCollectionAuthRef.current = setCollectionAuth;
+
   // True once the user edits any field; reset after successful save or reload.
   const [isDirty, setIsDirty] = useState(false);
   // Prevents the store-sync effect from firing with the empty initial auth
@@ -614,6 +621,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                     onChange={(v) => {
                       setAuth(v);
                       setIsDirty(true);
+                      // Write directly to the auth store so the token survives
+                      // if the component unmounts while the OAuth2 browser flow
+                      // is in progress (e.g. user switches tabs mid-flow).
+                      setCollectionAuthRef.current(collectionNameRef.current, v);
                     }}
                     variableContext={scopedContext}
                     collection={collectionName}

@@ -49,7 +49,11 @@ pub struct OAuth2AdditionalParameter {
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<String>,  // "header" | "query" | "body"
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -214,6 +218,7 @@ mod tests {
         let ap = OAuth2AdditionalParameter {
             name: "audience".into(), value: "https://api.example.com".into(),
             placement: Some("body".into()),
+            enabled: true,
         };
         assert_eq!(ap.name, "audience");
     }
