@@ -27,12 +27,14 @@ interface EnvironmentDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const EMPTY_ENVS: Environment[] = [];
+
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const setActiveEnvId = useEnvStore((s) => s.setActiveEnvId);
 
-  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: environments = EMPTY_ENVS } = useEnvironments(activeCollection);
   const saveMutation = useSaveEnvironment(activeCollection);
   const deleteMutation = useDeleteEnvironment(activeCollection);
 
@@ -44,10 +46,12 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   // Local in-flight edit state — avoids writing to the store mid-edit.
   const [localEnvs, setLocalEnvs] = useState<Environment[]>(environments);
 
-  // Sync local env list when query refreshes (e.g. after save invalidation).
+  // Sync local env list when query refreshes, but only when not mid-edit to
+  // avoid overwriting in-flight changes (and avoid the infinite-loop that a
+  // bare reference-unstable `environments` array would cause).
   useEffect(() => {
-    setLocalEnvs(environments);
-  }, [environments]);
+    if (!isDirty) setLocalEnvs(environments);
+  }, [environments, isDirty]);
 
   const selectedEnv = localEnvs.find((e) => e.name === selectedName) ?? null;
 

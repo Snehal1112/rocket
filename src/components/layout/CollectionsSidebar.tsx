@@ -116,11 +116,12 @@ export function CollectionsSidebar() {
         }
       };
       closeTabs(store.root);
+      void fetchCollections();
     } catch (err) {
       console.error('Delete failed:', err);
     }
     setDeleteTarget(null);
-  }, [deleteTarget]);
+  }, [deleteTarget, fetchCollections]);
 
   const INVALID_CHARS = /[/\\:*?"<>|]/;
 

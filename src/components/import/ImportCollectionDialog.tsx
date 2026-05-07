@@ -133,16 +133,17 @@ export function ImportCollectionDialog({
     setError(null);
     try {
       let targetWsId = workspaceId;
+      let newWsId: string | null = null;
 
-      // When importing as a new workspace, create it first and switch to it
-      // so the import writes files into the new workspace directory.
       if (createWorkspace) {
         const wsName = source.name.replace(/\.zip$/i, '');
         const dataDir = await getAppDataDir();
         const sep = dataDir.includes('\\') ? '\\' : '/';
         const fullPath = dataDir.endsWith(sep) ? dataDir + wsName : dataDir + sep + wsName;
         const ws = await apiCreateWorkspace(wsName, fullPath);
-        await apiSwitchWorkspace(ws.id);
+        // Defer the workspace switch until after import — switching early fires
+        // workspace-switched which blanks the UI (closeAll) while still importing.
+        newWsId = ws.id;
         targetWsId = ws.id;
       }
 
@@ -157,6 +158,10 @@ export function ImportCollectionDialog({
       } else {
         result = await importBruno(source.path, targetWsId, createWorkspace);
       }
+
+      // Switch workspace only after import completes so the UI isn't blanked mid-import.
+      if (newWsId) await apiSwitchWorkspace(newWsId);
+
       setReport(result);
       setDialogState('done');
       onImportComplete?.();

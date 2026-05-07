@@ -1,5 +1,5 @@
 import { FileLock } from 'lucide-react';
-import type { MouseEvent } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Contract } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -37,19 +37,29 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
         ? 'text-warning'
         : 'text-muted-foreground';
 
-  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
     // Prevent the sidebar row click from selecting the collection.
     event.stopPropagation();
     openContractTab(collectionName, collectionRoot);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === '') {
+      event.preventDefault();
+      event.stopPropagation();
+      openContractTab(collectionName, collectionRoot);
+    }
   };
 
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type='button'
+          <div
+            role='button'
+            tabIndex={0}
             onClick={handleClick}
+            onKeyDown={handleKeyDown}
             className={cn(
               'inline-flex items-center justify-center h-4 w-4 rounded-sm hover:bg-accent',
               iconColor,
@@ -57,7 +67,7 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
             aria-label='Manage contracts'
           >
             <FileLock className='h-4 w-4 shrink-0' />
-          </button>
+          </div>
         </TooltipTrigger>
         <TooltipContent side='right'>
           <p className='text-xs font-medium'>{primary.title}</p>
