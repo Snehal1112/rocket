@@ -8,7 +8,7 @@ use rocket_app::ContractService;
 use rocket_collection::contract::{
     changelog::ContractChangelog,
     snapshot::RequestSignatureSnapshot,
-    types::{Contract, ContractEnforcementMode, ContractScope},
+    types::{Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -68,10 +68,11 @@ pub fn attach_contract(
         // Overwritten inside ContractService::attach_contract — placeholder only.
         id: Ulid::new(),
         title: input.title,
-        provider: input.provider,
-        consumer: input.consumer,
+        provider: ContractParty::from_name(&input.provider),
+        consumers: vec![ContractParty::from_name(&input.consumer)],
         project: input.project,
         version: input.version,
+        status: ContractStatus::default(),
         effective_date,
         expiry_date,
         // Populated by the service after copying files; empty here.
@@ -79,6 +80,13 @@ pub fn attach_contract(
         // Forced to Informational inside the service; set here for shape only.
         enforcement_mode: ContractEnforcementMode::Informational,
         scope: input.scope,
+        policy: ContractPolicy::default(),
+        drift_count: 0,
+        breach_count: 0,
+        endpoint_count: 0,
+        created_by: None,
+        created_at: None,
+        updated_at: None,
     };
 
     svc.attach_contract(&root, &collection_name, contract, input.initial_snapshots, input.document_paths)
@@ -130,16 +138,24 @@ pub fn update_contract(
     let updated = Contract {
         id,
         title: input.title,
-        provider: input.provider,
-        consumer: input.consumer,
+        provider: ContractParty::from_name(&input.provider),
+        consumers: vec![ContractParty::from_name(&input.consumer)],
         project: input.project,
         version: input.version,
+        status: existing.status,
         effective_date,
         expiry_date,
         // Merged inside the service from kept_document_paths + new_document_paths.
         document_paths: vec![],
         enforcement_mode: existing.enforcement_mode,
         scope: existing.scope,
+        policy: existing.policy,
+        drift_count: existing.drift_count,
+        breach_count: existing.breach_count,
+        endpoint_count: existing.endpoint_count,
+        created_by: existing.created_by,
+        created_at: existing.created_at,
+        updated_at: existing.updated_at,
     };
 
     svc.update_contract(&root, updated, input.new_document_paths, input.kept_document_paths)

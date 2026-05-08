@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use ulid::Ulid;
@@ -126,46 +126,169 @@ pub enum BreakingChangePolicy {
     AdditiveOk,
 }
 
-// camelCase is intentional: this type serves as both the on-disk YAML format
-// and the Tauri IPC wire type. A separate DTO split is tracked as future work.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// A contract between a provider and one or more consumers.
+///
+/// camelCase is intentional: this type serves as both the on-disk YAML format
+/// and the Tauri IPC wire type. A separate DTO split is tracked as future work.
+///
+/// Backward compat: `provider` accepts both a plain string and an object.
+/// `consumer` (singular, old format) is also accepted and mapped to `consumers`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract {
     pub id: Ulid,
     pub title: String,
-    pub provider: String,
-    pub consumer: String,
+
+    pub provider: ContractParty,
+    pub consumers: Vec<ContractParty>,
+
     pub project: String,
+
+    #[serde(default = "default_version")]
     pub version: String,
-    pub effective_date: NaiveDate,
-    pub expiry_date: Option<NaiveDate>,
-    /// Relative paths to attachment files stored inside the collection.
-    /// Stored under `.rocket/contracts/attachments/<id>/`.
-    /// `default` handles old YAML files that pre-date this field.
+
     #[serde(default)]
+    pub status: ContractStatus,
+
+    pub effective_date: NaiveDate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_date: Option<NaiveDate>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub document_paths: Vec<PathBuf>,
+
     pub enforcement_mode: ContractEnforcementMode,
     pub scope: ContractScope,
+
+    #[serde(default)]
+    pub policy: ContractPolicy,
+
+    #[serde(default)]
+    pub drift_count: u32,
+    #[serde(default)]
+    pub breach_count: u32,
+    #[serde(default)]
+    pub endpoint_count: u32,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-impl Contract {
-    pub fn status(&self) -> ContractStatus {
-        let today = Utc::now().date_naive();
-        match self.expiry_date {
-            None => ContractStatus::Active,
-            Some(exp) if exp < today => ContractStatus::Expired,
-            Some(exp) if (exp - today).num_days() <= 30 => ContractStatus::ExpiringIn30Days,
-            _ => ContractStatus::Active,
+fn default_version() -> String {
+    "1.0.0".to_string()
+}
+
+/// Custom Deserialize for `Contract` handles the old `consumer: String`
+/// field (singular) and maps it to `consumers: Vec<ContractParty>`.
+impl<'de> serde::Deserialize<'de> for Contract {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{MapAccess, Visitor};
+        use std::fmt;
+
+        struct ContractVisitor;
+
+        impl<'de> Visitor<'de> for ContractVisitor {
+            type Value = Contract;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "a Contract object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Contract, A::Error> {
+                use serde::de::Error;
+
+                let mut id: Option<Ulid> = None;
+                let mut title: Option<String> = None;
+                let mut provider: Option<ContractParty> = None;
+                let mut consumers: Option<Vec<ContractParty>> = None;
+                let mut consumer_singular: Option<ContractParty> = None;
+                let mut project: Option<String> = None;
+                let mut version: Option<String> = None;
+                let mut status: Option<ContractStatus> = None;
+                let mut effective_date: Option<NaiveDate> = None;
+                let mut expiry_date: Option<NaiveDate> = None;
+                let mut document_paths: Option<Vec<PathBuf>> = None;
+                let mut enforcement_mode: Option<ContractEnforcementMode> = None;
+                let mut scope: Option<ContractScope> = None;
+                let mut policy: Option<ContractPolicy> = None;
+                let mut drift_count: Option<u32> = None;
+                let mut breach_count: Option<u32> = None;
+                let mut endpoint_count: Option<u32> = None;
+                let mut created_by: Option<String> = None;
+                let mut created_at: Option<chrono::DateTime<chrono::Utc>> = None;
+                let mut updated_at: Option<chrono::DateTime<chrono::Utc>> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "id" => id = Some(map.next_value()?),
+                        "title" => title = Some(map.next_value()?),
+                        "provider" => provider = Some(map.next_value()?),
+                        "consumers" => consumers = Some(map.next_value()?),
+                        "consumer" => consumer_singular = Some(map.next_value()?),
+                        "project" => project = Some(map.next_value()?),
+                        "version" => version = Some(map.next_value()?),
+                        "status" => status = Some(map.next_value()?),
+                        "effectiveDate" => effective_date = Some(map.next_value()?),
+                        "expiryDate" => expiry_date = Some(map.next_value()?),
+                        "documentPaths" => document_paths = Some(map.next_value()?),
+                        "enforcementMode" => enforcement_mode = Some(map.next_value()?),
+                        "scope" => scope = Some(map.next_value()?),
+                        "policy" => policy = Some(map.next_value()?),
+                        "driftCount" => drift_count = Some(map.next_value()?),
+                        "breachCount" => breach_count = Some(map.next_value()?),
+                        "endpointCount" => endpoint_count = Some(map.next_value()?),
+                        "createdBy" => created_by = Some(map.next_value()?),
+                        "createdAt" => created_at = Some(map.next_value()?),
+                        "updatedAt" => updated_at = Some(map.next_value()?),
+                        _ => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let resolved_consumers = consumers
+                    .or_else(|| consumer_singular.map(|c| vec![c]))
+                    .unwrap_or_default();
+
+                Ok(Contract {
+                    id: id.ok_or_else(|| A::Error::missing_field("id"))?,
+                    title: title.ok_or_else(|| A::Error::missing_field("title"))?,
+                    provider: provider.ok_or_else(|| A::Error::missing_field("provider"))?,
+                    consumers: resolved_consumers,
+                    project: project.unwrap_or_default(),
+                    version: version.unwrap_or_else(default_version),
+                    status: status.unwrap_or_default(),
+                    effective_date: effective_date
+                        .ok_or_else(|| A::Error::missing_field("effectiveDate"))?,
+                    expiry_date,
+                    document_paths: document_paths.unwrap_or_default(),
+                    enforcement_mode: enforcement_mode.unwrap_or_default(),
+                    scope: scope.ok_or_else(|| A::Error::missing_field("scope"))?,
+                    policy: policy.unwrap_or_default(),
+                    drift_count: drift_count.unwrap_or(0),
+                    breach_count: breach_count.unwrap_or(0),
+                    endpoint_count: endpoint_count.unwrap_or(0),
+                    created_by,
+                    created_at,
+                    updated_at,
+                })
+            }
         }
+
+        d.deserialize_map(ContractVisitor)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ContractStatus {
+    #[default]
     Active,
     ExpiringIn30Days,
     Expired,
+    Drift,
 }
 
 /// Model B extension seam.
@@ -251,5 +374,64 @@ mod tests {
         let yaml = serde_yaml::to_string(&scope).unwrap();
         let back: ContractScope = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(scope, back);
+    }
+
+    #[test]
+    fn old_yaml_provider_string_deserialises() {
+        let yaml = r#"
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+title: Payments API
+provider: "Billing Team"
+consumer: "Platform Team"
+project: Checkout
+version: "1.0.0"
+effectiveDate: "2026-01-15"
+enforcementMode: informational
+scope:
+  type: collection
+"#;
+        let c: Contract = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(c.provider.name, "Billing Team");
+        assert_eq!(c.provider.id, "billing-team");
+        assert_eq!(c.consumers.len(), 1);
+        assert_eq!(c.consumers[0].name, "Platform Team");
+        assert_eq!(c.status, ContractStatus::Active);
+        assert_eq!(c.version, "1.0.0");
+    }
+
+    #[test]
+    fn new_yaml_consumers_vec_deserialises() {
+        let yaml = r#"
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+title: Payments API
+provider:
+  id: billing-team
+  name: Billing Team
+  kind: team
+consumers:
+  - id: platform-team
+    name: Platform Team
+    kind: team
+  - id: mobile-team
+    name: Mobile Team
+    kind: team
+project: Checkout
+version: "2.0.0"
+status: drift
+effectiveDate: "2026-01-15"
+enforcementMode: informational
+scope:
+  type: collection
+policy:
+  breakingChangePolicy: strict
+  noticeDays: 14
+driftCount: 3
+breachCount: 1
+"#;
+        let c: Contract = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(c.consumers.len(), 2);
+        assert_eq!(c.status, ContractStatus::Drift);
+        assert_eq!(c.drift_count, 3);
+        assert_eq!(c.policy.breaking_change_policy, BreakingChangePolicy::Strict);
     }
 }
