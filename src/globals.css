@@ -1,7 +1,7 @@
-@import "@fontsource-variable/inter";
-@import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
-@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @config "../tailwind.config.js";
@@ -32,8 +32,8 @@
     --secondary-foreground: 0 0% 12.5%;
     /* VSCode 2026 Light: list.inactiveSelectionBackground #EAEAEA — darkened to #e0e0e0 for tab/badge visibility */
     --muted: 0 0% 87.8%;
-    /* VSCode 2026 Light: descriptionForeground #606060 */
-    --muted-foreground: 0 0% 37.6%;
+    /* VSCode 2026 Light: descriptionForeground lightened to #707070 for clearer hierarchy */
+    --muted-foreground: 0 0% 44%;
     /* VSCode 2026 Light: list.hoverBackground #DADADA — darkened to #c8c8c8 for perceptible hover states */
     --accent: 0 0% 78.4%;
     --accent-foreground: 0 0% 12.5%;
@@ -60,7 +60,7 @@
     --chart-4: 277 47% 43%;
     --chart-5: 3 93% 35%;
     --radius: 0.5rem;
-    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
     /* VSCode 2026 Light: gitDecoration tokens */
     --git-added: 88 74% 26%; /* #587c0c */
     --git-modified: 72 74% 22%; /* #667309 */
@@ -175,28 +175,28 @@
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
     --background: 210 5% 10%;
-    /* VSCode 2026 Dark: foreground #bfbfbf */
-    --foreground: 0 0% 75%;
+    /* VSCode 2026 Dark: foreground bumped to #D1D1D1 for wider text hierarchy */
+    --foreground: 0 0% 82%;
     /* VSCode 2026 Dark: editor.background #121314 — elevated content surface */
     --card: 210 5% 7.5%;
-    --card-foreground: 0 0% 75%;
+    --card-foreground: 0 0% 82%;
     /* VSCode 2026 Dark: editorWidget.background #202122 */
     --popover: 210 3% 13%;
-    --popover-foreground: 0 0% 75%;
+    --popover-foreground: 0 0% 82%;
     /* VSCode 2026 Dark: button.background #297AA0 */
     --primary: 200 59% 40%;
     --primary-foreground: 0 0% 100%;
     /* VSCode 2026 Dark: button.secondaryHoverBackground #FFFFFF10 */
     --secondary: 210 3% 13%;
     /* VSCode 2026 Dark: dropdown.foreground #bfbfbf */
-    --secondary-foreground: 0 0% 75%;
+    --secondary-foreground: 0 0% 82%;
     /* VSCode 2026 Dark: slightly above shell, below card — hover/recessed surfaces */
     --muted: 210 4% 12%;
-    /* VSCode 2026 Dark: descriptionForeground #8C8C8C */
-    --muted-foreground: 0 0% 55%;
+    /* VSCode 2026 Dark: descriptionForeground pushed to #7A7A7A for clearer hierarchy */
+    --muted-foreground: 0 0% 48%;
     /* VSCode 2026 Dark: editorWidget.background #252526 — matches VSCode nested surface */
     --accent: 210 3% 15%;
-    --accent-foreground: 0 0% 75%;
+    --accent-foreground: 0 0% 82%;
     /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
     --destructive: 5 100% 37%;
     --destructive-foreground: 0 0% 100%;
@@ -356,7 +356,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: "Inter Variable", "Inter", "Segoe UI", sans-serif;
+    font-family: "IBM Plex Sans Variable", "IBM Plex Sans", "Segoe UI", sans-serif;
   }
 
   #root {
