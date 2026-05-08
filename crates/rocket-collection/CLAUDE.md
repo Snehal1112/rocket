@@ -76,3 +76,23 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 ## CollectionRepository
 
 The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo.toml`, all methods return `DomainResult<T>` directly. The concrete implementation is `FsCollectionRepo` in `rocket-infra`.
+
+## Contract Module (`src/contract/`)
+
+### New public types (SP1)
+- `ContractParty` — replaces bare `String` for provider/consumer. Custom `Deserialize` accepts both plain strings (old format) and objects (new format).
+- `PartyKind` — `Team | Company | Service`
+- `ContractPolicy` — `breaking_change_policy`, `notice_days`, `uptime_sla`
+- `BreakingChangePolicy` — `Strict | Lenient | AdditiveOk`
+- `ContractStatus` — now has 8 variants including `Draft`, `Drift`, `Breach`, `InReview`, `Paused`. Status is **stored** in YAML, not computed at runtime.
+- `ChangelogEntry.is_breaking: bool` — defaults `false` for backward compat.
+
+### State machine (`state_machine.rs`)
+- `transition(current: &ContractStatus, event: &StatusEvent) -> Result<ContractStatus, InvalidTransition>`
+- Pure function — no I/O. Call from `ContractService` (in `rocket-app`) when handling lifecycle commands.
+
+### Backward compatibility rules
+- Old YAML `provider: "string"` → `ContractParty::from_name(string)`
+- Old YAML `consumer: "string"` → `consumers: vec![ContractParty::from_name(string)]`
+- Old YAML with no `status` field → defaults to `ContractStatus::Active`
+- Old YAML `ChangelogEntry` with no `isBreaking` → defaults to `false`
