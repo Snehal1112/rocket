@@ -281,14 +281,31 @@ impl<'de> serde::Deserialize<'de> for Contract {
     }
 }
 
+/// Lifecycle status of a contract. Stored explicitly in YAML.
+///
+/// Backward compat: `active` and `expired` retain their serialised values.
+/// `expiring_in_30_days` is stored but also recomputed on load if expiry
+/// is approaching, so the stored value may lag by one session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ContractStatus {
+    /// Not yet published — snapshot not taken.
+    Draft,
+    /// Healthy, in compliance.
     #[default]
     Active,
-    ExpiringIn30Days,
-    Expired,
+    /// Non-breaking changes detected since signing.
     Drift,
+    /// Breaking changes detected — consumer build at risk.
+    Breach,
+    /// Sent for consumer sign-off (not yet approved).
+    InReview,
+    /// Monitoring suspended by the provider.
+    Paused,
+    /// Expiry date is within 30 days.
+    ExpiringIn30Days,
+    /// Past expiry date.
+    Expired,
 }
 
 /// Model B extension seam.
@@ -433,5 +450,28 @@ breachCount: 1
         assert_eq!(c.status, ContractStatus::Drift);
         assert_eq!(c.drift_count, 3);
         assert_eq!(c.policy.breaking_change_policy, BreakingChangePolicy::Strict);
+    }
+
+    #[test]
+    fn new_status_variants_roundtrip() {
+        for status in [
+            ContractStatus::Draft,
+            ContractStatus::Drift,
+            ContractStatus::Breach,
+            ContractStatus::InReview,
+            ContractStatus::Paused,
+        ] {
+            let yaml = serde_yaml::to_string(&status).unwrap();
+            let back: ContractStatus = serde_yaml::from_str(&yaml).unwrap();
+            assert_eq!(status, back);
+        }
+    }
+
+    #[test]
+    fn existing_status_values_unchanged() {
+        let active = serde_yaml::to_string(&ContractStatus::Active).unwrap();
+        let expired = serde_yaml::to_string(&ContractStatus::Expired).unwrap();
+        assert!(active.trim() == "active");
+        assert!(expired.trim() == "expired");
     }
 }

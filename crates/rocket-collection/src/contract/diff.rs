@@ -26,6 +26,7 @@ pub fn diff_signature(
                     change_type: ChangeType::Changed,
                     old_value: Some($old.to_string()),
                     new_value: Some($new.to_string()),
+                    is_breaking: false,
                 });
             }
         };
@@ -44,6 +45,7 @@ pub fn diff_signature(
             change_type: ChangeType::Changed,
             old_value: if old.auth_detail.is_empty() { None } else { Some(old.auth_detail.clone()) },
             new_value: if new.auth_detail.is_empty() { None } else { Some(new.auth_detail.clone()) },
+            is_breaking: false,
         });
     }
 
@@ -61,6 +63,7 @@ pub fn diff_signature(
                 change_type: ChangeType::Changed,
                 old_value: Some(o.clone()),
                 new_value: Some(n.clone()),
+                is_breaking: false,
             });
         }
         (Some(o), None) => {
@@ -71,6 +74,7 @@ pub fn diff_signature(
                 change_type: ChangeType::Removed,
                 old_value: Some(o.clone()),
                 new_value: None,
+                is_breaking: false,
             });
         }
         (None, Some(n)) => {
@@ -81,6 +85,7 @@ pub fn diff_signature(
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(n.clone()),
+                is_breaking: false,
             });
         }
         // Both None or identical — no change.
@@ -115,6 +120,7 @@ fn diff_key_value_list(
                     change_type: ChangeType::Removed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: None,
+                    is_breaking: false,
                 });
             }
             Some(new_entry) if new_entry.value != old_entry.value => {
@@ -125,6 +131,7 @@ fn diff_key_value_list(
                     change_type: ChangeType::Changed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: Some(new_entry.value.clone()),
+                    is_breaking: false,
                 });
             }
             _ => {}
@@ -141,6 +148,7 @@ fn diff_key_value_list(
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(new_entry.value.clone()),
+                is_breaking: false,
             });
         }
     }
