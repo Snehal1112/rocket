@@ -288,7 +288,7 @@ impl ContractService {
             let mut snapshot = self.repo.load_snapshot(collection_root, contract.id)?;
 
             if let Some(old_snap) = snapshot.get(&new_snap.request_path) {
-                let changes = diff_signature(old_snap, &new_snap);
+                let changes = diff_signature(old_snap, &new_snap, &contract.policy.breaking_change_policy);
 
                 if !changes.is_empty() {
                     // MODEL B SEAM — match on enforcement_mode when Model B is built:
