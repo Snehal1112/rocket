@@ -8,7 +8,7 @@ use rocket_collection::{
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-        types::{Contract, ContractEnforcementMode, ContractScope},
+        types::{Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
     },
     CollectionItem, CollectionRepository, Folder,
 };
@@ -598,15 +598,23 @@ mod tests {
         Contract {
             id: Ulid::new(),
             title: "Test API".into(),
-            provider: "Team A".into(),
-            consumer: "Team B".into(),
+            provider: ContractParty::from_name("Team A"),
+            consumers: vec![ContractParty::from_name("Team B")],
             project: "Project X".into(),
             version: "v1.0".into(),
+            status: ContractStatus::default(),
             effective_date: Utc::now().date_naive(),
             expiry_date: None,
             document_paths: vec![],
             enforcement_mode: ContractEnforcementMode::Informational,
             scope: ContractScope::Collection,
+            policy: ContractPolicy::default(),
+            drift_count: 0,
+            breach_count: 0,
+            endpoint_count: 0,
+            created_by: None,
+            created_at: None,
+            updated_at: None,
         }
     }
 

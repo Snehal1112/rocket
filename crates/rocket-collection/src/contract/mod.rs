@@ -8,4 +8,13 @@ pub use changelog::{ChangeType, ChangelogEntry, ContractChangelog};
 pub use diff::diff_signature;
 pub use repository::{ContractError, ContractRepository, ContractResult};
 pub use snapshot::{ContractSnapshot, RequestSignatureSnapshot};
-pub use types::{Contract, ContractEnforcementMode, ContractScope, ContractStatus};
+pub use types::{
+    BreakingChangePolicy,
+    Contract,
+    ContractEnforcementMode,
+    ContractParty,
+    ContractPolicy,
+    ContractScope,
+    ContractStatus,
+    PartyKind,
+};
