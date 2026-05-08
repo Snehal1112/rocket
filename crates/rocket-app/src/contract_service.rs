@@ -4,11 +4,12 @@ use rocket_audit::{
 };
 use rocket_collection::{
     contract::{
-        changelog::{ChangelogEntry, ContractChangelog},
+        changelog::{ChangeType, ChangelogEntry, ContractChangelog},
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-        types::{Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
+        types::{BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
+        {transition_status, StatusEvent},
     },
     CollectionItem, CollectionRepository, Folder,
 };
@@ -380,6 +381,134 @@ fn walk_folder<'a>(
             // Summary items carry no file content; skip for contract audit.
             CollectionItem::Summary(_) => {}
         }
+    }
+}
+
+/// Summary returned by `recompute_drift_for_collection` for each processed contract.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractDriftSummary {
+    pub contract_id: String,
+    pub status: ContractStatus,
+    pub drift_count: u32,
+    pub breach_count: u32,
+}
+
+impl ContractService {
+    /// Scans all active contracts in the collection, diffs each against the
+    /// supplied current snapshots, updates drift/breach counts, transitions
+    /// status via the state machine, appends changelog entries, and saves
+    /// all modified contracts.
+    pub fn recompute_drift_for_collection(
+        &self,
+        collection_root: &Path,
+        current_snapshots: &[RequestSignatureSnapshot],
+    ) -> ContractResult<Vec<ContractDriftSummary>> {
+        let contracts = self.repo.list_contracts(collection_root)?;
+        let mut summaries = Vec::new();
+
+        for mut contract in contracts {
+            // Skip contracts not in an active monitoring state
+            match contract.status {
+                ContractStatus::Draft
+                | ContractStatus::Paused
+                | ContractStatus::Expired
+                | ContractStatus::InReview => continue,
+                _ => {}
+            }
+
+            // Load snapshot — skip if none (published but snapshot missing)
+            let snapshot = match self.repo.load_snapshot(collection_root, contract.id) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let mut all_entries: Vec<ChangelogEntry> = Vec::new();
+            let mut drift_count = 0u32;
+            let mut breach_count = 0u32;
+
+            for snap_entry in &snapshot.entries {
+                let current = current_snapshots
+                    .iter()
+                    .find(|s| s.request_path == snap_entry.request_path);
+
+                match current {
+                    None => {
+                        // Request removed — always breaking
+                        all_entries.push(ChangelogEntry {
+                            timestamp: chrono::Utc::now(),
+                            request_path: snap_entry.request_path.clone(),
+                            field: "request".into(),
+                            change_type: ChangeType::Removed,
+                            old_value: Some(format!("{} {}", snap_entry.method, snap_entry.url_pattern)),
+                            new_value: None,
+                            is_breaking: true,
+                        });
+                        drift_count += 1;
+                        breach_count += 1;
+                    }
+                    Some(current_snap) => {
+                        let changes = diff_signature(
+                            snap_entry,
+                            current_snap,
+                            &contract.policy.breaking_change_policy,
+                        );
+                        for entry in &changes {
+                            drift_count += 1;
+                            if entry.is_breaking {
+                                breach_count += 1;
+                            }
+                        }
+                        all_entries.extend(changes);
+                    }
+                }
+            }
+
+            // Determine new status via state machine
+            let event = if breach_count > 0 {
+                StatusEvent::BreachDetected
+            } else if drift_count > 0 {
+                StatusEvent::DriftDetected
+            } else {
+                match contract.status {
+                    ContractStatus::Drift | ContractStatus::Breach => StatusEvent::Resign,
+                    _ => {
+                        summaries.push(ContractDriftSummary {
+                            contract_id: contract.id.to_string(),
+                            status: contract.status.clone(),
+                            drift_count: 0,
+                            breach_count: 0,
+                        });
+                        continue;
+                    }
+                }
+            };
+
+            if let Ok(new_status) = transition_status(&contract.status, &event) {
+                contract.status = new_status;
+            }
+
+            contract.drift_count = drift_count;
+            contract.breach_count = breach_count;
+            contract.updated_at = Some(chrono::Utc::now());
+
+            if !all_entries.is_empty() {
+                let mut incoming = ContractChangelog::new(contract.id);
+                incoming.append(all_entries);
+                self.repo.append_changelog(collection_root, &incoming)?;
+            }
+
+            self.repo.save_contract(collection_root, &contract)?;
+
+            summaries.push(ContractDriftSummary {
+                contract_id: contract.id.to_string(),
+                status: contract.status,
+                drift_count,
+                breach_count,
+            });
+        }
+
+        Ok(summaries)
     }
 }
 
@@ -925,5 +1054,14 @@ mod tests {
             "expected ContractAttached, got {:?}",
             *captured
         );
+    }
+
+    #[test]
+    fn recompute_drift_no_snapshots_returns_empty_summaries() {
+        // Contracts with no snapshot (Draft state) are skipped; result is empty.
+        let svc = make_service();
+        let result = svc.recompute_drift_for_collection(root(), &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 }
