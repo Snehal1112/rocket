@@ -47,9 +47,7 @@ describe('NewContractModal', () => {
   it('shows error when name is too short on submit', async () => {
     renderModal();
     fireEvent.click(screen.getByText('Create & Publish →'));
-    await waitFor(() =>
-      expect(screen.getByText('At least 2 characters')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('At least 2 characters')).toBeInTheDocument());
   });
 
   it('shows error when version is not semver', async () => {
@@ -58,9 +56,7 @@ describe('NewContractModal', () => {
     await userEvent.clear(versionInput);
     await userEvent.type(versionInput, 'not-semver');
     fireEvent.click(screen.getByText('Create & Publish →'));
-    await waitFor(() =>
-      expect(screen.getByText('Must be semver, e.g. 1.0.0')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Must be semver, e.g. 1.0.0')).toBeInTheDocument());
   });
 
   it('shows error when consumers field is empty', async () => {
