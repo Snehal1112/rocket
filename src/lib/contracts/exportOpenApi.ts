@@ -12,7 +12,7 @@ export async function saveContractAsOpenApi(
   contractName: string,
 ): Promise<void> {
   const yaml = await exportContractOpenapi(collectionRoot, contractId);
-  const filename = `${contractName.replace(/[^a-z0-9_-]/gi, '_')}_openapi.yaml`;
+  const filename = `${contractName.replace(/\s+/g, '-').toLowerCase()}-openapi.yaml`;
 
   // Try Tauri dialog + fs plugins first (desktop app context).
   try {
@@ -35,13 +35,13 @@ export async function saveContractAsOpenApi(
   }
 
   // Browser fallback: trigger an <a> download.
-  const blob = new Blob([yaml], { type: 'application/yaml' });
+  const blob = new Blob([yaml], { type: 'text/yaml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  a.remove();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }

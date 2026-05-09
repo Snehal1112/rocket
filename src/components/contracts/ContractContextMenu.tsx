@@ -13,7 +13,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,10 +70,12 @@ export function ContractContextMenu({ contract, collectionRoot, onAction, childr
           </ContextMenuItem>
           {/* 4 — Export as OpenAPI */}
           <ContextMenuItem
-            onSelect={() => {
-              saveContractAsOpenApi(collectionRoot, contract.id, contract.name).catch((err) => {
-                toast.error(`Export failed: ${err}`);
-              });
+            onSelect={async () => {
+              try {
+                await saveContractAsOpenApi(collectionRoot, contract.id, contract.name);
+              } catch (err) {
+                console.error('[ContractContextMenu] export failed:', err);
+              }
             }}
           >
             <FileDown className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
