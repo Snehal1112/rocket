@@ -4,13 +4,14 @@ import { PartyAvatar } from './PartyAvatar';
 
 interface PartyPillProps {
   party: Party;
-  role?: PartyRole;
+  /** Display badge: 'provider' | 'consumer'. Named `partyRole` to avoid collision with HTML role attr. */
+  partyRole?: PartyRole;
   className?: string;
 }
 
 const roleLabels: Record<PartyRole, string> = { provider: 'Provider', consumer: 'Consumer' };
 
-export function PartyPill({ party, role, className }: PartyPillProps) {
+export function PartyPill({ party, partyRole, className }: PartyPillProps) {
   return (
     <div
       className={cn(
@@ -21,9 +22,9 @@ export function PartyPill({ party, role, className }: PartyPillProps) {
     >
       <PartyAvatar party={party} size={20} />
       <span className='truncate max-w-[120px]'>{party.name}</span>
-      {role && (
+      {partyRole && (
         <span className='text-[10px] text-muted-foreground font-medium shrink-0'>
-          · {roleLabels[role]}
+          · {roleLabels[partyRole]}
         </span>
       )}
     </div>

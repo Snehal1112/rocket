@@ -26,11 +26,7 @@ export function MetaItem({ icon, label, value, danger, warning }: MetaItemProps)
         {icon}
       </span>
       {label && <span className='shrink-0'>{label}</span>}
-      <span
-        className={cn('font-medium', !danger && !warning && 'text-foreground')}
-      >
-        {value}
-      </span>
+      <span className={cn('font-medium', !danger && !warning && 'text-foreground')}>{value}</span>
     </div>
   );
 }

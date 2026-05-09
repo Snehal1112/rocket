@@ -13,9 +13,7 @@ export function StatusSubline({ contract }: StatusSublineProps) {
 
   if (status === 'drift') {
     const breakingText = breachCount > 0 ? ` — ${breachCount} breaking` : '';
-    return (
-      <span className='text-[hsl(var(--warning))]'>Drift detected{breakingText}</span>
-    );
+    return <span className='text-[hsl(var(--warning))]'>Drift detected{breakingText}</span>;
   }
   if (status === 'breach') {
     return (
@@ -24,13 +22,9 @@ export function StatusSubline({ contract }: StatusSublineProps) {
       </span>
     );
   }
-  if (status === 'paused')
-    return <span className='text-muted-foreground'>Monitoring paused</span>;
-  if (status === 'draft')
-    return <span className='text-muted-foreground'>Not yet published</span>;
-  if (status === 'expired')
-    return <span className='text-muted-foreground'>Contract expired</span>;
-  if (status === 'in_review')
-    return <span className='text-primary'>Awaiting consumer review</span>;
+  if (status === 'paused') return <span className='text-muted-foreground'>Monitoring paused</span>;
+  if (status === 'draft') return <span className='text-muted-foreground'>Not yet published</span>;
+  if (status === 'expired') return <span className='text-muted-foreground'>Contract expired</span>;
+  if (status === 'in_review') return <span className='text-primary'>Awaiting consumer review</span>;
   return null;
 }
