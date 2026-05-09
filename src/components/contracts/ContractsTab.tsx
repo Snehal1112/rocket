@@ -229,6 +229,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         key={c.id}
                         contract={c}
                         collectionName={collectionName}
+                        collectionRoot={collectionId}
                         onAction={handleAction}
                         focused={focusedIdx === i}
                       />
@@ -243,6 +244,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         key={c.id}
                         contract={c}
                         collectionName={collectionName}
+                        collectionRoot={collectionId}
                         onAction={handleAction}
                         focused={focusedIdx === attention.length + i}
                       />
@@ -257,6 +259,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         key={c.id}
                         contract={c}
                         collectionName={collectionName}
+                        collectionRoot={collectionId}
                         onAction={handleAction}
                         focused={focusedIdx === attention.length + active.length + i}
                       />

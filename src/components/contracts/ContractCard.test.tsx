@@ -35,12 +35,12 @@ function makeContract(status: Contract['status'], overrides: Partial<Contract> =
 
 describe('ContractCard', () => {
   it('renders contract name', () => {
-    wrap(<ContractCard contract={makeContract('active')} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={makeContract('active')} collectionRoot='/ws/col' onAction={vi.fn()} />);
     expect(screen.getByText('Payments API')).toBeInTheDocument();
   });
 
   it('renders version tag', () => {
-    wrap(<ContractCard contract={makeContract('active')} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={makeContract('active')} collectionRoot='/ws/col' onAction={vi.fn()} />);
     expect(screen.getByText('1.2.0')).toBeInTheDocument();
   });
 
@@ -55,31 +55,31 @@ describe('ContractCard', () => {
       'expired',
     ];
     for (const status of statuses) {
-      const { unmount } = wrap(<ContractCard contract={makeContract(status)} onAction={vi.fn()} />);
+      const { unmount } = wrap(<ContractCard contract={makeContract(status)} collectionRoot='/ws/col' onAction={vi.fn()} />);
       unmount();
     }
   });
 
   it('shows "Drift detected" StatusSubline for drift status', () => {
     const c = makeContract('drift', { driftCount: 3, breachCount: 1 });
-    wrap(<ContractCard contract={c} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={c} collectionRoot='/ws/col' onAction={vi.fn()} />);
     expect(screen.getByText(/Drift detected/)).toBeInTheDocument();
   });
 
   it('shows "Monitoring paused" for paused status', () => {
-    wrap(<ContractCard contract={makeContract('paused')} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={makeContract('paused')} collectionRoot='/ws/col' onAction={vi.fn()} />);
     expect(screen.getByText('Monitoring paused')).toBeInTheDocument();
   });
 
   it('calls onOpen when article is clicked', () => {
     const onOpen = vi.fn();
-    wrap(<ContractCard contract={makeContract('active')} onAction={vi.fn()} onOpen={onOpen} />);
+    wrap(<ContractCard contract={makeContract('active')} collectionRoot='/ws/col' onAction={vi.fn()} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole('article'));
     expect(onOpen).toHaveBeenCalledWith('c-test');
   });
 
   it('has aria-labelledby pointing to contract name span', () => {
-    wrap(<ContractCard contract={makeContract('active')} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={makeContract('active')} collectionRoot='/ws/col' onAction={vi.fn()} />);
     const article = screen.getByRole('article');
     expect(article).toHaveAttribute('aria-labelledby', 'cc-name-c-test');
     expect(document.getElementById('cc-name-c-test')?.textContent).toBe('Payments API');
@@ -93,7 +93,7 @@ describe('ContractCard', () => {
         { id: 'c3', name: 'Web', kind: 'team' },
       ],
     });
-    wrap(<ContractCard contract={c} onAction={vi.fn()} />);
+    wrap(<ContractCard contract={c} collectionRoot='/ws/col' onAction={vi.fn()} />);
     expect(screen.getByText('+2 more')).toBeInTheDocument();
   });
 });

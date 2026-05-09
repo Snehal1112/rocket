@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,16 +31,18 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
 import type { Contract } from '@/types/contracts';
 import type { ContractAction } from './ContractCard';
 
 interface ContractContextMenuProps {
   contract: Contract;
+  collectionRoot: string;
   onAction: (action: ContractAction, id: string) => void;
   children: React.ReactNode;
 }
 
-export function ContractContextMenu({ contract, onAction, children }: ContractContextMenuProps) {
+export function ContractContextMenu({ contract, collectionRoot, onAction, children }: ContractContextMenuProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const s = contract.status;
 
@@ -67,7 +70,13 @@ export function ContractContextMenu({ contract, onAction, children }: ContractCo
             Duplicate
           </ContextMenuItem>
           {/* 4 — Export as OpenAPI */}
-          <ContextMenuItem onSelect={() => onAction('export', contract.id)}>
+          <ContextMenuItem
+            onSelect={() => {
+              saveContractAsOpenApi(collectionRoot, contract.id, contract.name).catch((err) => {
+                toast.error(`Export failed: ${err}`);
+              });
+            }}
+          >
             <FileDown className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
             Export as OpenAPI
           </ContextMenuItem>

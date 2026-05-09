@@ -35,6 +35,7 @@ export type ContractAction =
 interface ContractCardProps {
   contract: Contract;
   collectionName?: string;
+  collectionRoot: string;
   onAction: (action: ContractAction, contractId: string) => void;
   onOpen?: (contractId: string) => void;
   /** Passed by ContractsTab for j/k keyboard navigation highlight */
@@ -83,6 +84,7 @@ function policyLabel(policy: Contract['policy']): string {
 export function ContractCard({
   contract,
   collectionName,
+  collectionRoot,
   onAction,
   onOpen,
   focused,
@@ -95,7 +97,7 @@ export function ContractCard({
   }
 
   return (
-    <ContractContextMenu contract={contract} onAction={onAction}>
+    <ContractContextMenu contract={contract} collectionRoot={collectionRoot} onAction={onAction}>
       <article
         aria-labelledby={`cc-name-${contract.id}`}
         data-status={contract.status}
@@ -228,7 +230,7 @@ export function ContractCard({
               >
                 Edit
               </Button>
-              <ContractContextMenu contract={contract} onAction={onAction}>
+              <ContractContextMenu contract={contract} collectionRoot={collectionRoot} onAction={onAction}>
                 <Button
                   variant='ghost'
                   size='icon'
