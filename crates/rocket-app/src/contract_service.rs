@@ -583,6 +583,40 @@ impl ContractService {
             })
             .collect())
     }
+
+    /// Generates a minimal OpenAPI 3.0 YAML stub for the given contract.
+    /// Returns the YAML as a String — the frontend triggers the native save dialog.
+    pub fn export_as_openapi_yaml(
+        &self,
+        collection_root: &std::path::Path,
+        id: ulid::Ulid,
+    ) -> ContractResult<String> {
+        let contract = self.repo.load_contract(collection_root, id)?;
+        let snapshot = self.repo.load_snapshot(collection_root, id).ok();
+
+        let title = &contract.title;
+        let version = &contract.version;
+
+        let mut paths_yaml = String::new();
+        if let Some(snap) = &snapshot {
+            for entry in &snap.entries {
+                let path_segment = entry.url_pattern.trim_start_matches('/');
+                let method = entry.method.to_lowercase();
+                paths_yaml.push_str(&format!(
+                    "  /{}:\n    {}:\n      summary: '{} {}'\n      responses:\n        '200':\n          description: OK\n",
+                    path_segment, method, entry.method, entry.url_pattern
+                ));
+            }
+        }
+        if paths_yaml.is_empty() {
+            paths_yaml = "  /example:\n    get:\n      summary: Example endpoint\n      responses:\n        '200':\n          description: OK\n".to_string();
+        }
+
+        Ok(format!(
+            "openapi: '3.0.3'\ninfo:\n  title: '{}'\n  version: '{}'\npaths:\n{}",
+            title, version, paths_yaml
+        ))
+    }
 }
 
 /// Increments the patch segment of a semver-like version string.

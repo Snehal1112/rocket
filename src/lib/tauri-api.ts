@@ -1289,6 +1289,15 @@ export async function getContractSummary(collectionRoot: string): Promise<Contra
   return invoke('get_contract_summary', { collectionRoot });
 }
 
+/** Returns an OpenAPI 3.0 YAML stub for a contract as a string.
+ *  The caller is responsible for triggering the native save dialog. */
+export async function exportContractOpenapi(
+  collectionRoot: string,
+  contractId: string,
+): Promise<string> {
+  return invoke('export_contract_openapi', { collectionRoot, contractId });
+}
+
 // ============================================================
 // Security audit / compliance
 // ============================================================

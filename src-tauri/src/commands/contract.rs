@@ -335,3 +335,16 @@ pub fn get_contract_summary(
     svc.list_summaries(&PathBuf::from(&collection_root))
         .map_err(|e| e.to_string())
 }
+
+/// Returns an OpenAPI 3.0 YAML stub for a contract as a String.
+/// The frontend is responsible for triggering the save dialog.
+#[tauri::command]
+pub fn export_contract_openapi(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<String, String> {
+    let id = ulid::Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.export_as_openapi_yaml(&std::path::PathBuf::from(&collection_root), id)
+        .map_err(|e| e.to_string())
+}
