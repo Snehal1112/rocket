@@ -343,12 +343,22 @@ export function CollectionNode({
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <button
-                            type='button'
-                            className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity'
+                          {/* span instead of button: lock pin lives inside the tree-item-row <button>,
+                              and HTML forbids nested buttons. span+role="button" is the correct pattern. */}
+                          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: lock pin is interactive */}
+                          <span
+                            role='button'
+                            tabIndex={0}
+                            className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity cursor-pointer'
                             onClick={(e) => {
                               e.stopPropagation();
                               openContractTab(summary.name, collectionRoot);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.stopPropagation();
+                                openContractTab(summary.name, collectionRoot);
+                              }
                             }}
                             aria-label={lockPinLabel(contractMeta)}
                           >
@@ -366,7 +376,7 @@ export function CollectionNode({
                                 aria-hidden='true'
                               />
                             )}
-                          </button>
+                          </span>
                         </TooltipTrigger>
                         <TooltipContent side='right'>{lockPinLabel(contractMeta)}</TooltipContent>
                       </Tooltip>
