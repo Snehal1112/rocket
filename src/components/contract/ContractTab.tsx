@@ -2,10 +2,24 @@ import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { AttachContractInput, CollectionItem, UpdateContractInput } from '@/lib/tauri-api';
+import type {
+  AttachContractInput,
+  CollectionItem,
+  ContractParty,
+  UpdateContractInput,
+} from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
+
+// Mirror Rust's ContractParty::from_name: id = name.toLowerCase().replace(/ /g, '-').
+function partyFromName(name: string): ContractParty {
+  return {
+    id: name.toLowerCase().replace(/ /g, '-'),
+    name,
+    kind: 'team',
+  };
+}
 
 import { ChangelogSummaryBar } from './ChangelogSummaryBar';
 import { ChangelogTable } from './ChangelogTable';
@@ -47,7 +61,6 @@ const EMPTY_FORM: ContractFormValues = {
   title: '',
   provider: '',
   consumer: '',
-  project: '',
   version: '',
   effectiveDate: new Date().toISOString().split('T')[0],
   expiryDate: '',
@@ -161,9 +174,8 @@ export function ContractTab({ tab }: ContractTabProps) {
       c.scope.type === 'folder' ? 'folder' : c.scope.type === 'request' ? 'request' : 'collection';
     setForm({
       title: c.title,
-      provider: c.provider,
-      consumer: c.consumer,
-      project: c.project,
+      provider: c.provider.name,
+      consumer: c.consumers[0]?.name ?? '',
       version: c.version,
       effectiveDate: c.effectiveDate,
       expiryDate: c.expiryDate ?? '',
@@ -183,15 +195,8 @@ export function ContractTab({ tab }: ContractTabProps) {
 
   // ── Submit ─────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (
-      !form.title ||
-      !form.provider ||
-      !form.consumer ||
-      !form.project ||
-      !form.version ||
-      !form.effectiveDate
-    ) {
-      setError('Title, both teams, project, version, and effective date are required.');
+    if (!form.title || !form.provider || !form.consumer || !form.version || !form.effectiveDate) {
+      setError('Title, both teams, version, and effective date are required.');
       return;
     }
     if ((form.scopeType === 'folder' || form.scopeType === 'request') && !form.scopePath) {
@@ -207,12 +212,12 @@ export function ContractTab({ tab }: ContractTabProps) {
         const input: UpdateContractInput = {
           contractId: view.contractId,
           title: form.title,
-          provider: form.provider,
-          consumer: form.consumer,
-          project: form.project,
+          provider: partyFromName(form.provider),
+          consumers: form.consumer ? [partyFromName(form.consumer)] : [],
           version: form.version,
           effectiveDate: form.effectiveDate,
           expiryDate: form.expiryDate || null,
+          policy: { breakingChangePolicy: 'strict', noticeDays: 30 },
           newDocumentPaths: form.newDocumentPaths,
           keptDocumentPaths: form.existingDocumentPaths,
         };
@@ -227,15 +232,16 @@ export function ContractTab({ tab }: ContractTabProps) {
 
         const input: AttachContractInput = {
           title: form.title,
-          provider: form.provider,
-          consumer: form.consumer,
-          project: form.project,
+          provider: partyFromName(form.provider),
+          consumers: form.consumer ? [partyFromName(form.consumer)] : [],
           version: form.version,
           effectiveDate: form.effectiveDate,
           expiryDate: form.expiryDate || null,
           documentPaths: form.newDocumentPaths,
           scope,
+          policy: { breakingChangePolicy: 'strict', noticeDays: 30 },
           initialSnapshots: [],
+          publishImmediately: false,
         };
         await attachContract(tab.collectionRoot, input);
       }
@@ -352,12 +358,12 @@ export function ContractTab({ tab }: ContractTabProps) {
               <div className='flex items-center gap-2 flex-wrap mb-5'>
                 <span className='inline-flex items-center gap-1.5 bg-secondary rounded-full px-2.5 py-1 text-xs'>
                   <span className='w-2 h-2 rounded-full bg-violet-500 shrink-0' />
-                  {contract.provider}
+                  {contract.provider.name}
                 </span>
                 <span className='text-muted-foreground text-xs'>→</span>
                 <span className='inline-flex items-center gap-1.5 bg-secondary rounded-full px-2.5 py-1 text-xs'>
                   <span className='w-2 h-2 rounded-full bg-emerald-500 shrink-0' />
-                  {contract.consumer}
+                  {contract.consumers[0]?.name ?? '—'}
                 </span>
               </div>
             )}

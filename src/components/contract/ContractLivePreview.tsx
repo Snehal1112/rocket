@@ -21,15 +21,23 @@ export function ContractLivePreview({ values, collectionRoot }: ContractLivePrev
   const previewContract: Contract = {
     id: 'preview',
     title: values.title || 'Contract title',
-    provider: values.provider || 'Provider team',
-    consumer: values.consumer || 'Consumer team',
-    project: values.project || 'Project name',
+    provider: { id: 'preview-provider', name: values.provider || 'Provider team', kind: 'team' },
+    consumers: [{ id: 'preview-consumer', name: values.consumer || 'Consumer team', kind: 'team' }],
+    project: '',
     version: values.version || 'v1.0',
+    status: 'draft',
     effectiveDate: values.effectiveDate || new Date().toISOString().split('T')[0],
     expiryDate: values.expiryDate || null,
     documentPaths: [...values.existingDocumentPaths, ...values.newDocumentPaths],
     enforcementMode: 'informational',
     scope,
+    policy: { breakingChangePolicy: 'strict', noticeDays: 30 },
+    driftCount: 0,
+    breachCount: 0,
+    endpointCount: 0,
+    createdBy: null,
+    createdAt: null,
+    updatedAt: null,
   };
 
   return (

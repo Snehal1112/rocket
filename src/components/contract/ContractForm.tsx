@@ -16,7 +16,6 @@ export interface ContractFormValues {
   title: string;
   provider: string;
   consumer: string;
-  project: string;
   version: string;
   effectiveDate: string;
   expiryDate: string;
@@ -114,32 +113,18 @@ export function ContractForm({ values, onChange, folders, requests, error }: Con
         </div>
       </div>
 
-      {/* Project + Version */}
-      <div className='grid grid-cols-2 gap-3'>
-        <div className='space-y-1.5'>
-          <Label htmlFor='cl-project' className='text-xs'>
-            Project
-          </Label>
-          <Input
-            id='cl-project'
-            placeholder='Checkout Revamp'
-            value={values.project}
-            onChange={set('project')}
-            className='h-8 text-sm'
-          />
-        </div>
-        <div className='space-y-1.5'>
-          <Label htmlFor='cl-version' className='text-xs'>
-            Version
-          </Label>
-          <Input
-            id='cl-version'
-            placeholder='v1.0'
-            value={values.version}
-            onChange={set('version')}
-            className='h-8 text-sm'
-          />
-        </div>
+      {/* Version */}
+      <div className='space-y-1.5'>
+        <Label htmlFor='cl-version' className='text-xs'>
+          Version
+        </Label>
+        <Input
+          id='cl-version'
+          placeholder='v1.0'
+          value={values.version}
+          onChange={set('version')}
+          className='h-8 text-sm'
+        />
       </div>
 
       {/* Effective + Expiry */}

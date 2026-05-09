@@ -114,12 +114,12 @@ export function ContractCard({
         <div className='flex items-center gap-1.5 flex-wrap'>
           <span className='inline-flex items-center gap-1.5 bg-secondary rounded-md px-2 py-0.5 text-xs font-medium text-secondary-foreground'>
             <span className='w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0' />
-            {contract.provider}
+            {contract.provider.name}
           </span>
           <span className='text-muted-foreground/60 text-xs select-none'>→</span>
           <span className='inline-flex items-center gap-1.5 bg-secondary rounded-md px-2 py-0.5 text-xs font-medium text-secondary-foreground'>
             <span className='w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0' />
-            {contract.consumer}
+            {contract.consumers[0]?.name ?? '—'}
           </span>
         </div>
 
