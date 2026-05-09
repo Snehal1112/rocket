@@ -46,10 +46,12 @@ import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
 import type { DeleteTarget } from './tree-utils';
 
-// Stable empty reference to keep the Zustand selector output identity-stable
-// for collections that have no contracts. Without this, the `?? []` fallback
-// would produce a fresh array on every store update and force re-renders.
+// Stable empty references to keep Zustand selector output identity-stable.
+// Without these, the `?? []` fallback would produce a fresh array on every
+// store update, violating useSyncExternalStore's snapshot contract and
+// causing React 18 to loop detecting "tearing."
 const EMPTY_CONTRACTS: Contract[] = [];
+const EMPTY_IDS: string[] = [];
 
 /** Tooltip label for the sidebar lock pin (spec §8.1). */
 function lockPinLabel(meta: { count: number; driftCount: number; breachCount: number }): string {
@@ -115,7 +117,7 @@ export function CollectionNode({
 
   // New store — used for lock pin drift/breach counts
   const newLoadContracts = useContractsStore((s) => s.loadContracts);
-  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? []);
+  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? EMPTY_IDS);
   const newContractsById = useContractsStore((s) => s.byId);
 
   const contractMeta = useMemo(() => {

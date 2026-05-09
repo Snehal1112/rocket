@@ -45,6 +45,7 @@ import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
 
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
+const EMPTY_IDS: string[] = [];
 
 // Collects all leaf groupIds from the pane tree.
 function collectLeafGroupIds(node: PaneNode): string[] {
@@ -93,7 +94,7 @@ export function RequestNode({
   const scopedContracts = contractsForScope(collectionRoot, 'request', path) ?? EMPTY_CONTRACTS;
 
   // New store — contract status dot
-  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? []);
+  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? EMPTY_IDS);
   const newContractsById = useContractsStore((s) => s.byId);
 
   /**
