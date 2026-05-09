@@ -231,7 +231,9 @@ impl<'de> serde::Deserialize<'de> for Contract {
                         "version" => version = Some(map.next_value()?),
                         "status" => status = Some(map.next_value()?),
                         "effectiveDate" => effective_date = Some(map.next_value()?),
-                        "expiryDate" => expiry_date = Some(map.next_value()?),
+                        // Deserialize as Option<NaiveDate> directly: YAML `null`
+                        // maps to None rather than causing a parse error.
+                        "expiryDate" => expiry_date = map.next_value()?,
                         "documentPaths" => document_paths = Some(map.next_value()?),
                         "enforcementMode" => enforcement_mode = Some(map.next_value()?),
                         "scope" => scope = Some(map.next_value()?),
@@ -239,9 +241,9 @@ impl<'de> serde::Deserialize<'de> for Contract {
                         "driftCount" => drift_count = Some(map.next_value()?),
                         "breachCount" => breach_count = Some(map.next_value()?),
                         "endpointCount" => endpoint_count = Some(map.next_value()?),
-                        "createdBy" => created_by = Some(map.next_value()?),
-                        "createdAt" => created_at = Some(map.next_value()?),
-                        "updatedAt" => updated_at = Some(map.next_value()?),
+                        "createdBy" => created_by = map.next_value()?,
+                        "createdAt" => created_at = map.next_value()?,
+                        "updatedAt" => updated_at = map.next_value()?,
                         _ => {
                             let _ = map.next_value::<serde::de::IgnoredAny>()?;
                         }
@@ -473,5 +475,54 @@ breachCount: 1
         let expired = serde_yaml::to_string(&ContractStatus::Expired).unwrap();
         assert!(active.trim() == "active");
         assert!(expired.trim() == "expired");
+    }
+
+    #[test]
+    fn old_yaml_expiry_date_null_deserialises() {
+        // Reproduces the exact warning seen in production:
+        //   "expiryDate: input contains invalid characters at line 8 column 13"
+        // Old serializers wrote `expiryDate: null` explicitly; the custom
+        // Deserialize visitor must map YAML null to None, not try to parse
+        // the word "null" as a NaiveDate.
+        let yaml = r#"
+id: 01KR4KAPFKR5YM1T1WSD2YYGC0
+title: Jjjjj
+provider: Jhggg
+consumer: Yyyy
+project: Uuuu
+version: V222
+effectiveDate: 2026-05-08
+expiryDate: null
+documentPaths: []
+enforcementMode: informational
+scope:
+  type: collection
+"#;
+        let c: Contract = serde_yaml::from_str(yaml).unwrap();
+        assert!(c.expiry_date.is_none(), "expiryDate: null should deserialise to None");
+    }
+
+    #[test]
+    fn old_yaml_created_at_null_deserialises() {
+        // Same latent bug for createdBy/createdAt/updatedAt nullable fields.
+        let yaml = r#"
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+title: Test
+provider: Provider
+consumer: Consumer
+project: ''
+version: "1.0.0"
+effectiveDate: "2026-01-15"
+enforcementMode: informational
+scope:
+  type: collection
+createdBy: null
+createdAt: null
+updatedAt: null
+"#;
+        let c: Contract = serde_yaml::from_str(yaml).unwrap();
+        assert!(c.created_by.is_none());
+        assert!(c.created_at.is_none());
+        assert!(c.updated_at.is_none());
     }
 }
