@@ -1,11 +1,22 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { sendRequest } from '@/lib/execute-request';
 import { findActiveLeaf } from '@/lib/pane-utils';
+import { workspaceKeys } from '@/lib/queries/workspace-queries';
+import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { isRequestTab } from '@/types/pane-types';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Registers global keyboard shortcuts for tab management across all pane groups.
 export function useKeyboardShortcuts() {
+  const qc = useQueryClient();
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -44,6 +55,23 @@ export function useKeyboardShortcuts() {
       if (e.key === 'w') {
         e.preventDefault();
         store.closeTab(activeLeaf.activeTabId, activeGroupId);
+        return;
+      }
+
+      // Cmd/Ctrl+L — open contracts tab for the active collection.
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        const paneStore = usePaneStore.getState();
+        const activeCollection = paneStore.activeCollection;
+        if (!activeCollection) return;
+        const workspaces =
+          qc.getQueryData<Workspace[]>(workspaceKeys.all) ?? [];
+        const activeWorkspace = workspaces.find(
+          (w) => w.id === activeWorkspaceIdRef.current,
+        );
+        if (!activeWorkspace) return;
+        const collectionRoot = `${activeWorkspace.path}/collections/${activeCollection}`;
+        paneStore.openContractTab(activeCollection, collectionRoot);
         return;
       }
 

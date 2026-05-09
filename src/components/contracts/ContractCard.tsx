@@ -1,5 +1,6 @@
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { AlertTriangle, ArrowRight, Calendar, Clock, Lock, MoreHorizontal } from 'lucide-react';
+import { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -81,15 +82,10 @@ function policyLabel(policy: Contract['policy']): string {
 
 // ─── Component ────────────────────────────────────────────
 
-export function ContractCard({
-  contract,
-  collectionName,
-  collectionRoot,
-  onAction,
-  onOpen,
-  focused,
-  className,
-}: ContractCardProps) {
+export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function ContractCard(
+  { contract, collectionName, collectionRoot, onAction, onOpen, focused, className },
+  ref,
+) {
   const statusCount = contract.breachCount > 0 ? contract.breachCount : contract.driftCount;
 
   function stopPropagation(e: React.MouseEvent) {
@@ -99,6 +95,7 @@ export function ContractCard({
   return (
     <ContractContextMenu contract={contract} collectionRoot={collectionRoot} onAction={onAction}>
       <article
+        ref={ref as React.Ref<HTMLElement>}
         aria-labelledby={`cc-name-${contract.id}`}
         data-status={contract.status}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: card keyboard-navigable via j/k in ContractsTab
@@ -257,4 +254,4 @@ export function ContractCard({
       </article>
     </ContractContextMenu>
   );
-}
+});

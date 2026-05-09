@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from 'date-fns';
 import { Download, Lock, Plus, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useContractDrift } from '@/hooks/useContractDrift';
@@ -25,7 +25,7 @@ interface ContractsTabProps {
 
 export function ContractsTab({ collectionId, collectionName }: ContractsTabProps) {
   const [modalOpen, setModalOpen] = useState(false);
-  const [focusedIdx, _setFocusedIdx] = useState(-1);
+  const [focusedIdx, setFocusedIdx] = useState(-1);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -39,13 +39,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
     useContractsFilter(contracts);
 
   const { attention, active, inactive } = groupContracts(filtered);
-  // allCards used for j/k hotkeys (wired in SP9-01 once useHotkeys is available)
-  // const allCards: Contract[] = [...attention, ...active, ...inactive];
-
-  // j/k/e/p/n/del hotkeys — wired once useHotkeys is available in the project
-  // useHotkeys('j', () => setFocusedIdx(i => Math.min(i + 1, allCards.length - 1)))
-  // useHotkeys('k', () => setFocusedIdx(i => Math.max(0, i - 1)))
-  // useHotkeys('n', () => setModalOpen(true))
+  const allCards = [...attention, ...active, ...inactive];
 
   // Load on mount + when collectionId changes
   useEffect(() => {
@@ -100,6 +94,64 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
     },
     [collectionId, store],
   );
+
+  // Refs array for DOM focus — one entry per card across all groups.
+  const cardRefs = useRef<(HTMLElement | null)[]>([]);
+
+  // Move DOM focus when j/k changes the focused index.
+  useEffect(() => {
+    if (focusedIdx >= 0 && cardRefs.current[focusedIdx]) {
+      cardRefs.current[focusedIdx]?.focus();
+    }
+  }, [focusedIdx]);
+
+  // Stable refs so the keydown handler always sees the latest values
+  // without needing to re-register the listener.
+  const allCardsRef = useRef(allCards);
+  const focusedIdxRef = useRef(focusedIdx);
+  const handleActionRef = useRef(handleAction);
+  useEffect(() => { allCardsRef.current = allCards; });
+  useEffect(() => { focusedIdxRef.current = focusedIdx; }, [focusedIdx]);
+  useEffect(() => { handleActionRef.current = handleAction; }, [handleAction]);
+
+  // j/k/n/e/p/del hotkeys — scoped to this tab's lifetime.
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable)
+        return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const cards = allCardsRef.current;
+      const idx = focusedIdxRef.current;
+
+      if (e.key === 'j') {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.min(i + 1, cards.length - 1));
+      } else if (e.key === 'k') {
+        e.preventDefault();
+        setFocusedIdx((i) => Math.max(0, i - 1));
+      } else if (e.key === 'n') {
+        e.preventDefault();
+        setModalOpen(true);
+      } else if (e.key === 'e') {
+        e.preventDefault();
+        const c = cards[idx];
+        if (c) void handleActionRef.current('edit', c.id);
+      } else if (e.key === 'p') {
+        e.preventDefault();
+        const c = cards[idx];
+        if (!c) return;
+        void handleActionRef.current(c.status === 'paused' ? 'resume' : 'pause', c.id);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        const c = cards[idx];
+        if (c) void handleActionRef.current('delete', c.id);
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const isEmpty = !isLoading && !loadError && contracts.length === 0;
   const noResults = !isLoading && contracts.length > 0 && filtered.length === 0;
@@ -227,6 +279,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {attention.map((c, i) => (
                       <ContractCard
                         key={c.id}
+                        ref={(el) => { cardRefs.current[i] = el; }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
@@ -242,6 +295,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {active.map((c, i) => (
                       <ContractCard
                         key={c.id}
+                        ref={(el) => { cardRefs.current[attention.length + i] = el; }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
@@ -257,6 +311,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {inactive.map((c, i) => (
                       <ContractCard
                         key={c.id}
+                        ref={(el) => { cardRefs.current[attention.length + active.length + i] = el; }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
