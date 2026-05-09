@@ -1,4 +1,5 @@
 import * as api from '@/lib/tauri-api';
+import { track } from '@/lib/telemetry';
 import type {
   ChangeKind,
   ChangelogEntry,
@@ -106,38 +107,59 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
     },
 
     publishContract: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.publishContract(collectionId, id, []);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     pauseContract: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.pauseContract(collectionId, id);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     resumeContract: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.resumeContract(collectionId, id);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     renewContract: async (collectionId, id, newExpiresAt) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.renewContract(collectionId, id, newExpiresAt);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     sendForReview: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.sendForReview(collectionId, id);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     approveContract: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.approveContract(collectionId, id);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     rejectContract: async (collectionId, id) => {
+      const prev = get().byId[id]?.status;
       const raw = await api.rejectContract(collectionId, id);
-      upsertInCollection(collectionId, adaptIpcContract(raw));
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
     },
 
     duplicateContract: async (collectionId, id) => {
@@ -146,10 +168,36 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
     },
 
     recomputeDrift: async (collectionId) => {
-      // Calls Rust — returns updated summaries, then re-fetches contracts
+      // Snapshot statuses before recompute to detect transitions
+      const beforeStatuses: Record<string, string> = {};
+      for (const id of (get().byCollection[collectionId] ?? [])) {
+        const status = get().byId[id]?.status;
+        if (status) beforeStatuses[id] = status;
+      }
+
       await api.recomputeDrift(collectionId, []);
-      // Reload the full contract list to get updated drift counts
       await get().loadContracts(collectionId);
+
+      // Emit drift_detected for every contract that newly entered drift or breach
+      for (const id of (get().byCollection[collectionId] ?? [])) {
+        const prev = beforeStatuses[id];
+        const curr = get().byId[id];
+        if (!curr) continue;
+        const nowDrifting = curr.status === 'drift' || curr.status === 'breach';
+        const wasDrifting = prev === 'drift' || prev === 'breach';
+        if (nowDrifting && !wasDrifting) {
+          try {
+            track('contracts.drift_detected', {
+              contractId: id,
+              driftCount: curr.driftCount,
+              breachCount: curr.breachCount,
+              elapsedMsSinceSigned: curr.createdAt
+                ? Date.now() - new Date(curr.createdAt).getTime()
+                : undefined,
+            });
+          } catch {}
+        }
+      }
     },
 
     loadChangelog: async (collectionId, contractId) => {
