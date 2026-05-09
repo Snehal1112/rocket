@@ -8,7 +8,7 @@ use rocket_app::ContractService;
 use rocket_collection::contract::{
     changelog::ContractChangelog,
     snapshot::RequestSignatureSnapshot,
-    types::{Contract, ContractEnforcementMode, ContractParty, ContractStatus},
+    types::{Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractStatus},
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -20,8 +20,8 @@ use ulid::Ulid;
 #[serde(rename_all = "camelCase")]
 pub struct AttachContractInput {
     pub title: String,
-    pub provider: rocket_collection::contract::types::ContractParty,
-    pub consumers: Vec<rocket_collection::contract::types::ContractParty>,
+    pub provider: ContractParty,
+    pub consumers: Vec<ContractParty>,
     pub version: String,
     pub effective_date: String,
     pub expiry_date: Option<String>,
@@ -29,7 +29,7 @@ pub struct AttachContractInput {
     /// The service validates, copies, and converts them to relative paths.
     pub document_paths: Vec<PathBuf>,
     pub scope: rocket_collection::contract::types::ContractScope,
-    pub policy: rocket_collection::contract::types::ContractPolicy,
+    pub policy: ContractPolicy,
     pub initial_snapshots: Vec<RequestSignatureSnapshot>,
     /// If true, status is set to Active and snapshot taken on creation.
     /// If false, status is Draft and no snapshot is taken.
@@ -95,12 +95,12 @@ pub fn attach_contract(
 pub struct UpdateContractInput {
     pub contract_id: String,
     pub title: String,
-    pub provider: String,
-    pub consumer: String,
-    pub project: String,
+    pub provider: ContractParty,
+    pub consumers: Vec<ContractParty>,
     pub version: String,
     pub effective_date: String,
     pub expiry_date: Option<String>,
+    pub policy: ContractPolicy,
     /// Absolute paths for newly added attachments (not yet copied).
     pub new_document_paths: Vec<PathBuf>,
     /// Relative paths of existing attachments the user wants to keep.
@@ -133,9 +133,9 @@ pub fn update_contract(
     let updated = Contract {
         id,
         title: input.title,
-        provider: ContractParty::from_name(&input.provider),
-        consumers: vec![ContractParty::from_name(&input.consumer)],
-        project: input.project,
+        provider: input.provider,
+        consumers: input.consumers,
+        project: existing.project,  // preserve existing value; field superseded by ContractParty
         version: input.version,
         status: existing.status,
         effective_date,
@@ -144,13 +144,13 @@ pub fn update_contract(
         document_paths: vec![],
         enforcement_mode: existing.enforcement_mode,
         scope: existing.scope,
-        policy: existing.policy,
+        policy: input.policy,
         drift_count: existing.drift_count,
         breach_count: existing.breach_count,
         endpoint_count: existing.endpoint_count,
         created_by: existing.created_by,
         created_at: existing.created_at,
-        updated_at: existing.updated_at,
+        updated_at: existing.updated_at,  // refreshed by the service
     };
 
     svc.update_contract(&root, updated, input.new_document_paths, input.kept_document_paths)

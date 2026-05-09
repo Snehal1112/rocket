@@ -262,6 +262,7 @@ impl ContractService {
         merged.append(&mut new_relative);
         contract.document_paths = merged;
 
+        contract.updated_at = Some(chrono::Utc::now());
         self.repo.save_contract(collection_root, &contract)?;
         Ok(contract)
     }
