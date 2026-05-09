@@ -235,6 +235,7 @@ export function ContractCard({
                   className='h-7 w-7'
                   onClick={stopPropagation}
                   aria-label='More actions'
+                  data-more-trigger
                 >
                   <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
                 </Button>
