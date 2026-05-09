@@ -456,6 +456,14 @@ impl ContractService {
                 Err(_) => continue,
             };
 
+            // Capture originals before any mutation so we can guard against
+            // unnecessary disk writes.  The file watcher emits `collection-changed`
+            // for every write; without this guard every save triggers another
+            // recompute_drift call, producing an infinite feedback loop.
+            let original_status = contract.status.clone();
+            let original_drift = contract.drift_count;
+            let original_breach = contract.breach_count;
+
             let mut all_entries: Vec<ChangelogEntry> = Vec::new();
             let mut drift_count = 0u32;
             let mut breach_count = 0u32;
@@ -517,10 +525,26 @@ impl ContractService {
                 }
             };
 
-            if let Ok(new_status) = transition_status(&contract.status, &event) {
-                contract.status = new_status;
+            let new_status = transition_status(&contract.status, &event)
+                .unwrap_or_else(|_| contract.status.clone());
+
+            // Guard: skip disk write when nothing changed.  Identical counts and
+            // status mean the file content would only differ in `updated_at`,
+            // which would retrigger the file watcher and restart the loop.
+            if drift_count == original_drift
+                && breach_count == original_breach
+                && new_status == original_status
+            {
+                summaries.push(ContractDriftSummary {
+                    contract_id: contract.id.to_string(),
+                    status: original_status,
+                    drift_count,
+                    breach_count,
+                });
+                continue;
             }
 
+            contract.status = new_status;
             contract.drift_count = drift_count;
             contract.breach_count = breach_count;
             contract.updated_at = Some(chrono::Utc::now());
@@ -1377,5 +1401,44 @@ mod tests {
 
         let result = svc.publish_contract(root(), contract.id, vec![]).unwrap();
         assert_eq!(result.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn recompute_drift_idempotent_when_counts_unchanged() {
+        // Verifies the file-watcher feedback loop guard: calling recompute_drift
+        // twice with the same (empty) snapshot set must NOT write the contract
+        // file on the second call. The test checks this by asserting that
+        // updated_at does not change between the two calls.
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Active);
+        contract.id = Ulid::new();
+        contract.drift_count = 2;
+        contract.breach_count = 2;
+        let fixed_time = chrono::Utc::now();
+        contract.updated_at = Some(fixed_time);
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        // First call — counts already match what empty snapshots would compute.
+        let summaries1 = svc
+            .recompute_drift_for_collection(root(), &[])
+            .unwrap();
+        let persisted1 = svc.repo.load_contract(root(), contract.id).unwrap();
+
+        // Second call — same snapshots, same result; must NOT update updated_at.
+        let summaries2 = svc
+            .recompute_drift_for_collection(root(), &[])
+            .unwrap();
+        let persisted2 = svc.repo.load_contract(root(), contract.id).unwrap();
+
+        // Both calls return a summary for the contract.
+        assert!(!summaries1.is_empty());
+        assert!(!summaries2.is_empty());
+
+        // Second call must NOT have written the contract file — updated_at unchanged.
+        assert_eq!(
+            persisted1.updated_at, persisted2.updated_at,
+            "recompute_drift wrote the contract file on a no-op second call — \
+             this would trigger the file-watcher feedback loop"
+        );
     }
 }
