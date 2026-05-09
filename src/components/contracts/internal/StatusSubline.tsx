@@ -1,7 +1,7 @@
 import type { Contract } from '@/types/contracts';
 
 interface StatusSublineProps {
-  contract: Pick<Contract, 'status' | 'driftCount' | 'breachCount'>;
+  contract: Pick<Contract, 'status' | 'breachCount'>;
 }
 
 /**
