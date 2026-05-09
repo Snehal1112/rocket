@@ -90,3 +90,34 @@ export const CHART_COLORS = {
   red: 'text-chart-5',
   yellow: 'text-chart-3',
 } as const;
+
+// ── Contract: HTTP Method CSS Variable References ───────────────────
+
+/**
+ * CSS variable references for HTTP method colors.
+ * Use in Tailwind-incompatible contexts (inline styles, canvas, etc.)
+ * For Tailwind: use text-[hsl(var(--color-method-get))] etc. directly.
+ */
+export const METHOD_COLOR_VARS: Record<string, string> = {
+  GET: 'hsl(var(--color-method-get))',
+  POST: 'hsl(var(--color-method-post))',
+  PUT: 'hsl(var(--color-method-put))',
+  DELETE: 'hsl(var(--color-method-delete))',
+  PATCH: 'hsl(var(--color-method-patch))',
+  OPTIONS: 'hsl(var(--color-method-options))',
+  HEAD: 'hsl(var(--color-method-head))',
+};
+
+/** Returns the Tailwind class for a given HTTP method. Falls back to muted text. */
+export function methodColorClass(method: string): string {
+  const map: Record<string, string> = {
+    GET: 'text-[hsl(var(--color-method-get))]',
+    POST: 'text-[hsl(var(--color-method-post))]',
+    PUT: 'text-[hsl(var(--color-method-put))]',
+    DELETE: 'text-[hsl(var(--color-method-delete))]',
+    PATCH: 'text-[hsl(var(--color-method-patch))]',
+    OPTIONS: 'text-[hsl(var(--color-method-options))]',
+    HEAD: 'text-[hsl(var(--color-method-head))]',
+  };
+  return map[method.toUpperCase()] ?? 'text-muted-foreground';
+}
