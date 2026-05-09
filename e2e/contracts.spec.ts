@@ -110,11 +110,9 @@ test('scenario 1: create and publish a contract — card appears with Active sta
   // Create via "New contract" button
   await createPublishedContract(page, 'Payments API v1');
 
-  // Card shows status chip (Active)
+  // Card shows Active status somewhere inside it
   await expect(
-    page.locator('article', { hasText: 'Payments API v1' })
-      .locator('[class*="StatusChip"], [data-status]')
-      .or(page.locator('article', { hasText: 'Payments API v1' }).getByText(/Active/i)),
+    page.locator('article', { hasText: 'Payments API v1' }).getByText(/Active/i).first(),
   ).toBeVisible({ timeout: 5_000 });
 });
 

@@ -9,7 +9,7 @@
  * State lives in window.__e2eMockState so tests can inspect/mutate it
  * via page.evaluate.
  */
-export const TAURI_MOCK_SCRIPT = `
+
 (function() {
   // ── Callback registry (used by Channel / event system) ───────────────────
   const callbacks = {};
@@ -281,4 +281,4 @@ export const TAURI_MOCK_SCRIPT = `
     fs: { readTextFile: () => Promise.resolve(''), writeTextFile: () => Promise.resolve() },
   };
 })();
-`;
+

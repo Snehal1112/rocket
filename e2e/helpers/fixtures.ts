@@ -1,14 +1,16 @@
+import { resolve } from 'path';
 import type { Page } from '@playwright/test';
-import { TAURI_MOCK_SCRIPT } from './tauri-mock';
 
-export { TAURI_MOCK_SCRIPT };
+const MOCK_SCRIPT_PATH = resolve('./e2e/helpers/tauri-mock.js');
 
 /**
  * Inject the Tauri mock and navigate to the app.
  * Must be called at the start of every test.
  */
 export async function setupPage(page: Page): Promise<void> {
-  await page.addInitScript(TAURI_MOCK_SCRIPT);
+  // Load the mock as a plain JS file to avoid TypeScript template-literal
+  // transformation issues in Playwright's module bundler.
+  await page.addInitScript({ path: MOCK_SCRIPT_PATH });
   await page.goto('/');
   // Wait until the React app has hydrated (sidebar visible)
   await page.waitForSelector('[data-slot="tree-item"]', { timeout: 15_000 });
