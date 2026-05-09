@@ -389,7 +389,12 @@ impl ContractService {
         snapshots: Vec<RequestSignatureSnapshot>,
     ) -> ContractResult<Contract> {
         let mut contract = self.repo.load_contract(collection_root, id)?;
-        let new_status = transition_status(&contract.status, &StatusEvent::Publish)
+        // Drift/Breach → Active uses Resign (re-sign); Draft → Active uses Publish.
+        let event = match &contract.status {
+            ContractStatus::Drift | ContractStatus::Breach => StatusEvent::Resign,
+            _ => StatusEvent::Publish,
+        };
+        let new_status = transition_status(&contract.status, &event)
             .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
         contract.status = new_status;
         contract.updated_at = Some(chrono::Utc::now());
@@ -1349,5 +1354,28 @@ mod tests {
         assert_eq!(result.status, ContractStatus::Active);
         assert_eq!(result.drift_count, 0);
         assert_eq!(result.breach_count, 0);
+    }
+
+    #[test]
+    fn publish_contract_from_breach_resigns_to_active() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Breach);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        // Calling publish_contract on a Breach contract must succeed via Resign.
+        let result = svc.publish_contract(root(), contract.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn publish_contract_from_drift_resigns_to_active() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Drift);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc.publish_contract(root(), contract.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
     }
 }
