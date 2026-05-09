@@ -1,17 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { Contract } from '@/types/contracts';
+import { describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import type { Contract } from '@/types/contracts';
 import { ContractCard } from './ContractCard';
 
 function wrap(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
 
-function makeContract(
-  status: Contract['status'],
-  overrides: Partial<Contract> = {},
-): Contract {
+function makeContract(status: Contract['status'], overrides: Partial<Contract> = {}): Contract {
   return {
     id: 'c-test',
     collectionId: 'col1',
@@ -58,9 +55,7 @@ describe('ContractCard', () => {
       'expired',
     ];
     for (const status of statuses) {
-      const { unmount } = wrap(
-        <ContractCard contract={makeContract(status)} onAction={vi.fn()} />,
-      );
+      const { unmount } = wrap(<ContractCard contract={makeContract(status)} onAction={vi.fn()} />);
       unmount();
     }
   });
@@ -78,9 +73,7 @@ describe('ContractCard', () => {
 
   it('calls onOpen when article is clicked', () => {
     const onOpen = vi.fn();
-    wrap(
-      <ContractCard contract={makeContract('active')} onAction={vi.fn()} onOpen={onOpen} />,
-    );
+    wrap(<ContractCard contract={makeContract('active')} onAction={vi.fn()} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole('article'));
     expect(onOpen).toHaveBeenCalledWith('c-test');
   });
