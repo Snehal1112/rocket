@@ -2,6 +2,7 @@ import {
   BoxIcon,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   FolderPlus,
   LayoutGrid,
   Lock,
@@ -9,8 +10,9 @@ import {
   Pencil,
   Plus,
   Trash2,
+  TriangleAlert,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
@@ -28,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
@@ -35,6 +38,7 @@ import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
+import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
@@ -46,6 +50,15 @@ import type { DeleteTarget } from './tree-utils';
 // for collections that have no contracts. Without this, the `?? []` fallback
 // would produce a fresh array on every store update and force re-renders.
 const EMPTY_CONTRACTS: Contract[] = [];
+
+/** Tooltip label for the sidebar lock pin (spec §8.1). */
+function lockPinLabel(meta: { count: number; driftCount: number; breachCount: number }): string {
+  const parts: string[] = [`${meta.count} contract${meta.count !== 1 ? 's' : ''}`];
+  if (meta.breachCount > 0) parts.push(`${meta.breachCount} breaching`);
+  else if (meta.driftCount > 0) parts.push(`${meta.driftCount} drifting`);
+  else parts.push('in compliance');
+  return parts.join(' · ');
+}
 
 interface CollectionNodeProps {
   summary: CollectionSummary;
@@ -100,12 +113,27 @@ export function CollectionNode({
   const collectionScopedContracts = contractsForRoot.filter((c) => c.scope.type === 'collection');
   const openContractTab = usePaneStore((s) => s.openContractTab);
 
+  // New store — used for lock pin drift/breach counts
+  const newLoadContracts = useContractsStore((s) => s.loadContracts);
+  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? []);
+  const newContractsById = useContractsStore((s) => s.byId);
+
+  const contractMeta = useMemo(() => {
+    const contracts = newContractIds.map((id) => newContractsById[id]).filter(Boolean);
+    return {
+      count: contracts.length,
+      driftCount: contracts.filter((c) => c.status === 'drift').length,
+      breachCount: contracts.filter((c) => c.status === 'breach').length,
+    };
+  }, [newContractIds, newContractsById]);
+
   // Load contracts for this collection once the workspace path is known.
   // Cheap when the collection has none — backend returns an empty list.
   useEffect(() => {
     if (!collectionRoot) return;
     void loadContracts(collectionRoot);
-  }, [collectionRoot, loadContracts]);
+    void newLoadContracts(collectionRoot); // populate new store so lock pin has data
+  }, [collectionRoot, loadContracts, newLoadContracts]);
 
   const refreshTree = useCallback(() => {
     getCollection(summary.name)
@@ -308,6 +336,37 @@ export function CollectionNode({
                       collectionName={summary.name}
                       collectionRoot={collectionRoot}
                     />
+                  )}
+                  {contractMeta.count > 0 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type='button'
+                          className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openContractTab(summary.name, collectionRoot);
+                          }}
+                          aria-label={lockPinLabel(contractMeta)}
+                        >
+                          <Lock className='w-[10px] h-[10px]' aria-hidden='true' />
+                          {contractMeta.count > 1 && <span>{contractMeta.count}</span>}
+                          {contractMeta.driftCount > 0 && (
+                            <TriangleAlert
+                              className='w-[10px] h-[10px] text-[hsl(var(--warning))]'
+                              aria-hidden='true'
+                            />
+                          )}
+                          {contractMeta.breachCount > 0 && (
+                            <CircleAlert
+                              className='w-[10px] h-[10px] text-[hsl(var(--destructive))]'
+                              aria-hidden='true'
+                            />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side='right'>{lockPinLabel(contractMeta)}</TooltipContent>
+                    </Tooltip>
                   )}
                   {summary.refType === 'external' && (
                     <span className='ml-auto shrink-0 text-2xs text-foreground bg-muted px-1.5 py-0.5 rounded'>
