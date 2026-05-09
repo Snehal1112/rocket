@@ -1,5 +1,6 @@
 import { ChevronDown, LayoutGrid, List, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -147,7 +148,13 @@ export function ContractsFilterBar({
           variant='ghost'
           size='icon'
           className='h-8 w-8'
-          onClick={() => onSetView(filterState.view === 'cards' ? 'table' : 'cards')}
+          onClick={() => {
+            if (filterState.view === 'cards') {
+              toast('Table view coming soon');
+            } else {
+              onSetView('cards');
+            }
+          }}
           aria-label={filterState.view === 'cards' ? 'Switch to table view' : 'Switch to card view'}
         >
           {filterState.view === 'cards' ? (

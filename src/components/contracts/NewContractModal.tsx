@@ -98,16 +98,35 @@ export function NewContractModal({
 
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [warnings, setWarnings] = useState<Partial<Record<keyof FormState, string>>>({});
   const [saving, setSaving] = useState(false);
+
+  function checkWarnings(f: FormState): Partial<Record<keyof FormState, string>> {
+    const w: Partial<Record<keyof FormState, string>> = {};
+    if (f.effectiveAt) {
+      const d = new Date(`${f.effectiveAt}T00:00:00`);
+      if (d < new Date()) {
+        w.effectiveAt = 'This date is in the past — the contract will take effect immediately';
+      }
+    }
+    return w;
+  }
 
   function setField<K extends keyof FormState>(field: K) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
   }
 
+  function setEffectiveAt(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value;
+    setForm((prev) => ({ ...prev, effectiveAt: value }));
+    setWarnings(checkWarnings({ ...form, effectiveAt: value }));
+  }
+
   function resetAndClose() {
     setForm(INITIAL_STATE);
     setErrors({});
+    setWarnings({});
     setSaving(false);
     onOpenChange(false);
   }
@@ -301,10 +320,16 @@ export function NewContractModal({
                   *
                 </span>
               </Label>
-              <Input type='date' {...inputProps('effectiveAt')} />
+              <Input type='date' {...inputProps('effectiveAt')} onChange={setEffectiveAt} />
               {errors.effectiveAt && (
                 <p id='nc-effectiveAt-err' className='text-xs text-destructive'>
                   {errors.effectiveAt}
+                </p>
+              )}
+              {!errors.effectiveAt && warnings.effectiveAt && (
+                <p className='text-xs text-[hsl(var(--warning))] flex items-center gap-1'>
+                  <span aria-hidden='true'>⚠</span>
+                  {warnings.effectiveAt}
                 </p>
               )}
             </div>
