@@ -181,7 +181,7 @@ export function RequestNode({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className='group relative flex items-center'>
-          <TreeItem value={uid} active={active} className='flex-1'>
+          <TreeItem value={uid} active={active} className='flex-1' data-testid={`request-item-${method}-${name}`}>
             <TreeItemContent
               className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
               onClick={handleClick}

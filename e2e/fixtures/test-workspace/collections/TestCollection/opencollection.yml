@@ -1,0 +1,7 @@
+opencollection: 1.0.0
+uid: e2e-test-collection-0000-0000-0000
+info:
+  name: TestCollection
+  type: collection
+  description: E2E test collection for contract feature tests
+variables: []
