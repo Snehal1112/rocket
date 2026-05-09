@@ -1,6 +1,7 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { Moon, PanelBottom, PanelRight, Sun, Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ContractsStatusItem } from '@/components/status-bar/ContractsStatusItem';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/hooks/useTheme';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
           </span>
         )}
       </Button>
+      <ContractsStatusItem />
       <Button
         variant='ghost'
         size='sm'
