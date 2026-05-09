@@ -393,6 +393,70 @@ fn walk_folder<'a>(
     }
 }
 
+impl ContractService {
+    /// Drive the contract through the state machine with the given event.
+    /// Returns the updated contract (already persisted).
+    pub fn transition_contract_status(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        event: StatusEvent,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        let new_status = transition_status(&contract.status, &event)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.updated_at = Some(chrono::Utc::now());
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Transition a contract to Active and record the current set of endpoint snapshots.
+    /// Any snapshots supplied are merged into the stored baseline.
+    pub fn publish_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        snapshots: Vec<RequestSignatureSnapshot>,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        let new_status = transition_status(&contract.status, &StatusEvent::Publish)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.endpoint_count = snapshots.len() as u32;
+        contract.updated_at = Some(chrono::Utc::now());
+        if !snapshots.is_empty() {
+            let mut snapshot = self.repo.load_snapshot(collection_root, id)?;
+            for snap in snapshots {
+                snapshot.upsert(snap);
+            }
+            self.repo.save_snapshot(collection_root, &snapshot)?;
+        }
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Renew a contract: transition via `Renew` event, optionally set a new
+    /// expiry date, and reset drift/breach counters.
+    pub fn renew_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        new_expiry: Option<chrono::NaiveDate>,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        let new_status = transition_status(&contract.status, &StatusEvent::Renew)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.expiry_date = new_expiry;
+        contract.drift_count = 0;
+        contract.breach_count = 0;
+        contract.updated_at = Some(chrono::Utc::now());
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+}
+
 /// Summary returned by `recompute_drift_for_collection` for each processed contract.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1074,5 +1138,60 @@ mod tests {
         let result = svc.recompute_drift_for_collection(root(), &[]);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // publish_contract / transition_contract_status / renew_contract
+    // -----------------------------------------------------------------------
+
+    fn make_contract_with_status(status: ContractStatus) -> Contract {
+        let mut c = make_contract();
+        c.status = status;
+        c
+    }
+
+    #[test]
+    fn publish_draft_contract_sets_active_status() {
+        let svc = make_service();
+        // Attach a Draft contract first so it is persisted.
+        let draft = {
+            let mut c = make_contract();
+            c.status = ContractStatus::Draft;
+            c.id = Ulid::new();
+            svc.repo.save_contract(root(), &c).unwrap();
+            c
+        };
+        let result = svc.publish_contract(root(), draft.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn transition_contract_status_pause_sets_paused() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Active);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc
+            .transition_contract_status(root(), contract.id, StatusEvent::Pause)
+            .unwrap();
+        assert_eq!(result.status, ContractStatus::Paused);
+    }
+
+    #[test]
+    fn renew_expired_contract_resets_counts() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Expired);
+        contract.id = Ulid::new();
+        contract.drift_count = 5;
+        contract.breach_count = 3;
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc
+            .renew_contract(root(), contract.id, None)
+            .unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+        assert_eq!(result.drift_count, 0);
+        assert_eq!(result.breach_count, 0);
     }
 }

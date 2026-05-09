@@ -198,3 +198,62 @@ pub fn get_contract_changelog(
     svc.get_changelog(&PathBuf::from(&collection_root), id)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn publish_contract(
+    collection_root: String,
+    contract_id: String,
+    snapshots: Vec<rocket_collection::contract::snapshot::RequestSignatureSnapshot>,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.publish_contract(&PathBuf::from(&collection_root), id, snapshots)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pause_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Pause,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn resume_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Resume,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn renew_contract(
+    collection_root: String,
+    contract_id: String,
+    new_expires_at: Option<String>,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    let expiry = new_expires_at
+        .as_deref()
+        .map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d"))
+        .transpose()
+        .map_err(|e| format!("invalid expiresAt: {e}"))?;
+    svc.renew_contract(&PathBuf::from(&collection_root), id, expiry)
+        .map_err(|e| e.to_string())
+}
