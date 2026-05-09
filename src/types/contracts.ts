@@ -16,12 +16,12 @@ export type PartyRole = 'provider' | 'consumer';
 /** 'add' | 'remove' | 'modify' — frontend domain names (IPC uses 'added'/'removed'/'changed') */
 export type ChangeKind = 'add' | 'remove' | 'modify';
 
-export type ContractScopeType = 'collection' | 'folder' | 'requests';
+export type ContractScopeType = 'collection' | 'folder' | 'request';
 
 export type ContractScope =
   | { type: 'collection' }
-  | { type: 'folder'; folderId: string; path: string }
-  | { type: 'requests'; requestIds: string[] };
+  | { type: 'folder'; rel_path: string }
+  | { type: 'request'; rel_path: string };
 
 export type BreakingChangePolicy = 'strict' | 'lenient' | 'additive_ok';
 

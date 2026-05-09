@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { computeSnapshot } from './snapshot';
+import { describe, expect, it } from 'vitest';
 import type { ContractScope } from '@/types/contracts';
+import { computeSnapshot } from './snapshot';
 
 const mockRequests = [
   {
@@ -47,8 +47,8 @@ describe('computeSnapshot', () => {
     expect(snap['r1'].headers).toEqual([{ key: 'Authorization', required: true }]);
   });
 
-  it('folder scope returns only matching folder requests', () => {
-    const scope: ContractScope = { type: 'folder', folderId: 'folder-a', path: 'payments/' };
+  it('folder scope returns only requests in that folder (rel_path matches folderId)', () => {
+    const scope: ContractScope = { type: 'folder', rel_path: 'folder-a' };
     const snap = computeSnapshot(mockRequests, scope);
     expect(Object.keys(snap)).toHaveLength(2);
     expect(snap['r1']).toBeDefined();
@@ -56,12 +56,11 @@ describe('computeSnapshot', () => {
     expect(snap['r3']).toBeUndefined();
   });
 
-  it('requests scope returns only specified requestIds', () => {
-    const scope: ContractScope = { type: 'requests', requestIds: ['r1', 'r3'] };
+  it('request scope returns only the single request matching rel_path', () => {
+    const scope: ContractScope = { type: 'request', rel_path: 'r1' };
     const snap = computeSnapshot(mockRequests, scope);
-    expect(Object.keys(snap)).toHaveLength(2);
+    expect(Object.keys(snap)).toHaveLength(1);
     expect(snap['r1']).toBeDefined();
-    expect(snap['r3']).toBeDefined();
     expect(snap['r2']).toBeUndefined();
   });
 

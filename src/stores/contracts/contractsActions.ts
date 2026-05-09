@@ -1,5 +1,11 @@
 import * as api from '@/lib/tauri-api';
-import type { Contract, ContractsState, CreateContractFormValues } from '@/types/contracts';
+import type {
+  ChangeKind,
+  ChangelogEntry,
+  Contract,
+  ContractsState,
+  CreateContractFormValues,
+} from '@/types/contracts';
 
 type Set = (
   partial:
@@ -25,6 +31,7 @@ export interface ContractsActions {
   rejectContract: (collectionId: string, id: string) => Promise<void>;
   duplicateContract: (collectionId: string, id: string) => Promise<void>;
   recomputeDrift: (collectionId: string) => Promise<void>;
+  loadChangelog: (collectionId: string, contractId: string) => Promise<void>;
 }
 
 export function contractsActions(set: Set, get: Get): ContractsActions {
@@ -144,6 +151,57 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       // Reload the full contract list to get updated drift counts
       await get().loadContracts(collectionId);
     },
+
+    loadChangelog: async (collectionId, contractId) => {
+      const ipcLog = await api.getContractChangelog(collectionId, contractId);
+      const entries = ipcLog.entries.map((e, i) => adaptIpcChangelogEntry(e, contractId, i));
+      set((state) => ({
+        byId: {
+          ...state.byId,
+          [contractId]: state.byId[contractId]
+            ? { ...state.byId[contractId], changelog: entries }
+            : state.byId[contractId],
+        },
+      }));
+    },
+  };
+}
+
+/** Maps Rust IPC ChangeType string to domain ChangeKind. */
+function adaptChangeKind(changeType: string): ChangeKind {
+  if (changeType === 'added') return 'add';
+  if (changeType === 'removed') return 'remove';
+  return 'modify'; // 'changed'
+}
+
+/**
+ * Adapts an IPC ChangelogEntry to the domain ChangelogEntry.
+ * Synthesises fields (id, summary, detail) that exist in the domain type
+ * but are not present on the Rust wire format.
+ */
+function adaptIpcChangelogEntry(
+  raw: api.ChangelogEntry,
+  contractId: string,
+  index: number,
+): ChangelogEntry {
+  const detail =
+    raw.oldValue && raw.newValue
+      ? `${raw.oldValue} → ${raw.newValue}`
+      : raw.oldValue
+        ? `removed: ${raw.oldValue}`
+        : raw.newValue
+          ? `added: ${raw.newValue}`
+          : undefined;
+
+  return {
+    id: `${contractId}-${raw.timestamp}-${index}`,
+    contractId,
+    at: raw.timestamp,
+    kind: adaptChangeKind(raw.changeType),
+    summary: raw.field,
+    detail,
+    requestPath: typeof raw.requestPath === 'string' ? raw.requestPath : undefined,
+    isBreaking: raw.isBreaking ?? false,
   };
 }
 

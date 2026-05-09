@@ -1,4 +1,4 @@
-import type { ContractScope, RequestShapeMap, RequestShape } from '@/types/contracts';
+import type { ContractScope, RequestShape, RequestShapeMap } from '@/types/contracts';
 
 /**
  * Builds a RequestShapeMap from a collection's live requests, filtered to scope.
@@ -34,8 +34,10 @@ function filterRequestsByScope(
   scope: ContractScope,
 ): CollectionRequest[] {
   if (scope.type === 'collection') return requests;
-  if (scope.type === 'folder') return requests.filter((r) => r.folderId === scope.folderId);
-  return requests.filter((r) => scope.requestIds.includes(r.id));
+  // folder scope: rel_path is the folder's path — match requests in that folder
+  if (scope.type === 'folder') return requests.filter((r) => r.folderId === scope.rel_path);
+  // request scope: rel_path identifies a single request by id or path
+  return requests.filter((r) => r.id === scope.rel_path);
 }
 
 /** Loose type for any request object from the collection store.
