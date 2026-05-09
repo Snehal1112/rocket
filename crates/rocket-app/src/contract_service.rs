@@ -112,6 +112,18 @@ pub struct ContractDriftSummary {
     pub breach_count: u32,
 }
 
+/// Lightweight summary of a contract returned by `list_summaries`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractSummary {
+    pub id: String,
+    pub title: String,
+    pub status: ContractStatus,
+    pub drift_count: u32,
+    pub breach_count: u32,
+    pub endpoint_count: u32,
+}
+
 impl ContractService {
     pub fn new(
         repo: Arc<dyn ContractRepository>,
@@ -525,6 +537,63 @@ impl ContractService {
 
         Ok(summaries)
     }
+
+    /// Create a copy of an existing contract in `Draft` status with a bumped
+    /// patch version and a `" (copy)"` title suffix.
+    pub fn duplicate_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+    ) -> ContractResult<Contract> {
+        let source = self.repo.load_contract(collection_root, id)?;
+        let new_version = bump_patch_version(&source.version);
+        let now = chrono::Utc::now();
+        let duplicate = Contract {
+            id: Ulid::new(),
+            title: format!("{} (copy)", source.title),
+            version: new_version,
+            status: ContractStatus::Draft,
+            drift_count: 0,
+            breach_count: 0,
+            endpoint_count: 0,
+            created_at: Some(now),
+            updated_at: Some(now),
+            ..source
+        };
+        self.repo.save_contract(collection_root, &duplicate)?;
+        Ok(duplicate)
+    }
+
+    /// Return lightweight summaries for all contracts in the collection.
+    pub fn list_summaries(
+        &self,
+        collection_root: &Path,
+    ) -> ContractResult<Vec<ContractSummary>> {
+        let contracts = self.repo.list_contracts(collection_root)?;
+        Ok(contracts
+            .into_iter()
+            .map(|c| ContractSummary {
+                id: c.id.to_string(),
+                title: c.title,
+                status: c.status,
+                drift_count: c.drift_count,
+                breach_count: c.breach_count,
+                endpoint_count: c.endpoint_count,
+            })
+            .collect())
+    }
+}
+
+/// Increments the patch segment of a semver-like version string.
+/// E.g. `"1.2.3"` → `"1.2.4"`. Falls back to `"{v}-copy"` for non-standard strings.
+fn bump_patch_version(v: &str) -> String {
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() == 3 {
+        if let Ok(patch) = parts[2].parse::<u32>() {
+            return format!("{}.{}.{}", parts[0], parts[1], patch + 1);
+        }
+    }
+    format!("{v}-copy")
 }
 
 /// Returns true if the contract scope covers the given request path.
@@ -1126,12 +1195,51 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_contract_creates_draft_copy() {
+        let svc = make_service();
+        // Persist a contract with a semver version.
+        let mut source = make_contract();
+        source.version = "1.2.3".into();
+        source.status = ContractStatus::Active;
+        source.drift_count = 5;
+        source.breach_count = 2;
+        svc.repo.save_contract(root(), &source).unwrap();
+
+        let copy = svc.duplicate_contract(root(), source.id).unwrap();
+
+        // New identity
+        assert_ne!(copy.id, source.id);
+        // Title gets the suffix
+        assert!(copy.title.contains("(copy)"), "title must contain '(copy)': {}", copy.title);
+        // Version patch is bumped
+        assert_eq!(copy.version, "1.2.4");
+        // Status is reset to Draft regardless of source status
+        assert_eq!(copy.status, ContractStatus::Draft);
+        // Drift / breach counters are zeroed
+        assert_eq!(copy.drift_count, 0);
+        assert_eq!(copy.breach_count, 0);
+        // Persisted
+        svc.repo.load_contract(root(), copy.id).expect("duplicate must be persisted");
+    }
+
+    #[test]
     fn recompute_drift_no_snapshots_returns_empty_summaries() {
         // Contracts with no snapshot (Draft state) are skipped; result is empty.
         let svc = make_service();
         let result = svc.recompute_drift_for_collection(root(), &[]);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn bump_patch_version_handles_edge_cases() {
+        // Standard semver — happy path
+        assert_eq!(super::bump_patch_version("1.2.3"), "1.2.4");
+        assert_eq!(super::bump_patch_version("0.0.0"), "0.0.1");
+        // Non-semver — fallback branch
+        assert_eq!(super::bump_patch_version("v2"), "v2-copy");
+        assert_eq!(super::bump_patch_version("1.0"), "1.0-copy");
+        assert_eq!(super::bump_patch_version(""), "-copy");
     }
 
     // -----------------------------------------------------------------------

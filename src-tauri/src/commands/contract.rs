@@ -257,3 +257,81 @@ pub fn renew_contract(
     svc.renew_contract(&PathBuf::from(&collection_root), id, expiry)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn send_for_review(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::SendForReview,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn approve_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Approve,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reject_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Reject,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn duplicate_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Contract, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.duplicate_contract(&PathBuf::from(&collection_root), id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn recompute_drift(
+    collection_root: String,
+    current_snapshots: Vec<rocket_collection::contract::snapshot::RequestSignatureSnapshot>,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Vec<rocket_app::contract_service::ContractDriftSummary>, String> {
+    svc.recompute_drift_for_collection(
+        &std::path::PathBuf::from(&collection_root),
+        &current_snapshots,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_contract_summary(
+    collection_root: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<Vec<rocket_app::contract_service::ContractSummary>, String> {
+    svc.list_summaries(&PathBuf::from(&collection_root))
+        .map_err(|e| e.to_string())
+}

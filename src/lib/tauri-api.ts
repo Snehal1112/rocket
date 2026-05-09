@@ -1166,6 +1166,101 @@ export const deleteContract = (collectionRoot: string, contractId: string) =>
 export const getContractChangelog = (collectionRoot: string, contractId: string) =>
   invoke<ContractChangelog>('get_contract_changelog', { collectionRoot, contractId });
 
+// Contract status — mirrors Rust ContractStatus enum (serialised as snake_case strings)
+export type ContractStatus =
+  | 'draft'
+  | 'active'
+  | 'drift'
+  | 'breach'
+  | 'in_review'
+  | 'paused'
+  | 'expiring_in_30_days'
+  | 'expired';
+
+export interface ContractDriftSummary {
+  contractId: string;
+  status: ContractStatus;
+  driftCount: number;
+  breachCount: number;
+}
+
+export interface ContractSummary {
+  id: string;
+  title: string;
+  status: ContractStatus;
+  driftCount: number;
+  breachCount: number;
+  endpointCount: number;
+}
+
+// ─── Contract lifecycle commands ─────────────────────────────
+
+export async function publishContract(
+  collectionRoot: string,
+  contractId: string,
+  snapshots: RequestSignatureSnapshot[],
+): Promise<Contract> {
+  return invoke('publish_contract', { collectionRoot, contractId, snapshots });
+}
+
+export async function pauseContract(collectionRoot: string, contractId: string): Promise<Contract> {
+  return invoke('pause_contract', { collectionRoot, contractId });
+}
+
+export async function resumeContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('resume_contract', { collectionRoot, contractId });
+}
+
+export async function renewContract(
+  collectionRoot: string,
+  contractId: string,
+  newExpiresAt: string | null,
+): Promise<Contract> {
+  return invoke('renew_contract', { collectionRoot, contractId, newExpiresAt });
+}
+
+export async function sendForReview(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('send_for_review', { collectionRoot, contractId });
+}
+
+export async function approveContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('approve_contract', { collectionRoot, contractId });
+}
+
+export async function rejectContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('reject_contract', { collectionRoot, contractId });
+}
+
+export async function duplicateContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('duplicate_contract', { collectionRoot, contractId });
+}
+
+export async function recomputeDrift(
+  collectionRoot: string,
+  currentSnapshots: RequestSignatureSnapshot[],
+): Promise<ContractDriftSummary[]> {
+  return invoke('recompute_drift', { collectionRoot, currentSnapshots });
+}
+
+export async function getContractSummary(collectionRoot: string): Promise<ContractSummary[]> {
+  return invoke('get_contract_summary', { collectionRoot });
+}
+
 // ============================================================
 // Security audit / compliance
 // ============================================================

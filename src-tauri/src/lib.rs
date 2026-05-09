@@ -388,6 +388,12 @@ pub fn run() {
             commands::contract::pause_contract,
             commands::contract::resume_contract,
             commands::contract::renew_contract,
+            commands::contract::send_for_review,
+            commands::contract::approve_contract,
+            commands::contract::reject_contract,
+            commands::contract::duplicate_contract,
+            commands::contract::recompute_drift,
+            commands::contract::get_contract_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
