@@ -102,6 +102,16 @@ pub struct ContractService {
     audit: Arc<dyn SecurityAuditPublisher>,
 }
 
+/// Summary returned by `recompute_drift_for_collection` for each processed contract.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractDriftSummary {
+    pub contract_id: String,
+    pub status: ContractStatus,
+    pub drift_count: u32,
+    pub breach_count: u32,
+}
+
 impl ContractService {
     pub fn new(
         repo: Arc<dyn ContractRepository>,
@@ -339,61 +349,7 @@ impl ContractService {
 
         Ok(())
     }
-}
 
-/// Returns true if the contract scope covers the given request path.
-fn covers(scope: &ContractScope, request_path: &Path) -> bool {
-    match scope {
-        ContractScope::Collection => true,
-        ContractScope::Folder { rel_path } => request_path.starts_with(rel_path),
-        ContractScope::Request { rel_path } => request_path == rel_path,
-    }
-}
-
-/// Recursively collect every request in the folder tree along with its
-/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
-/// directory name) to match the path format the save handler emits.
-/// Requests with no `file_name` (e.g. freshly constructed in memory) are
-/// skipped because we cannot key them the same way the save path will.
-fn walk_folder<'a>(
-    folder: &'a Folder,
-    prefix: &Path,
-    out: &mut Vec<(PathBuf, &'a rocket_collection::Request)>,
-) {
-    for item in &folder.items {
-        match item {
-            CollectionItem::Request(req) => {
-                let Some(file_name) = req.file_name.as_deref() else {
-                    continue;
-                };
-                let path = if prefix.as_os_str().is_empty() {
-                    PathBuf::from(file_name)
-                } else {
-                    prefix.join(file_name)
-                };
-                out.push((path, req));
-            }
-            CollectionItem::Folder(sub) => {
-                // Skip folders with no on-disk name. build_folder_tree always
-                // sets dir_name; None here means a malformed in-memory tree.
-                let Some(segment) = sub.dir_name.as_deref() else {
-                    continue;
-                };
-                let next = if prefix.as_os_str().is_empty() {
-                    PathBuf::from(segment)
-                } else {
-                    prefix.join(segment)
-                };
-                walk_folder(sub, &next, out);
-            }
-            CollectionItem::OpaqueItem(_) => {}
-            // Summary items carry no file content; skip for contract audit.
-            CollectionItem::Summary(_) => {}
-        }
-    }
-}
-
-impl ContractService {
     /// Drive the contract through the state machine with the given event.
     /// Returns the updated contract (already persisted).
     pub fn transition_contract_status(
@@ -423,15 +379,13 @@ impl ContractService {
         let new_status = transition_status(&contract.status, &StatusEvent::Publish)
             .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
         contract.status = new_status;
-        contract.endpoint_count = snapshots.len() as u32;
         contract.updated_at = Some(chrono::Utc::now());
-        if !snapshots.is_empty() {
-            let mut snapshot = self.repo.load_snapshot(collection_root, id)?;
-            for snap in snapshots {
-                snapshot.upsert(snap);
-            }
-            self.repo.save_snapshot(collection_root, &snapshot)?;
+        let mut snapshot = self.repo.load_snapshot(collection_root, id)?;
+        for snap in snapshots {
+            snapshot.upsert(snap);
         }
+        contract.endpoint_count = snapshot.entries.len() as u32;
+        self.repo.save_snapshot(collection_root, &snapshot)?;
         self.repo.save_contract(collection_root, &contract)?;
         Ok(contract)
     }
@@ -455,19 +409,7 @@ impl ContractService {
         self.repo.save_contract(collection_root, &contract)?;
         Ok(contract)
     }
-}
 
-/// Summary returned by `recompute_drift_for_collection` for each processed contract.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContractDriftSummary {
-    pub contract_id: String,
-    pub status: ContractStatus,
-    pub drift_count: u32,
-    pub breach_count: u32,
-}
-
-impl ContractService {
     /// Scans all active contracts in the collection, diffs each against the
     /// supplied current snapshots, updates drift/breach counts, transitions
     /// status via the state machine, appends changelog entries, and saves
@@ -582,6 +524,58 @@ impl ContractService {
         }
 
         Ok(summaries)
+    }
+}
+
+/// Returns true if the contract scope covers the given request path.
+fn covers(scope: &ContractScope, request_path: &Path) -> bool {
+    match scope {
+        ContractScope::Collection => true,
+        ContractScope::Folder { rel_path } => request_path.starts_with(rel_path),
+        ContractScope::Request { rel_path } => request_path == rel_path,
+    }
+}
+
+/// Recursively collect every request in the folder tree along with its
+/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
+/// directory name) to match the path format the save handler emits.
+/// Requests with no `file_name` (e.g. freshly constructed in memory) are
+/// skipped because we cannot key them the same way the save path will.
+fn walk_folder<'a>(
+    folder: &'a Folder,
+    prefix: &Path,
+    out: &mut Vec<(PathBuf, &'a rocket_collection::Request)>,
+) {
+    for item in &folder.items {
+        match item {
+            CollectionItem::Request(req) => {
+                let Some(file_name) = req.file_name.as_deref() else {
+                    continue;
+                };
+                let path = if prefix.as_os_str().is_empty() {
+                    PathBuf::from(file_name)
+                } else {
+                    prefix.join(file_name)
+                };
+                out.push((path, req));
+            }
+            CollectionItem::Folder(sub) => {
+                // Skip folders with no on-disk name. build_folder_tree always
+                // sets dir_name; None here means a malformed in-memory tree.
+                let Some(segment) = sub.dir_name.as_deref() else {
+                    continue;
+                };
+                let next = if prefix.as_os_str().is_empty() {
+                    PathBuf::from(segment)
+                } else {
+                    prefix.join(segment)
+                };
+                walk_folder(sub, &next, out);
+            }
+            CollectionItem::OpaqueItem(_) => {}
+            // Summary items carry no file content; skip for contract audit.
+            CollectionItem::Summary(_) => {}
+        }
     }
 }
 
@@ -1163,6 +1157,25 @@ mod tests {
         };
         let result = svc.publish_contract(root(), draft.id, vec![]).unwrap();
         assert_eq!(result.status, ContractStatus::Active);
+
+        let persisted = svc.repo.load_contract(root(), draft.id).unwrap();
+        assert_eq!(persisted.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn publish_contract_with_snapshots_sets_endpoint_count() {
+        let svc = make_service();
+        let mut draft = make_contract();
+        draft.status = ContractStatus::Draft;
+        let draft = svc.attach_contract(root(), draft, vec![], vec![]).unwrap();
+
+        let snaps = vec![make_snap("a.yml"), make_snap("b.yml")];
+        let published = svc.publish_contract(root(), draft.id, snaps).unwrap();
+        assert_eq!(published.endpoint_count, 2);
+
+        let persisted = svc.repo.load_contract(root(), draft.id).unwrap();
+        assert_eq!(persisted.endpoint_count, 2);
+        assert_eq!(persisted.status, ContractStatus::Active);
     }
 
     #[test]
