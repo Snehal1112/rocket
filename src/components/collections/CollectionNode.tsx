@@ -30,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
@@ -338,35 +338,37 @@ export function CollectionNode({
                     />
                   )}
                   {contractMeta.count > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type='button'
-                          className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity'
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openContractTab(summary.name, collectionRoot);
-                          }}
-                          aria-label={lockPinLabel(contractMeta)}
-                        >
-                          <Lock className='w-[10px] h-[10px]' aria-hidden='true' />
-                          {contractMeta.count > 1 && <span>{contractMeta.count}</span>}
-                          {contractMeta.driftCount > 0 && (
-                            <TriangleAlert
-                              className='w-[10px] h-[10px] text-[hsl(var(--warning))]'
-                              aria-hidden='true'
-                            />
-                          )}
-                          {contractMeta.breachCount > 0 && (
-                            <CircleAlert
-                              className='w-[10px] h-[10px] text-[hsl(var(--destructive))]'
-                              aria-hidden='true'
-                            />
-                          )}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side='right'>{lockPinLabel(contractMeta)}</TooltipContent>
-                    </Tooltip>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type='button'
+                            className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openContractTab(summary.name, collectionRoot);
+                            }}
+                            aria-label={lockPinLabel(contractMeta)}
+                          >
+                            <Lock className='w-[10px] h-[10px]' aria-hidden='true' />
+                            {contractMeta.count > 1 && <span>{contractMeta.count}</span>}
+                            {contractMeta.driftCount > 0 && (
+                              <TriangleAlert
+                                className='w-[10px] h-[10px] text-[hsl(var(--warning))]'
+                                aria-hidden='true'
+                              />
+                            )}
+                            {contractMeta.breachCount > 0 && (
+                              <CircleAlert
+                                className='w-[10px] h-[10px] text-[hsl(var(--destructive))]'
+                                aria-hidden='true'
+                              />
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side='right'>{lockPinLabel(contractMeta)}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                   {summary.refType === 'external' && (
                     <span className='ml-auto shrink-0 text-2xs text-foreground bg-muted px-1.5 py-0.5 rounded'>
