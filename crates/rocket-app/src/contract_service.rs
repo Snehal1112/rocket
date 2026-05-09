@@ -8,7 +8,7 @@ use rocket_collection::{
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-        types::{BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
+        types::{Contract, ContractEnforcementMode, ContractScope, ContractStatus},
         {transition_status, StatusEvent},
     },
     CollectionItem, CollectionRepository, Folder,
@@ -132,12 +132,19 @@ impl ContractService {
     pub fn attach_contract(
         &self,
         collection_root: &Path,
-        collection_name: &str,
         mut contract: Contract,
         initial_snapshots: Vec<RequestSignatureSnapshot>,
         attachment_sources: Vec<PathBuf>,
     ) -> ContractResult<Contract> {
+        let collection_name = collection_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| ContractError::Internal("collection_root has no final path component".into()))?;
+
         contract.id = Ulid::new();
+        let now = chrono::Utc::now();
+        contract.created_at = Some(now);
+        contract.updated_at = Some(now);
         // Force Informational — Model B variants not yet UI-reachable.
         contract.enforcement_mode = ContractEnforcementMode::Informational;
 
@@ -165,6 +172,8 @@ impl ContractService {
         for snap in initial_snapshots {
             snapshot.upsert(snap);
         }
+
+        contract.endpoint_count = snapshot.entries.len() as u32;
 
         // Copy attachments into the collection before writing the contract YAML
         // so the relative paths are ready. If copy fails, no contract file is
@@ -517,8 +526,11 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use rocket_collection::{
-        contract::repository::ContractError, Collection, CollectionSettings, CollectionSummary,
-        CollectionVariable, Request,
+        contract::{
+            repository::ContractError,
+            types::{ContractParty, ContractPolicy},
+        },
+        Collection, CollectionSettings, CollectionSummary, CollectionVariable, Request,
     };
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::types::HttpMethod;
@@ -720,7 +732,7 @@ mod tests {
     }
 
     fn root() -> &'static Path {
-        Path::new("/tmp/mock")
+        Path::new("/tmp/demo")
     }
 
     fn make_contract() -> Contract {
@@ -790,7 +802,7 @@ mod tests {
     fn attach_and_list() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
         let list = svc.list_contracts(root()).unwrap();
         assert_eq!(list.len(), 1);
@@ -802,7 +814,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         svc.on_request_saved(root(), snap).unwrap();
         let log = svc.get_changelog(root(), contract.id).unwrap();
@@ -814,7 +826,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         let mut changed = snap;
         changed.method = "POST".into();
@@ -828,7 +840,7 @@ mod tests {
     fn delete_removes_all_files() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
         svc.delete_contract(root(), contract.id).unwrap();
         assert!(svc.get_contract(root(), contract.id).is_err());
@@ -844,7 +856,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
@@ -871,7 +883,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         // Simulate the save hook emitting a changed shape for the nested
@@ -914,7 +926,6 @@ mod tests {
         let contract = svc
             .attach_contract(
                 root(),
-                COLLECTION_NAME,
                 make_contract(),
                 vec![override_snap],
                 vec![],
@@ -961,7 +972,7 @@ mod tests {
         contract.scope = ContractScope::Folder { rel_path: PathBuf::from("a") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
+            .attach_contract(root(), contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -988,7 +999,7 @@ mod tests {
         contract.scope = ContractScope::Request { rel_path: PathBuf::from("foo.yml") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
+            .attach_contract(root(), contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -1008,7 +1019,7 @@ mod tests {
             Arc::new(MockCollectionRepo::failing()),
         );
 
-        let result = svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![]);
+        let result = svc.attach_contract(root(), make_contract(), vec![], vec![]);
 
         match result {
             Err(ContractError::Internal(_)) => {}
@@ -1043,7 +1054,7 @@ mod tests {
             publisher.clone(),
         );
 
-        svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+        svc.attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         let captured = publisher.captured.lock().unwrap();

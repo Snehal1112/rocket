@@ -8,7 +8,7 @@ use rocket_app::ContractService;
 use rocket_collection::contract::{
     changelog::ContractChangelog,
     snapshot::RequestSignatureSnapshot,
-    types::{Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope, ContractStatus},
+    types::{Contract, ContractEnforcementMode, ContractParty, ContractStatus},
 };
 use std::path::PathBuf;
 use tauri::State;
@@ -20,17 +20,20 @@ use ulid::Ulid;
 #[serde(rename_all = "camelCase")]
 pub struct AttachContractInput {
     pub title: String,
-    pub provider: String,
-    pub consumer: String,
-    pub project: String,
+    pub provider: rocket_collection::contract::types::ContractParty,
+    pub consumers: Vec<rocket_collection::contract::types::ContractParty>,
     pub version: String,
     pub effective_date: String,
     pub expiry_date: Option<String>,
     /// Absolute paths chosen by the file picker on the user's machine.
     /// The service validates, copies, and converts them to relative paths.
     pub document_paths: Vec<PathBuf>,
-    pub scope: ContractScope,
+    pub scope: rocket_collection::contract::types::ContractScope,
+    pub policy: rocket_collection::contract::types::ContractPolicy,
     pub initial_snapshots: Vec<RequestSignatureSnapshot>,
+    /// If true, status is set to Active and snapshot taken on creation.
+    /// If false, status is Draft and no snapshot is taken.
+    pub publish_immediately: bool,
 }
 
 #[tauri::command]
@@ -39,57 +42,49 @@ pub fn attach_contract(
     input: AttachContractInput,
     svc: State<'_, ContractService>,
 ) -> Result<Contract, String> {
+    use chrono::NaiveDate;
+
     let root = PathBuf::from(&collection_root);
 
-    // The collection name is derived from the final path component of the
-    // collection root. This works for embedded collections whose root is
-    // `<workspace>/collections/<name>`. External collections (linked via
-    // WorkspaceService::link_external_collection) have arbitrary roots, so
-    // the stem may not match the name key used by CollectionRepository::get.
-    // Full external-collection support is tracked in the workspace-mismatch
-    // fix (collection_root_for on CollectionRepository).
-    let collection_name = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "collectionRoot must have a final path component".to_string())?
-        .to_string();
+    let effective_date = NaiveDate::parse_from_str(&input.effective_date, "%Y-%m-%d")
+        .map_err(|e| format!("invalid effectiveDate: {e}"))?;
 
-    let effective_date = chrono::NaiveDate::parse_from_str(&input.effective_date, "%Y-%m-%d")
-        .map_err(|e| format!("invalid effectiveDate: {}", e))?;
-
-    let expiry_date = input
-        .expiry_date
-        .as_deref()
-        .map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d"))
+    let expiry_date = input.expiry_date.as_deref()
+        .map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d"))
         .transpose()
-        .map_err(|e| format!("invalid expiryDate: {}", e))?;
+        .map_err(|e| format!("invalid expiryDate: {e}"))?;
 
-    let contract = Contract {
-        // Overwritten inside ContractService::attach_contract — placeholder only.
-        id: Ulid::new(),
-        title: input.title,
-        provider: ContractParty::from_name(&input.provider),
-        consumers: vec![ContractParty::from_name(&input.consumer)],
-        project: input.project,
-        version: input.version,
-        status: ContractStatus::default(),
-        effective_date,
-        expiry_date,
-        // Populated by the service after copying files; empty here.
-        document_paths: vec![],
-        // Forced to Informational inside the service; set here for shape only.
-        enforcement_mode: ContractEnforcementMode::Informational,
-        scope: input.scope,
-        policy: ContractPolicy::default(),
-        drift_count: 0,
-        breach_count: 0,
-        endpoint_count: 0,
-        created_by: None,
-        created_at: None,
-        updated_at: None,
+    let status = if input.publish_immediately {
+        ContractStatus::Active
+    } else {
+        ContractStatus::Draft
     };
 
-    svc.attach_contract(&root, &collection_name, contract, input.initial_snapshots, input.document_paths)
+    let contract = Contract {
+        id: Ulid::new(),
+        title: input.title,
+        provider: input.provider,
+        consumers: input.consumers,
+        project: String::new(), // project field superseded by ContractParty identities; retained for backward compat
+        version: input.version,
+        status,
+        effective_date,
+        expiry_date,
+        document_paths: vec![],
+        enforcement_mode: ContractEnforcementMode::Informational,
+        scope: input.scope,
+        policy: input.policy,
+        drift_count: 0,
+        breach_count: 0,
+        endpoint_count: 0, // overwritten by the service after the snapshot walk
+        created_by: None,
+        created_at: None, // set by the service
+        updated_at: None, // set by the service
+    };
+
+    let snapshots = if input.publish_immediately { input.initial_snapshots } else { vec![] };
+
+    svc.attach_contract(&root, contract, snapshots, input.document_paths)
         .map_err(|e| e.to_string())
 }
 
