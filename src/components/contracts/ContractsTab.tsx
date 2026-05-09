@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useContractDrift } from '@/hooks/useContractDrift';
 import { useContracts } from '@/hooks/useContracts';
 import { useContractsFilter } from '@/hooks/useContractsFilter';
+import { track } from '@/lib/telemetry';
 import { groupContracts } from '@/stores/contracts/contractsSelectors';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import type { ContractAction } from './ContractCard';
@@ -45,13 +46,22 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   useEffect(() => {
     setLoadError(null);
     loadContracts(collectionId)
-      .then(() => setLastSync(new Date()))
+      .then(() => {
+        setLastSync(new Date());
+        try {
+          track('contracts.tab_opened', {
+            collectionId,
+            contractCount: useContractsStore.getState().byCollection[collectionId]?.length ?? 0,
+          });
+        } catch {}
+      })
       .catch((err) => setLoadError(String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionId, loadContracts]);
 
   const handleAction = useCallback(
     async (action: ContractAction, contractId: string) => {
+      try { track('contracts.card_action', { contractId, action }); } catch {}
       try {
         switch (action) {
           case 'pause':
@@ -183,8 +193,13 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             <h1 className='text-xl font-semibold text-foreground leading-tight tracking-[-0.01em]'>
               Contracts
             </h1>
-            <div className='text-xs text-muted-foreground flex items-center gap-2 mt-0.5 flex-wrap'>
+            <div
+              className='text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap'
+              aria-label={`${collectionName} / Contracts`}
+            >
               <span>{collectionName}</span>
+              <span aria-hidden='true'>/</span>
+              <span className='text-foreground/70'>Contracts</span>
               <span
                 className='w-[3px] h-[3px] rounded-full bg-muted-foreground/40'
                 aria-hidden='true'
@@ -252,16 +267,32 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         <ContractsFilterBar
           filterState={filterState}
           counts={counts}
-          onSearch={setSearch}
-          onToggleStatus={toggleStatus}
-          onSetSort={setSort}
+          onSearch={(q) => {
+            setSearch(q);
+            if (q.length > 0) {
+              try { track('contracts.filter_used', { filterType: 'search' }); } catch {}
+            }
+          }}
+          onToggleStatus={(s) => {
+            toggleStatus(s);
+            try { track('contracts.filter_used', { filterType: 'status', value: s }); } catch {}
+          }}
+          onSetSort={(s) => {
+            setSort(s);
+            try { track('contracts.filter_used', { filterType: 'sort', value: s }); } catch {}
+          }}
           onSetView={setView}
         />
       )}
 
       {/* ── Content area ────────────────────────────────── */}
       {isEmpty && !loadError ? (
-        <ContractsEmptyState onStartFromCurrent={() => setModalOpen(true)} />
+        <ContractsEmptyState
+          onStartFromCurrent={() => {
+            try { track('contracts.empty_state_cta', { action: 'start_from_current' }); } catch {}
+            setModalOpen(true);
+          }}
+        />
       ) : (
         <ScrollArea className='flex-1'>
           <div className='px-6 py-4'>
