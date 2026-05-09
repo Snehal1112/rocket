@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { track } from '@/lib/telemetry';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -159,7 +160,7 @@ export function NewContractModal({
       };
       const consumers = buildParties(form.consumerNames);
 
-      await createContract(
+      const contract = await createContract(
         collectionId,
         {
           name: form.name.trim(),
@@ -177,8 +178,14 @@ export function NewContractModal({
 
       if (publishImmediately) {
         await recomputeDrift(collectionId);
+        // Event 1: contracts.created
+        try { track('contracts.created', { scopeType: form.scopeType, consumerCount: consumers.length, publishedImmediately: true }); } catch {}
+        // Event 2: contracts.published
+        try { track('contracts.published', { contractId: contract.id, endpointCount: contract.endpointCount }); } catch {}
         toast.success('Contract created and published.');
       } else {
+        // Event 3: contracts.draft_saved
+        try { track('contracts.draft_saved', { collectionId, scopeType: form.scopeType, consumerCount: consumers.length }); } catch {}
         toast('Contract saved as draft.');
       }
 
