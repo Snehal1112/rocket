@@ -3,6 +3,9 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type { Contract, ContractsState } from '@/types/contracts';
 import { type ContractsActions, contractsActions } from './contractsActions';
 
+// Re-export so SP5+ components can import Contract from the store layer
+export type { Contract };
+
 export interface ContractsStore extends ContractsState, ContractsActions {
   // Sync mutations
   updateContract: (id: string, patch: Partial<Contract>) => void;
