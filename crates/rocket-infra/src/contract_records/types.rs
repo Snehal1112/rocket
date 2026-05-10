@@ -292,3 +292,74 @@ mod policy_tests {
         assert_eq!(domain, back);
     }
 }
+
+// ---------------------------------------------------------------------------
+// ContractScopeRecord
+// ---------------------------------------------------------------------------
+
+use rocket_collection::contract::types::ContractScope;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContractScopeRecord {
+    Collection,
+    Folder { rel_path: PathBuf },
+    Request { rel_path: PathBuf },
+}
+
+impl From<&ContractScope> for ContractScopeRecord {
+    fn from(s: &ContractScope) -> Self {
+        match s {
+            ContractScope::Collection => ContractScopeRecord::Collection,
+            ContractScope::Folder { rel_path } => ContractScopeRecord::Folder { rel_path: rel_path.clone() },
+            ContractScope::Request { rel_path } => ContractScopeRecord::Request { rel_path: rel_path.clone() },
+        }
+    }
+}
+
+impl From<ContractScopeRecord> for ContractScope {
+    fn from(r: ContractScopeRecord) -> Self {
+        match r {
+            ContractScopeRecord::Collection => ContractScope::Collection,
+            ContractScopeRecord::Folder { rel_path } => ContractScope::Folder { rel_path },
+            ContractScopeRecord::Request { rel_path } => ContractScope::Request { rel_path },
+        }
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    #[test]
+    fn scope_record_folder_yaml_uses_snake_case_rel_path() {
+        let s = ContractScopeRecord::Folder { rel_path: PathBuf::from("auth/login.yml") };
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
+        assert!(!yaml.contains("relPath:"), "camelCase relPath must NOT appear in:\n{yaml}");
+    }
+
+    #[test]
+    fn scope_record_request_yaml_uses_snake_case_rel_path() {
+        let s = ContractScopeRecord::Request { rel_path: PathBuf::from("users/get.yml") };
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        assert!(yaml.contains("rel_path:"));
+    }
+
+    #[test]
+    fn scope_record_collection_roundtrip() {
+        let s = ContractScopeRecord::Collection;
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        let back: ContractScopeRecord = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(s, back);
+    }
+
+    #[test]
+    fn domain_scope_record_roundtrip() {
+        let domain = ContractScope::Folder { rel_path: PathBuf::from("a/b.yml") };
+        let r: ContractScopeRecord = (&domain).into();
+        let back: ContractScope = r.into();
+        assert_eq!(domain, back);
+    }
+}
