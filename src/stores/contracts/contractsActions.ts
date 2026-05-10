@@ -288,9 +288,26 @@ function adaptChangeKind(changeType: string): ChangeKind {
   return 'modify'; // 'changed'
 }
 
+/** Turns a raw field path + change type into a human-readable summary. */
+function humanizeSummary(field: string, changeType: string): string {
+  const action = changeType === 'added' ? 'added' : changeType === 'removed' ? 'removed' : 'changed'
+  if (field.startsWith('query_param.')) return `Query parameter ${action}`
+  if (field.startsWith('header.')) return `Header ${action}`
+  if (field.startsWith('form_field.')) return `Form field ${action}`
+  if (field.startsWith('body_field.')) return `Body field ${action}`
+  if (field === 'body') return `Body ${action}`
+  if (field === 'method') return 'HTTP method changed'
+  if (field === 'url_pattern') return 'URL pattern changed'
+  if (field === 'auth_type') return 'Auth type changed'
+  if (field === 'auth_detail') return 'Auth credentials changed'
+  // Generic fallback
+  const label = field.replace(/_/g, ' ').replace(/\./g, ': ').toLowerCase()
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${action}`
+}
+
 /**
  * Adapts an IPC ChangelogEntry to the domain ChangelogEntry.
- * Synthesises fields (id, summary, detail) that exist in the domain type
+ * Synthesises fields (id, summary, diffLines) that exist in the domain type
  * but are not present on the Rust wire format.
  */
 function adaptIpcChangelogEntry(
@@ -298,24 +315,33 @@ function adaptIpcChangelogEntry(
   contractId: string,
   index: number,
 ): ChangelogEntry {
-  const detail =
-    raw.oldValue && raw.newValue
-      ? `${raw.oldValue} → ${raw.newValue}`
-      : raw.oldValue
-        ? `removed: ${raw.oldValue}`
-        : raw.newValue
-          ? `added: ${raw.newValue}`
-          : undefined;
+  // Build structured diff lines from old/new values so the diff block renders.
+  const diffLines: import('@/types/contracts').DiffLine[] = [];
+  if (raw.oldValue != null && raw.oldValue !== '') {
+    diffLines.push({ kind: 'remove', text: raw.oldValue });
+  }
+  if (raw.newValue != null && raw.newValue !== '') {
+    diffLines.push({ kind: 'add', text: raw.newValue });
+  }
+
+  const requestPath =
+    raw.httpPath ?? (typeof raw.requestPath === 'string' ? raw.requestPath : undefined);
 
   return {
     id: `${contractId}-${raw.timestamp}-${index}`,
     contractId,
     at: raw.timestamp,
     kind: adaptChangeKind(raw.changeType),
-    summary: raw.field,
-    detail,
-    requestPath: typeof raw.requestPath === 'string' ? raw.requestPath : undefined,
+    summary: humanizeSummary(raw.field, raw.changeType),
+    detail: diffLines.map(l => `${l.kind === 'remove' ? '−' : '+'} ${l.text}`).join('\n') || undefined,
+    diffLines: diffLines.length > 0 ? diffLines : undefined,
+    requestPath,
+    // Use requestPath as a stable id so the "Open request" action button renders.
+    // A real requestId (UUID linking to the request record) would come from the backend.
+    requestId: requestPath,
     isBreaking: raw.isBreaking ?? false,
+    requestMethod: raw.requestMethod ?? undefined,
+    authorName: raw.author ?? undefined,
   };
 }
 

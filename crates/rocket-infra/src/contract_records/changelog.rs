@@ -27,6 +27,12 @@ pub struct ChangelogEntryRecord {
     pub new_value: Option<String>,
     #[serde(default)]
     pub is_breaking: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +72,9 @@ impl From<&ChangelogEntry> for ChangelogEntryRecord {
             old_value: e.old_value.clone(),
             new_value: e.new_value.clone(),
             is_breaking: e.is_breaking,
+            request_method: e.request_method.clone(),
+            http_path: e.http_path.clone(),
+            author: e.author.clone(),
         }
     }
 }
@@ -80,6 +89,9 @@ impl From<ChangelogEntryRecord> for ChangelogEntry {
             old_value: r.old_value,
             new_value: r.new_value,
             is_breaking: r.is_breaking,
+            request_method: r.request_method,
+            http_path: r.http_path,
+            author: r.author,
         }
     }
 }

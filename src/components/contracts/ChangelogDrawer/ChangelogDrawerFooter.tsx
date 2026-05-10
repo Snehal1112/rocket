@@ -43,13 +43,21 @@ function exportCsv(contract: Contract, groups: DayGroup[]) {
   try { track('contracts.changelog_exported', { contractId: contract.id, entryCount: allEntries.length }) } catch {}
 }
 
+function formatSince(iso: string): string {
+  try {
+    return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch {
+    return iso
+  }
+}
+
 export function ChangelogDrawerFooter({ contract, shownCount, groups }: ChangelogDrawerFooterProps) {
   const totalCount = contract.changelog.length
 
   return (
     <div className='px-5 py-2.5 border-t border-border flex justify-between items-center text-[11px] text-muted-foreground'>
       <span>
-        Showing {shownCount} of {totalCount}
+        Showing {shownCount} of {totalCount} · since {formatSince(contract.effectiveAt)}
       </span>
       <div className='flex items-center gap-1'>
         <Button

@@ -29,7 +29,14 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
                   <span className='flex-1 h-px bg-border' />
                 </div>
                 {group.items.map((entry) => (
-                  <ChangelogEntry key={entry.id} entry={entry} />
+                  <ChangelogEntry
+                    key={entry.id}
+                    entry={entry}
+                    onMarkBreaking={() => {}}
+                    onMarkNonBreaking={() => {}}
+                    onNotifyConsumer={() => {}}
+                    onSnapshotToContract={() => {}}
+                  />
                 ))}
               </div>
             ))}

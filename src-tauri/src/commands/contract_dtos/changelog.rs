@@ -27,6 +27,12 @@ pub struct ChangelogEntryDto {
     pub new_value: Option<String>,
     #[serde(default)]
     pub is_breaking: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -65,6 +71,9 @@ impl From<&ChangelogEntry> for ChangelogEntryDto {
             old_value: e.old_value.clone(),
             new_value: e.new_value.clone(),
             is_breaking: e.is_breaking,
+            request_method: e.request_method.clone(),
+            http_path: e.http_path.clone(),
+            author: e.author.clone(),
         }
     }
 }
@@ -78,6 +87,9 @@ impl From<ChangelogEntryDto> for ChangelogEntry {
             old_value: d.old_value,
             new_value: d.new_value,
             is_breaking: d.is_breaking,
+            request_method: d.request_method,
+            http_path: d.http_path,
+            author: d.author,
         }
     }
 }

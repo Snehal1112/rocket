@@ -1122,6 +1122,9 @@ export interface ChangelogEntry {
   oldValue: string | null;
   newValue: string | null;
   isBreaking: boolean;
+  requestMethod?: string;
+  httpPath?: string;
+  author?: string;
 }
 
 export interface ContractChangelog {

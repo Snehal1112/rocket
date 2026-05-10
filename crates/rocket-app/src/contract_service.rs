@@ -319,7 +319,10 @@ impl ContractService {
             let mut snapshot = self.repo.load_snapshot(collection_root, contract.id)?;
 
             if let Some(old_snap) = snapshot.get(&new_snap.request_path) {
-                let changes = diff_signature(old_snap, &new_snap, &contract.policy.breaking_change_policy);
+                let author = std::env::var("USER")
+                    .or_else(|_| std::env::var("USERNAME"))
+                    .ok();
+                let changes = diff_signature(old_snap, &new_snap, &contract.policy.breaking_change_policy, author);
 
                 if !changes.is_empty() {
                     // MODEL B SEAM — match on enforcement_mode when Model B is built:
@@ -500,6 +503,9 @@ impl ContractService {
                             old_value: Some(format!("{} {}", snap_entry.method, snap_entry.url_pattern)),
                             new_value: None,
                             is_breaking: true,
+                            request_method: Some(snap_entry.method.clone()),
+                            http_path: Some(snap_entry.url_pattern.clone()),
+                            author: None,
                         });
                         drift_count += 1;
                         breach_count += 1;
@@ -509,6 +515,7 @@ impl ContractService {
                             snap_entry,
                             current_snap,
                             &contract.policy.breaking_change_policy,
+                            None,
                         );
                         for entry in &changes {
                             drift_count += 1;

@@ -20,6 +20,15 @@ pub struct ChangelogEntry {
     /// True if this change violates the contract's breaking-change policy.
     /// Defaults to false so old changelog entries deserialise correctly.
     pub is_breaking: bool,
+    /// HTTP method (e.g. "POST") at the time of the change. None for entries
+    /// captured before this field was added.
+    pub request_method: Option<String>,
+    /// URL pattern (e.g. "/v2/email/send") at the time of the change. None for
+    /// entries captured before this field was added.
+    pub http_path: Option<String>,
+    /// OS username of the person who saved the request. None for entries
+    /// captured before this field was added or when the env var is absent.
+    pub author: Option<String>,
 }
 
 /// Append-only audit log for one contract.
