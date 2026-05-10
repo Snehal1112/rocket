@@ -1070,9 +1070,10 @@ export type ContractStatus =
   | 'in_review'
   | 'paused'
   | 'expiring_in_30_days'
-  | 'expired';
+  | 'expired'
+  | 'archived';
 
-export type PartyKind = 'team' | 'company' | 'service';
+export type PartyKind = 'team' | 'company' | 'service' | 'legacy';
 
 export type BreakingChangePolicy = 'strict' | 'lenient' | 'additive_ok';
 
@@ -1271,6 +1272,20 @@ export async function rejectContract(
   return invoke('reject_contract', { collectionRoot, contractId });
 }
 
+export async function archiveContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('archive_contract', { collectionRoot, contractId });
+}
+
+export async function unarchiveContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('unarchive_contract', { collectionRoot, contractId });
+}
+
 export async function duplicateContract(
   collectionRoot: string,
   contractId: string,
@@ -1278,11 +1293,8 @@ export async function duplicateContract(
   return invoke('duplicate_contract', { collectionRoot, contractId });
 }
 
-export async function recomputeDrift(
-  collectionRoot: string,
-  currentSnapshots: RequestSignatureSnapshot[],
-): Promise<ContractDriftSummary[]> {
-  return invoke('recompute_drift', { collectionRoot, currentSnapshots });
+export async function recomputeDrift(collectionRoot: string): Promise<ContractDriftSummary[]> {
+  return invoke('recompute_drift', { collectionRoot });
 }
 
 export async function getContractSummary(collectionRoot: string): Promise<ContractSummary[]> {

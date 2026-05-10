@@ -31,6 +31,7 @@ export function statusLabel(status: ContractStatus): string {
     paused: 'Paused',
     expired: 'Expired',
     expiring_in_30_days: 'Expiring Soon',
+    archived: 'Archived',
   };
   return labels[status] ?? status;
 }

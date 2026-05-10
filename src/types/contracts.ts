@@ -8,9 +8,10 @@ export type ContractStatus =
   | 'draft'
   | 'paused'
   | 'expired'
-  | 'expiring_in_30_days';
+  | 'expiring_in_30_days'
+  | 'archived';
 
-export type PartyKind = 'team' | 'company' | 'service';
+export type PartyKind = 'team' | 'company' | 'service' | 'legacy';
 export type PartyRole = 'provider' | 'consumer';
 
 /** 'add' | 'remove' | 'modify' — frontend domain names (IPC uses 'added'/'removed'/'changed') */
@@ -111,6 +112,23 @@ export interface Contract {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+
+  // Paused-state fields (optional — only present when status === 'paused')
+  pausedAt?: string;
+  pausedBy?: string;
+  pauseReason?: string;
+  successorId?: string;
+  successorName?: string;
+  driftDetectionEnabled?: boolean;
+
+  // Expiry/renewal fields (optional — only present when status === 'expired')
+  isArchiveCandidate?: boolean;
+  lastRenewalAttemptAt?: string;
+  lastRenewalDeclined?: boolean;
+
+  // In-review fields (optional — only present when status === 'in_review')
+  reviewerCount?: number;
+  commentCount?: number;
 }
 
 // ─── Drift ────────────────────────────────────────────────
@@ -207,6 +225,7 @@ export interface ContractCounts {
   draft: number;
   paused: number;
   expired: number;
+  archived: number;
   /** Sum of all driftCount across all contracts (used in "Changes · 30d" card) */
   totalChanges: number;
   /** Breakdown for summary row trend line */
