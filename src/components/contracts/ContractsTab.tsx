@@ -32,7 +32,15 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
 
   const loadContracts = useContractsStore((s) => s.loadContracts);
   const recomputeDrift = useContractsStore((s) => s.recomputeDrift);
-  const store = useContractsStore();
+  const pauseContract = useContractsStore((s) => s.pauseContract);
+  const resumeContract = useContractsStore((s) => s.resumeContract);
+  const deleteContract = useContractsStore((s) => s.deleteContract);
+  const duplicateContract = useContractsStore((s) => s.duplicateContract);
+  const publishContract = useContractsStore((s) => s.publishContract);
+  const sendForReview = useContractsStore((s) => s.sendForReview);
+  const approveContract = useContractsStore((s) => s.approveContract);
+  const rejectContract = useContractsStore((s) => s.rejectContract);
+  const renewContract = useContractsStore((s) => s.renewContract);
 
   const { contracts, counts, isLoading } = useContracts(collectionId);
   useContractDrift(collectionId);
@@ -65,34 +73,34 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       try {
         switch (action) {
           case 'pause':
-            await store.pauseContract(collectionId, contractId);
+            await pauseContract(collectionId, contractId);
             break;
           case 'resume':
-            await store.resumeContract(collectionId, contractId);
+            await resumeContract(collectionId, contractId);
             break;
           case 'delete':
-            await store.deleteContract(collectionId, contractId);
+            await deleteContract(collectionId, contractId);
             break;
           case 'duplicate':
-            await store.duplicateContract(collectionId, contractId);
+            await duplicateContract(collectionId, contractId);
             break;
           case 'publish':
-            await store.publishContract(collectionId, contractId);
+            await publishContract(collectionId, contractId);
             break;
           case 'resign':
-            await store.publishContract(collectionId, contractId);
+            await publishContract(collectionId, contractId);
             break;
           case 'send_for_review':
-            await store.sendForReview(collectionId, contractId);
+            await sendForReview(collectionId, contractId);
             break;
           case 'approve':
-            await store.approveContract(collectionId, contractId);
+            await approveContract(collectionId, contractId);
             break;
           case 'reject':
-            await store.rejectContract(collectionId, contractId);
+            await rejectContract(collectionId, contractId);
             break;
           case 'renew':
-            await store.renewContract(collectionId, contractId, null);
+            await renewContract(collectionId, contractId, null);
             break;
           // 'open', 'edit', 'view_changelog', 'export' → handled by routing/navigation (future SP)
           default:
@@ -102,7 +110,18 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         console.error('[ContractsTab] action error:', err);
       }
     },
-    [collectionId, store],
+    [
+      collectionId,
+      pauseContract,
+      resumeContract,
+      deleteContract,
+      duplicateContract,
+      publishContract,
+      sendForReview,
+      approveContract,
+      rejectContract,
+      renewContract,
+    ],
   );
 
   // Refs array for DOM focus — one entry per card across all groups.

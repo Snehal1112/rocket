@@ -1,5 +1,6 @@
 import { Lock } from 'lucide-react';
 import { useMemo } from 'react';
+import { Button } from '@/components/ui/button';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
@@ -47,8 +48,9 @@ export function ContractsStatusItem() {
         |
       </span>
 
-      <button
-        type='button'
+      <Button
+        variant='ghost'
+        size='sm'
         className='flex items-center gap-[5px] text-[11px] text-muted-foreground hover:text-foreground transition-colors'
         onClick={() => openContractTab(activeCollection, collectionRoot)}
         aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}
@@ -63,7 +65,7 @@ export function ContractsStatusItem() {
         {meta.breachCount > 0 && (
           <span className='text-[hsl(var(--destructive))]'>· {meta.breachCount} breaching</span>
         )}
-      </button>
+      </Button>
 
       {/* Separator AFTER (spec §9) */}
       <span className='mx-1 text-muted-foreground/30 select-none' aria-hidden='true'>
