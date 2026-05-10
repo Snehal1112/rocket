@@ -863,10 +863,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fontsource-variable/ibm-plex-sans@npm:^5.2.8":
+  version: 5.2.8
+  resolution: "@fontsource-variable/ibm-plex-sans@npm:5.2.8"
+  checksum: 10c0/e1c073d347da65e1b6e8a1269dc2f6ebea4ff1a9abe84d70194d5b6c868871cd2ae704fd78612495c8dd2a3a0541c97d75959f5edd21c4bc3582fdaf2dfbe029
+  languageName: node
+  linkType: hard
+
 "@fontsource-variable/inter@npm:^5.2.8":
   version: 5.2.8
   resolution: "@fontsource-variable/inter@npm:5.2.8"
   checksum: 10c0/35b46df31c8c18f55f87228acf6297e4dac6cc9f38d0faaafdaf5a40e40c386cf1bfb115fb0fe0dcdb9b7e14f582843693ccf070d9c903072a5b2fc0f8dfde56
+  languageName: node
+  linkType: hard
+
+"@fontsource/ibm-plex-mono@npm:^5.2.7":
+  version: 5.2.7
+  resolution: "@fontsource/ibm-plex-mono@npm:5.2.7"
+  checksum: 10c0/b104ae0f8054def5e6edca395f9c41d9a15b17ceeea522573b1ef223311bfa0d8f0fe3e2d3a56ecea59ff3e3ceee571e16d1ee942093bac97a66c3b8a72eaca3
   languageName: node
   linkType: hard
 
@@ -7336,7 +7350,9 @@ __metadata:
     "@codemirror/state": "npm:^6.6.0"
     "@codemirror/view": "npm:^6.41.0"
     "@faker-js/faker": "npm:^10.4.0"
+    "@fontsource-variable/ibm-plex-sans": "npm:^5.2.8"
     "@fontsource-variable/inter": "npm:^5.2.8"
+    "@fontsource/ibm-plex-mono": "npm:^5.2.7"
     "@fontsource/inter": "npm:^5.2.8"
     "@fontsource/jetbrains-mono": "npm:^5.2.8"
     "@monaco-editor/react": "npm:^4.7.0"
