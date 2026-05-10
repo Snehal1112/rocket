@@ -64,11 +64,8 @@ export function useKeyboardShortcuts() {
         const paneStore = usePaneStore.getState();
         const activeCollection = paneStore.activeCollection;
         if (!activeCollection) return;
-        const workspaces =
-          qc.getQueryData<Workspace[]>(workspaceKeys.all) ?? [];
-        const activeWorkspace = workspaces.find(
-          (w) => w.id === activeWorkspaceIdRef.current,
-        );
+        const workspaces = qc.getQueryData<Workspace[]>(workspaceKeys.all) ?? [];
+        const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceIdRef.current);
         if (!activeWorkspace) return;
         const collectionRoot = `${activeWorkspace.path}/collections/${activeCollection}`;
         paneStore.openContractTab(activeCollection, collectionRoot);

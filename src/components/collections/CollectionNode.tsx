@@ -295,7 +295,13 @@ export function CollectionNode({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className='group relative flex items-center'>
-          <TreeItem value={summary.uid} open={open} onOpenChange={setOpen} className='flex-1' data-testid={`collection-item-${summary.name}`}>
+          <TreeItem
+            value={summary.uid}
+            open={open}
+            onOpenChange={setOpen}
+            className='flex-1'
+            data-testid={`collection-item-${summary.name}`}
+          >
             <TreeItemContent
               className='flex gap-2 w-full  py-1 cursor-pointer'
               onClick={handleClick}
