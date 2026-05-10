@@ -203,6 +203,9 @@ impl ContractService {
         // Only now write the contract, its baseline, and the empty changelog.
         self.repo.save_contract(collection_root, &contract)?;
         self.repo.save_snapshot(collection_root, &snapshot)?;
+        // Seed the tracking snapshot with the same baseline so on_request_saved
+        // has a correct starting point without touching the signed baseline.
+        self.repo.save_tracking_snapshot(collection_root, &snapshot)?;
         let changelog = ContractChangelog::new(contract.id);
         self.repo.append_changelog(collection_root, &changelog)?;
 
@@ -316,7 +319,7 @@ impl ContractService {
                 continue;
             }
 
-            let mut snapshot = self.repo.load_snapshot(collection_root, contract.id)?;
+            let mut snapshot = self.repo.load_tracking_snapshot(collection_root, contract.id)?;
 
             if let Some(old_snap) = snapshot.get(&new_snap.request_path) {
                 let author = std::env::var("USER")
@@ -356,9 +359,10 @@ impl ContractService {
                 }
             }
 
-            // Always update snapshot to track current state.
+            // Always update the tracking snapshot to track current state.
+            // The baseline snapshot (used by recompute_drift_for_collection) is intentionally left untouched.
             snapshot.upsert(new_snap.clone());
-            self.repo.save_snapshot(collection_root, &snapshot)?;
+            self.repo.save_tracking_snapshot(collection_root, &snapshot)?;
         }
 
         Ok(())
@@ -405,7 +409,63 @@ impl ContractService {
         }
         contract.endpoint_count = snapshot.entries.len() as u32;
         self.repo.save_snapshot(collection_root, &snapshot)?;
+        // Reset the tracking snapshot to match the newly signed baseline so
+        // on_request_saved compares against the fresh contract state going forward.
+        self.repo.save_tracking_snapshot(collection_root, &snapshot)?;
         self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Accept all detected drift and re-sign the contract at its current shape.
+    ///
+    /// Walks the live collection, rebuilds the baseline snapshot from the
+    /// current request state (so `recompute_drift` finds zero changes after
+    /// this call), resets both baseline and tracking snapshots, bumps the
+    /// version, and transitions status back to Active via Resign.
+    pub fn accept_drift(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        new_version: String,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+
+        let new_status = transition_status(&contract.status, &StatusEvent::Resign)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+
+        // Walk the live collection to capture the current request state as the
+        // new baseline — this is what makes accept idempotent: recompute_drift
+        // will see zero diff because baseline now matches live collection.
+        let collection_name = collection_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| ContractError::Internal("collection_root has no final path component".into()))?;
+        let collection = self
+            .collection_repo
+            .get(collection_name)
+            .map_err(|e| ContractError::Internal(e.to_string()))?;
+
+        let mut new_snapshot = ContractSnapshot::new(id);
+        let mut walked = Vec::new();
+        walk_folder(&collection.root, Path::new(""), &mut walked);
+        for (rel_path, request) in walked {
+            if !covers(&contract.scope, &rel_path) {
+                continue;
+            }
+            new_snapshot.upsert(RequestSignatureSnapshot::from_request(&rel_path, request));
+        }
+
+        contract.status = new_status;
+        contract.version = new_version;
+        contract.drift_count = 0;
+        contract.breach_count = 0;
+        contract.endpoint_count = new_snapshot.entries.len() as u32;
+        contract.updated_at = Some(chrono::Utc::now());
+
+        self.repo.save_snapshot(collection_root, &new_snapshot)?;
+        self.repo.save_tracking_snapshot(collection_root, &new_snapshot)?;
+        self.repo.save_contract(collection_root, &contract)?;
+
         Ok(contract)
     }
 

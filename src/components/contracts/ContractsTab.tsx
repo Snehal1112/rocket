@@ -42,6 +42,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const deleteContract = useContractsStore((s) => s.deleteContract);
   const duplicateContract = useContractsStore((s) => s.duplicateContract);
   const publishContract = useContractsStore((s) => s.publishContract);
+  const acceptDrift = useContractsStore((s) => s.acceptDrift);
   const sendForReview = useContractsStore((s) => s.sendForReview);
   const approveContract = useContractsStore((s) => s.approveContract);
   const rejectContract = useContractsStore((s) => s.rejectContract);
@@ -124,10 +125,17 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             setEditingId(contractId);
             setModalOpen(true);
             break;
-          case 'accept_drift':
-            // Same backend as resign — accepts all detected drift and re-signs at the new shape.
-            await publishContract(collectionId, contractId);
+          case 'accept_drift': {
+            const current = byId[contractId];
+            const v = current?.version ?? '0.0.0';
+            const hasV = v.startsWith('v');
+            const parts = (hasV ? v.slice(1) : v).split('.');
+            const last = parseInt(parts[parts.length - 1], 10);
+            if (!Number.isNaN(last)) parts[parts.length - 1] = String(last + 1);
+            const newVersion = `${hasV ? 'v' : ''}${parts.join('.')}`;
+            await acceptDrift(collectionId, contractId, newVersion);
             break;
+          }
           case 'open':
           case 'review_diff':
             openTab({

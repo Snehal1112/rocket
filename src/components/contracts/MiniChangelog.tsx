@@ -8,6 +8,10 @@ interface MiniChangelogProps {
   status: ContractStatus;
   effectiveAt?: string;
   endpointCount?: number;
+  /** Passed for paused cards — total consumer count for migration stat line */
+  consumersCount?: number;
+  /** Passed for paused cards — successor contract name */
+  successorName?: string;
   onViewAll?: () => void;
 }
 
@@ -49,11 +53,21 @@ function formatSinceDate(iso: string): string {
   }
 }
 
+function SysChip() {
+  return (
+    <span className='inline-flex items-center px-1.5 py-0.5 rounded-[3px] border text-[10px] font-mono font-semibold shrink-0 bg-muted text-muted-foreground border-border'>
+      SYS
+    </span>
+  );
+}
+
 export function MiniChangelog({
   entries,
   status,
   effectiveAt,
   endpointCount,
+  consumersCount,
+  successorName,
   onViewAll,
 }: MiniChangelogProps) {
   const visible = entries.slice(0, 4);
@@ -75,12 +89,21 @@ export function MiniChangelog({
         )}
       </div>
 
-      {/* Paused: static description, no entries */}
+      {/* Paused: static description + optional migration stat */}
       {status === 'paused' && (
-        <p className='text-[11px] text-muted-foreground/70 leading-relaxed py-1'>
-          Changes are not being tracked while paused. Consumers still reference this version until
-          migration completes.
-        </p>
+        <div className='flex flex-col gap-1.5'>
+          <p className='text-[11px] text-muted-foreground/70 leading-relaxed py-1'>
+            Changes are not being tracked while paused. Consumers still reference this version until
+            migration completes.
+          </p>
+          {successorName && consumersCount !== undefined && consumersCount > 0 && (
+            <p className='text-[11px] text-muted-foreground/80'>
+              <span className='font-semibold text-foreground/80'>{consumersCount}</span>
+              {' '}consumer{consumersCount !== 1 ? 's' : ''} → migrating to{' '}
+              <span className='font-semibold text-foreground/80'>{successorName}</span>
+            </p>
+          )}
+        </div>
       )}
 
       {/* All other statuses: entry list */}
@@ -91,10 +114,10 @@ export function MiniChangelog({
               <span className='text-[11px] text-muted-foreground/70 w-11 shrink-0 tabular-nums'>
                 {entryTimestamp(entry.at)}
               </span>
-              <ChangeChip kind={entry.kind} />
+              {entry.isSignEvent ? <SysChip /> : <ChangeChip kind={entry.kind} />}
               <span className='text-[11px] text-muted-foreground truncate flex-1'>
                 <code className='font-mono text-[10px] bg-background px-1 rounded text-foreground'>
-                  {entry.summary}
+                  {entry.isSignEvent ? (entry.signEventLabel ?? entry.summary) : entry.summary}
                 </code>
               </span>
             </div>
@@ -117,7 +140,7 @@ export function MiniChangelog({
           {status === 'expired' && entries.length > 0 && (
             <div className='mt-auto pt-2 border-t border-dashed border-border/50'>
               <span className='text-[10px] text-muted-foreground/50'>
-                Frozen · {entries.length} total historical change{entries.length !== 1 ? 's' : ''}
+                Future · {entries.length} total historical change{entries.length !== 1 ? 's' : ''}
               </span>
             </div>
           )}

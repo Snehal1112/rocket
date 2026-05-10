@@ -29,6 +29,7 @@ export interface ContractsActions {
   ) => Promise<Contract>;
   deleteContract: (collectionId: string, id: string) => Promise<void>;
   publishContract: (collectionId: string, id: string) => Promise<void>;
+  acceptDrift: (collectionId: string, id: string, newVersion: string) => Promise<void>;
   pauseContract: (collectionId: string, id: string) => Promise<void>;
   resumeContract: (collectionId: string, id: string) => Promise<void>;
   renewContract: (collectionId: string, id: string, newExpiresAt: string | null) => Promise<void>;
@@ -155,6 +156,16 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch (_) { /* ignore tracking errors */ }
+    },
+
+    acceptDrift: async (collectionId, id, newVersion) => {
+      const prev = get().byId[id]?.status;
+      const raw = await api.acceptDrift(collectionId, id, newVersion);
+      const contract = adaptIpcContract(raw);
+      upsertInCollection(collectionId, contract);
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status, newVersion });
       } catch (_) { /* ignore tracking errors */ }
     },
 

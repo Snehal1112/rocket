@@ -32,6 +32,10 @@ impl FsContractRepo {
         Self::contracts_dir(collection_root).join(format!("{}-snapshot.yml", id))
     }
 
+    fn tracking_snapshot_path(collection_root: &Path, id: Ulid) -> std::path::PathBuf {
+        Self::contracts_dir(collection_root).join(format!("{}-track.yml", id))
+    }
+
     fn changelog_path(collection_root: &Path, id: Ulid) -> std::path::PathBuf {
         Self::contracts_dir(collection_root).join(format!("{}-changelog.yml", id))
     }
@@ -79,6 +83,7 @@ impl ContractRepository for FsContractRepo {
             if name.ends_with(".yml")
                 && !name.contains("-snapshot")
                 && !name.contains("-changelog")
+                && !name.contains("-track")
             {
                 let yaml = std::fs::read_to_string(&path)?;
                 match serde_yaml::from_str::<ContractRecord>(&yaml) {
@@ -139,6 +144,7 @@ impl ContractRepository for FsContractRepo {
     fn delete_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<()> {
         let _ = std::fs::remove_file(Self::contract_path(collection_root, id));
         let _ = std::fs::remove_file(Self::snapshot_path(collection_root, id));
+        let _ = std::fs::remove_file(Self::tracking_snapshot_path(collection_root, id));
         let _ = std::fs::remove_file(Self::changelog_path(collection_root, id));
         let attachments = Self::attachments_dir(collection_root, id);
         if attachments.exists() {
@@ -191,5 +197,33 @@ impl ContractRepository for FsContractRepo {
         let yaml = std::fs::read_to_string(path)?;
         let record: ContractChangelogRecord = serde_yaml::from_str(&yaml)?;
         Ok(record.into())
+    }
+
+    fn load_tracking_snapshot(
+        &self,
+        collection_root: &Path,
+        contract_id: Ulid,
+    ) -> ContractResult<ContractSnapshot> {
+        let path = Self::tracking_snapshot_path(collection_root, contract_id);
+        if !path.exists() {
+            // Fall back to the baseline if no tracking file exists yet.
+            return self.load_snapshot(collection_root, contract_id);
+        }
+        let yaml = std::fs::read_to_string(path)?;
+        let record: ContractSnapshotRecord = serde_yaml::from_str(&yaml)?;
+        Ok(record.into())
+    }
+
+    fn save_tracking_snapshot(
+        &self,
+        collection_root: &Path,
+        snapshot: &ContractSnapshot,
+    ) -> ContractResult<()> {
+        Self::ensure_dir(collection_root)?;
+        let path = Self::tracking_snapshot_path(collection_root, snapshot.contract_id);
+        let record: ContractSnapshotRecord = snapshot.into();
+        let yaml = serde_yaml::to_string(&record)?;
+        atomic_write(&path, yaml.as_bytes())?;
+        Ok(())
     }
 }

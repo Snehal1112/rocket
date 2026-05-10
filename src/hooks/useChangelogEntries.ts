@@ -37,7 +37,7 @@ export function useChangelogEntries(contract: Contract): DayGroup[] {
 function groupByDay(entries: ChangelogEntry[]): DayGroup[] {
   const groups: Record<string, ChangelogEntry[]> = {}
   entries.forEach(e => {
-    const day = e.at.slice(0, 10)
+    const day = new Date(e.at).toLocaleDateString('en-CA')
     ;(groups[day] ??= []).push(e)
   })
   return Object.entries(groups).map(([day, items]) => ({ day, label: formatDayLabel(day), items }))

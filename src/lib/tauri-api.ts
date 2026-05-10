@@ -1238,6 +1238,14 @@ export async function publishContract(
   return invoke('publish_contract', { collectionRoot, contractId, snapshots });
 }
 
+export async function acceptDrift(
+  collectionRoot: string,
+  contractId: string,
+  newVersion: string,
+): Promise<Contract> {
+  return invoke('accept_drift', { collectionRoot, contractId, newVersion });
+}
+
 export async function pauseContract(collectionRoot: string, contractId: string): Promise<Contract> {
   return invoke('pause_contract', { collectionRoot, contractId });
 }

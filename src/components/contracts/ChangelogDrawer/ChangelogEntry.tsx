@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Clock, PenLine } from 'lucide-react';
+import { AlertTriangle, ChevronRight, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { avatarColorForName, initialsForName } from '@/lib/contracts/avatarColor';
 import { cn } from '@/lib/utils';
@@ -54,26 +54,6 @@ function KindChip({ kind }: { kind: ChangelogEntryType['kind'] }) {
   );
 }
 
-function Dot({ kind, isSign }: { kind: ChangelogEntryType['kind']; isSign?: boolean }) {
-  if (isSign) {
-    return (
-      <span className='absolute -left-7 top-3.5 w-3 h-3 rounded-full border-2 border-background bg-muted-foreground flex items-center justify-center'>
-        <Clock className='w-1.5 h-1.5 text-background' aria-hidden='true' />
-      </span>
-    );
-  }
-  return (
-    <span
-      className={cn(
-        'absolute -left-7 top-3.5 w-3 h-3 rounded-full border-2 border-background',
-        kind === 'add' && 'bg-[hsl(var(--success))]',
-        kind === 'remove' && 'bg-destructive',
-        kind === 'modify' && 'bg-[hsl(var(--warning))]',
-      )}
-    />
-  );
-}
-
 export function ChangelogEntry({
   entry,
   onOpenRequest,
@@ -97,12 +77,12 @@ export function ChangelogEntry({
       role='article'
       aria-labelledby={`changelog-entry-${entry.id}`}
       className={cn(
-        'relative px-3 py-2 rounded-md hover:bg-accent group',
-        entry.isBreaking && !isSign && 'bg-destructive/10 hover:bg-destructive/15',
+        'group px-3 py-2.5 rounded-xl transition-all duration-150',
+        'border border-transparent',
+        isSign && 'border-dashed border-border/30',
+        !isSign && 'hover:bg-muted/60 hover:border-border/50 hover:shadow-sm dark:hover:bg-accent dark:hover:border-border dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)]',
       )}
     >
-      <Dot kind={entry.kind} isSign={isSign} />
-
       {/* Line 1: chip + breaking tag + summary + time */}
       <div className='flex items-center gap-1.5'>
         {!isSign && <KindChip kind={entry.kind} />}
@@ -121,19 +101,19 @@ export function ChangelogEntry({
           )}
           {isSign ? entry.signEventLabel : entry.summary}
         </span>
-        <span className='text-[11px] text-muted-foreground/70 tabular-nums shrink-0'>
+        <span className='text-[11px] text-muted-foreground/50 tabular-nums shrink-0'>
           {timeAgo(entry.at)}
         </span>
       </div>
 
       {/* Target pill */}
       {hasTarget && (
-        <div className='mt-1'>
-          <span className='font-mono text-[10px] bg-background border border-border px-1.5 py-0.5 rounded mt-1 inline-flex gap-1 items-center'>
+        <div className='mt-1.5'>
+          <span className='font-mono text-[10px] bg-background/60 border border-border/60 px-1.5 py-0.5 rounded inline-flex gap-1 items-center'>
             {entry.requestMethod && (
               <span className='text-primary font-bold'>{entry.requestMethod}</span>
             )}
-            {entry.requestPath && <span>{entry.requestPath}</span>}
+            {entry.requestPath && <span className='text-muted-foreground'>{entry.requestPath}</span>}
           </span>
         </div>
       )}
@@ -143,7 +123,7 @@ export function ChangelogEntry({
 
       {/* Author row */}
       {hasAuthor && (
-        <div className='flex items-center gap-1.5 mt-1'>
+        <div className='flex items-center gap-1.5 mt-2'>
           <span
             className='w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-primary-foreground shrink-0'
             style={{ backgroundColor: avatarBg }}
@@ -151,7 +131,7 @@ export function ChangelogEntry({
           >
             {initials}
           </span>
-          <span className='text-[11px] text-muted-foreground'>{entry.authorName}</span>
+          <span className='text-[11px] text-muted-foreground/70'>{entry.authorName}</span>
         </div>
       )}
 

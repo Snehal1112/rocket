@@ -385,6 +385,7 @@ pub fn run() {
             commands::contract::delete_contract,
             commands::contract::get_contract_changelog,
             commands::contract::publish_contract,
+            commands::contract::accept_drift,
             commands::contract::pause_contract,
             commands::contract::resume_contract,
             commands::contract::renew_contract,

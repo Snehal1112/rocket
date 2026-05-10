@@ -229,6 +229,19 @@ pub fn publish_contract(
 }
 
 #[tauri::command]
+pub fn accept_drift(
+    collection_root: String,
+    contract_id: String,
+    new_version: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<ContractDto, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.accept_drift(&PathBuf::from(&collection_root), id, new_version)
+        .map(|c| (&c).into())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn pause_contract(
     collection_root: String,
     contract_id: String,

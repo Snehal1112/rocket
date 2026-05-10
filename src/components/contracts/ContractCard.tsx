@@ -221,8 +221,8 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
           contract.status === 'paused' &&
             'bg-[color-mix(in_oklab,hsl(var(--muted))_50%,hsl(var(--card)))]',
           contract.status === 'expired' && 'opacity-75',
-          // Keyboard focus highlight from parent
-          focused && 'ring-2 ring-ring ring-offset-2 ring-offset-background',
+          // j/k keyboard navigation highlight — ring-ring colour, no offset gap
+          focused && 'ring-2 ring-ring/50',
           className,
         )}
       >
@@ -634,6 +634,10 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
           <MiniChangelog
             entries={contract.changelog}
             status={contract.status}
+            effectiveAt={contract.effectiveAt}
+            endpointCount={contract.endpointCount}
+            consumersCount={contract.consumers.length}
+            successorName={contract.successorName}
             onViewAll={() => {
               try { track('contracts.changelog_drawer_opened', { contractId: contract.id, source: 'card_link' }) } catch {}
               openDrawer(contract.id)
