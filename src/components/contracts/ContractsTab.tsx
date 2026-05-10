@@ -10,6 +10,7 @@ import { track } from '@/lib/telemetry';
 import { groupContracts } from '@/stores/contracts/contractsSelectors';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { useDrawerStore } from '@/stores/contracts/drawerSlice';
+import { usePaneStore } from '@/stores/pane-store';
 import type { ContractAction } from './ContractCard';
 import { ContractCard } from './ContractCard';
 import { ContractCardSkeleton } from './ContractCardSkeleton';
@@ -48,6 +49,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const archiveContract = useContractsStore((s) => s.archiveContract);
   const unarchiveContract = useContractsStore((s) => s.unarchiveContract);
   const editingContract = useContractsStore((s) => (editingId ? s.byId[editingId] : undefined));
+  const openTab = usePaneStore((s) => s.openTab);
+  const byId = useContractsStore((s) => s.byId);
 
   const { contracts, counts, isLoading } = useContracts(collectionId);
   useContractDrift(collectionId);
@@ -125,12 +128,22 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             // Same backend as resign — accepts all detected drift and re-signs at the new shape.
             await publishContract(collectionId, contractId);
             break;
+          case 'open':
           case 'review_diff':
+            openTab({
+              id: `contract_diff:${contractId}`,
+              title: `Diff — ${byId[contractId]?.name ?? contractId}`,
+              tabType: 'contract_diff',
+              collectionId,
+              contractId,
+              isDirty: false,
+            });
+            break;
           case 'open_review':
           case 'remind_reviewers':
             // Stub — full UI for these actions is a future feature.
             break;
-          // 'open', 'export' → handled by routing/navigation (future SP)
+          // 'export' → handled by routing/navigation (future SP)
           default:
             break;
         }
@@ -151,6 +164,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       renewContract,
       archiveContract,
       unarchiveContract,
+      openTab,
+      byId,
     ],
   );
 
@@ -182,6 +197,16 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   useEffect(() => {
     openDrawerRef.current = openDrawer;
   }, [openDrawer]);
+
+  // Focus the clicked card — reads allCardsRef so deps stay empty.
+  const handleOpen = useCallback(
+    (contractId: string) => {
+      const idx = allCardsRef.current.findIndex((c) => c.id === contractId);
+      if (idx >= 0) setFocusedIdx(idx);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // j/k/n/e/p/del hotkeys — scoped to this tab's lifetime.
   useEffect(() => {
@@ -391,6 +416,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         collectionName={collectionName}
                         collectionRoot={collectionId}
                         onAction={handleAction}
+                        onOpen={handleOpen}
                         focused={focusedIdx === i}
                       />
                     ))}
@@ -409,6 +435,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         collectionName={collectionName}
                         collectionRoot={collectionId}
                         onAction={handleAction}
+                        onOpen={handleOpen}
                         focused={focusedIdx === attention.length + i}
                       />
                     ))}
@@ -427,6 +454,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         collectionName={collectionName}
                         collectionRoot={collectionId}
                         onAction={handleAction}
+                        onOpen={handleOpen}
                         focused={focusedIdx === attention.length + active.length + i}
                       />
                     ))}
@@ -446,6 +474,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         collectionName={collectionName}
                         collectionRoot={collectionId}
                         onAction={handleAction}
+                        onOpen={handleOpen}
                         focused={
                           focusedIdx === attention.length + active.length + inactive.length + i
                         }
