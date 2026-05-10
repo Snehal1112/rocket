@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { track } from '@/lib/telemetry'
 import { useDrawerStore } from '@/stores/contracts/drawerSlice'
 import type { Contract } from '@/types/contracts'
 
@@ -45,9 +46,14 @@ export function ChangelogDrawerToolbar({ contract }: ChangelogDrawerToolbarProps
   const [localSearch, setLocalSearch] = useState(filters.search)
 
   useEffect(() => {
-    const t = setTimeout(() => setSearch(localSearch), 200)
+    const t = setTimeout(() => {
+      setSearch(localSearch)
+      if (localSearch !== '') {
+        try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'search' }) } catch {}
+      }
+    }, 200)
     return () => clearTimeout(t)
-  }, [localSearch, setSearch])
+  }, [localSearch, setSearch, contract.id])
 
   useEffect(() => {
     setLocalSearch(filters.search)
@@ -67,27 +73,43 @@ export function ChangelogDrawerToolbar({ contract }: ChangelogDrawerToolbarProps
         placeholder='Search changes…'
         value={localSearch}
         onChange={e => setLocalSearch(e.target.value)}
+        aria-label='Search changelog entries'
         className='flex-1 min-w-[160px] bg-card border border-border rounded-sm px-2.5 h-7 text-xs outline-none placeholder:text-muted-foreground/60'
       />
       <Pill isActive={isAllActive} onClick={resetFilters}>
         All · {total}
       </Pill>
       {breakingCount > 0 && (
-        <Pill isActive={filters.breakingOnly} onClick={toggleBreakingOnly}>
+        <Pill isActive={filters.breakingOnly} onClick={() => {
+          toggleBreakingOnly()
+          try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'breaking' }) } catch {}
+        }}>
           <AlertTriangle className='w-3 h-3' aria-hidden='true' />
           Breaking · {breakingCount}
         </Pill>
       )}
-      <Pill isActive={filters.kinds.includes('remove')} onClick={() => toggleKind('remove')}>
+      <Pill isActive={filters.kinds.includes('remove')} onClick={() => {
+        toggleKind('remove')
+        try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'kind' }) } catch {}
+      }}>
         REM · {removeCount}
       </Pill>
-      <Pill isActive={filters.kinds.includes('add')} onClick={() => toggleKind('add')}>
+      <Pill isActive={filters.kinds.includes('add')} onClick={() => {
+        toggleKind('add')
+        try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'kind' }) } catch {}
+      }}>
         ADD · {addCount}
       </Pill>
-      <Pill isActive={filters.kinds.includes('modify')} onClick={() => toggleKind('modify')}>
+      <Pill isActive={filters.kinds.includes('modify')} onClick={() => {
+        toggleKind('modify')
+        try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'kind' }) } catch {}
+      }}>
         MOD · {modifyCount}
       </Pill>
-      <Pill isActive={filters.sinceSigned} onClick={toggleSinceSigned}>
+      <Pill isActive={filters.sinceSigned} onClick={() => {
+        toggleSinceSigned()
+        try { track('contracts.changelog_filtered', { contractId: contract.id, filterType: 'since_signed' }) } catch {}
+      }}>
         Since signed
       </Pill>
     </div>

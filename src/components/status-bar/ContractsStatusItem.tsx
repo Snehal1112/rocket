@@ -1,6 +1,7 @@
 import { Lock } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { track } from '@/lib/telemetry';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -64,7 +65,10 @@ export function ContractsStatusItem() {
         size='sm'
         className='flex items-center gap-[5px] text-[11px] text-muted-foreground hover:text-foreground transition-colors'
         onClick={() => {
-          if (meta.mostRecentId) openDrawer(meta.mostRecentId);
+          if (meta.mostRecentId) {
+            try { track('contracts.changelog_drawer_opened', { contractId: meta.mostRecentId, source: 'status_bar' }) } catch {}
+            openDrawer(meta.mostRecentId);
+          }
         }}
         aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}
       >

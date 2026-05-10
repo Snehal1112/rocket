@@ -200,7 +200,10 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       } else if (e.key === 'c') {
         e.preventDefault();
         const c = cards[idx];
-        if (c) openDrawerRef.current(c.id);
+        if (c) {
+          try { track('contracts.changelog_drawer_opened', { contractId: c.id, source: 'keyboard' }) } catch {}
+          openDrawerRef.current(c.id);
+        }
       }
     }
     window.addEventListener('keydown', handler);

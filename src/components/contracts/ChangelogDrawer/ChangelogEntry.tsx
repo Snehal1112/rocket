@@ -94,6 +94,8 @@ export function ChangelogEntry({
 
   return (
     <div
+      role='article'
+      aria-labelledby={`changelog-entry-${entry.id}`}
       className={cn(
         'relative px-3 py-2 rounded-md hover:bg-accent group',
         entry.isBreaking && !isSign && 'bg-destructive/10 hover:bg-destructive/15',
@@ -113,7 +115,10 @@ export function ChangelogEntry({
             BREAKING
           </span>
         )}
-        <span className='text-[12px] text-foreground flex-1'>
+        <span id={`changelog-entry-${entry.id}`} className='text-[12px] text-foreground flex-1'>
+          {entry.isBreaking && !isSign && (
+            <span className='sr-only'>Breaking change. </span>
+          )}
           {isSign ? entry.signEventLabel : entry.summary}
         </span>
         <span className='text-[11px] text-muted-foreground/70 tabular-nums shrink-0'>

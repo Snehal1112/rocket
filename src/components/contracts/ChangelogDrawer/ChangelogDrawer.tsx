@@ -36,7 +36,7 @@ function ChangelogDrawerInner({
         <ChangelogDrawerHeader contract={contract} onClose={onClose} />
         <ChangelogDrawerToolbar contract={contract} />
         <ChangelogTimeline groups={groups} />
-        <ChangelogDrawerFooter contract={contract} shownCount={shownCount} />
+        <ChangelogDrawerFooter contract={contract} shownCount={shownCount} groups={groups} />
       </SheetContent>
     </Sheet>
   )

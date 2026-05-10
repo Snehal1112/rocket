@@ -39,6 +39,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { track } from '@/lib/telemetry';
 import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
 import type { Contract } from '@/types/contracts';
 import type { ContractAction } from './ContractCard';
@@ -75,7 +76,10 @@ function renderItems(
         <Pencil className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
         Edit
       </Item>
-      <Item onSelect={() => openDrawer(contract.id)}>
+      <Item onSelect={() => {
+        try { track('contracts.changelog_drawer_opened', { contractId: contract.id, source: 'context_menu' }) } catch {}
+        openDrawer(contract.id)
+      }}>
         <History className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
         Show changelog
       </Item>

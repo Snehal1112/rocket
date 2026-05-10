@@ -15,7 +15,11 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
       {groups.length === 0 ? (
         <ChangelogEmptyState onReset={resetFilters} />
       ) : (
-        <div className='relative pl-14 pr-5 before:absolute before:left-[28px] before:top-0 before:bottom-0 before:w-px before:bg-border'>
+        <div
+          role='feed'
+          aria-label='Changelog timeline'
+          className='relative pl-14 pr-5 before:absolute before:left-[28px] before:top-0 before:bottom-0 before:w-px before:bg-border'
+        >
           {groups.map((group) => (
             <div key={group.day}>
               <div className='text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground flex items-center gap-2 mb-2 mt-3 first:mt-0'>
