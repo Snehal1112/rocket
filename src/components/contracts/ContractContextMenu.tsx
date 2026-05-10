@@ -3,6 +3,7 @@ import {
   Copy,
   ExternalLink,
   FileDown,
+  History,
   Link,
   PauseCircle,
   Pencil,
@@ -13,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,6 +60,7 @@ function renderItems(
   collectionRoot: string,
   onAction: (action: ContractAction, id: string) => void,
   openDelete: () => void,
+  openDrawer: (contractId: string) => void,
   Item: typeof ContextMenuItem | typeof DropdownMenuItem,
   Separator: typeof ContextMenuSeparator | typeof DropdownMenuSeparator,
 ) {
@@ -71,6 +74,10 @@ function renderItems(
       <Item onSelect={() => onAction('edit', contract.id)}>
         <Pencil className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
         Edit
+      </Item>
+      <Item onSelect={() => openDrawer(contract.id)}>
+        <History className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
+        Show changelog
       </Item>
 
       <Separator />
@@ -200,6 +207,7 @@ export function ContractContextMenu({
   children,
 }: ContractMenuProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const openDrawer = useDrawerStore((s) => s.open);
 
   return (
     <>
@@ -211,6 +219,7 @@ export function ContractContextMenu({
             collectionRoot,
             onAction,
             () => setDeleteOpen(true),
+            openDrawer,
             ContextMenuItem,
             ContextMenuSeparator,
           )}
@@ -234,6 +243,7 @@ export function ContractDropdownMenu({
   children,
 }: ContractMenuProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const openDrawer = useDrawerStore((s) => s.open);
 
   return (
     <>
@@ -245,6 +255,7 @@ export function ContractDropdownMenu({
             collectionRoot,
             onAction,
             () => setDeleteOpen(true),
+            openDrawer,
             DropdownMenuItem,
             DropdownMenuSeparator,
           )}

@@ -2,6 +2,7 @@ import { Lock } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -23,7 +24,7 @@ export function ContractsStatusItem() {
       ? `${activeWorkspace.path}/collections/${activeCollection}`
       : null;
 
-  const openContractTab = usePaneStore((s) => s.openContractTab);
+  const openDrawer = useDrawerStore((s) => s.open);
   const byId = useContractsStore((s) => s.byId);
   const byCollection = useContractsStore((s) => s.byCollection);
 
@@ -32,10 +33,20 @@ export function ContractsStatusItem() {
     const ids = byCollection[collectionRoot] ?? [];
     const contracts = ids.map((id) => byId[id]).filter(Boolean);
     if (contracts.length === 0) return null;
+
+    const mostRecentId = contracts.reduce<string | null>((best, c) => {
+      const latestAt = c.changelog[0]?.at ?? c.updatedAt;
+      if (!best) return c.id;
+      const bestContract = byId[best];
+      const bestAt = bestContract?.changelog[0]?.at ?? bestContract?.updatedAt ?? '';
+      return latestAt > bestAt ? c.id : best;
+    }, null);
+
     return {
       total: contracts.length,
       driftCount: contracts.filter((c) => c.status === 'drift').length,
       breachCount: contracts.filter((c) => c.status === 'breach').length,
+      mostRecentId,
     };
   }, [byId, byCollection, collectionRoot]);
 
@@ -52,7 +63,9 @@ export function ContractsStatusItem() {
         variant='ghost'
         size='sm'
         className='flex items-center gap-[5px] text-[11px] text-muted-foreground hover:text-foreground transition-colors'
-        onClick={() => openContractTab(activeCollection, collectionRoot)}
+        onClick={() => {
+          if (meta.mostRecentId) openDrawer(meta.mostRecentId);
+        }}
         aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}
       >
         <Lock className='w-[11px] h-[11px]' aria-hidden='true' />
