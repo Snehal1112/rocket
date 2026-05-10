@@ -2,6 +2,7 @@ pub mod app;
 pub mod audit;
 pub mod collections;
 pub mod contract;
+pub mod contract_dtos;
 pub mod import;
 pub mod cookies;
 pub mod environments;
