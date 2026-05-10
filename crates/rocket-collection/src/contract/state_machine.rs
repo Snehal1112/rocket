@@ -14,6 +14,8 @@ pub enum StatusEvent {
     Renew,
     ExpiryLapsed,
     ExpiringSoon,
+    Archive,
+    Unarchive,
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,8 +71,13 @@ pub fn transition(
         // SendForReview: valid from Active, Drift, Breach, Paused
         (Active | Drift | Breach | Paused, SendForReview) => InReview,
 
-        // Any status can lapse into Expired
-        (_, ExpiryLapsed) => Expired,
+        // Archive: from Paused or Expired → Archived
+        (Paused | Expired, Archive) => Archived,
+        // Unarchive: returns to Draft for a fresh start
+        (Archived, Unarchive) => Draft,
+
+        // Any non-archived status can lapse into Expired
+        (status, ExpiryLapsed) if *status != Archived => Expired,
 
         // All other combinations are invalid
         _ => {
@@ -170,6 +177,36 @@ mod tests {
     #[test]
     fn paused_cannot_drift() {
         let result = transition(&ContractStatus::Paused, &StatusEvent::DriftDetected);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn paused_archive_to_archived() {
+        let result = transition(&ContractStatus::Paused, &StatusEvent::Archive).unwrap();
+        assert_eq!(result, ContractStatus::Archived);
+    }
+
+    #[test]
+    fn expired_archive_to_archived() {
+        let result = transition(&ContractStatus::Expired, &StatusEvent::Archive).unwrap();
+        assert_eq!(result, ContractStatus::Archived);
+    }
+
+    #[test]
+    fn archived_unarchive_to_draft() {
+        let result = transition(&ContractStatus::Archived, &StatusEvent::Unarchive).unwrap();
+        assert_eq!(result, ContractStatus::Draft);
+    }
+
+    #[test]
+    fn active_cannot_archive() {
+        let result = transition(&ContractStatus::Active, &StatusEvent::Archive);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn archived_does_not_expire() {
+        let result = transition(&ContractStatus::Archived, &StatusEvent::ExpiryLapsed);
         assert!(result.is_err());
     }
 }

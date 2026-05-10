@@ -114,6 +114,8 @@ pub enum ContractStatus {
     ExpiringIn30Days,
     /// Past expiry date.
     Expired,
+    /// Manually archived — hidden from main list, recoverable.
+    Archived,
 }
 
 /// Model B extension seam.

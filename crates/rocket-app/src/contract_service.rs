@@ -427,14 +427,31 @@ impl ContractService {
     }
 
     /// Scans all active contracts in the collection, diffs each against the
-    /// supplied current snapshots, updates drift/breach counts, transitions
-    /// status via the state machine, appends changelog entries, and saves
-    /// all modified contracts.
+    /// current on-disk request shapes (loaded from the collection repo), updates
+    /// drift/breach counts, transitions status via the state machine, appends
+    /// changelog entries, and saves all modified contracts.
     pub fn recompute_drift_for_collection(
         &self,
         collection_root: &Path,
-        current_snapshots: &[RequestSignatureSnapshot],
     ) -> ContractResult<Vec<ContractDriftSummary>> {
+        // Build the current snapshot set by walking the live collection on disk.
+        // This is the authoritative source of truth — the frontend cannot supply
+        // request signatures because it operates in Option B (snapshot-less) mode.
+        let collection_name = collection_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| ContractError::Internal("collection_root has no final path component".into()))?;
+        let collection = self
+            .collection_repo
+            .get(collection_name)
+            .map_err(|e| ContractError::Internal(e.to_string()))?;
+        let mut walked = Vec::new();
+        walk_folder(&collection.root, Path::new(""), &mut walked);
+        let current_snapshots: Vec<RequestSignatureSnapshot> = walked
+            .into_iter()
+            .map(|(rel_path, request)| RequestSignatureSnapshot::from_request(&rel_path, request))
+            .collect();
+
         let contracts = self.repo.list_contracts(collection_root)?;
         let mut summaries = Vec::new();
 
@@ -444,7 +461,8 @@ impl ContractService {
                 ContractStatus::Draft
                 | ContractStatus::Paused
                 | ContractStatus::Expired
-                | ContractStatus::InReview => continue,
+                | ContractStatus::InReview
+                | ContractStatus::Archived => continue,
                 _ => {}
             }
 
@@ -1288,7 +1306,7 @@ mod tests {
     fn recompute_drift_no_snapshots_returns_empty_summaries() {
         // Contracts with no snapshot (Draft state) are skipped; result is empty.
         let svc = make_service();
-        let result = svc.recompute_drift_for_collection(root(), &[]);
+        let result = svc.recompute_drift_for_collection(root());
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
@@ -1416,15 +1434,15 @@ mod tests {
         contract.updated_at = Some(fixed_time);
         svc.repo.save_contract(root(), &contract).unwrap();
 
-        // First call — counts already match what empty snapshots would compute.
+        // First call — counts already match what empty collection would compute.
         let summaries1 = svc
-            .recompute_drift_for_collection(root(), &[])
+            .recompute_drift_for_collection(root())
             .unwrap();
         let persisted1 = svc.repo.load_contract(root(), contract.id).unwrap();
 
-        // Second call — same snapshots, same result; must NOT update updated_at.
+        // Second call — same collection, same result; must NOT update updated_at.
         let summaries2 = svc
-            .recompute_drift_for_collection(root(), &[])
+            .recompute_drift_for_collection(root())
             .unwrap();
         let persisted2 = svc.repo.load_contract(root(), contract.id).unwrap();
 

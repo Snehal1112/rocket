@@ -385,6 +385,7 @@ pub enum ContractStatusRecord {
     // disk, so we keep the default behaviour for byte-equivalent YAML roundtrip.
     ExpiringIn30Days,
     Expired,
+    Archived,
 }
 
 impl From<&ContractStatus> for ContractStatusRecord {
@@ -398,6 +399,7 @@ impl From<&ContractStatus> for ContractStatusRecord {
             ContractStatus::Paused => Self::Paused,
             ContractStatus::ExpiringIn30Days => Self::ExpiringIn30Days,
             ContractStatus::Expired => Self::Expired,
+            ContractStatus::Archived => Self::Archived,
         }
     }
 }
@@ -413,6 +415,7 @@ impl From<ContractStatusRecord> for ContractStatus {
             ContractStatusRecord::Paused => Self::Paused,
             ContractStatusRecord::ExpiringIn30Days => Self::ExpiringIn30Days,
             ContractStatusRecord::Expired => Self::Expired,
+            ContractStatusRecord::Archived => Self::Archived,
         }
     }
 }
