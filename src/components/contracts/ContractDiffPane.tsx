@@ -9,6 +9,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { getContractChangelog } from '@/lib/tauri-api';
 import type { ChangeKind } from '@/types/contracts';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -116,58 +124,48 @@ export function ContractDiffPane({ collectionId, contractId }: ContractDiffPaneP
             </p>
           ) : (
             <div className='rounded-md border overflow-hidden'>
-              <table className='w-full text-sm'>
-                <thead className='bg-muted/50'>
-                  <tr>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2 w-32'>
-                      Date
-                    </th>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2'>
-                      Request
-                    </th>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2 w-24'>
-                      Field
-                    </th>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2 w-16'>
-                      Kind
-                    </th>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2'>
-                      Old → New
-                    </th>
-                    <th className='text-left font-medium text-xs text-muted-foreground px-3 py-2 w-24'></th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table>
+                <TableHeader className='bg-muted/50'>
+                  <TableRow>
+                    <TableHead className='w-32 text-xs'>Date</TableHead>
+                    <TableHead className='text-xs'>Request</TableHead>
+                    <TableHead className='w-24 text-xs'>Field</TableHead>
+                    <TableHead className='w-16 text-xs'>Kind</TableHead>
+                    <TableHead className='text-xs'>Old → New</TableHead>
+                    <TableHead className='w-24 text-xs'></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {entries.map((entry, idx) => (
-                    <tr
+                    <TableRow
                       key={`${entry.requestPath}-${entry.field}-${idx}`}
-                      className='border-t hover:bg-muted/20 transition-colors'
+                      className='hover:bg-muted/20'
                     >
-                      <td className='px-3 py-2 text-xs text-muted-foreground whitespace-nowrap'>
+                      <TableCell className='text-xs text-muted-foreground whitespace-nowrap py-2'>
                         {format(new Date(entry.timestamp), 'MMM d, HH:mm')}
-                      </td>
-                      <td className='px-3 py-2 font-mono text-xs truncate max-w-[180px]'>
+                      </TableCell>
+                      <TableCell className='font-mono text-xs py-2 max-w-[180px] truncate'>
                         {entry.requestPath}
-                      </td>
-                      <td className='px-3 py-2 text-xs'>{entry.field}</td>
-                      <td className='px-3 py-2'>
+                      </TableCell>
+                      <TableCell className='text-xs py-2'>{entry.field}</TableCell>
+                      <TableCell className='py-2'>
                         <ChangeChip kind={changeTypeToKind(entry.changeType)} />
-                      </td>
-                      <td className='px-3 py-2 text-xs text-muted-foreground font-mono'>
+                      </TableCell>
+                      <TableCell className='text-xs text-muted-foreground font-mono py-2'>
                         <span className='line-through mr-1'>{truncate(entry.oldValue)}</span>
                         <span className='text-foreground'>{truncate(entry.newValue)}</span>
-                      </td>
-                      <td className='px-3 py-2'>
+                      </TableCell>
+                      <TableCell className='py-2'>
                         {entry.isBreaking && (
                           <Badge variant='destructive' className='text-[10px] px-1.5 py-0'>
                             Breaking
                           </Badge>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>
