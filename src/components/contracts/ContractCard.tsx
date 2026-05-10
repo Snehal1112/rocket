@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { Contract } from '@/types/contracts';
-import { ContractContextMenu } from './ContractContextMenu';
+import { ContractContextMenu, ContractDropdownMenu } from './ContractContextMenu';
 import { ContractStatusChip } from './ContractStatusChip';
 import { MetaItem } from './internal/MetaItem';
 import { PrimaryAction } from './internal/PrimaryAction';
@@ -227,7 +227,11 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
               >
                 Edit
               </Button>
-              <ContractContextMenu contract={contract} collectionRoot={collectionRoot} onAction={onAction}>
+              <ContractDropdownMenu
+                contract={contract}
+                collectionRoot={collectionRoot}
+                onAction={onAction}
+              >
                 <Button
                   variant='ghost'
                   size='icon'
@@ -238,7 +242,7 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                 >
                   <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
                 </Button>
-              </ContractContextMenu>
+              </ContractDropdownMenu>
             </div>
           </div>
         </div>
