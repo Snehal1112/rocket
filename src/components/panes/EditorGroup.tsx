@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { AuditLogTab } from '@/components/audit/AuditLogTab';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { ContractDiffPane } from '@/components/contracts/ContractDiffPane';
 import { ContractsTab } from '@/components/contracts/ContractsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 
@@ -191,7 +192,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionName={activeTab.collectionName}
             />
           ) : isContractDiffTab(activeTab) ? (
-            null
+            <ContractDiffPane
+              collectionId={activeTab.collectionId}
+              contractId={activeTab.contractId}
+            />
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
