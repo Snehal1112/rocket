@@ -22,6 +22,11 @@ export interface ContractsActions {
     values: CreateContractFormValues,
     requests: unknown[],
   ) => Promise<Contract>;
+  updateContract: (
+    collectionId: string,
+    contractId: string,
+    values: CreateContractFormValues,
+  ) => Promise<Contract>;
   deleteContract: (collectionId: string, id: string) => Promise<void>;
   publishContract: (collectionId: string, id: string) => Promise<void>;
   pauseContract: (collectionId: string, id: string) => Promise<void>;
@@ -66,6 +71,17 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
           byCollection: { ...state.byCollection, [collectionId]: ids },
           loading: false,
         }));
+
+        // Load all changelogs in parallel so the Recent Changes panel reflects disk state.
+        // Failures are non-fatal — list view still renders without changelog data.
+        const loadChangelog = get().loadChangelog;
+        await Promise.all(
+          ids.map((id) =>
+            loadChangelog(collectionId, id).catch((err) =>
+              console.warn('[contracts] loadChangelog failed for', id, err),
+            ),
+          ),
+        );
       } catch (err) {
         set({ loading: false, error: String(err) });
       }
@@ -92,6 +108,30 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       return contract;
     },
 
+    updateContract: async (collectionId, contractId, values) => {
+      const raw = await api.updateContract(collectionId, {
+        contractId,
+        title: values.name,
+        provider: values.provider,
+        consumers: values.consumers,
+        version: values.version,
+        effectiveDate: values.effectiveAt,
+        expiryDate: values.expiresAt,
+        // biome-ignore lint/suspicious/noExplicitAny: bridging domain ContractPolicy→IPC ContractPolicy
+        policy: values.policy as unknown as any,
+        newDocumentPaths: [],
+        keptDocumentPaths: [],
+      });
+      const contract = adaptIpcContract(raw);
+      // Reload changelog so the Recent Changes panel reflects updated entries.
+      const loadChangelog = get().loadChangelog;
+      loadChangelog(collectionId, contractId).catch((err) =>
+        console.warn('[contracts] loadChangelog failed for', contractId, err),
+      );
+      upsertInCollection(collectionId, contract);
+      return contract;
+    },
+
     deleteContract: async (collectionId, id) => {
       await api.deleteContract(collectionId, id);
       set((state) => {
@@ -111,7 +151,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.publishContract(collectionId, id, []);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     pauseContract: async (collectionId, id) => {
@@ -119,7 +161,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.pauseContract(collectionId, id);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     resumeContract: async (collectionId, id) => {
@@ -127,7 +171,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.resumeContract(collectionId, id);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     renewContract: async (collectionId, id, newExpiresAt) => {
@@ -135,7 +181,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.renewContract(collectionId, id, newExpiresAt);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     sendForReview: async (collectionId, id) => {
@@ -143,7 +191,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.sendForReview(collectionId, id);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     approveContract: async (collectionId, id) => {
@@ -151,7 +201,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.approveContract(collectionId, id);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     rejectContract: async (collectionId, id) => {
@@ -159,7 +211,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const raw = await api.rejectContract(collectionId, id);
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
-      try { track('contracts.status_changed', { contractId: id, from: prev, to: contract.status }); } catch {}
+      try {
+        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
+      } catch {}
     },
 
     duplicateContract: async (collectionId, id) => {
@@ -170,7 +224,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
     recomputeDrift: async (collectionId) => {
       // Snapshot statuses before recompute to detect transitions
       const beforeStatuses: Record<string, string> = {};
-      for (const id of (get().byCollection[collectionId] ?? [])) {
+      for (const id of get().byCollection[collectionId] ?? []) {
         const status = get().byId[id]?.status;
         if (status) beforeStatuses[id] = status;
       }
@@ -179,7 +233,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       await get().loadContracts(collectionId);
 
       // Emit drift_detected for every contract that newly entered drift or breach
-      for (const id of (get().byCollection[collectionId] ?? [])) {
+      for (const id of get().byCollection[collectionId] ?? []) {
         const prev = beforeStatuses[id];
         const curr = get().byId[id];
         if (!curr) continue;
