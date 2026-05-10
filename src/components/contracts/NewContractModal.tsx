@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { track } from '@/lib/telemetry';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -13,13 +13,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
-import type { ContractPolicy, ContractScope, Party } from '@/types/contracts';
+import type { Contract, ContractPolicy, ContractScope, Party } from '@/types/contracts';
 
 interface NewContractModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   collectionId: string;
   collectionName: string;
+  /** When set, the modal renders in edit mode pre-filled from this contract. */
+  contract?: Contract;
 }
 
 interface FormState {
@@ -88,16 +90,52 @@ const INITIAL_STATE: FormState = {
   uptimeSla: '',
 };
 
+function contractToFormState(c: Contract): FormState {
+  const scopeType = c.scope.type;
+  const scopePath =
+    c.scope.type === 'collection' ? '' : ((c.scope as { rel_path?: string }).rel_path ?? '');
+  return {
+    name: c.name,
+    version: c.version,
+    providerName: c.provider.name,
+    consumerNames: c.consumers.map((p) => p.name).join(', '),
+    scopeType,
+    scopePath,
+    effectiveAt: c.effectiveAt,
+    expiresAt: c.expiresAt ?? '',
+    breakingChangePolicy: c.policy.breakingChangePolicy,
+    noticeDays: String(c.policy.noticeDays),
+    uptimeSla: c.policy.uptimeSla === null ? '' : String(c.policy.uptimeSla),
+  };
+}
+
 export function NewContractModal({
   open,
   onOpenChange,
   collectionId,
   collectionName: _collectionName,
+  contract,
 }: NewContractModalProps) {
+  const isEdit = !!contract;
   const createContract = useContractsStore((s) => s.createContract);
+  const updateContract = useContractsStore((s) => s.updateContract);
   const recomputeDrift = useContractsStore((s) => s.recomputeDrift);
 
-  const [form, setForm] = useState<FormState>(INITIAL_STATE);
+  const [form, setForm] = useState<FormState>(
+    contract ? contractToFormState(contract) : INITIAL_STATE,
+  );
+
+  // Resync form whenever the modal opens with a different contract for edit.
+  // When `open` flips closed, we keep the last state; resetAndClose handles cleanup.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depend on contract.id for identity, not the full contract object — avoids form thrash on every store update
+  useEffect(() => {
+    if (open && contract) {
+      setForm(contractToFormState(contract));
+    } else if (open && !contract) {
+      setForm(INITIAL_STATE);
+    }
+  }, [open, contract?.id]);
+
   const [errors, setErrors] = useState<FormErrors>({});
   const [warnings, setWarnings] = useState<Partial<Record<keyof FormState, string>>>({});
   const [saving, setSaving] = useState(false);
@@ -160,33 +198,59 @@ export function NewContractModal({
       };
       const consumers = buildParties(form.consumerNames);
 
-      const contract = await createContract(
-        collectionId,
-        {
-          name: form.name.trim(),
-          version: form.version.trim(),
-          provider,
-          consumers,
-          scope,
-          policy,
-          effectiveAt: form.effectiveAt,
-          expiresAt: form.expiresAt || null,
-          publishImmediately,
-        },
-        [],
-      );
+      const values = {
+        name: form.name.trim(),
+        version: form.version.trim(),
+        provider,
+        consumers,
+        scope,
+        policy,
+        effectiveAt: form.effectiveAt,
+        expiresAt: form.expiresAt || null,
+        publishImmediately,
+      };
 
-      if (publishImmediately) {
+      if (isEdit && contract) {
+        const updated = await updateContract(collectionId, contract.id, values);
+        // Recompute drift so any signature-affecting changes are reflected.
         await recomputeDrift(collectionId);
-        // Event 1: contracts.created
-        try { track('contracts.created', { scopeType: form.scopeType, consumerCount: consumers.length, publishedImmediately: true }); } catch {}
-        // Event 2: contracts.published
-        try { track('contracts.published', { contractId: contract.id, endpointCount: contract.endpointCount }); } catch {}
-        toast.success('Contract created and published.');
+        try {
+          track('contracts.status_changed', {
+            contractId: updated.id,
+            from: contract.status,
+            to: updated.status,
+            action: 'edit',
+          });
+        } catch {}
+        toast.success('Contract updated.');
       } else {
-        // Event 3: contracts.draft_saved
-        try { track('contracts.draft_saved', { collectionId, scopeType: form.scopeType, consumerCount: consumers.length }); } catch {}
-        toast('Contract saved as draft.');
+        const created = await createContract(collectionId, values, []);
+        if (publishImmediately) {
+          await recomputeDrift(collectionId);
+          try {
+            track('contracts.created', {
+              scopeType: form.scopeType,
+              consumerCount: consumers.length,
+              publishedImmediately: true,
+            });
+          } catch {}
+          try {
+            track('contracts.published', {
+              contractId: created.id,
+              endpointCount: created.endpointCount,
+            });
+          } catch {}
+          toast.success('Contract created and published.');
+        } else {
+          try {
+            track('contracts.draft_saved', {
+              collectionId,
+              scopeType: form.scopeType,
+              consumerCount: consumers.length,
+            });
+          } catch {}
+          toast('Contract saved as draft.');
+        }
       }
 
       resetAndClose();
@@ -219,7 +283,7 @@ export function NewContractModal({
     >
       <DialogContent className='max-w-lg max-h-[90vh] overflow-y-auto'>
         <DialogHeader>
-          <DialogTitle>New contract</DialogTitle>
+          <DialogTitle>{isEdit ? 'Edit contract' : 'New contract'}</DialogTitle>
         </DialogHeader>
 
         <div className='space-y-4 py-2'>
@@ -439,12 +503,20 @@ export function NewContractModal({
           <Button variant='ghost' onClick={resetAndClose} disabled={saving}>
             Cancel
           </Button>
-          <Button variant='outline' onClick={() => submit(false)} disabled={saving}>
-            {saving ? 'Saving…' : 'Save as Draft'}
-          </Button>
-          <Button onClick={() => submit(true)} disabled={saving}>
-            {saving ? 'Creating…' : 'Create & Publish →'}
-          </Button>
+          {isEdit ? (
+            <Button onClick={() => submit(true)} disabled={saving}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </Button>
+          ) : (
+            <>
+              <Button variant='outline' onClick={() => submit(false)} disabled={saving}>
+                {saving ? 'Saving…' : 'Save as Draft'}
+              </Button>
+              <Button onClick={() => submit(true)} disabled={saving}>
+                {saving ? 'Creating…' : 'Create & Publish →'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -26,6 +26,7 @@ interface ContractsTabProps {
 
 export function ContractsTab({ collectionId, collectionName }: ContractsTabProps) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -41,6 +42,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const approveContract = useContractsStore((s) => s.approveContract);
   const rejectContract = useContractsStore((s) => s.rejectContract);
   const renewContract = useContractsStore((s) => s.renewContract);
+  const editingContract = useContractsStore((s) => (editingId ? s.byId[editingId] : undefined));
 
   const { contracts, counts, isLoading } = useContracts(collectionId);
   useContractDrift(collectionId);
@@ -69,7 +71,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
 
   const handleAction = useCallback(
     async (action: ContractAction, contractId: string) => {
-      try { track('contracts.card_action', { contractId, action }); } catch {}
+      try {
+        track('contracts.card_action', { contractId, action });
+      } catch {}
       try {
         switch (action) {
           case 'pause':
@@ -102,7 +106,11 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
           case 'renew':
             await renewContract(collectionId, contractId, null);
             break;
-          // 'open', 'edit', 'view_changelog', 'export' → handled by routing/navigation (future SP)
+          case 'edit':
+            setEditingId(contractId);
+            setModalOpen(true);
+            break;
+          // 'open', 'view_changelog', 'export' → handled by routing/navigation (future SP)
           default:
             break;
         }
@@ -139,9 +147,15 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const allCardsRef = useRef(allCards);
   const focusedIdxRef = useRef(focusedIdx);
   const handleActionRef = useRef(handleAction);
-  useEffect(() => { allCardsRef.current = allCards; });
-  useEffect(() => { focusedIdxRef.current = focusedIdx; }, [focusedIdx]);
-  useEffect(() => { handleActionRef.current = handleAction; }, [handleAction]);
+  useEffect(() => {
+    allCardsRef.current = allCards;
+  });
+  useEffect(() => {
+    focusedIdxRef.current = focusedIdx;
+  }, [focusedIdx]);
+  useEffect(() => {
+    handleActionRef.current = handleAction;
+  }, [handleAction]);
 
   // j/k/n/e/p/del hotkeys — scoped to this tab's lifetime.
   useEffect(() => {
@@ -289,16 +303,22 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
           onSearch={(q) => {
             setSearch(q);
             if (q.length > 0) {
-              try { track('contracts.filter_used', { filterType: 'search' }); } catch {}
+              try {
+                track('contracts.filter_used', { filterType: 'search' });
+              } catch {}
             }
           }}
           onToggleStatus={(s) => {
             toggleStatus(s);
-            try { track('contracts.filter_used', { filterType: 'status', value: s }); } catch {}
+            try {
+              track('contracts.filter_used', { filterType: 'status', value: s });
+            } catch {}
           }}
           onSetSort={(s) => {
             setSort(s);
-            try { track('contracts.filter_used', { filterType: 'sort', value: s }); } catch {}
+            try {
+              track('contracts.filter_used', { filterType: 'sort', value: s });
+            } catch {}
           }}
           onSetView={setView}
         />
@@ -308,7 +328,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       {isEmpty && !loadError ? (
         <ContractsEmptyState
           onStartFromCurrent={() => {
-            try { track('contracts.empty_state_cta', { action: 'start_from_current' }); } catch {}
+            try {
+              track('contracts.empty_state_cta', { action: 'start_from_current' });
+            } catch {}
             setModalOpen(true);
           }}
         />
@@ -329,7 +351,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {attention.map((c, i) => (
                       <ContractCard
                         key={c.id}
-                        ref={(el) => { cardRefs.current[i] = el; }}
+                        ref={(el) => {
+                          cardRefs.current[i] = el;
+                        }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
@@ -345,7 +369,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {active.map((c, i) => (
                       <ContractCard
                         key={c.id}
-                        ref={(el) => { cardRefs.current[attention.length + i] = el; }}
+                        ref={(el) => {
+                          cardRefs.current[attention.length + i] = el;
+                        }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
@@ -361,7 +387,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                     {inactive.map((c, i) => (
                       <ContractCard
                         key={c.id}
-                        ref={(el) => { cardRefs.current[attention.length + active.length + i] = el; }}
+                        ref={(el) => {
+                          cardRefs.current[attention.length + active.length + i] = el;
+                        }}
                         contract={c}
                         collectionName={collectionName}
                         collectionRoot={collectionId}
@@ -377,12 +405,16 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         </ScrollArea>
       )}
 
-      {/* ── New contract modal ──────────────────────────── */}
+      {/* ── New / edit contract modal ───────────────────── */}
       <NewContractModal
         open={modalOpen}
-        onOpenChange={setModalOpen}
+        onOpenChange={(v) => {
+          setModalOpen(v);
+          if (!v) setEditingId(null);
+        }}
         collectionId={collectionId}
         collectionName={collectionName}
+        contract={editingContract}
       />
     </div>
   );

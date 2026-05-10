@@ -8,7 +8,7 @@ export type { Contract };
 
 export interface ContractsStore extends ContractsState, ContractsActions {
   // Sync mutations
-  updateContract: (id: string, patch: Partial<Contract>) => void;
+  patchContract: (id: string, patch: Partial<Contract>) => void;
   upsert: (contract: Contract) => void;
   setHovered: (id: string | null) => void;
 }
@@ -26,7 +26,7 @@ export const useContractsStore = create<ContractsStore>()(
     ...contractsActions(set, get),
 
     // Sync mutations
-    updateContract: (id, patch) =>
+    patchContract: (id, patch) =>
       set((state) => ({
         byId: {
           ...state.byId,
