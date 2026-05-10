@@ -436,7 +436,6 @@ function deriveSegments(
     ];
   }
 
->>>>>>> 92d725b (feat(contracts): add ContractDiffTab type and isContractDiffTab guard)
   const _exhaustive: never = tab;
   throw new Error(`Unhandled tab type: ${(_exhaustive as { tabType: string }).tabType}`);
 }
