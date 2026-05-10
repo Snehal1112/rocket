@@ -110,6 +110,15 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             setEditingId(contractId);
             setModalOpen(true);
             break;
+          case 'accept_drift':
+            // Same backend as resign — accepts all detected drift and re-signs at the new shape.
+            await publishContract(collectionId, contractId);
+            break;
+          case 'review_diff':
+          case 'open_review':
+          case 'remind_reviewers':
+            // Stub — full UI for these actions is a future feature.
+            break;
           // 'open', 'view_changelog', 'export' → handled by routing/navigation (future SP)
           default:
             break;
