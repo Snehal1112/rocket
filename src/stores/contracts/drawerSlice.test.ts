@@ -36,10 +36,24 @@ describe('useDrawerStore', () => {
       expect(useDrawerStore.getState().isOpen).toBe(false)
     })
 
-    it('sets contractId to null', () => {
+    it('preserves contractId so close animation can complete', () => {
       useDrawerStore.setState({ isOpen: true, contractId: 'c1' })
       useDrawerStore.getState().close()
+      expect(useDrawerStore.getState().contractId).toBe('c1')
+    })
+  })
+
+  describe('clearContract()', () => {
+    it('sets contractId to null', () => {
+      useDrawerStore.setState({ isOpen: false, contractId: 'c1' })
+      useDrawerStore.getState().clearContract()
       expect(useDrawerStore.getState().contractId).toBeNull()
+    })
+
+    it('does not affect isOpen', () => {
+      useDrawerStore.setState({ isOpen: false, contractId: 'c1' })
+      useDrawerStore.getState().clearContract()
+      expect(useDrawerStore.getState().isOpen).toBe(false)
     })
   })
 

@@ -5,6 +5,7 @@ import { DEFAULT_FILTERS } from '@/types/contracts'
 interface DrawerStore extends DrawerState {
   open: (contractId: string) => void
   close: () => void
+  clearContract: () => void
   setSearch: (search: string) => void
   toggleKind: (kind: ChangeKind) => void
   toggleBreakingOnly: () => void
@@ -18,7 +19,8 @@ export const useDrawerStore = create<DrawerStore>((set) => ({
   filters: { ...DEFAULT_FILTERS },
 
   open: (contractId) => set({ isOpen: true, contractId, filters: { ...DEFAULT_FILTERS } }),
-  close: () => set({ isOpen: false, contractId: null }),
+  close: () => set({ isOpen: false }),
+  clearContract: () => set({ contractId: null }),
 
   setSearch: (search) => set((s) => ({ filters: { ...s.filters, search } })),
   toggleKind: (kind) =>

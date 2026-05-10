@@ -26,6 +26,7 @@ export function ContractsStatusItem() {
       : null;
 
   const openDrawer = useDrawerStore((s) => s.open);
+  const openContractTab = usePaneStore((s) => s.openContractTab);
   const byId = useContractsStore((s) => s.byId);
   const byCollection = useContractsStore((s) => s.byCollection);
 
@@ -68,6 +69,8 @@ export function ContractsStatusItem() {
           if (meta.mostRecentId) {
             try { track('contracts.changelog_drawer_opened', { contractId: meta.mostRecentId, source: 'status_bar' }) } catch {}
             openDrawer(meta.mostRecentId);
+          } else {
+            openContractTab(activeCollection, collectionRoot!);
           }
         }}
         aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}

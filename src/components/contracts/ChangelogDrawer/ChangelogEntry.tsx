@@ -157,7 +157,7 @@ export function ChangelogEntry({
 
       {/* Actions row (hover-revealed) */}
       {!isSign && (
-        <div className='flex items-center gap-1.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity'>
+        <div className='flex items-center gap-1.5 mt-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'>
           {entry.requestId && onOpenRequest && (
             <Button
               variant='outline'
