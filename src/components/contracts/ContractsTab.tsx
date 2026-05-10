@@ -9,9 +9,11 @@ import { useContractsFilter } from '@/hooks/useContractsFilter';
 import { track } from '@/lib/telemetry';
 import { groupContracts } from '@/stores/contracts/contractsSelectors';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import type { ContractAction } from './ContractCard';
 import { ContractCard } from './ContractCard';
 import { ContractCardSkeleton } from './ContractCardSkeleton';
+import { ChangelogDrawer } from './ChangelogDrawer';
 import { ContractsEmptyState } from './ContractsEmptyState';
 import { ContractsFilterBar } from './ContractsFilterBar';
 import { ContractsGroupHeader } from './ContractsGroupHeader';
@@ -31,6 +33,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const openDrawer = useDrawerStore((s) => s.open);
   const loadContracts = useContractsStore((s) => s.loadContracts);
   const recomputeDrift = useContractsStore((s) => s.recomputeDrift);
   const pauseContract = useContractsStore((s) => s.pauseContract);
@@ -119,7 +122,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
           case 'remind_reviewers':
             // Stub — full UI for these actions is a future feature.
             break;
-          // 'open', 'view_changelog', 'export' → handled by routing/navigation (future SP)
+          // 'open', 'export' → handled by routing/navigation (future SP)
           default:
             break;
         }
@@ -156,6 +159,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const allCardsRef = useRef(allCards);
   const focusedIdxRef = useRef(focusedIdx);
   const handleActionRef = useRef(handleAction);
+  const openDrawerRef = useRef(openDrawer);
   useEffect(() => {
     allCardsRef.current = allCards;
   });
@@ -165,6 +169,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   useEffect(() => {
     handleActionRef.current = handleAction;
   }, [handleAction]);
+  useEffect(() => {
+    openDrawerRef.current = openDrawer;
+  }, [openDrawer]);
 
   // j/k/n/e/p/del hotkeys — scoped to this tab's lifetime.
   useEffect(() => {
@@ -199,6 +206,13 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         e.preventDefault();
         const c = cards[idx];
         if (c) void handleActionRef.current('delete', c.id);
+      } else if (e.key === 'c') {
+        e.preventDefault();
+        const c = cards[idx];
+        if (c) {
+          try { track('contracts.changelog_drawer_opened', { contractId: c.id, source: 'keyboard' }) } catch {}
+          openDrawerRef.current(c.id);
+        }
       }
     }
     window.addEventListener('keydown', handler);
@@ -425,6 +439,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         collectionName={collectionName}
         contract={editingContract}
       />
+
+      <ChangelogDrawer />
     </div>
   );
 }

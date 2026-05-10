@@ -4,6 +4,8 @@ import { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { track } from '@/lib/telemetry';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import type { Contract } from '@/types/contracts';
 import { ContractContextMenu, ContractDropdownMenu } from './ContractContextMenu';
 import { ContractStatusChip } from './ContractStatusChip';
@@ -30,8 +32,7 @@ export type ContractAction =
   | 'reject'
   | 'duplicate'
   | 'export'
-  | 'delete'
-  | 'view_changelog';
+  | 'delete';
 
 interface ContractCardProps {
   contract: Contract;
@@ -86,6 +87,7 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
   { contract, collectionName, collectionRoot, onAction, onOpen, focused, className },
   ref,
 ) {
+  const openDrawer = useDrawerStore((s) => s.open);
   const statusCount = contract.breachCount > 0 ? contract.breachCount : contract.driftCount;
 
   function stopPropagation(e: React.MouseEvent) {
@@ -252,7 +254,10 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
           <MiniChangelog
             entries={contract.changelog}
             status={contract.status}
-            onViewAll={() => onAction('view_changelog', contract.id)}
+            onViewAll={() => {
+              try { track('contracts.changelog_drawer_opened', { contractId: contract.id, source: 'card_link' }) } catch {}
+              openDrawer(contract.id)
+            }}
           />
         </div>
       </article>
