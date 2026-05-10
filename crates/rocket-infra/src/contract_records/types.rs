@@ -1,7 +1,7 @@
 //! Persistence records for `Contract` and its sub-types (`ContractParty`,
 //! `ContractPolicy`, `ContractScope`, plus the four enums).
 
-use rocket_collection::contract::types::{ContractParty, PartyKind};
+use rocket_collection::contract::types::{BreakingChangePolicy, ContractParty, ContractPolicy, PartyKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -167,6 +167,128 @@ mod party_tests {
         let domain = ContractParty::from_name("Platform Team");
         let record: ContractPartyRecord = (&domain).into();
         let back: ContractParty = record.into();
+        assert_eq!(domain, back);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContractPolicyRecord + BreakingChangePolicyRecord
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractPolicyRecord {
+    #[serde(default)]
+    pub breaking_change_policy: BreakingChangePolicyRecord,
+    #[serde(default = "default_notice_days_record")]
+    pub notice_days: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_sla: Option<f32>,
+}
+
+impl Default for ContractPolicyRecord {
+    fn default() -> Self {
+        Self {
+            breaking_change_policy: BreakingChangePolicyRecord::Lenient,
+            notice_days: 30,
+            uptime_sla: None,
+        }
+    }
+}
+
+fn default_notice_days_record() -> u32 {
+    30
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BreakingChangePolicyRecord {
+    Strict,
+    #[default]
+    Lenient,
+    AdditiveOk,
+}
+
+impl From<&BreakingChangePolicy> for BreakingChangePolicyRecord {
+    fn from(p: &BreakingChangePolicy) -> Self {
+        match p {
+            BreakingChangePolicy::Strict => BreakingChangePolicyRecord::Strict,
+            BreakingChangePolicy::Lenient => BreakingChangePolicyRecord::Lenient,
+            BreakingChangePolicy::AdditiveOk => BreakingChangePolicyRecord::AdditiveOk,
+        }
+    }
+}
+
+impl From<BreakingChangePolicyRecord> for BreakingChangePolicy {
+    fn from(r: BreakingChangePolicyRecord) -> Self {
+        match r {
+            BreakingChangePolicyRecord::Strict => BreakingChangePolicy::Strict,
+            BreakingChangePolicyRecord::Lenient => BreakingChangePolicy::Lenient,
+            BreakingChangePolicyRecord::AdditiveOk => BreakingChangePolicy::AdditiveOk,
+        }
+    }
+}
+
+impl From<&ContractPolicy> for ContractPolicyRecord {
+    fn from(p: &ContractPolicy) -> Self {
+        Self {
+            breaking_change_policy: (&p.breaking_change_policy).into(),
+            notice_days: p.notice_days,
+            uptime_sla: p.uptime_sla,
+        }
+    }
+}
+
+impl From<ContractPolicyRecord> for ContractPolicy {
+    fn from(r: ContractPolicyRecord) -> Self {
+        Self {
+            breaking_change_policy: r.breaking_change_policy.into(),
+            notice_days: r.notice_days,
+            uptime_sla: r.uptime_sla,
+        }
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn policy_record_defaults_from_empty_yaml() {
+        let p: ContractPolicyRecord = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(p.breaking_change_policy, BreakingChangePolicyRecord::Lenient);
+        assert_eq!(p.notice_days, 30);
+        assert!(p.uptime_sla.is_none());
+    }
+
+    #[test]
+    fn policy_record_roundtrip() {
+        let p = ContractPolicyRecord {
+            breaking_change_policy: BreakingChangePolicyRecord::Strict,
+            notice_days: 14,
+            uptime_sla: Some(99.9),
+        };
+        let yaml = serde_yaml::to_string(&p).unwrap();
+        assert!(yaml.contains("breakingChangePolicy"), "got:\n{yaml}");
+        let back: ContractPolicyRecord = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn breaking_policy_record_uses_snake_case() {
+        let y = serde_yaml::to_string(&BreakingChangePolicyRecord::AdditiveOk).unwrap();
+        assert!(y.contains("additive_ok"), "got: {y}");
+    }
+
+    #[test]
+    fn domain_policy_record_roundtrip() {
+        let domain = ContractPolicy {
+            breaking_change_policy: BreakingChangePolicy::AdditiveOk,
+            notice_days: 7,
+            uptime_sla: Some(95.0),
+        };
+        let r: ContractPolicyRecord = (&domain).into();
+        let back: ContractPolicy = r.into();
         assert_eq!(domain, back);
     }
 }
