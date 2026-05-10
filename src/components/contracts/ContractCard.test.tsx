@@ -122,7 +122,7 @@ describe('ContractCard', () => {
     expect(document.getElementById('cc-name-c-test')?.textContent).toBe('Payments API');
   });
 
-  it('shows +N more tooltip when >1 consumer', () => {
+  it('shows consumer count pill when >1 consumer', () => {
     const c = makeContract('active', {
       consumers: [
         { id: 'c1', name: 'Platform', kind: 'team' },
@@ -131,6 +131,6 @@ describe('ContractCard', () => {
       ],
     });
     wrap(<ContractCard contract={c} collectionRoot='/ws/col' onAction={vi.fn()} />);
-    expect(screen.getByText('+2 more')).toBeInTheDocument();
+    expect(screen.getByText('3 consumers')).toBeInTheDocument();
   });
 });

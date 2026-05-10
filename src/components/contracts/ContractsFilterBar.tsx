@@ -27,6 +27,7 @@ const STATUS_CHIPS: ContractFilterStatus[] = [
   'draft',
   'paused',
   'expired',
+  'archived',
 ];
 
 const SORT_OPTIONS: Array<{ key: ContractSortKey; label: string }> = [
@@ -45,6 +46,7 @@ function getChipCount(status: ContractFilterStatus, counts: ContractCounts): num
     draft: counts.draft,
     paused: counts.paused,
     expired: counts.expired,
+    archived: counts.archived,
   };
   return map[status] ?? 0;
 }

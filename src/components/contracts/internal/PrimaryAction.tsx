@@ -24,10 +24,24 @@ export function PrimaryAction({ contract, onAction }: PrimaryActionProps) {
           className='h-7 text-xs'
           onClick={(e) => {
             stop(e);
-            onAction('resign', contract.id);
+            onAction('review_diff', contract.id);
           }}
         >
-          Re-sign
+          Review diff →
+        </Button>
+      );
+    case 'in_review':
+      return (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 text-xs'
+          onClick={(e) => {
+            stop(e);
+            onAction('open_review', contract.id);
+          }}
+        >
+          Open review →
         </Button>
       );
     case 'draft':
@@ -70,6 +84,35 @@ export function PrimaryAction({ contract, onAction }: PrimaryActionProps) {
           }}
         >
           Renew
+        </Button>
+      );
+    case 'active':
+    case 'expiring_in_30_days':
+      return (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 text-xs'
+          onClick={(e) => {
+            stop(e);
+            onAction('open', contract.id);
+          }}
+        >
+          Open contract
+        </Button>
+      );
+    case 'archived':
+      return (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 text-xs'
+          onClick={(e) => {
+            stop(e);
+            onAction('unarchive', contract.id);
+          }}
+        >
+          Unarchive
         </Button>
       );
     default:

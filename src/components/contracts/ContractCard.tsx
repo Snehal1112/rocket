@@ -39,6 +39,10 @@ export type ContractAction =
   | 'open'
   | 'edit'
   | 'resign'
+  | 'review_diff'
+  | 'accept_drift'
+  | 'open_review'
+  | 'remind_reviewers'
   | 'publish'
   | 'pause'
   | 'resume'
@@ -49,10 +53,6 @@ export type ContractAction =
   | 'duplicate'
   | 'export'
   | 'delete'
-  | 'accept_drift'
-  | 'review_diff'
-  | 'open_review'
-  | 'remind_reviewers'
   | 'archive'
   | 'unarchive';
 
@@ -83,11 +83,73 @@ function formatDate(iso: string): string {
 
 function formatMonthDay(iso: string): string {
   try {
-    return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
   } catch {
     return iso;
   }
 }
+
+function subtitleDateLabel(contract: Contract): string {
+  if (contract.status === 'paused' && contract.pausedAt) {
+    return `Paused ${formatDate(contract.pausedAt)}`;
+  }
+  if (contract.status === 'expired' && contract.expiresAt) {
+    return `Expired ${formatDate(contract.expiresAt)}`;
+  }
+  if (contract.status === 'in_review' && contract.createdAt) {
+    try {
+      return `Created ${new Date(contract.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    } catch {
+      // fall through
+    }
+  }
+  return `Effective ${formatDate(contract.effectiveAt)}`;
+}
+
+/** Bumps the last dot-separated numeric segment: "v2.1" → "v2.2", "1.0.0" → "1.0.1" */
+function nextVersion(version: string): string {
+  const hasV = version.startsWith('v');
+  const v = hasV ? version.slice(1) : version;
+  const parts = v.split('.');
+  const last = parseInt(parts[parts.length - 1], 10);
+  if (!Number.isNaN(last)) {
+    parts[parts.length - 1] = String(last + 1);
+    return `${hasV ? 'v' : ''}${parts.join('.')}`;
+  }
+  return `${version}-next`;
+}
+
+function driftFooterLabel(contract: Contract): string {
+  if (contract.changelog.length === 0) return 'No changes recorded';
+  const latest = contract.changelog[0];
+  try {
+    const timeStr = formatDistanceToNow(parseISO(latest.at), { addSuffix: true }).replace(
+      'about ',
+      '',
+    );
+    const byPart = latest.authorName ? ` · by ${latest.authorName}` : '';
+    return `Last change ${timeStr}${byPart}`;
+  } catch {
+    return 'No changes recorded';
+  }
+}
+
+function reviewFooterLabel(contract: Contract): string {
+  try {
+    const timeStr = formatDistanceToNow(parseISO(contract.createdAt), { addSuffix: true }).replace(
+      'about ',
+      '',
+    );
+    const byPart = contract.createdBy ? ` · by ${contract.createdBy}` : '';
+    return `Proposed ${timeStr}${byPart}`;
+  } catch {
+    return 'Awaiting review';
+  }
+}
+
 
 function isExpiringSoon(expiresAt: string | null): boolean {
   if (!expiresAt) return false;
@@ -95,20 +157,29 @@ function isExpiringSoon(expiresAt: string | null): boolean {
   return ms > 0 && ms < 30 * 24 * 60 * 60 * 1000;
 }
 
-function lastChangeLabel(updatedAt: string): string {
+function footerLabel(contract: Contract): string {
+  if (contract.changelog.length === 0) return 'No changes recorded';
+  const latest = contract.changelog[0];
   try {
-    return `Updated ${formatDistanceToNow(parseISO(updatedAt), { addSuffix: true })}`;
+    const timeStr = formatDistanceToNow(parseISO(latest.at), { addSuffix: false }).replace(
+      'about ',
+      '',
+    );
+    const kindLabel =
+      latest.kind === 'add' ? 'additive' : latest.kind === 'remove' ? 'removal' : 'modified';
+    const breakLabel = latest.isBreaking ? 'breaking' : 'accepted';
+    return `Last change ${timeStr} ago · ${kindLabel}, ${breakLabel}`;
   } catch {
-    return 'Updated recently';
+    return 'No changes recorded';
   }
 }
 
 function policyLabel(policy: Contract['policy']): string {
-  return (
-    ({ strict: 'Strict', lenient: 'Lenient', additive_ok: 'Additive OK' } as const)[
+  const base =
+    ({ strict: 'Strict', lenient: 'Standard', additive_ok: 'Additive OK' } as const)[
       policy.breakingChangePolicy
-    ] ?? policy.breakingChangePolicy
-  );
+    ] ?? policy.breakingChangePolicy;
+  return `${base} · ${policy.noticeDays}-day notice`;
 }
 
 // ─── Component ────────────────────────────────────────────
@@ -177,7 +248,7 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                     />
                   </>
                 )}
-                <span>{formatDate(contract.effectiveAt)}</span>
+                <span>{subtitleDateLabel(contract)}</span>
                 <StatusSubline contract={contract} />
               </div>
             </div>
@@ -188,25 +259,34 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
           <div className='flex items-center gap-2 flex-wrap mb-3'>
             <PartyPill party={contract.provider} partyRole='provider' />
             <ArrowRight className='w-4 h-3.5 text-muted-foreground shrink-0' aria-hidden='true' />
-            <PartyPill party={contract.consumers[0]} partyRole='consumer' />
-            {contract.consumers.length > 1 && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className='text-xs text-muted-foreground cursor-default select-none'>
-                    +{contract.consumers.length - 1} more
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side='top'>
-                  {contract.consumers
-                    .slice(1)
-                    .map((c) => c.name)
-                    .join(', ')}
-                </TooltipContent>
-              </Tooltip>
+            {contract.consumers.length === 1 ? (
+              <PartyPill party={contract.consumers[0]} partyRole='consumer' />
+            ) : (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className='inline-flex items-center gap-[7px] pl-[4px] pr-[10px] py-1 border border-border rounded-full bg-card text-xs text-foreground cursor-default'>
+                      <span className='w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-semibold flex items-center justify-center shrink-0'>
+                        +{contract.consumers.length}
+                      </span>
+                      <span>{contract.consumers.length} consumers</span>
+                      <span className='text-[10px] text-muted-foreground font-medium shrink-0'>
+                        · Consumer
+                      </span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side='top'>
+                    {contract.consumers.map((c) => c.name).join(', ')}
+                  </TooltipContent>
+                </Tooltip>
+                <span className='text-xs text-muted-foreground truncate max-w-[200px]'>
+                  · {contract.consumers.map((c) => c.name).join(', ')}
+                </span>
+              </>
             )}
           </div>
 
-          {/* Meta row */}
+          {/* Meta row — content varies by status */}
           <div className='flex gap-5 flex-wrap mb-3'>
             {contract.status === 'paused' ? (
               <>
@@ -287,7 +367,6 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                     <MetaItem
                       icon={<TrendingUp className='h-3 w-3' />}
                       value={`${contract.policy.uptimeSla}% compliance`}
-                      success
                     />
                   ) : (
                     <MetaItem
@@ -308,57 +387,245 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                   />
                 ) : null}
               </>
-
             )}
           </div>
 
-          {/* Scope + meta tags */}
+          {/* Scope + meta tags — content varies by status */}
           <div className='flex gap-1.5 flex-wrap mb-3'>
-            <ScopeTag scope={contract.scope} />
-            <ScopeTag type='endpoints' count={contract.endpointCount} />
-            <ScopeTag type='policy' label={policyLabel(contract.policy)} />
-            {contract.policy.uptimeSla !== null && (
-              <ScopeTag type='sla' label={String(contract.policy.uptimeSla)} />
+            {contract.status === 'expired' ? (
+              <>
+                <ScopeTag type='endpoints' count={contract.endpointCount} />
+                <ScopeTag type='policy' label='Expired — read only' />
+              </>
+            ) : contract.status === 'paused' ? (
+              <>
+                <ScopeTag scope={contract.scope} />
+                <ScopeTag type='endpoints' count={contract.endpointCount} />
+              </>
+            ) : contract.status === 'in_review' ? (
+              <>
+                <ScopeTag type='endpoints' count={contract.endpointCount} />
+                <ScopeTag
+                  type='policy'
+                  label={
+                    contract.policy.breakingChangePolicy === 'strict'
+                      ? 'Strict · Both parties sign'
+                      : policyLabel(contract.policy)
+                  }
+                />
+              </>
+            ) : (
+              <>
+                <ScopeTag scope={contract.scope} />
+                <ScopeTag type='endpoints' count={contract.endpointCount} />
+                <ScopeTag type='policy' label={policyLabel(contract.policy)} />
+                {contract.policy.uptimeSla !== null && (
+                  <ScopeTag type='sla' label={String(contract.policy.uptimeSla)} />
+                )}
+              </>
             )}
           </div>
 
-          {/* Footer */}
-          <div className='mt-1.5 pt-3 border-t border-dashed border-border flex justify-between items-center'>
-            <span className='text-[11px] text-muted-foreground'>
-              {lastChangeLabel(contract.updatedAt)}
-            </span>
-            {/* Action buttons — hidden until hover/focus */}
-            <div className='flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity'>
-              <PrimaryAction contract={contract} onAction={onAction} />
-              <Button
-                variant='ghost'
-                size='sm'
-                className='h-7 text-xs'
-                onClick={(e) => {
-                  stopPropagation(e);
-                  onAction('edit', contract.id);
-                }}
-                aria-label={`Edit ${contract.name}`}
-              >
-                Edit
-              </Button>
-              <ContractDropdownMenu
-                contract={contract}
-                collectionRoot={collectionRoot}
-                onAction={onAction}
-              >
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='h-7 w-7'
-                  onClick={stopPropagation}
-                  aria-label='More actions'
-                  data-more-trigger
-                >
-                  <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
-                </Button>
-              </ContractDropdownMenu>
-            </div>
+          {/* Footer — content and actions vary by status */}
+          <div className='mt-1.5 pt-3 border-t border-dashed border-border flex justify-between items-center gap-3'>
+            {contract.status === 'paused' ? (
+              <>
+                <span className='text-[11px] text-muted-foreground italic truncate'>
+                  {contract.pauseReason ? (
+                    <>
+                      Reason: {contract.pauseReason}
+                      {contract.successorName && (
+                        <>
+                          {' '}
+                          <strong className='font-semibold not-italic text-foreground/80'>
+                            {contract.successorName}
+                          </strong>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    'Contract is paused'
+                  )}
+                </span>
+                <div className='flex gap-1 shrink-0'>
+                  <PrimaryAction contract={contract} onAction={onAction} />
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('archive', contract.id);
+                    }}
+                  >
+                    Archive
+                  </Button>
+                  <ContractDropdownMenu
+                    contract={contract}
+                    collectionRoot={collectionRoot}
+                    onAction={onAction}
+                  >
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-7 w-7'
+                      onClick={stopPropagation}
+                      aria-label='More actions'
+                      data-more-trigger
+                    >
+                      <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  </ContractDropdownMenu>
+                </div>
+              </>
+            ) : contract.status === 'expired' ? (
+              <>
+                <span className='text-[11px] text-muted-foreground italic truncate'>
+                  {contract.lastRenewalAttemptAt && contract.lastRenewalDeclined
+                    ? `Last renewal attempt declined · ${formatMonthDay(contract.lastRenewalAttemptAt)}`
+                    : contract.expiresAt
+                      ? `Expired ${formatDate(contract.expiresAt)}`
+                      : 'Contract expired'}
+                </span>
+                <div className='flex gap-1 shrink-0'>
+                  <PrimaryAction contract={contract} onAction={onAction} />
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('duplicate', contract.id);
+                    }}
+                  >
+                    Clone as new
+                  </Button>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('archive', contract.id);
+                    }}
+                  >
+                    Archive
+                  </Button>
+                </div>
+              </>
+            ) : contract.status === 'drift' || contract.status === 'breach' ? (
+              <>
+                <span className='flex items-center gap-1 text-[11px] text-muted-foreground truncate'>
+                  <Clock className='h-3 w-3 shrink-0' aria-hidden='true' />
+                  {driftFooterLabel(contract)}
+                </span>
+                <div className='flex gap-1 shrink-0'>
+                  <PrimaryAction contract={contract} onAction={onAction} />
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('accept_drift', contract.id);
+                    }}
+                  >
+                    Accept as {nextVersion(contract.version)}
+                  </Button>
+                  <ContractDropdownMenu
+                    contract={contract}
+                    collectionRoot={collectionRoot}
+                    onAction={onAction}
+                  >
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-7 w-7'
+                      onClick={stopPropagation}
+                      aria-label='More actions'
+                      data-more-trigger
+                    >
+                      <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  </ContractDropdownMenu>
+                </div>
+              </>
+            ) : contract.status === 'in_review' ? (
+              <>
+                <span className='flex items-center gap-1 text-[11px] text-muted-foreground truncate'>
+                  <Clock className='h-3 w-3 shrink-0' aria-hidden='true' />
+                  {reviewFooterLabel(contract)}
+                </span>
+                <div className='flex gap-1 shrink-0'>
+                  <PrimaryAction contract={contract} onAction={onAction} />
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('remind_reviewers', contract.id);
+                    }}
+                  >
+                    Remind reviewers
+                  </Button>
+                  <ContractDropdownMenu
+                    contract={contract}
+                    collectionRoot={collectionRoot}
+                    onAction={onAction}
+                  >
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-7 w-7'
+                      onClick={stopPropagation}
+                      aria-label='More actions'
+                      data-more-trigger
+                    >
+                      <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  </ContractDropdownMenu>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className='flex items-center gap-1 text-[11px] text-muted-foreground'>
+                  <Check className='h-3 w-3 shrink-0' aria-hidden='true' />
+                  {footerLabel(contract)}
+                </span>
+                <div className='flex gap-1 shrink-0'>
+                  <PrimaryAction contract={contract} onAction={onAction} />
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='h-7 text-xs'
+                    onClick={(e) => {
+                      stopPropagation(e);
+                      onAction('edit', contract.id);
+                    }}
+                    aria-label={`Edit ${contract.name}`}
+                  >
+                    Edit
+                  </Button>
+                  <ContractDropdownMenu
+                    contract={contract}
+                    collectionRoot={collectionRoot}
+                    onAction={onAction}
+                  >
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-7 w-7'
+                      onClick={stopPropagation}
+                      aria-label='More actions'
+                      data-more-trigger
+                    >
+                      <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  </ContractDropdownMenu>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

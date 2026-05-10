@@ -22,7 +22,7 @@ const chipVariants: Record<ContractStatus, string> = {
   expired: 'bg-[hsl(var(--muted-foreground)/0.18)] text-muted-foreground border-border border-2',
   expiring_in_30_days:
     'bg-[hsl(var(--warning)/0.10)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.25)]',
-  archived: 'bg-muted text-muted-foreground/60 border-border',
+  archived: 'bg-muted text-muted-foreground border-border',
 };
 
 const dotVariants: Record<ContractStatus, string | null> = {

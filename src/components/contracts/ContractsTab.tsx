@@ -45,6 +45,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const approveContract = useContractsStore((s) => s.approveContract);
   const rejectContract = useContractsStore((s) => s.rejectContract);
   const renewContract = useContractsStore((s) => s.renewContract);
+  const archiveContract = useContractsStore((s) => s.archiveContract);
+  const unarchiveContract = useContractsStore((s) => s.unarchiveContract);
   const editingContract = useContractsStore((s) => (editingId ? s.byId[editingId] : undefined));
 
   const { contracts, counts, isLoading } = useContracts(collectionId);
@@ -52,8 +54,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
   const { filtered, filterState, setSearch, toggleStatus, setSort, setView } =
     useContractsFilter(contracts);
 
-  const { attention, active, inactive } = groupContracts(filtered);
-  const allCards = [...attention, ...active, ...inactive];
+  const { attention, active, inactive, archived } = groupContracts(filtered);
+  const allCards = [...attention, ...active, ...inactive, ...archived];
 
   // Load on mount + when collectionId changes
   useEffect(() => {
@@ -109,6 +111,12 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
           case 'renew':
             await renewContract(collectionId, contractId, null);
             break;
+          case 'archive':
+            await archiveContract(collectionId, contractId);
+            break;
+          case 'unarchive':
+            await unarchiveContract(collectionId, contractId);
+            break;
           case 'edit':
             setEditingId(contractId);
             setModalOpen(true);
@@ -141,6 +149,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       approveContract,
       rejectContract,
       renewContract,
+      archiveContract,
+      unarchiveContract,
     ],
   );
 
@@ -418,6 +428,27 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
                         collectionRoot={collectionId}
                         onAction={handleAction}
                         focused={focusedIdx === attention.length + active.length + i}
+                      />
+                    ))}
+                  </>
+                )}
+                {archived.length > 0 && (
+                  <>
+                    <ContractsGroupHeader label='Archived' count={archived.length} />
+                    {archived.map((c, i) => (
+                      <ContractCard
+                        key={c.id}
+                        ref={(el) => {
+                          cardRefs.current[attention.length + active.length + inactive.length + i] =
+                            el;
+                        }}
+                        contract={c}
+                        collectionName={collectionName}
+                        collectionRoot={collectionId}
+                        onAction={handleAction}
+                        focused={
+                          focusedIdx === attention.length + active.length + inactive.length + i
+                        }
                       />
                     ))}
                   </>
