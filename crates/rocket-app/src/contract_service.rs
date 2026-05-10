@@ -1457,4 +1457,101 @@ mod tests {
              this would trigger the file-watcher feedback loop"
         );
     }
+
+    #[test]
+    fn folder_scope_logs_changes_inside_folder() {
+        // Attach a contract scoped to the "auth" folder with a baseline snapshot
+        // for auth/login.yml, then save a modified version of that request.
+        // Expect: one changelog entry (method change).
+        let svc = make_service();
+        let snap = make_snap("auth/login.yml");
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Folder { rel_path: PathBuf::from("auth") };
+        let contract = svc
+            .attach_contract(root(), contract, vec![snap.clone()], vec![])
+            .unwrap();
+
+        let mut changed = snap;
+        changed.method = "POST".into();
+        svc.on_request_saved(root(), changed).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert_eq!(
+            log.entries.len(),
+            1,
+            "folder-scoped contract must log changes to requests inside the folder"
+        );
+        assert_eq!(log.entries[0].field, "method");
+    }
+
+    #[test]
+    fn folder_scope_ignores_requests_outside_folder() {
+        // Attach a contract scoped to the "auth" folder, then save a request
+        // from a DIFFERENT folder. Expect: no changelog entries.
+        let svc = make_service();
+        let snap = make_snap("auth/login.yml");
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Folder { rel_path: PathBuf::from("auth") };
+        let contract = svc
+            .attach_contract(root(), contract, vec![snap], vec![])
+            .unwrap();
+
+        // "payments/pay.yml" is outside the "auth" folder.
+        let outside = make_snap_with_method("payments/pay.yml", "POST");
+        svc.on_request_saved(root(), outside).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert!(
+            log.entries.is_empty(),
+            "folder-scoped contract must not log changes to requests outside the folder"
+        );
+    }
+
+    #[test]
+    fn request_scope_logs_changes_for_covered_request() {
+        // Attach a contract scoped to the single request "auth/login.yml", then
+        // save a modified version of that exact request.
+        // Expect: one changelog entry (method change).
+        let svc = make_service();
+        let snap = make_snap("auth/login.yml");
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Request { rel_path: PathBuf::from("auth/login.yml") };
+        let contract = svc
+            .attach_contract(root(), contract, vec![snap.clone()], vec![])
+            .unwrap();
+
+        let mut changed = snap;
+        changed.method = "POST".into();
+        svc.on_request_saved(root(), changed).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert_eq!(
+            log.entries.len(),
+            1,
+            "request-scoped contract must log changes to the covered request"
+        );
+        assert_eq!(log.entries[0].field, "method");
+    }
+
+    #[test]
+    fn request_scope_ignores_other_requests() {
+        // Attach a contract scoped to "auth/login.yml", then save a DIFFERENT
+        // request. Expect: no changelog entries.
+        let svc = make_service();
+        let snap = make_snap("auth/login.yml");
+        let mut contract = make_contract();
+        contract.scope = ContractScope::Request { rel_path: PathBuf::from("auth/login.yml") };
+        let contract = svc
+            .attach_contract(root(), contract, vec![snap], vec![])
+            .unwrap();
+
+        let other = make_snap_with_method("auth/register.yml", "POST");
+        svc.on_request_saved(root(), other).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert!(
+            log.entries.is_empty(),
+            "request-scoped contract must not log changes to other requests"
+        );
+    }
 }
