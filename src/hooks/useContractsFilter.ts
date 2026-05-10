@@ -33,6 +33,9 @@ export function applyFilter(contracts: Contract[], state: ContractsFilterState):
 
   if (!state.statuses.includes('all')) {
     result = result.filter((c) => state.statuses.includes(c.status as ContractFilterStatus));
+  } else {
+    // 'all' excludes archived — archived only shows when explicitly filtered.
+    result = result.filter((c) => c.status !== 'archived');
   }
 
   return applySort(result, state.sort, state.sortDir);

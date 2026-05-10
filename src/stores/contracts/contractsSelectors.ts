@@ -17,7 +17,8 @@ export function selectContractCounts(contracts: Contract[]): ContractCounts {
     inReview = 0,
     draft = 0,
     paused = 0,
-    expired = 0;
+    expired = 0,
+    archived = 0;
   let totalChanges = 0,
     changesAdded = 0,
     changesRemoved = 0,
@@ -31,6 +32,7 @@ export function selectContractCounts(contracts: Contract[]): ContractCounts {
     else if (c.status === 'draft') draft++;
     else if (c.status === 'paused') paused++;
     else if (c.status === 'expired') expired++;
+    else if (c.status === 'archived') archived++;
 
     totalChanges += c.driftCount;
     for (const entry of c.changelog) {
@@ -49,6 +51,7 @@ export function selectContractCounts(contracts: Contract[]): ContractCounts {
     draft,
     paused,
     expired,
+    archived,
     totalChanges,
     changesAdded,
     changesRemoved,
@@ -60,11 +63,13 @@ export function groupContracts(contracts: Contract[]): {
   attention: Contract[];
   active: Contract[];
   inactive: Contract[];
+  archived: Contract[];
 } {
   return {
     attention: contracts.filter((c) => needsAttention(c.status)),
     active: contracts.filter((c) => isActive(c.status)),
     inactive: contracts.filter((c) => isInactive(c.status)),
+    archived: contracts.filter((c) => c.status === 'archived'),
   };
 }
 
@@ -77,6 +82,7 @@ const STATUS_ORDER: Partial<Record<ContractStatus, number>> = {
   draft: 5,
   paused: 6,
   expired: 7,
+  archived: 8,
 };
 
 export function sortContractsAttentionFirst(contracts: Contract[]): Contract[] {

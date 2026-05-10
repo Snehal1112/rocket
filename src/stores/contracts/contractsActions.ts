@@ -35,6 +35,8 @@ export interface ContractsActions {
   sendForReview: (collectionId: string, id: string) => Promise<void>;
   approveContract: (collectionId: string, id: string) => Promise<void>;
   rejectContract: (collectionId: string, id: string) => Promise<void>;
+  archiveContract: (collectionId: string, contractId: string) => Promise<void>;
+  unarchiveContract: (collectionId: string, contractId: string) => Promise<void>;
   duplicateContract: (collectionId: string, id: string) => Promise<void>;
   recomputeDrift: (collectionId: string) => Promise<void>;
   loadChangelog: (collectionId: string, contractId: string) => Promise<void>;
@@ -216,6 +218,16 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       } catch {}
     },
 
+    archiveContract: async (collectionId, contractId) => {
+      const raw = await api.archiveContract(collectionId, contractId);
+      upsertInCollection(collectionId, adaptIpcContract(raw));
+    },
+
+    unarchiveContract: async (collectionId, contractId) => {
+      const raw = await api.unarchiveContract(collectionId, contractId);
+      upsertInCollection(collectionId, adaptIpcContract(raw));
+    },
+
     duplicateContract: async (collectionId, id) => {
       const raw = await api.duplicateContract(collectionId, id);
       upsertInCollection(collectionId, adaptIpcContract(raw));
@@ -229,7 +241,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
         if (status) beforeStatuses[id] = status;
       }
 
-      await api.recomputeDrift(collectionId, []);
+      await api.recomputeDrift(collectionId);
       await get().loadContracts(collectionId);
 
       // Emit drift_detected for every contract that newly entered drift or breach
