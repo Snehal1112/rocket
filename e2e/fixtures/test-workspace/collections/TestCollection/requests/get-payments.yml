@@ -1,0 +1,17 @@
+uid: e2e-get-payments-0000-0000-0001
+info:
+  name: Get Payments
+  type: http
+http:
+  method: GET
+  url: "{{baseUrl}}/payments"
+  params:
+  - name: currency
+    value: USD
+    enabled: true
+  headers:
+  - name: Authorization
+    value: "Bearer {{token}}"
+    enabled: true
+  body:
+    type: none

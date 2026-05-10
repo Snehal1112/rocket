@@ -8,7 +8,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
   ContextMenu,
@@ -38,12 +38,14 @@ import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
+import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
 import type { PaneNode, RequestState, RequestTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
 
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
+const EMPTY_IDS: string[] = [];
 
 // Collects all leaf groupIds from the pane tree.
 function collectLeafGroupIds(node: PaneNode): string[] {
@@ -90,6 +92,37 @@ export function RequestNode({
   const active = isActiveRequest(root, uid);
   const contractsForScope = useContractStore((s) => s.contractsForScope);
   const scopedContracts = contractsForScope(collectionRoot, 'request', path) ?? EMPTY_CONTRACTS;
+
+  // New store — contract status dot
+  const newContractIds = useContractsStore((s) => s.byCollection[collectionRoot] ?? EMPTY_IDS);
+  const newContractsById = useContractsStore((s) => s.byId);
+
+  /**
+   * Highest-severity contract status covering this request.
+   * Priority: breach > drift > compliant > undefined (no contract covers it).
+   */
+  const contractDotStatus = useMemo(() => {
+    let highestCompliant = false;
+    for (const id of newContractIds) {
+      const contract = newContractsById[id];
+      if (!contract) continue;
+
+      const covers =
+        contract.scope.type === 'collection' ||
+        (contract.scope.type === 'folder' && path.startsWith(contract.scope.rel_path)) ||
+        (contract.scope.type === 'request' && contract.scope.rel_path === path);
+
+      if (!covers) continue;
+
+      if (contract.status === 'breach') return 'breach' as const;
+      if (contract.status === 'drift') return 'drift' as const;
+      if (contract.status === 'active' || contract.status === 'expiring_in_30_days') {
+        highestCompliant = true;
+      }
+    }
+    return highestCompliant ? ('compliant' as const) : undefined;
+  }, [newContractIds, newContractsById, path]);
+
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const renameInFlight = useRef(false);
@@ -148,7 +181,7 @@ export function RequestNode({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className='group relative flex items-center'>
-          <TreeItem value={uid} active={active} className='flex-1'>
+          <TreeItem value={uid} active={active} className='flex-1' data-testid={`request-item-${method}-${name}`}>
             <TreeItemContent
               className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
               onClick={handleClick}
@@ -183,6 +216,18 @@ export function RequestNode({
                 collectionName={collectionName}
                 collectionRoot={collectionRoot}
               />
+              {contractDotStatus && (
+                <span
+                  role='img'
+                  aria-label={`Contract status: ${contractDotStatus}`}
+                  className={cn(
+                    'ml-auto w-[7px] h-[7px] rounded-full shrink-0 inline-block',
+                    contractDotStatus === 'breach' && 'bg-[hsl(var(--destructive))] animate-pulse',
+                    contractDotStatus === 'drift' && 'bg-[hsl(var(--warning))]',
+                    contractDotStatus === 'compliant' && 'bg-[hsl(var(--success)/0.8)]',
+                  )}
+                />
+              )}
             </TreeItemContent>
           </TreeItem>
 

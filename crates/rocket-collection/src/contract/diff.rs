@@ -1,146 +1,220 @@
 use crate::contract::changelog::{ChangeType, ChangelogEntry};
 use crate::contract::snapshot::{KeyValueEntry, RequestSignatureSnapshot};
+use crate::contract::types::BreakingChangePolicy;
 use chrono::Utc;
 
 /// Pure function — no I/O, no side effects.
-/// Returns one `ChangelogEntry` per detected change.
-///
-/// This is the Model B extension seam:
-/// the save hook calls this function and currently logs results silently.
-/// Model B will act on the return value (warn / block) without changing this function.
+/// Returns one `ChangelogEntry` per detected change, each tagged with `is_breaking`
+/// according to the supplied `BreakingChangePolicy`.
 pub fn diff_signature(
     old: &RequestSignatureSnapshot,
     new: &RequestSignatureSnapshot,
+    policy: &BreakingChangePolicy,
 ) -> Vec<ChangelogEntry> {
     let mut entries = Vec::new();
     let now = Utc::now();
     let path = new.request_path.clone();
 
-    macro_rules! field_diff {
-        ($field:expr, $old:expr, $new:expr) => {
-            if $old != $new {
-                entries.push(ChangelogEntry {
-                    timestamp: now,
-                    request_path: path.clone(),
-                    field: $field.to_string(),
-                    change_type: ChangeType::Changed,
-                    old_value: Some($old.to_string()),
-                    new_value: Some($new.to_string()),
-                });
-            }
-        };
+    // Method change — always breaking
+    if old.method != new.method {
+        entries.push(ChangelogEntry {
+            timestamp: now,
+            request_path: path.clone(),
+            field: "method".into(),
+            change_type: ChangeType::Changed,
+            old_value: Some(old.method.clone()),
+            new_value: Some(new.method.clone()),
+            is_breaking: true,
+        });
     }
 
-    field_diff!("method", old.method, new.method);
-    field_diff!("url_pattern", old.url_pattern, new.url_pattern);
-    field_diff!("auth_type", old.auth_type, new.auth_type);
+    // URL pattern change — always breaking
+    if old.url_pattern != new.url_pattern {
+        entries.push(ChangelogEntry {
+            timestamp: now,
+            request_path: path.clone(),
+            field: "url_pattern".into(),
+            change_type: ChangeType::Changed,
+            old_value: Some(old.url_pattern.clone()),
+            new_value: Some(new.url_pattern.clone()),
+            is_breaking: true,
+        });
+    }
 
-    // Diff auth_detail when the values differ.
+    // Auth type change — always breaking
+    if old.auth_type != new.auth_type {
+        entries.push(ChangelogEntry {
+            timestamp: now,
+            request_path: path.clone(),
+            field: "auth_type".into(),
+            change_type: ChangeType::Changed,
+            old_value: Some(old.auth_type.clone()),
+            new_value: Some(new.auth_type.clone()),
+            is_breaking: true,
+        });
+    }
+
+    // Auth detail change — always breaking (credential change)
     if old.auth_detail != new.auth_detail {
         entries.push(ChangelogEntry {
             timestamp: now,
             request_path: path.clone(),
-            field: "auth_detail".to_string(),
+            field: "auth_detail".into(),
             change_type: ChangeType::Changed,
             old_value: if old.auth_detail.is_empty() { None } else { Some(old.auth_detail.clone()) },
             new_value: if new.auth_detail.is_empty() { None } else { Some(new.auth_detail.clone()) },
+            is_breaking: true,
         });
     }
 
-    diff_key_value_list(&path, "header", &old.headers, &new.headers, now, &mut entries);
-    diff_key_value_list(&path, "query_param", &old.query_params, &new.query_params, now, &mut entries);
-    diff_key_value_list(&path, "form_field", &old.form_fields, &new.form_fields, now, &mut entries);
+    // Key-value list diffs (new snapshot format)
+    diff_kv_list(&path, "header", &old.headers, &new.headers, policy, now, &mut entries);
+    diff_kv_list(&path, "query_param", &old.query_params, &new.query_params, policy, now, &mut entries);
+    diff_kv_list(&path, "form_field", &old.form_fields, &new.form_fields, policy, now, &mut entries);
 
-    // Diff raw body content.
+    // Legacy key-only list diffs (backward compat for old snapshots)
+    diff_key_only_list(&path, "query_param", &old.query_param_keys, &new.query_param_keys, policy, now, &mut entries);
+    diff_key_only_list(&path, "header", &old.header_keys, &new.header_keys, policy, now, &mut entries);
+    diff_key_only_list(&path, "body_field", &old.body_field_keys, &new.body_field_keys, policy, now, &mut entries);
+
+    // Body content diff
     match (&old.body_content, &new.body_content) {
         (Some(o), Some(n)) if o != n => {
             entries.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path.clone(),
-                field: "body".to_string(),
+                field: "body".into(),
                 change_type: ChangeType::Changed,
                 old_value: Some(o.clone()),
                 new_value: Some(n.clone()),
+                is_breaking: true,
             });
         }
         (Some(o), None) => {
             entries.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path.clone(),
-                field: "body".to_string(),
+                field: "body".into(),
                 change_type: ChangeType::Removed,
                 old_value: Some(o.clone()),
                 new_value: None,
+                is_breaking: true,
             });
         }
         (None, Some(n)) => {
             entries.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path.clone(),
-                field: "body".to_string(),
+                field: "body".into(),
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(n.clone()),
+                is_breaking: matches!(policy, BreakingChangePolicy::Strict),
             });
         }
-        // Both None or identical — no change.
         _ => {}
     }
 
     entries
 }
 
-// Key uniqueness is not enforced here. If two entries share a key, the first
-// match wins. Uniqueness is guaranteed upstream by from_request's
-// filter(|h| h.enabled) step, which only includes one entry per enabled slot.
-/// Compares two key-value lists, emitting Added/Removed/Changed entries.
-fn diff_key_value_list(
+fn diff_kv_list(
     path: &std::path::Path,
     prefix: &str,
-    old: &[KeyValueEntry],
-    new: &[KeyValueEntry],
-    now: chrono::DateTime<chrono::Utc>,
+    old_kvs: &[KeyValueEntry],
+    new_kvs: &[KeyValueEntry],
+    policy: &BreakingChangePolicy,
+    now: chrono::DateTime<Utc>,
     out: &mut Vec<ChangelogEntry>,
 ) {
     let path_buf = path.to_path_buf();
 
-    // Detect removed and changed entries.
-    for old_entry in old {
-        match new.iter().find(|e| e.key == old_entry.key) {
+    for old_entry in old_kvs {
+        match new_kvs.iter().find(|e| e.key == old_entry.key) {
             None => {
+                let is_breaking = match (prefix, policy) {
+                    ("header", BreakingChangePolicy::AdditiveOk) => false,
+                    _ => true,
+                };
                 out.push(ChangelogEntry {
                     timestamp: now,
                     request_path: path_buf.clone(),
-                    field: format!("{}.{}", prefix, old_entry.key),
+                    field: format!("{prefix}.{}", old_entry.key),
                     change_type: ChangeType::Removed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: None,
+                    is_breaking,
                 });
             }
             Some(new_entry) if new_entry.value != old_entry.value => {
                 out.push(ChangelogEntry {
                     timestamp: now,
                     request_path: path_buf.clone(),
-                    field: format!("{}.{}", prefix, old_entry.key),
+                    field: format!("{prefix}.{}", old_entry.key),
                     change_type: ChangeType::Changed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: Some(new_entry.value.clone()),
+                    is_breaking: true,
                 });
             }
             _ => {}
         }
     }
 
-    // Detect added entries.
-    for new_entry in new {
-        if !old.iter().any(|e| e.key == new_entry.key) {
+    for new_entry in new_kvs {
+        if !old_kvs.iter().any(|e| e.key == new_entry.key) {
             out.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path_buf.clone(),
-                field: format!("{}.{}", prefix, new_entry.key),
+                field: format!("{prefix}.{}", new_entry.key),
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(new_entry.value.clone()),
+                is_breaking: matches!(policy, BreakingChangePolicy::Strict),
+            });
+        }
+    }
+}
+
+fn diff_key_only_list(
+    path: &std::path::Path,
+    prefix: &str,
+    old_keys: &[String],
+    new_keys: &[String],
+    policy: &BreakingChangePolicy,
+    now: chrono::DateTime<Utc>,
+    out: &mut Vec<ChangelogEntry>,
+) {
+    let path_buf = path.to_path_buf();
+
+    for key in old_keys {
+        if !new_keys.contains(key) {
+            let is_breaking = match (prefix, policy) {
+                ("header", BreakingChangePolicy::AdditiveOk) => false,
+                _ => true,
+            };
+            out.push(ChangelogEntry {
+                timestamp: now,
+                request_path: path_buf.clone(),
+                field: format!("{prefix}.{key}"),
+                change_type: ChangeType::Removed,
+                old_value: Some(key.clone()),
+                new_value: None,
+                is_breaking,
+            });
+        }
+    }
+
+    for key in new_keys {
+        if !old_keys.contains(key) {
+            out.push(ChangelogEntry {
+                timestamp: now,
+                request_path: path_buf.clone(),
+                field: format!("{prefix}.{key}"),
+                change_type: ChangeType::Added,
+                old_value: None,
+                new_value: Some(key.clone()),
+                is_breaking: matches!(policy, BreakingChangePolicy::Strict),
             });
         }
     }
@@ -150,6 +224,7 @@ fn diff_key_value_list(
 mod tests {
     use super::*;
     use crate::contract::snapshot::KeyValueEntry;
+    use crate::contract::types::BreakingChangePolicy;
     use std::path::PathBuf;
 
     fn make_kv(key: &str, value: &str) -> KeyValueEntry {
@@ -193,10 +268,12 @@ mod tests {
         }
     }
 
+    fn lenient() -> BreakingChangePolicy { BreakingChangePolicy::Lenient }
+
     #[test]
     fn no_changes_returns_empty() {
         let snap = base_snap();
-        assert!(diff_signature(&snap, &snap).is_empty());
+        assert!(diff_signature(&snap, &snap, &lenient()).is_empty());
     }
 
     #[test]
@@ -204,10 +281,11 @@ mod tests {
         let old = base_snap();
         let mut new = base_snap();
         new.method = "PUT".into();
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "method");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
+        assert!(changes[0].is_breaking);
     }
 
     #[test]
@@ -215,9 +293,12 @@ mod tests {
         let old = base_snap();
         let mut new = base_snap();
         new.body_field_keys = vec!["currency".into()]; // "amount" removed
-        // Legacy key-list fields are no longer diffed; no change expected.
-        let changes = diff_signature(&old, &new);
-        assert!(changes.is_empty());
+        let changes = diff_signature(&old, &new, &lenient());
+        // body_field removal is a breaking change under Lenient
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "body_field.amount");
+        assert_eq!(changes[0].change_type, ChangeType::Removed);
+        assert!(changes[0].is_breaking);
     }
 
     #[test]
@@ -225,9 +306,12 @@ mod tests {
         let old = base_snap();
         let mut new = base_snap();
         new.query_param_keys.push("locale".into());
-        // Legacy key-list fields are no longer diffed; no change expected.
-        let changes = diff_signature(&old, &new);
-        assert!(changes.is_empty());
+        let changes = diff_signature(&old, &new, &lenient());
+        // Added param — not breaking under Lenient
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "query_param.locale");
+        assert_eq!(changes[0].change_type, ChangeType::Added);
+        assert!(!changes[0].is_breaking);
     }
 
     #[test]
@@ -236,9 +320,10 @@ mod tests {
         let mut new = base_snap();
         new.method = "PUT".into();
         new.body_field_keys = vec!["total".into()];
-        // Only method change is detected; legacy key-list fields are not diffed.
-        let changes = diff_signature(&old, &new);
-        assert_eq!(changes.len(), 1);
+        // Method + "amount" removed + "currency" removed + "total" added = 4 changes
+        let changes = diff_signature(&old, &new, &lenient());
+        assert_eq!(changes.len(), 4);
+        assert!(changes.iter().any(|e| e.field == "method"));
     }
 
     // --- v2 tests: key-value list, body content, auth_detail ---
@@ -248,7 +333,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.headers[0].value = "Bearer new".into();
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "header.Authorization");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
@@ -261,7 +346,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.headers.retain(|h| h.key != "Content-Type");
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "header.Content-Type");
         assert_eq!(changes[0].change_type, ChangeType::Removed);
@@ -272,7 +357,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.headers.push(make_kv("X-New", "yes"));
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "header.X-New");
         assert_eq!(changes[0].change_type, ChangeType::Added);
@@ -284,7 +369,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.query_params[0].value = "EUR".into();
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "query_param.currency");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
@@ -297,7 +382,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.body_content = Some(r#"{"amount":200}"#.into());
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "body");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
@@ -310,7 +395,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.body_content = None;
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "body");
         assert_eq!(changes[0].change_type, ChangeType::Removed);
@@ -323,7 +408,7 @@ mod tests {
         let mut new = base_snap_v2();
         old.body_content = None;
         new.body_content = Some(r#"{"amount":100}"#.into());
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "body");
         assert_eq!(changes[0].change_type, ChangeType::Added);
@@ -337,7 +422,7 @@ mod tests {
         old.form_fields = vec![make_kv("name", "Ada")];
         let mut new = base_snap_v2();
         new.form_fields = vec![make_kv("name", "Bob")];
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "form_field.name");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
@@ -348,7 +433,7 @@ mod tests {
         let old = base_snap_v2();
         let mut new = base_snap_v2();
         new.auth_detail = "newtoken…".into();
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].field, "auth_detail");
         assert_eq!(changes[0].change_type, ChangeType::Changed);
@@ -360,28 +445,88 @@ mod tests {
         let mut new = base_snap_v2();
         old.auth_detail = String::new();
         new.auth_detail = String::new();
-        assert!(diff_signature(&old, &new).is_empty());
+        assert!(diff_signature(&old, &new, &lenient()).is_empty());
     }
 
     #[test]
     fn no_changes_v2_returns_empty() {
         let snap = base_snap_v2();
-        assert!(diff_signature(&snap, &snap).is_empty());
+        assert!(diff_signature(&snap, &snap, &lenient()).is_empty());
     }
 
     #[test]
     fn auth_type_and_detail_both_emitted_when_auth_scheme_changes() {
-        // Switching from bearer to none changes auth_type and clears auth_detail.
-        // Both fields are diffed independently, so both entries must appear.
         let old = base_snap_v2(); // auth_type: "bearer", auth_detail: "oldtoken…"
         let mut new = base_snap_v2();
         new.auth_type = "none".into();
         new.auth_detail = String::new();
 
-        let changes = diff_signature(&old, &new);
+        let changes = diff_signature(&old, &new, &lenient());
 
         assert_eq!(changes.len(), 2);
         assert!(changes.iter().any(|e| e.field == "auth_type" && e.change_type == ChangeType::Changed));
         assert!(changes.iter().any(|e| e.field == "auth_detail" && e.change_type == ChangeType::Changed));
+    }
+
+    fn make_policy_snap(method: &str, params: Vec<&str>) -> RequestSignatureSnapshot {
+        RequestSignatureSnapshot {
+            request_path: std::path::PathBuf::from("req.yml"),
+            method: method.into(),
+            url_pattern: "/test".into(),
+            headers: vec![],
+            query_params: params.iter().map(|k| KeyValueEntry { key: k.to_string(), value: String::new() }).collect(),
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "none".into(),
+            auth_detail: String::new(),
+            captured_at: chrono::Utc::now(),
+            query_param_keys: vec![],
+            header_keys: vec![],
+            body_field_keys: vec![],
+        }
+    }
+
+    #[test]
+    fn method_change_always_breaking_all_policies() {
+        let old = make_policy_snap("GET", vec![]);
+        let new = make_policy_snap("POST", vec![]);
+        for policy in [BreakingChangePolicy::Strict, BreakingChangePolicy::Lenient, BreakingChangePolicy::AdditiveOk] {
+            let entries = diff_signature(&old, &new, &policy);
+            assert!(entries.iter().any(|e| e.field == "method" && e.is_breaking), "method change must be breaking for {:?}", policy);
+        }
+    }
+
+    #[test]
+    fn new_param_strict_is_breaking_lenient_is_not() {
+        let old = make_policy_snap("GET", vec![]);
+        let new = make_policy_snap("GET", vec!["page"]);
+
+        let strict = diff_signature(&old, &new, &BreakingChangePolicy::Strict);
+        assert!(strict.iter().any(|e| e.is_breaking));
+
+        let lenient = diff_signature(&old, &new, &BreakingChangePolicy::Lenient);
+        assert!(lenient.iter().all(|e| !e.is_breaking));
+    }
+
+    #[test]
+    fn required_param_removed_always_breaking() {
+        let mut old = make_policy_snap("GET", vec![]);
+        old.query_param_keys = vec!["required_param".into()];
+        let new = make_policy_snap("GET", vec![]);
+
+        for policy in [BreakingChangePolicy::Strict, BreakingChangePolicy::Lenient, BreakingChangePolicy::AdditiveOk] {
+            let entries = diff_signature(&old, &new, &policy);
+            assert!(!entries.is_empty(), "removed param must be detected for {:?}", policy);
+        }
+    }
+
+    #[test]
+    fn additive_ok_new_param_not_breaking() {
+        let old = make_policy_snap("GET", vec![]);
+        let new = make_policy_snap("GET", vec!["page"]);
+        let entries = diff_signature(&old, &new, &BreakingChangePolicy::AdditiveOk);
+        for e in &entries {
+            assert!(!e.is_breaking, "additive change must not be breaking under AdditiveOk");
+        }
     }
 }

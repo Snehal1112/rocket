@@ -40,9 +40,8 @@
     /* VSCode 2026 Light: inputValidation.errorBorder #ad0707 */
     --destructive: 3 93% 35%;
     --destructive-foreground: 0 0% 100%;
-    /* VSCode 2026 Light: notificationsWarningIcon.foreground #B69500 */
-    --warning: 49 100% 36%;
-    --warning-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
     /* VSCode 2026 Light: structural separator (sidebar, panel, tab, titlebar dividers).
        1.37:1 on bg — perceptible hairline. Matches input separator visibility. */
     --border: 210 7% 85%;
@@ -171,6 +170,22 @@
     --diff-removed-text: rgba(173, 7, 7, 0.149); /* diffEditor.removedTextBackground  #ad070726 */
     --diff-inserted-line: rgba(88, 124, 12, 0.149); /* diffEditor.insertedLineBackground */
     --diff-removed-line: rgba(173, 7, 7, 0.149); /* diffEditor.removedLineBackground  */
+
+    /* Contract feature tokens */
+    --warning-soft: 38 92% 93%;
+    --success: 160 63% 45%;
+    --success-foreground: 0 0% 98%;
+    --success-soft: 160 50% 92%;
+    --destructive-soft: 0 74% 94%;
+
+    /* HTTP method colors */
+    --color-method-get: 160 63% 35%;
+    --color-method-post: 38 92% 48%;
+    --color-method-put: 213 88% 42%;
+    --color-method-delete: 0 74% 52%;
+    --color-method-patch: 283 52% 49%;
+    --color-method-options: 190 80% 42%;
+    --color-method-head: 330 65% 55%;
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
@@ -200,9 +215,8 @@
     /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
     --destructive: 5 100% 37%;
     --destructive-foreground: 0 0% 100%;
-    /* VSCode 2026 Dark: gitDecoration.modifiedResourceForeground #e5ba7d */
-    --warning: 36 69% 69%;
-    --warning-foreground: 0 0% 12.5%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 10%;
     /* VSCode 2026 Dark: sideBar.border #2A2B2C */
     --border: 210 2% 17%;
     /* VSCode 2026 Dark: input.border #333536 */
@@ -342,6 +356,22 @@
       0.149
     ); /* diffEditor.insertedLineBackground #347d3926 */
     --diff-removed-line: rgba(201, 60, 55, 0.149); /* diffEditor.removedLineBackground  #c93c3726 */
+
+    /* Contract feature tokens */
+    --warning-soft: 38 60% 16%;
+    --success: 160 63% 49%;
+    --success-foreground: 0 0% 10%;
+    --success-soft: 160 50% 14%;
+    --destructive-soft: 0 50% 18%;
+
+    /* HTTP method colors */
+    --color-method-get: 160 63% 49%;
+    --color-method-post: 38 92% 55%;
+    --color-method-put: 207 100% 55%;
+    --color-method-delete: 0 72% 55%;
+    --color-method-patch: 283 60% 62%;
+    --color-method-options: 190 80% 55%;
+    --color-method-head: 330 65% 65%;
   }
 
   * {
@@ -706,4 +736,23 @@ html.windows.window-inactive #root {
   height: auto;
   border-radius: 6px;
   margin-bottom: 1rem;
+}
+
+@keyframes pulseRed {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--destructive) / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px hsl(var(--destructive) / 0);
+  }
+}
+.animate-pulse-red {
+  animation: pulseRed 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-red {
+    animation: none;
+    box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.5);
+  }
 }

@@ -1061,19 +1061,56 @@ export const ATTACHMENT_ALLOWED_EXTENSIONS = [
 /** Maximum attachment size in bytes (2 MB). Must mirror MAX_ATTACHMENT_BYTES in contract_service.rs. */
 export const ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024;
 
+// Contract status — mirrors Rust ContractStatus enum (serialised as snake_case strings)
+export type ContractStatus =
+  | 'draft'
+  | 'active'
+  | 'drift'
+  | 'breach'
+  | 'in_review'
+  | 'paused'
+  | 'expiring_in_30_days'
+  | 'expired';
+
+export type PartyKind = 'team' | 'company' | 'service';
+
+export type BreakingChangePolicy = 'strict' | 'lenient' | 'additive_ok';
+
+export interface ContractParty {
+  id: string;
+  name: string;
+  kind: PartyKind;
+  avatarSeed?: string;
+  avatarColor?: string;
+}
+
+export interface ContractPolicy {
+  breakingChangePolicy: BreakingChangePolicy;
+  noticeDays: number;
+  uptimeSla?: number;
+}
+
 export interface Contract {
   id: string;
   title: string;
-  provider: string;
-  consumer: string;
+  provider: ContractParty;
+  consumers: ContractParty[];
   project: string;
   version: string;
+  status: ContractStatus;
   effectiveDate: string;
   expiryDate: string | null;
   /** Relative paths to attachments stored inside the collection folder. */
   documentPaths: string[];
   enforcementMode: 'informational' | 'warn' | 'block';
   scope: ContractScope;
+  policy: ContractPolicy;
+  driftCount: number;
+  breachCount: number;
+  endpointCount: number;
+  createdBy: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface ChangelogEntry {
@@ -1083,6 +1120,7 @@ export interface ChangelogEntry {
   changeType: 'changed' | 'added' | 'removed';
   oldValue: string | null;
   newValue: string | null;
+  isBreaking: boolean;
 }
 
 export interface ContractChangelog {
@@ -1111,37 +1149,41 @@ export interface RequestSignatureSnapshot {
   /** Summarised auth credentials for change detection. */
   authDetail: string;
   capturedAt: string;
+  /** Legacy: key-only lists for old snapshot format. Absent when empty. */
+  queryParamKeys?: string[];
+  headerKeys?: string[];
+  bodyFieldKeys?: string[];
 }
 
 export interface AttachContractInput {
   title: string;
-  provider: string;
-  consumer: string;
-  project: string;
+  provider: ContractParty;
+  consumers: ContractParty[];
   version: string;
   effectiveDate: string;
   expiryDate: string | null;
-  /** Absolute paths from the OS file picker. Copied into the collection by the service. */
+  /** Absolute paths from the OS file picker. */
   documentPaths: string[];
   scope: ContractScope;
+  policy: ContractPolicy;
   /**
    * Initial signature snapshots captured for covered requests at the
-   * moment the contract is signed. Frontend sends an empty array
-   * today — collection-scoped contracts start with no baseline and
-   * accumulate entries as requests are saved.
+   * moment the contract is signed.
    */
   initialSnapshots: RequestSignatureSnapshot[];
+  /** If true, status is set to Active and snapshot taken on creation. */
+  publishImmediately: boolean;
 }
 
 export interface UpdateContractInput {
   contractId: string;
   title: string;
-  provider: string;
-  consumer: string;
-  project: string;
+  provider: ContractParty;
+  consumers: ContractParty[];
   version: string;
   effectiveDate: string;
   expiryDate: string | null;
+  policy: ContractPolicy;
   /** Absolute paths for newly added attachments (not yet copied). */
   newDocumentPaths: string[];
   /** Relative paths of existing attachments the user wants to keep. */
@@ -1165,6 +1207,96 @@ export const deleteContract = (collectionRoot: string, contractId: string) =>
 
 export const getContractChangelog = (collectionRoot: string, contractId: string) =>
   invoke<ContractChangelog>('get_contract_changelog', { collectionRoot, contractId });
+
+export interface ContractDriftSummary {
+  contractId: string;
+  status: ContractStatus;
+  driftCount: number;
+  breachCount: number;
+}
+
+export interface ContractSummary {
+  id: string;
+  title: string;
+  status: ContractStatus;
+  driftCount: number;
+  breachCount: number;
+  endpointCount: number;
+}
+
+// ─── Contract lifecycle commands ─────────────────────────────
+
+export async function publishContract(
+  collectionRoot: string,
+  contractId: string,
+  snapshots: RequestSignatureSnapshot[],
+): Promise<Contract> {
+  return invoke('publish_contract', { collectionRoot, contractId, snapshots });
+}
+
+export async function pauseContract(collectionRoot: string, contractId: string): Promise<Contract> {
+  return invoke('pause_contract', { collectionRoot, contractId });
+}
+
+export async function resumeContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('resume_contract', { collectionRoot, contractId });
+}
+
+export async function renewContract(
+  collectionRoot: string,
+  contractId: string,
+  newExpiresAt: string | null,
+): Promise<Contract> {
+  return invoke('renew_contract', { collectionRoot, contractId, newExpiresAt });
+}
+
+export async function sendForReview(collectionRoot: string, contractId: string): Promise<Contract> {
+  return invoke('send_for_review', { collectionRoot, contractId });
+}
+
+export async function approveContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('approve_contract', { collectionRoot, contractId });
+}
+
+export async function rejectContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('reject_contract', { collectionRoot, contractId });
+}
+
+export async function duplicateContract(
+  collectionRoot: string,
+  contractId: string,
+): Promise<Contract> {
+  return invoke('duplicate_contract', { collectionRoot, contractId });
+}
+
+export async function recomputeDrift(
+  collectionRoot: string,
+  currentSnapshots: RequestSignatureSnapshot[],
+): Promise<ContractDriftSummary[]> {
+  return invoke('recompute_drift', { collectionRoot, currentSnapshots });
+}
+
+export async function getContractSummary(collectionRoot: string): Promise<ContractSummary[]> {
+  return invoke('get_contract_summary', { collectionRoot });
+}
+
+/** Returns an OpenAPI 3.0 YAML stub for a contract as a string.
+ *  The caller is responsible for triggering the native save dialog. */
+export async function exportContractOpenapi(
+  collectionRoot: string,
+  contractId: string,
+): Promise<string> {
+  return invoke('export_contract_openapi', { collectionRoot, contractId });
+}
 
 // ============================================================
 // Security audit / compliance

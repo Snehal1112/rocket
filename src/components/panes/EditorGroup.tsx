@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { AuditLogTab } from '@/components/audit/AuditLogTab';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
-import { ContractTab } from '@/components/contract/ContractTab';
+import { ContractsTab } from '@/components/contracts/ContractsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 
 // Lazy-load Monaco-heavy git components so they don't load until a git tab opens.
@@ -185,7 +185,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionName={activeTab.collectionName}
             />
           ) : isContractTab(activeTab) ? (
-            <ContractTab tab={activeTab} />
+            <ContractsTab
+              collectionId={activeTab.collectionRoot}
+              collectionName={activeTab.collectionName}
+            />
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />

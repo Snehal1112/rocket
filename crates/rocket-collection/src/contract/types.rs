@@ -1,55 +1,125 @@
-use chrono::{NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::NaiveDate;
 use std::path::PathBuf;
 use ulid::Ulid;
 
-// camelCase is intentional: this type serves as both the on-disk YAML format
-// and the Tauri IPC wire type. A separate DTO split is tracked as future work.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Contract {
-    pub id: Ulid,
-    pub title: String,
-    pub provider: String,
-    pub consumer: String,
-    pub project: String,
-    pub version: String,
-    pub effective_date: NaiveDate,
-    pub expiry_date: Option<NaiveDate>,
-    /// Relative paths to attachment files stored inside the collection.
-    /// Stored under `.rocket/contracts/attachments/<id>/`.
-    /// `default` handles old YAML files that pre-date this field.
-    #[serde(default)]
-    pub document_paths: Vec<PathBuf>,
-    pub enforcement_mode: ContractEnforcementMode,
-    pub scope: ContractScope,
+/// A party (provider or consumer) in a contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContractParty {
+    pub id: String,
+    pub name: String,
+    pub kind: PartyKind,
+    pub avatar_seed: Option<String>,
+    pub avatar_color: Option<String>,
 }
 
-impl Contract {
-    pub fn status(&self) -> ContractStatus {
-        let today = Utc::now().date_naive();
-        match self.expiry_date {
-            None => ContractStatus::Active,
-            Some(exp) if exp < today => ContractStatus::Expired,
-            Some(exp) if (exp - today).num_days() <= 30 => ContractStatus::ExpiringIn30Days,
-            _ => ContractStatus::Active,
+impl ContractParty {
+    pub fn from_name(name: &str) -> Self {
+        Self {
+            id: name.to_lowercase().replace(' ', "-"),
+            name: name.to_string(),
+            kind: PartyKind::Team,
+            avatar_seed: None,
+            avatar_color: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+/// What kind of entity a party represents.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum PartyKind {
+    #[default]
+    Team,
+    Company,
+    Service,
+}
+
+/// Policy governing how contract drift is evaluated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContractPolicy {
+    pub breaking_change_policy: BreakingChangePolicy,
+    pub notice_days: u32,
+    pub uptime_sla: Option<f32>,
+}
+
+impl Default for ContractPolicy {
+    fn default() -> Self {
+        Self {
+            breaking_change_policy: BreakingChangePolicy::Lenient,
+            notice_days: 30,
+            uptime_sla: None,
+        }
+    }
+}
+
+/// How strictly drift is classified as breaking.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum BreakingChangePolicy {
+    Strict,
+    #[default]
+    Lenient,
+    AdditiveOk,
+}
+
+/// A contract between a provider and one or more consumers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contract {
+    pub id: Ulid,
+    pub title: String,
+
+    pub provider: ContractParty,
+    pub consumers: Vec<ContractParty>,
+
+    pub project: String,
+
+    pub version: String,
+
+    pub status: ContractStatus,
+
+    pub effective_date: NaiveDate,
+    pub expiry_date: Option<NaiveDate>,
+
+    pub document_paths: Vec<PathBuf>,
+
+    pub enforcement_mode: ContractEnforcementMode,
+    pub scope: ContractScope,
+
+    pub policy: ContractPolicy,
+
+    pub drift_count: u32,
+    pub breach_count: u32,
+    pub endpoint_count: u32,
+
+    pub created_by: Option<String>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Lifecycle status of a contract.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ContractStatus {
+    /// Not yet published — snapshot not taken.
+    Draft,
+    /// Healthy, in compliance.
+    #[default]
     Active,
+    /// Non-breaking changes detected since signing.
+    Drift,
+    /// Breaking changes detected — consumer build at risk.
+    Breach,
+    /// Sent for consumer sign-off (not yet approved).
+    InReview,
+    /// Monitoring suspended by the provider.
+    Paused,
+    /// Expiry date is within 30 days.
     ExpiringIn30Days,
+    /// Past expiry date.
     Expired,
 }
 
 /// Model B extension seam.
 /// Only `Informational` is reachable from UI in this sprint.
 /// `Warn` and `Block` are defined now so Model B requires zero domain changes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ContractEnforcementMode {
     #[default]
     Informational,
@@ -57,48 +127,9 @@ pub enum ContractEnforcementMode {
     Block,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ContractScope {
     Collection,
     Folder { rel_path: PathBuf },
     Request { rel_path: PathBuf },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn contract_scope_folder_serializes_rel_path_as_snake_case() {
-        let scope = ContractScope::Folder { rel_path: PathBuf::from("auth/login.yml") };
-        let yaml = serde_yaml::to_string(&scope).unwrap();
-        // rel_path must stay snake_case — the frontend wire type uses rel_path.
-        assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
-        assert!(!yaml.contains("relPath:"), "camelCase relPath must not appear in:\n{yaml}");
-    }
-
-    #[test]
-    fn contract_scope_request_serializes_rel_path_as_snake_case() {
-        let scope = ContractScope::Request { rel_path: PathBuf::from("users/get.yml") };
-        let yaml = serde_yaml::to_string(&scope).unwrap();
-        assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
-        assert!(!yaml.contains("relPath:"), "camelCase relPath must not appear in:\n{yaml}");
-    }
-
-    #[test]
-    fn contract_scope_folder_roundtrips() {
-        let scope = ContractScope::Folder { rel_path: PathBuf::from("auth/login.yml") };
-        let yaml = serde_yaml::to_string(&scope).unwrap();
-        let back: ContractScope = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(scope, back);
-    }
-
-    #[test]
-    fn contract_scope_collection_roundtrips() {
-        let scope = ContractScope::Collection;
-        let yaml = serde_yaml::to_string(&scope).unwrap();
-        let back: ContractScope = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(scope, back);
-    }
 }

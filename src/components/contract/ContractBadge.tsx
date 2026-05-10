@@ -72,7 +72,7 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
         <TooltipContent side='right'>
           <p className='text-xs font-medium'>{primary.title}</p>
           <p className='text-xs text-primary-foreground/80'>
-            {primary.provider} → {primary.consumer}
+            {primary.provider.name} → {primary.consumers[0]?.name ?? '—'}
           </p>
           {contracts.length > 1 && (
             <p className='text-xs text-primary-foreground/60'>+{contracts.length - 1} more</p>

@@ -8,6 +8,11 @@ use std::path::Path;
 use ulid::Ulid;
 
 use crate::atomic_write;
+use crate::contract_records::{
+    changelog::ContractChangelogRecord,
+    snapshot::ContractSnapshotRecord,
+    types::ContractRecord,
+};
 
 pub struct FsContractRepo;
 
@@ -42,16 +47,17 @@ impl ContractRepository for FsContractRepo {
     fn save_contract(&self, collection_root: &Path, contract: &Contract) -> ContractResult<()> {
         Self::ensure_dir(collection_root)?;
         let path = Self::contract_path(collection_root, contract.id);
-        let yaml = serde_yaml::to_string(contract)?;
+        let record: ContractRecord = contract.into();
+        let yaml = serde_yaml::to_string(&record)?;
         atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
 
     fn load_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<Contract> {
         let path = Self::contract_path(collection_root, id);
-        let yaml = std::fs::read_to_string(&path)
-            .map_err(|_| ContractError::NotFound(id))?;
-        Ok(serde_yaml::from_str(&yaml)?)
+        let yaml = std::fs::read_to_string(&path).map_err(|_| ContractError::NotFound(id))?;
+        let record: ContractRecord = serde_yaml::from_str(&yaml)?;
+        Ok(record.into())
     }
 
     fn list_contracts(&self, collection_root: &Path) -> ContractResult<Vec<Contract>> {
@@ -64,15 +70,17 @@ impl ContractRepository for FsContractRepo {
             let entry = entry?;
             let path = entry.path();
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            // only plain contract files, not -snapshot or -changelog
             if name.ends_with(".yml")
                 && !name.contains("-snapshot")
                 && !name.contains("-changelog")
             {
                 let yaml = std::fs::read_to_string(&path)?;
-                match serde_yaml::from_str::<Contract>(&yaml) {
-                    Ok(c) => contracts.push(c),
-                    Err(e) => tracing::warn!(path = %path.display(), error = %e, "skipping malformed contract YAML"),
+                match serde_yaml::from_str::<ContractRecord>(&yaml) {
+                    Ok(r) => contracts.push(r.into()),
+                    Err(e) => tracing::warn!(
+                        path = %path.display(), error = %e,
+                        "skipping malformed contract YAML"
+                    ),
                 }
             }
         }
@@ -83,7 +91,6 @@ impl ContractRepository for FsContractRepo {
         let _ = std::fs::remove_file(Self::contract_path(collection_root, id));
         let _ = std::fs::remove_file(Self::snapshot_path(collection_root, id));
         let _ = std::fs::remove_file(Self::changelog_path(collection_root, id));
-        // Remove the entire attachments directory for this contract.
         let attachments = Self::attachments_dir(collection_root, id);
         if attachments.exists() {
             std::fs::remove_dir_all(attachments)?;
@@ -94,7 +101,8 @@ impl ContractRepository for FsContractRepo {
     fn save_snapshot(&self, collection_root: &Path, snapshot: &ContractSnapshot) -> ContractResult<()> {
         Self::ensure_dir(collection_root)?;
         let path = Self::snapshot_path(collection_root, snapshot.contract_id);
-        let yaml = serde_yaml::to_string(snapshot)?;
+        let record: ContractSnapshotRecord = snapshot.into();
+        let yaml = serde_yaml::to_string(&record)?;
         atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
@@ -105,21 +113,23 @@ impl ContractRepository for FsContractRepo {
             return Ok(ContractSnapshot::new(contract_id));
         }
         let yaml = std::fs::read_to_string(path)?;
-        Ok(serde_yaml::from_str(&yaml)?)
+        let record: ContractSnapshotRecord = serde_yaml::from_str(&yaml)?;
+        Ok(record.into())
     }
 
     fn append_changelog(&self, collection_root: &Path, incoming: &ContractChangelog) -> ContractResult<()> {
         Self::ensure_dir(collection_root)?;
         let path = Self::changelog_path(collection_root, incoming.contract_id);
-        // Load existing, append new entries, write back.
-        let mut existing = if path.exists() {
+        let mut existing: ContractChangelog = if path.exists() {
             let yaml = std::fs::read_to_string(&path)?;
-            serde_yaml::from_str::<ContractChangelog>(&yaml)?
+            let record: ContractChangelogRecord = serde_yaml::from_str(&yaml)?;
+            record.into()
         } else {
             ContractChangelog::new(incoming.contract_id)
         };
         existing.append(incoming.entries.clone());
-        let yaml = serde_yaml::to_string(&existing)?;
+        let record: ContractChangelogRecord = (&existing).into();
+        let yaml = serde_yaml::to_string(&record)?;
         atomic_write(&path, yaml.as_bytes())?;
         Ok(())
     }
@@ -130,6 +140,7 @@ impl ContractRepository for FsContractRepo {
             return Ok(ContractChangelog::new(contract_id));
         }
         let yaml = std::fs::read_to_string(path)?;
-        Ok(serde_yaml::from_str(&yaml)?)
+        let record: ContractChangelogRecord = serde_yaml::from_str(&yaml)?;
+        Ok(record.into())
     }
 }

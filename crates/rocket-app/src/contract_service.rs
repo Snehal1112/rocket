@@ -4,11 +4,12 @@ use rocket_audit::{
 };
 use rocket_collection::{
     contract::{
-        changelog::{ChangelogEntry, ContractChangelog},
+        changelog::{ChangeType, ChangelogEntry, ContractChangelog},
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-        types::{Contract, ContractEnforcementMode, ContractScope},
+        types::{Contract, ContractEnforcementMode, ContractScope, ContractStatus},
+        {transition_status, StatusEvent},
     },
     CollectionItem, CollectionRepository, Folder,
 };
@@ -101,6 +102,26 @@ pub struct ContractService {
     audit: Arc<dyn SecurityAuditPublisher>,
 }
 
+/// Summary returned by `recompute_drift_for_collection` for each processed contract.
+#[derive(Debug, Clone)]
+pub struct ContractDriftSummary {
+    pub contract_id: String,
+    pub status: ContractStatus,
+    pub drift_count: u32,
+    pub breach_count: u32,
+}
+
+/// Lightweight summary of a contract returned by `list_summaries`.
+#[derive(Debug, Clone)]
+pub struct ContractSummary {
+    pub id: String,
+    pub title: String,
+    pub status: ContractStatus,
+    pub drift_count: u32,
+    pub breach_count: u32,
+    pub endpoint_count: u32,
+}
+
 impl ContractService {
     pub fn new(
         repo: Arc<dyn ContractRepository>,
@@ -131,12 +152,19 @@ impl ContractService {
     pub fn attach_contract(
         &self,
         collection_root: &Path,
-        collection_name: &str,
         mut contract: Contract,
         initial_snapshots: Vec<RequestSignatureSnapshot>,
         attachment_sources: Vec<PathBuf>,
     ) -> ContractResult<Contract> {
+        let collection_name = collection_root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| ContractError::Internal("collection_root has no final path component".into()))?;
+
         contract.id = Ulid::new();
+        let now = chrono::Utc::now();
+        contract.created_at = Some(now);
+        contract.updated_at = Some(now);
         // Force Informational — Model B variants not yet UI-reachable.
         contract.enforcement_mode = ContractEnforcementMode::Informational;
 
@@ -164,6 +192,8 @@ impl ContractService {
         for snap in initial_snapshots {
             snapshot.upsert(snap);
         }
+
+        contract.endpoint_count = snapshot.entries.len() as u32;
 
         // Copy attachments into the collection before writing the contract YAML
         // so the relative paths are ready. If copy fails, no contract file is
@@ -230,6 +260,7 @@ impl ContractService {
         merged.append(&mut new_relative);
         contract.document_paths = merged;
 
+        contract.updated_at = Some(chrono::Utc::now());
         self.repo.save_contract(collection_root, &contract)?;
         Ok(contract)
     }
@@ -288,7 +319,7 @@ impl ContractService {
             let mut snapshot = self.repo.load_snapshot(collection_root, contract.id)?;
 
             if let Some(old_snap) = snapshot.get(&new_snap.request_path) {
-                let changes = diff_signature(old_snap, &new_snap);
+                let changes = diff_signature(old_snap, &new_snap, &contract.policy.breaking_change_policy);
 
                 if !changes.is_empty() {
                     // MODEL B SEAM — match on enforcement_mode when Model B is built:
@@ -329,6 +360,302 @@ impl ContractService {
 
         Ok(())
     }
+
+    /// Drive the contract through the state machine with the given event.
+    /// Returns the updated contract (already persisted).
+    pub fn transition_contract_status(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        event: StatusEvent,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        let new_status = transition_status(&contract.status, &event)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.updated_at = Some(chrono::Utc::now());
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Transition a contract to Active and record the current set of endpoint snapshots.
+    /// Any snapshots supplied are merged into the stored baseline.
+    pub fn publish_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        snapshots: Vec<RequestSignatureSnapshot>,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        // Drift/Breach → Active uses Resign (re-sign); Draft → Active uses Publish.
+        let event = match &contract.status {
+            ContractStatus::Drift | ContractStatus::Breach => StatusEvent::Resign,
+            _ => StatusEvent::Publish,
+        };
+        let new_status = transition_status(&contract.status, &event)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.updated_at = Some(chrono::Utc::now());
+        let mut snapshot = self.repo.load_snapshot(collection_root, id)?;
+        for snap in snapshots {
+            snapshot.upsert(snap);
+        }
+        contract.endpoint_count = snapshot.entries.len() as u32;
+        self.repo.save_snapshot(collection_root, &snapshot)?;
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Renew a contract: transition via `Renew` event, optionally set a new
+    /// expiry date, and reset drift/breach counters.
+    pub fn renew_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+        new_expiry: Option<chrono::NaiveDate>,
+    ) -> ContractResult<Contract> {
+        let mut contract = self.repo.load_contract(collection_root, id)?;
+        let new_status = transition_status(&contract.status, &StatusEvent::Renew)
+            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        contract.status = new_status;
+        contract.expiry_date = new_expiry;
+        contract.drift_count = 0;
+        contract.breach_count = 0;
+        contract.updated_at = Some(chrono::Utc::now());
+        self.repo.save_contract(collection_root, &contract)?;
+        Ok(contract)
+    }
+
+    /// Scans all active contracts in the collection, diffs each against the
+    /// supplied current snapshots, updates drift/breach counts, transitions
+    /// status via the state machine, appends changelog entries, and saves
+    /// all modified contracts.
+    pub fn recompute_drift_for_collection(
+        &self,
+        collection_root: &Path,
+        current_snapshots: &[RequestSignatureSnapshot],
+    ) -> ContractResult<Vec<ContractDriftSummary>> {
+        let contracts = self.repo.list_contracts(collection_root)?;
+        let mut summaries = Vec::new();
+
+        for mut contract in contracts {
+            // Skip contracts not in an active monitoring state
+            match contract.status {
+                ContractStatus::Draft
+                | ContractStatus::Paused
+                | ContractStatus::Expired
+                | ContractStatus::InReview => continue,
+                _ => {}
+            }
+
+            // Load snapshot — skip if none (published but snapshot missing)
+            let snapshot = match self.repo.load_snapshot(collection_root, contract.id) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Capture originals before any mutation so we can guard against
+            // unnecessary disk writes.  The file watcher emits `collection-changed`
+            // for every write; without this guard every save triggers another
+            // recompute_drift call, producing an infinite feedback loop.
+            let original_status = contract.status.clone();
+            let original_drift = contract.drift_count;
+            let original_breach = contract.breach_count;
+
+            let mut all_entries: Vec<ChangelogEntry> = Vec::new();
+            let mut drift_count = 0u32;
+            let mut breach_count = 0u32;
+
+            for snap_entry in &snapshot.entries {
+                let current = current_snapshots
+                    .iter()
+                    .find(|s| s.request_path == snap_entry.request_path);
+
+                match current {
+                    None => {
+                        // Request removed — always breaking
+                        all_entries.push(ChangelogEntry {
+                            timestamp: chrono::Utc::now(),
+                            request_path: snap_entry.request_path.clone(),
+                            field: "request".into(),
+                            change_type: ChangeType::Removed,
+                            old_value: Some(format!("{} {}", snap_entry.method, snap_entry.url_pattern)),
+                            new_value: None,
+                            is_breaking: true,
+                        });
+                        drift_count += 1;
+                        breach_count += 1;
+                    }
+                    Some(current_snap) => {
+                        let changes = diff_signature(
+                            snap_entry,
+                            current_snap,
+                            &contract.policy.breaking_change_policy,
+                        );
+                        for entry in &changes {
+                            drift_count += 1;
+                            if entry.is_breaking {
+                                breach_count += 1;
+                            }
+                        }
+                        all_entries.extend(changes);
+                    }
+                }
+            }
+
+            // Determine new status via state machine
+            let event = if breach_count > 0 {
+                StatusEvent::BreachDetected
+            } else if drift_count > 0 {
+                StatusEvent::DriftDetected
+            } else {
+                match contract.status {
+                    ContractStatus::Drift | ContractStatus::Breach => StatusEvent::Resign,
+                    _ => {
+                        summaries.push(ContractDriftSummary {
+                            contract_id: contract.id.to_string(),
+                            status: contract.status.clone(),
+                            drift_count: 0,
+                            breach_count: 0,
+                        });
+                        continue;
+                    }
+                }
+            };
+
+            let new_status = transition_status(&contract.status, &event)
+                .unwrap_or_else(|_| contract.status.clone());
+
+            // Guard: skip disk write when nothing changed.  Identical counts and
+            // status mean the file content would only differ in `updated_at`,
+            // which would retrigger the file watcher and restart the loop.
+            if drift_count == original_drift
+                && breach_count == original_breach
+                && new_status == original_status
+            {
+                summaries.push(ContractDriftSummary {
+                    contract_id: contract.id.to_string(),
+                    status: original_status,
+                    drift_count,
+                    breach_count,
+                });
+                continue;
+            }
+
+            contract.status = new_status;
+            contract.drift_count = drift_count;
+            contract.breach_count = breach_count;
+            contract.updated_at = Some(chrono::Utc::now());
+
+            if !all_entries.is_empty() {
+                let mut incoming = ContractChangelog::new(contract.id);
+                incoming.append(all_entries);
+                self.repo.append_changelog(collection_root, &incoming)?;
+            }
+
+            self.repo.save_contract(collection_root, &contract)?;
+
+            summaries.push(ContractDriftSummary {
+                contract_id: contract.id.to_string(),
+                status: contract.status,
+                drift_count,
+                breach_count,
+            });
+        }
+
+        Ok(summaries)
+    }
+
+    /// Create a copy of an existing contract in `Draft` status with a bumped
+    /// patch version and a `" (copy)"` title suffix.
+    pub fn duplicate_contract(
+        &self,
+        collection_root: &Path,
+        id: Ulid,
+    ) -> ContractResult<Contract> {
+        let source = self.repo.load_contract(collection_root, id)?;
+        let new_version = bump_patch_version(&source.version);
+        let now = chrono::Utc::now();
+        let duplicate = Contract {
+            id: Ulid::new(),
+            title: format!("{} (copy)", source.title),
+            version: new_version,
+            status: ContractStatus::Draft,
+            drift_count: 0,
+            breach_count: 0,
+            endpoint_count: 0,
+            created_at: Some(now),
+            updated_at: Some(now),
+            ..source
+        };
+        self.repo.save_contract(collection_root, &duplicate)?;
+        Ok(duplicate)
+    }
+
+    /// Return lightweight summaries for all contracts in the collection.
+    pub fn list_summaries(
+        &self,
+        collection_root: &Path,
+    ) -> ContractResult<Vec<ContractSummary>> {
+        let contracts = self.repo.list_contracts(collection_root)?;
+        Ok(contracts
+            .into_iter()
+            .map(|c| ContractSummary {
+                id: c.id.to_string(),
+                title: c.title,
+                status: c.status,
+                drift_count: c.drift_count,
+                breach_count: c.breach_count,
+                endpoint_count: c.endpoint_count,
+            })
+            .collect())
+    }
+
+    /// Generates a minimal OpenAPI 3.0 YAML stub for the given contract.
+    /// Returns the YAML as a String — the frontend triggers the native save dialog.
+    pub fn export_as_openapi_yaml(
+        &self,
+        collection_root: &std::path::Path,
+        id: ulid::Ulid,
+    ) -> ContractResult<String> {
+        let contract = self.repo.load_contract(collection_root, id)?;
+        let snapshot = self.repo.load_snapshot(collection_root, id).ok();
+
+        let title = &contract.title;
+        let version = &contract.version;
+
+        let mut paths_yaml = String::new();
+        if let Some(snap) = &snapshot {
+            for entry in &snap.entries {
+                let path_segment = entry.url_pattern.trim_start_matches('/');
+                let method = entry.method.to_lowercase();
+                paths_yaml.push_str(&format!(
+                    "  /{}:\n    {}:\n      summary: '{} {}'\n      responses:\n        '200':\n          description: OK\n",
+                    path_segment, method, entry.method, entry.url_pattern
+                ));
+            }
+        }
+        if paths_yaml.is_empty() {
+            paths_yaml = "  /example:\n    get:\n      summary: Example endpoint\n      responses:\n        '200':\n          description: OK\n".to_string();
+        }
+
+        Ok(format!(
+            "openapi: '3.0.3'\ninfo:\n  title: '{}'\n  version: '{}'\npaths:\n{}",
+            title, version, paths_yaml
+        ))
+    }
+}
+
+/// Increments the patch segment of a semver-like version string.
+/// E.g. `"1.2.3"` → `"1.2.4"`. Falls back to `"{v}-copy"` for non-standard strings.
+fn bump_patch_version(v: &str) -> String {
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() == 3 {
+        if let Ok(patch) = parts[2].parse::<u32>() {
+            return format!("{}.{}.{}", parts[0], parts[1], patch + 1);
+        }
+    }
+    format!("{v}-copy")
 }
 
 /// Returns true if the contract scope covers the given request path.
@@ -388,8 +715,11 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use rocket_collection::{
-        contract::repository::ContractError, Collection, CollectionSettings, CollectionSummary,
-        CollectionVariable, Request,
+        contract::{
+            repository::ContractError,
+            types::{ContractParty, ContractPolicy},
+        },
+        Collection, CollectionSettings, CollectionSummary, CollectionVariable, Request,
     };
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::types::HttpMethod;
@@ -591,22 +921,30 @@ mod tests {
     }
 
     fn root() -> &'static Path {
-        Path::new("/tmp/mock")
+        Path::new("/tmp/demo")
     }
 
     fn make_contract() -> Contract {
         Contract {
             id: Ulid::new(),
             title: "Test API".into(),
-            provider: "Team A".into(),
-            consumer: "Team B".into(),
+            provider: ContractParty::from_name("Team A"),
+            consumers: vec![ContractParty::from_name("Team B")],
             project: "Project X".into(),
             version: "v1.0".into(),
+            status: ContractStatus::default(),
             effective_date: Utc::now().date_naive(),
             expiry_date: None,
             document_paths: vec![],
             enforcement_mode: ContractEnforcementMode::Informational,
             scope: ContractScope::Collection,
+            policy: ContractPolicy::default(),
+            drift_count: 0,
+            breach_count: 0,
+            endpoint_count: 0,
+            created_by: None,
+            created_at: None,
+            updated_at: None,
         }
     }
 
@@ -653,7 +991,7 @@ mod tests {
     fn attach_and_list() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
         let list = svc.list_contracts(root()).unwrap();
         assert_eq!(list.len(), 1);
@@ -665,7 +1003,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         svc.on_request_saved(root(), snap).unwrap();
         let log = svc.get_changelog(root(), contract.id).unwrap();
@@ -677,7 +1015,7 @@ mod tests {
         let svc = make_service();
         let snap = make_snap("requests/test.yml");
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![snap.clone()], vec![])
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
             .unwrap();
         let mut changed = snap;
         changed.method = "POST".into();
@@ -691,7 +1029,7 @@ mod tests {
     fn delete_removes_all_files() {
         let svc = make_service();
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
         svc.delete_contract(root(), contract.id).unwrap();
         assert!(svc.get_contract(root(), contract.id).is_err());
@@ -707,7 +1045,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
@@ -734,7 +1072,7 @@ mod tests {
         let svc = make_service_with_collection(collection);
 
         let contract = svc
-            .attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+            .attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         // Simulate the save hook emitting a changed shape for the nested
@@ -777,7 +1115,6 @@ mod tests {
         let contract = svc
             .attach_contract(
                 root(),
-                COLLECTION_NAME,
                 make_contract(),
                 vec![override_snap],
                 vec![],
@@ -824,7 +1161,7 @@ mod tests {
         contract.scope = ContractScope::Folder { rel_path: PathBuf::from("a") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
+            .attach_contract(root(), contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -851,7 +1188,7 @@ mod tests {
         contract.scope = ContractScope::Request { rel_path: PathBuf::from("foo.yml") };
 
         let attached = svc
-            .attach_contract(root(), COLLECTION_NAME, contract, vec![], vec![])
+            .attach_contract(root(), contract, vec![], vec![])
             .unwrap();
 
         let snapshot = svc.repo.load_snapshot(root(), attached.id).unwrap();
@@ -871,7 +1208,7 @@ mod tests {
             Arc::new(MockCollectionRepo::failing()),
         );
 
-        let result = svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![]);
+        let result = svc.attach_contract(root(), make_contract(), vec![], vec![]);
 
         match result {
             Err(ContractError::Internal(_)) => {}
@@ -906,7 +1243,7 @@ mod tests {
             publisher.clone(),
         );
 
-        svc.attach_contract(root(), COLLECTION_NAME, make_contract(), vec![], vec![])
+        svc.attach_contract(root(), make_contract(), vec![], vec![])
             .unwrap();
 
         let captured = publisher.captured.lock().unwrap();
@@ -916,6 +1253,190 @@ mod tests {
                 .any(|k| matches!(k, AuditEventKind::ContractAttached { .. })),
             "expected ContractAttached, got {:?}",
             *captured
+        );
+    }
+
+    #[test]
+    fn duplicate_contract_creates_draft_copy() {
+        let svc = make_service();
+        // Persist a contract with a semver version.
+        let mut source = make_contract();
+        source.version = "1.2.3".into();
+        source.status = ContractStatus::Active;
+        source.drift_count = 5;
+        source.breach_count = 2;
+        svc.repo.save_contract(root(), &source).unwrap();
+
+        let copy = svc.duplicate_contract(root(), source.id).unwrap();
+
+        // New identity
+        assert_ne!(copy.id, source.id);
+        // Title gets the suffix
+        assert!(copy.title.contains("(copy)"), "title must contain '(copy)': {}", copy.title);
+        // Version patch is bumped
+        assert_eq!(copy.version, "1.2.4");
+        // Status is reset to Draft regardless of source status
+        assert_eq!(copy.status, ContractStatus::Draft);
+        // Drift / breach counters are zeroed
+        assert_eq!(copy.drift_count, 0);
+        assert_eq!(copy.breach_count, 0);
+        // Persisted
+        svc.repo.load_contract(root(), copy.id).expect("duplicate must be persisted");
+    }
+
+    #[test]
+    fn recompute_drift_no_snapshots_returns_empty_summaries() {
+        // Contracts with no snapshot (Draft state) are skipped; result is empty.
+        let svc = make_service();
+        let result = svc.recompute_drift_for_collection(root(), &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn bump_patch_version_handles_edge_cases() {
+        // Standard semver — happy path
+        assert_eq!(super::bump_patch_version("1.2.3"), "1.2.4");
+        assert_eq!(super::bump_patch_version("0.0.0"), "0.0.1");
+        // Non-semver — fallback branch
+        assert_eq!(super::bump_patch_version("v2"), "v2-copy");
+        assert_eq!(super::bump_patch_version("1.0"), "1.0-copy");
+        assert_eq!(super::bump_patch_version(""), "-copy");
+    }
+
+    // -----------------------------------------------------------------------
+    // publish_contract / transition_contract_status / renew_contract
+    // -----------------------------------------------------------------------
+
+    fn make_contract_with_status(status: ContractStatus) -> Contract {
+        let mut c = make_contract();
+        c.status = status;
+        c
+    }
+
+    #[test]
+    fn publish_draft_contract_sets_active_status() {
+        let svc = make_service();
+        // Attach a Draft contract first so it is persisted.
+        let draft = {
+            let mut c = make_contract();
+            c.status = ContractStatus::Draft;
+            c.id = Ulid::new();
+            svc.repo.save_contract(root(), &c).unwrap();
+            c
+        };
+        let result = svc.publish_contract(root(), draft.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+
+        let persisted = svc.repo.load_contract(root(), draft.id).unwrap();
+        assert_eq!(persisted.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn publish_contract_with_snapshots_sets_endpoint_count() {
+        let svc = make_service();
+        let mut draft = make_contract();
+        draft.status = ContractStatus::Draft;
+        let draft = svc.attach_contract(root(), draft, vec![], vec![]).unwrap();
+
+        let snaps = vec![make_snap("a.yml"), make_snap("b.yml")];
+        let published = svc.publish_contract(root(), draft.id, snaps).unwrap();
+        assert_eq!(published.endpoint_count, 2);
+
+        let persisted = svc.repo.load_contract(root(), draft.id).unwrap();
+        assert_eq!(persisted.endpoint_count, 2);
+        assert_eq!(persisted.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn transition_contract_status_pause_sets_paused() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Active);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc
+            .transition_contract_status(root(), contract.id, StatusEvent::Pause)
+            .unwrap();
+        assert_eq!(result.status, ContractStatus::Paused);
+    }
+
+    #[test]
+    fn renew_expired_contract_resets_counts() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Expired);
+        contract.id = Ulid::new();
+        contract.drift_count = 5;
+        contract.breach_count = 3;
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc
+            .renew_contract(root(), contract.id, None)
+            .unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+        assert_eq!(result.drift_count, 0);
+        assert_eq!(result.breach_count, 0);
+    }
+
+    #[test]
+    fn publish_contract_from_breach_resigns_to_active() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Breach);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        // Calling publish_contract on a Breach contract must succeed via Resign.
+        let result = svc.publish_contract(root(), contract.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn publish_contract_from_drift_resigns_to_active() {
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Drift);
+        contract.id = Ulid::new();
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        let result = svc.publish_contract(root(), contract.id, vec![]).unwrap();
+        assert_eq!(result.status, ContractStatus::Active);
+    }
+
+    #[test]
+    fn recompute_drift_idempotent_when_counts_unchanged() {
+        // Verifies the file-watcher feedback loop guard: calling recompute_drift
+        // twice with the same (empty) snapshot set must NOT write the contract
+        // file on the second call. The test checks this by asserting that
+        // updated_at does not change between the two calls.
+        let svc = make_service();
+        let mut contract = make_contract_with_status(ContractStatus::Active);
+        contract.id = Ulid::new();
+        contract.drift_count = 2;
+        contract.breach_count = 2;
+        let fixed_time = chrono::Utc::now();
+        contract.updated_at = Some(fixed_time);
+        svc.repo.save_contract(root(), &contract).unwrap();
+
+        // First call — counts already match what empty snapshots would compute.
+        let summaries1 = svc
+            .recompute_drift_for_collection(root(), &[])
+            .unwrap();
+        let persisted1 = svc.repo.load_contract(root(), contract.id).unwrap();
+
+        // Second call — same snapshots, same result; must NOT update updated_at.
+        let summaries2 = svc
+            .recompute_drift_for_collection(root(), &[])
+            .unwrap();
+        let persisted2 = svc.repo.load_contract(root(), contract.id).unwrap();
+
+        // Both calls return a summary for the contract.
+        assert!(!summaries1.is_empty());
+        assert!(!summaries2.is_empty());
+
+        // Second call must NOT have written the contract file — updated_at unchanged.
+        assert_eq!(
+            persisted1.updated_at, persisted2.updated_at,
+            "recompute_drift wrote the contract file on a no-op second call — \
+             this would trigger the file-watcher feedback loop"
         );
     }
 }

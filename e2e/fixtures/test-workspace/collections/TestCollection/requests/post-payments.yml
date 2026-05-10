@@ -1,0 +1,15 @@
+uid: e2e-post-payments-0000-0000-0002
+info:
+  name: Create Payment
+  type: http
+http:
+  method: POST
+  url: "{{baseUrl}}/payments"
+  params: []
+  headers:
+  - name: Content-Type
+    value: application/json
+    enabled: true
+  body:
+    type: json
+    data: '{"amount":100,"currency":"USD"}'
