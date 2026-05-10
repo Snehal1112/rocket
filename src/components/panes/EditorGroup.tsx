@@ -190,7 +190,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionId={activeTab.collectionRoot}
               collectionName={activeTab.collectionName}
             />
-          ) : isContractDiffTab(activeTab) ? null : isWorkspaceTab(activeTab) ? (
+          ) : isContractDiffTab(activeTab) ? (
+            null
+          ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
             ) : activeTab.activeSection === 'environments' ? (

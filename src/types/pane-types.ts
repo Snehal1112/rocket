@@ -93,7 +93,7 @@ export function isContractTab(tab: Tab): tab is ContractTab {
 
 export interface ContractDiffTab extends BaseTab {
   tabType: 'contract_diff';
-  collectionId: string;
+  collectionId: string; // absolute path — passed as collectionRoot to IPC
   contractId: string;
 }
 

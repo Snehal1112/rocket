@@ -431,10 +431,12 @@ function deriveSegments(
   }
 
   if (isContractDiffTab(tab)) {
-    return [{ label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> }];
+    return [
+      { label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> },
+    ];
   }
 
-
+>>>>>>> 92d725b (feat(contracts): add ContractDiffTab type and isContractDiffTab guard)
   const _exhaustive: never = tab;
   throw new Error(`Unhandled tab type: ${(_exhaustive as { tabType: string }).tabType}`);
 }
