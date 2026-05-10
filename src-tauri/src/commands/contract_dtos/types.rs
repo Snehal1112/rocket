@@ -81,6 +81,7 @@ pub enum ContractStatusDto {
     Breach,
     InReview,
     Paused,
+    #[serde(rename = "expiring_in_30_days")]
     ExpiringIn30Days,
     Expired,
     Archived,
