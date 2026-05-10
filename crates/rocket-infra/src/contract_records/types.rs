@@ -480,3 +480,343 @@ mod enum_tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// ContractRecord
+// ---------------------------------------------------------------------------
+
+use chrono::{DateTime, NaiveDate, Utc};
+use rocket_collection::contract::types::Contract;
+use ulid::Ulid;
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractRecord {
+    pub id: Ulid,
+    pub title: String,
+
+    pub provider: ContractPartyRecord,
+    pub consumers: Vec<ContractPartyRecord>,
+
+    pub project: String,
+
+    #[serde(default = "default_version_record")]
+    pub version: String,
+
+    #[serde(default)]
+    pub status: ContractStatusRecord,
+
+    pub effective_date: NaiveDate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_date: Option<NaiveDate>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub document_paths: Vec<PathBuf>,
+
+    pub enforcement_mode: ContractEnforcementModeRecord,
+    pub scope: ContractScopeRecord,
+
+    #[serde(default)]
+    pub policy: ContractPolicyRecord,
+
+    #[serde(default)]
+    pub drift_count: u32,
+    #[serde(default)]
+    pub breach_count: u32,
+    #[serde(default)]
+    pub endpoint_count: u32,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+fn default_version_record() -> String {
+    "1.0.0".to_string()
+}
+
+impl<'de> serde::Deserialize<'de> for ContractRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{Error, MapAccess, Visitor};
+        use std::fmt;
+
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = ContractRecord;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "a ContractRecord object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<ContractRecord, A::Error> {
+                let mut id = None;
+                let mut title = None;
+                let mut provider = None;
+                let mut consumers: Option<Vec<ContractPartyRecord>> = None;
+                let mut consumer_singular: Option<ContractPartyRecord> = None;
+                let mut project = None;
+                let mut version = None;
+                let mut status = None;
+                let mut effective_date = None;
+                let mut expiry_date = None;
+                let mut document_paths = None;
+                let mut enforcement_mode = None;
+                let mut scope = None;
+                let mut policy = None;
+                let mut drift_count = None;
+                let mut breach_count = None;
+                let mut endpoint_count = None;
+                let mut created_by = None;
+                let mut created_at = None;
+                let mut updated_at = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "id" => id = Some(map.next_value()?),
+                        "title" => title = Some(map.next_value()?),
+                        "provider" => provider = Some(map.next_value()?),
+                        "consumers" => consumers = Some(map.next_value()?),
+                        "consumer" => consumer_singular = Some(map.next_value()?),
+                        "project" => project = Some(map.next_value()?),
+                        "version" => version = Some(map.next_value()?),
+                        "status" => status = Some(map.next_value()?),
+                        "effectiveDate" => effective_date = Some(map.next_value()?),
+                        "expiryDate" => expiry_date = map.next_value()?,
+                        "documentPaths" => document_paths = Some(map.next_value()?),
+                        "enforcementMode" => enforcement_mode = Some(map.next_value()?),
+                        "scope" => scope = Some(map.next_value()?),
+                        "policy" => policy = Some(map.next_value()?),
+                        "driftCount" => drift_count = Some(map.next_value()?),
+                        "breachCount" => breach_count = Some(map.next_value()?),
+                        "endpointCount" => endpoint_count = Some(map.next_value()?),
+                        "createdBy" => created_by = map.next_value()?,
+                        "createdAt" => created_at = map.next_value()?,
+                        "updatedAt" => updated_at = map.next_value()?,
+                        _ => { let _ = map.next_value::<serde::de::IgnoredAny>()?; }
+                    }
+                }
+
+                let resolved_consumers = consumers
+                    .or_else(|| consumer_singular.map(|c| vec![c]))
+                    .unwrap_or_default();
+
+                Ok(ContractRecord {
+                    id: id.ok_or_else(|| A::Error::missing_field("id"))?,
+                    title: title.ok_or_else(|| A::Error::missing_field("title"))?,
+                    provider: provider.ok_or_else(|| A::Error::missing_field("provider"))?,
+                    consumers: resolved_consumers,
+                    project: project.unwrap_or_default(),
+                    version: version.unwrap_or_else(default_version_record),
+                    status: status.unwrap_or_default(),
+                    effective_date: effective_date.ok_or_else(|| A::Error::missing_field("effectiveDate"))?,
+                    expiry_date,
+                    document_paths: document_paths.unwrap_or_default(),
+                    enforcement_mode: enforcement_mode.unwrap_or_default(),
+                    scope: scope.ok_or_else(|| A::Error::missing_field("scope"))?,
+                    policy: policy.unwrap_or_default(),
+                    drift_count: drift_count.unwrap_or(0),
+                    breach_count: breach_count.unwrap_or(0),
+                    endpoint_count: endpoint_count.unwrap_or(0),
+                    created_by,
+                    created_at,
+                    updated_at,
+                })
+            }
+        }
+
+        d.deserialize_map(V)
+    }
+}
+
+impl From<&Contract> for ContractRecord {
+    fn from(c: &Contract) -> Self {
+        Self {
+            id: c.id,
+            title: c.title.clone(),
+            provider: (&c.provider).into(),
+            consumers: c.consumers.iter().map(Into::into).collect(),
+            project: c.project.clone(),
+            version: c.version.clone(),
+            status: (&c.status).into(),
+            effective_date: c.effective_date,
+            expiry_date: c.expiry_date,
+            document_paths: c.document_paths.clone(),
+            enforcement_mode: (&c.enforcement_mode).into(),
+            scope: (&c.scope).into(),
+            policy: (&c.policy).into(),
+            drift_count: c.drift_count,
+            breach_count: c.breach_count,
+            endpoint_count: c.endpoint_count,
+            created_by: c.created_by.clone(),
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+        }
+    }
+}
+
+impl From<ContractRecord> for Contract {
+    fn from(r: ContractRecord) -> Self {
+        Self {
+            id: r.id,
+            title: r.title,
+            provider: r.provider.into(),
+            consumers: r.consumers.into_iter().map(Into::into).collect(),
+            project: r.project,
+            version: r.version,
+            status: r.status.into(),
+            effective_date: r.effective_date,
+            expiry_date: r.expiry_date,
+            document_paths: r.document_paths,
+            enforcement_mode: r.enforcement_mode.into(),
+            scope: r.scope.into(),
+            policy: r.policy.into(),
+            drift_count: r.drift_count,
+            breach_count: r.breach_count,
+            endpoint_count: r.endpoint_count,
+            created_by: r.created_by,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+#[cfg(test)]
+mod contract_record_tests {
+    use super::*;
+
+    #[test]
+    fn old_yaml_provider_string_deserialises_via_record() {
+        let yaml = r#"
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+title: Payments API
+provider: "Billing Team"
+consumer: "Platform Team"
+project: Checkout
+version: "1.0.0"
+effectiveDate: "2026-01-15"
+enforcementMode: informational
+scope:
+  type: collection
+"#;
+        let r: ContractRecord = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(r.provider.name, "Billing Team");
+        assert_eq!(r.provider.id, "billing-team");
+        assert_eq!(r.consumers.len(), 1);
+        assert_eq!(r.consumers[0].name, "Platform Team");
+        assert_eq!(r.status, ContractStatusRecord::Active);
+    }
+
+    #[test]
+    fn old_yaml_expiry_date_null_deserialises_via_record() {
+        let yaml = r#"
+id: 01KR4KAPFKR5YM1T1WSD2YYGC0
+title: Jjjjj
+provider: Jhggg
+consumer: Yyyy
+project: Uuuu
+version: V222
+effectiveDate: 2026-05-08
+expiryDate: null
+documentPaths: []
+enforcementMode: informational
+scope:
+  type: collection
+"#;
+        let r: ContractRecord = serde_yaml::from_str(yaml).unwrap();
+        assert!(r.expiry_date.is_none());
+    }
+
+    #[test]
+    fn old_yaml_created_at_null_deserialises_via_record() {
+        let yaml = r#"
+id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+title: Test
+provider: Provider
+consumer: Consumer
+project: ''
+version: "1.0.0"
+effectiveDate: "2026-01-15"
+enforcementMode: informational
+scope:
+  type: collection
+createdBy: null
+createdAt: null
+updatedAt: null
+"#;
+        let r: ContractRecord = serde_yaml::from_str(yaml).unwrap();
+        assert!(r.created_by.is_none());
+        assert!(r.created_at.is_none());
+        assert!(r.updated_at.is_none());
+    }
+
+    #[test]
+    fn domain_to_record_to_domain_roundtrip() {
+        use rocket_collection::contract::types::{
+            BreakingChangePolicy, ContractEnforcementMode, ContractPolicy, ContractScope, ContractStatus,
+        };
+        let domain = Contract {
+            id: Ulid::new(),
+            title: "X".into(),
+            provider: ContractParty::from_name("Prov"),
+            consumers: vec![ContractParty::from_name("Cons")],
+            project: "P".into(),
+            version: "1.2.3".into(),
+            status: ContractStatus::Drift,
+            effective_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            expiry_date: None,
+            document_paths: vec![],
+            enforcement_mode: ContractEnforcementMode::Informational,
+            scope: ContractScope::Collection,
+            policy: ContractPolicy {
+                breaking_change_policy: BreakingChangePolicy::Strict,
+                notice_days: 14,
+                uptime_sla: Some(99.5),
+            },
+            drift_count: 2,
+            breach_count: 0,
+            endpoint_count: 5,
+            created_by: Some("alice".into()),
+            created_at: None,
+            updated_at: None,
+        };
+        let r: ContractRecord = (&domain).into();
+        let back: Contract = r.into();
+        assert_eq!(domain, back);
+    }
+
+    #[test]
+    fn yaml_roundtrip_preserves_camel_case_field_names() {
+        use rocket_collection::contract::types::{ContractEnforcementMode, ContractScope, ContractStatus};
+        let domain = Contract {
+            id: Ulid::new(),
+            title: "Y".into(),
+            provider: ContractParty::from_name("Prov"),
+            consumers: vec![],
+            project: String::new(),
+            version: "1.0.0".into(),
+            status: ContractStatus::Active,
+            effective_date: NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
+            expiry_date: Some(NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()),
+            document_paths: vec![],
+            enforcement_mode: ContractEnforcementMode::Informational,
+            scope: ContractScope::Folder { rel_path: PathBuf::from("a.yml") },
+            policy: ContractPolicy::default(),
+            drift_count: 0,
+            breach_count: 0,
+            endpoint_count: 0,
+            created_by: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let r: ContractRecord = (&domain).into();
+        let yaml = serde_yaml::to_string(&r).unwrap();
+        assert!(yaml.contains("effectiveDate:"), "expected camelCase in:\n{yaml}");
+        assert!(yaml.contains("expiryDate:"));
+        assert!(yaml.contains("enforcementMode:"));
+        assert!(yaml.contains("rel_path:"), "scope rel_path must remain snake_case in:\n{yaml}");
+        let back: ContractRecord = serde_yaml::from_str(&yaml).unwrap();
+        let back_domain: Contract = back.into();
+        assert_eq!(domain, back_domain);
+    }
+}
