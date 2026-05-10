@@ -1,54 +1,41 @@
 use chrono::{DateTime, Utc};
 use rocket_shared::types::{Auth, Body, BodyMode, HttpMethod};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use ulid::Ulid;
 
 use crate::request::Request;
 
 /// A key+value pair used for headers, query params, and form fields.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct KeyValueEntry {
     pub key: String,
     pub value: String,
 }
 
 /// Shape of one request at the moment a contract is signed.
-/// camelCase is intentional: serves as both YAML persistence and Tauri IPC wire type.
 /// Rebuilt on every save and diffed against this baseline.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RequestSignatureSnapshot {
     pub request_path: PathBuf,
     pub method: String,
     pub url_pattern: String,
     /// Full key+value pairs for enabled headers.
-    #[serde(default)]
     pub headers: Vec<KeyValueEntry>,
     /// Full key+value pairs for enabled query params.
-    #[serde(default)]
     pub query_params: Vec<KeyValueEntry>,
     /// Raw body string for text-like body modes (Json, Xml, Text, Sparql, Binary).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_content: Option<String>,
     /// Key+value pairs for enabled form fields (FormData/FormUrlEncoded modes).
-    #[serde(default)]
     pub form_fields: Vec<KeyValueEntry>,
     pub auth_type: String,
     /// Auth credential summary — does not include the auth type itself.
-    #[serde(default)]
     pub auth_detail: String,
     pub captured_at: DateTime<Utc>,
-    // Legacy key-list fields from v0.6.x snapshots. Kept with serde(default) so
-    // old on-disk files deserialise without error. No longer written by from_request.
-    // The first save after upgrade will emit "added" entries for all current fields
-    // relative to these empty lists — delete old -snapshot.yml files to reset.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // Legacy key-list fields from v0.6.x snapshots. Kept so the in-memory
+    // domain type can carry them through Records during migration. No longer
+    // written by from_request.
     pub query_param_keys: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub header_keys: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub body_field_keys: Vec<String>,
 }
 
@@ -192,8 +179,7 @@ fn extract_form_fields(body: &Option<Body>) -> Vec<KeyValueEntry> {
 }
 
 /// All snapshots for one contract (one entry per covered request).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContractSnapshot {
     pub contract_id: Ulid,
     pub entries: Vec<RequestSignatureSnapshot>,
@@ -370,36 +356,6 @@ mod tests {
             .with_auth(Auth::OAuth2(flow));
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "my-client");
-    }
-
-    #[test]
-    fn old_format_snapshot_deserialises_without_error() {
-        // Regression test: snapshots written before the full-changelog expansion
-        // used key-list fields only (headerKeys, queryParamKeys, bodyFieldKeys).
-        // The new fields (headers, queryParams, authDetail) must default to empty
-        // rather than causing a serde error that silently breaks the audit hook.
-        let yaml = r#"contractId: 01KQRNJTCG9AA2FR6AV9N1H3QA
-entries:
-- requestPath: get-users.yml
-  method: GET
-  urlPattern: https://api.example.com/users
-  queryParamKeys: []
-  headerKeys:
-  - Authorization
-  bodyFieldKeys: []
-  authType: none
-  capturedAt: 2026-05-04T04:57:42.033432603Z
-"#;
-        let snapshot: ContractSnapshot = serde_yaml::from_str(yaml)
-            .expect("old-format snapshot must deserialise without error");
-        assert_eq!(snapshot.entries.len(), 1);
-        let entry = &snapshot.entries[0];
-        // New fields must default to empty — not an error.
-        assert!(entry.headers.is_empty());
-        assert!(entry.query_params.is_empty());
-        assert!(entry.auth_detail.is_empty());
-        // Legacy fields are still there.
-        assert_eq!(entry.header_keys, vec!["Authorization".to_string()]);
     }
 
     #[test]

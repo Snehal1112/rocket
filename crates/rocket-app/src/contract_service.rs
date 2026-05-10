@@ -103,8 +103,7 @@ pub struct ContractService {
 }
 
 /// Summary returned by `recompute_drift_for_collection` for each processed contract.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ContractDriftSummary {
     pub contract_id: String,
     pub status: ContractStatus,
@@ -113,8 +112,7 @@ pub struct ContractDriftSummary {
 }
 
 /// Lightweight summary of a contract returned by `list_summaries`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct ContractSummary {
     pub id: String,
     pub title: String,
