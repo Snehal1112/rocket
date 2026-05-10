@@ -83,6 +83,7 @@ pub enum ContractStatusDto {
     Paused,
     ExpiringIn30Days,
     Expired,
+    Archived,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -235,6 +236,7 @@ impl From<&ContractStatus> for ContractStatusDto {
             ContractStatus::Paused => Self::Paused,
             ContractStatus::ExpiringIn30Days => Self::ExpiringIn30Days,
             ContractStatus::Expired => Self::Expired,
+            ContractStatus::Archived => Self::Archived,
         }
     }
 }
@@ -249,6 +251,7 @@ impl From<ContractStatusDto> for ContractStatus {
             ContractStatusDto::Paused => Self::Paused,
             ContractStatusDto::ExpiringIn30Days => Self::ExpiringIn30Days,
             ContractStatusDto::Expired => Self::Expired,
+            ContractStatusDto::Archived => Self::Archived,
         }
     }
 }

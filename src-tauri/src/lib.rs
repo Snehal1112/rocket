@@ -395,6 +395,8 @@ pub fn run() {
             commands::contract::recompute_drift,
             commands::contract::get_contract_summary,
             commands::contract::export_contract_openapi,
+            commands::contract::archive_contract,
+            commands::contract::unarchive_contract,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

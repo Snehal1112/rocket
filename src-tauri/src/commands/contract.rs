@@ -327,6 +327,38 @@ pub fn reject_contract(
 }
 
 #[tauri::command]
+pub fn archive_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<ContractDto, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Archive,
+    )
+    .map(|c| (&c).into())
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn unarchive_contract(
+    collection_root: String,
+    contract_id: String,
+    svc: tauri::State<'_, ContractService>,
+) -> Result<ContractDto, String> {
+    let id = Ulid::from_string(&contract_id).map_err(|e| e.to_string())?;
+    svc.transition_contract_status(
+        &PathBuf::from(&collection_root),
+        id,
+        rocket_collection::contract::StatusEvent::Unarchive,
+    )
+    .map(|c| (&c).into())
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn duplicate_contract(
     collection_root: String,
     contract_id: String,
@@ -341,17 +373,11 @@ pub fn duplicate_contract(
 #[tauri::command]
 pub fn recompute_drift(
     collection_root: String,
-    current_snapshots: Vec<RequestSignatureSnapshotDto>,
     svc: tauri::State<'_, ContractService>,
 ) -> Result<Vec<ContractDriftSummaryDto>, String> {
-    let domain_snapshots: Vec<rocket_collection::contract::snapshot::RequestSignatureSnapshot> =
-        current_snapshots.into_iter().map(Into::into).collect();
-    svc.recompute_drift_for_collection(
-        &std::path::PathBuf::from(&collection_root),
-        &domain_snapshots,
-    )
-    .map(|v| v.into_iter().map(Into::into).collect())
-    .map_err(|e| e.to_string())
+    svc.recompute_drift_for_collection(&std::path::PathBuf::from(&collection_root))
+        .map(|v| v.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
