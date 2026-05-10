@@ -363,3 +363,120 @@ mod scope_tests {
         assert_eq!(domain, back);
     }
 }
+
+// ---------------------------------------------------------------------------
+// ContractStatusRecord + ContractEnforcementModeRecord
+// ---------------------------------------------------------------------------
+
+use rocket_collection::contract::types::{ContractEnforcementMode, ContractStatus};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractStatusRecord {
+    Draft,
+    #[default]
+    Active,
+    Drift,
+    Breach,
+    InReview,
+    Paused,
+    // Note: serde rename_all=snake_case produces "expiring_in30_days" (no underscore
+    // before digits). This matches what the domain ContractStatus already writes to
+    // disk, so we keep the default behaviour for byte-equivalent YAML roundtrip.
+    ExpiringIn30Days,
+    Expired,
+}
+
+impl From<&ContractStatus> for ContractStatusRecord {
+    fn from(s: &ContractStatus) -> Self {
+        match s {
+            ContractStatus::Draft => Self::Draft,
+            ContractStatus::Active => Self::Active,
+            ContractStatus::Drift => Self::Drift,
+            ContractStatus::Breach => Self::Breach,
+            ContractStatus::InReview => Self::InReview,
+            ContractStatus::Paused => Self::Paused,
+            ContractStatus::ExpiringIn30Days => Self::ExpiringIn30Days,
+            ContractStatus::Expired => Self::Expired,
+        }
+    }
+}
+
+impl From<ContractStatusRecord> for ContractStatus {
+    fn from(r: ContractStatusRecord) -> Self {
+        match r {
+            ContractStatusRecord::Draft => Self::Draft,
+            ContractStatusRecord::Active => Self::Active,
+            ContractStatusRecord::Drift => Self::Drift,
+            ContractStatusRecord::Breach => Self::Breach,
+            ContractStatusRecord::InReview => Self::InReview,
+            ContractStatusRecord::Paused => Self::Paused,
+            ContractStatusRecord::ExpiringIn30Days => Self::ExpiringIn30Days,
+            ContractStatusRecord::Expired => Self::Expired,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractEnforcementModeRecord {
+    #[default]
+    Informational,
+    Warn,
+    Block,
+}
+
+impl From<&ContractEnforcementMode> for ContractEnforcementModeRecord {
+    fn from(e: &ContractEnforcementMode) -> Self {
+        match e {
+            ContractEnforcementMode::Informational => Self::Informational,
+            ContractEnforcementMode::Warn => Self::Warn,
+            ContractEnforcementMode::Block => Self::Block,
+        }
+    }
+}
+
+impl From<ContractEnforcementModeRecord> for ContractEnforcementMode {
+    fn from(r: ContractEnforcementModeRecord) -> Self {
+        match r {
+            ContractEnforcementModeRecord::Informational => Self::Informational,
+            ContractEnforcementModeRecord::Warn => Self::Warn,
+            ContractEnforcementModeRecord::Block => Self::Block,
+        }
+    }
+}
+
+#[cfg(test)]
+mod enum_tests {
+    use super::*;
+
+    #[test]
+    fn status_record_active_serialises_unchanged() {
+        let y = serde_yaml::to_string(&ContractStatusRecord::Active).unwrap();
+        assert_eq!(y.trim(), "active");
+    }
+
+    #[test]
+    fn status_record_in_review_uses_snake_case() {
+        let y = serde_yaml::to_string(&ContractStatusRecord::InReview).unwrap();
+        assert_eq!(y.trim(), "in_review");
+    }
+
+    #[test]
+    fn status_record_expiring_in_30_days_matches_domain_byte_equivalent() {
+        // serde's rename_all=snake_case produces "expiring_in30_days" (no underscore
+        // before the digit). The domain ContractStatus does the same, so the Record
+        // matches it exactly to keep on-disk YAML byte-equivalent.
+        let y = serde_yaml::to_string(&ContractStatusRecord::ExpiringIn30Days).unwrap();
+        assert_eq!(y.trim(), "expiring_in30_days");
+    }
+
+    #[test]
+    fn enforcement_mode_record_roundtrip() {
+        for m in [ContractEnforcementMode::Informational, ContractEnforcementMode::Warn, ContractEnforcementMode::Block] {
+            let r: ContractEnforcementModeRecord = (&m).into();
+            let back: ContractEnforcementMode = r.into();
+            assert_eq!(m, back);
+        }
+    }
+}
