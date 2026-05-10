@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -12,6 +13,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { collectPaths } from '@/lib/contracts/collectPaths';
+import { getCollection } from '@/lib/tauri-api';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import type { Contract, ContractPolicy, ContractScope, Party } from '@/types/contracts';
 
@@ -113,7 +123,7 @@ export function NewContractModal({
   open,
   onOpenChange,
   collectionId,
-  collectionName: _collectionName,
+  collectionName,
   contract,
 }: NewContractModalProps) {
   const isEdit = !!contract;
@@ -124,6 +134,8 @@ export function NewContractModal({
   const [form, setForm] = useState<FormState>(
     contract ? contractToFormState(contract) : INITIAL_STATE,
   );
+  const [folders, setFolders] = useState<string[]>([]);
+  const [requests, setRequests] = useState<string[]>([]);
 
   // Resync form whenever the modal opens with a different contract for edit.
   // When `open` flips closed, we keep the last state; resetAndClose handles cleanup.
@@ -135,6 +147,22 @@ export function NewContractModal({
       setForm(INITIAL_STATE);
     }
   }, [open, contract?.id]);
+
+  // Load folder/request lists for the scope dropdowns.
+  useEffect(() => {
+    if (!open) return;
+    getCollection(collectionName)
+      .then((col) => {
+        const f: string[] = [];
+        const r: string[] = [];
+        collectPaths(col.root.items, '', f, r);
+        setFolders(f);
+        setRequests(r);
+      })
+      .catch(() => {
+        // Leave lists empty — dropdowns will show "No folders/requests found".
+      });
+  }, [collectionName, open]);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [warnings, setWarnings] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -284,6 +312,11 @@ export function NewContractModal({
       <DialogContent className='max-w-lg max-h-[90vh] overflow-y-auto'>
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit contract' : 'New contract'}</DialogTitle>
+          <DialogDescription className='sr-only'>
+            {isEdit
+              ? 'Edit the details of this API contract.'
+              : 'Define the parties, scope, and policy for a new API contract.'}
+          </DialogDescription>
         </DialogHeader>
 
         <div className='space-y-4 py-2'>
@@ -355,31 +388,90 @@ export function NewContractModal({
             <RadioGroup
               value={form.scopeType}
               onValueChange={(v) =>
-                setForm((p) => ({ ...p, scopeType: v as FormState['scopeType'] }))
+                setForm((p) => ({
+                  ...p,
+                  scopeType: v as FormState['scopeType'],
+                  scopePath: '',
+                }))
               }
-              className='flex gap-4'
+              className='space-y-2'
             >
-              {(['collection', 'folder', 'request'] as const).map((s) => (
-                <div key={s} className='flex items-center gap-1.5'>
-                  <RadioGroupItem value={s} id={`scope-${s}`} />
-                  <Label
-                    htmlFor={`scope-${s}`}
-                    className='text-sm font-normal cursor-pointer capitalize'
+              {/* Collection */}
+              <div className='flex items-center gap-2'>
+                <RadioGroupItem value='collection' id='scope-collection' />
+                <Label htmlFor='scope-collection' className='text-sm font-normal cursor-pointer'>
+                  Collection
+                </Label>
+              </div>
+
+              {/* Folder */}
+              <div className='flex items-center gap-2 flex-wrap'>
+                <RadioGroupItem value='folder' id='scope-folder' />
+                <Label htmlFor='scope-folder' className='text-sm font-normal cursor-pointer'>
+                  Folder
+                </Label>
+                {form.scopeType === 'folder' && (
+                  <Select
+                    value={form.scopePath}
+                    onValueChange={(v) => setForm((p) => ({ ...p, scopePath: v }))}
                   >
-                    {s}
-                  </Label>
-                </div>
-              ))}
+                    <SelectTrigger className='h-8 text-sm w-48'>
+                      <SelectValue placeholder='Select folder…' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {folders.length === 0 && (
+                        <SelectItem
+                          value='__none__'
+                          disabled
+                          className='text-sm text-muted-foreground'
+                        >
+                          No folders found
+                        </SelectItem>
+                      )}
+                      {folders.map((f) => (
+                        <SelectItem key={f} value={f} className='text-sm font-mono'>
+                          {f}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Request */}
+              <div className='flex items-center gap-2 flex-wrap'>
+                <RadioGroupItem value='request' id='scope-request' />
+                <Label htmlFor='scope-request' className='text-sm font-normal cursor-pointer'>
+                  Request
+                </Label>
+                {form.scopeType === 'request' && (
+                  <Select
+                    value={form.scopePath}
+                    onValueChange={(v) => setForm((p) => ({ ...p, scopePath: v }))}
+                  >
+                    <SelectTrigger className='h-8 text-sm w-52'>
+                      <SelectValue placeholder='Select request…' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {requests.length === 0 && (
+                        <SelectItem
+                          value='__none__'
+                          disabled
+                          className='text-sm text-muted-foreground'
+                        >
+                          No requests found
+                        </SelectItem>
+                      )}
+                      {requests.map((r) => (
+                        <SelectItem key={r} value={r} className='text-sm font-mono'>
+                          {r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </RadioGroup>
-            {form.scopeType !== 'collection' && (
-              <Input
-                id='nc-scopePath'
-                value={form.scopePath}
-                onChange={setField('scopePath')}
-                className='mt-1.5 font-mono text-sm'
-                placeholder={form.scopeType === 'folder' ? 'auth/' : 'requests/payments.yml'}
-              />
-            )}
           </div>
 
           {/* ── Dates ────────────────────────── */}
