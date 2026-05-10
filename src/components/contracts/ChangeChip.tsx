@@ -7,17 +7,17 @@ interface ChangeChipProps {
 }
 
 const styles: Record<ChangeKind, string> = {
-  add: 'bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.25)]',
+  add: 'bg-[hsl(var(--success-soft))] text-[hsl(var(--success))] border-[hsl(var(--success)/0.35)]',
   remove:
-    'bg-[hsl(var(--destructive)/0.12)] text-[hsl(var(--destructive))] border-[hsl(var(--destructive)/0.25)]',
+    'bg-[hsl(var(--destructive-soft))] text-[hsl(var(--destructive))] border-[hsl(var(--destructive)/0.35)]',
   modify:
-    'bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.25)]',
+    'bg-[hsl(var(--warning-soft))] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.35)]',
 };
 
 const labels: Record<ChangeKind, string> = {
-  add: '+add',
-  remove: '−rem',
-  modify: '~mod',
+  add: 'ADD',
+  remove: 'REM',
+  modify: 'MOD',
 };
 
 export function ChangeChip({ kind, className }: ChangeChipProps) {

@@ -22,6 +22,11 @@ export function PartyPill({ party, partyRole, className }: PartyPillProps) {
     >
       <PartyAvatar party={party} size={20} />
       <span className='truncate max-w-[120px]'>{party.name}</span>
+      {party.kind !== 'service' && (
+        <span className='text-[10px] text-muted-foreground font-medium shrink-0'>
+          · {party.kind}
+        </span>
+      )}
       {partyRole && (
         <span className='text-[10px] text-muted-foreground font-medium shrink-0'>
           · {roleLabels[partyRole]}
