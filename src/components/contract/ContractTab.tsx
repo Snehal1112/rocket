@@ -4,22 +4,13 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type {
   AttachContractInput,
-  CollectionItem,
   ContractParty,
   UpdateContractInput,
 } from '@/lib/tauri-api';
 import { getCollection, onCollectionChanged } from '@/lib/tauri-api';
+import { collectPaths } from '@/lib/contracts/collectPaths';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
-
-// Mirror Rust's ContractParty::from_name: id = name.toLowerCase().replace(/ /g, '-').
-function partyFromName(name: string): ContractParty {
-  return {
-    id: name.toLowerCase().replace(/ /g, '-'),
-    name,
-    kind: 'team',
-  };
-}
 
 import { ChangelogSummaryBar } from './ChangelogSummaryBar';
 import { ChangelogTable } from './ChangelogTable';
@@ -29,25 +20,13 @@ import { ContractForm, type ContractFormValues } from './ContractForm';
 import { ContractLivePreview } from './ContractLivePreview';
 import { ContractTabTopBar } from './ContractTabTopBar';
 
-// Walk the collection item tree and collect relative folder/request paths.
-function collectPaths(
-  items: CollectionItem[],
-  prefix: string,
-  folders: string[],
-  requests: string[],
-) {
-  for (const item of items) {
-    if (item.type === 'folder') {
-      const seg = item.dirName ?? item.name;
-      const path = prefix ? `${prefix}/${seg}` : seg;
-      folders.push(path);
-      collectPaths(item.items, path, folders, requests);
-    } else {
-      const seg = item.fileName ?? item.name;
-      const path = prefix ? `${prefix}/${seg}` : seg;
-      requests.push(path);
-    }
-  }
+// Mirror Rust's ContractParty::from_name: id = name.toLowerCase().replace(/ /g, '-').
+function partyFromName(name: string): ContractParty {
+  return {
+    id: name.toLowerCase().replace(/ /g, '-'),
+    name,
+    kind: 'team',
+  };
 }
 
 // View discriminant for internal navigation.
