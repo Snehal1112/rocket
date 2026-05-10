@@ -155,7 +155,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     pauseContract: async (collectionId, id) => {
@@ -165,7 +165,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     resumeContract: async (collectionId, id) => {
@@ -175,7 +175,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     renewContract: async (collectionId, id, newExpiresAt) => {
@@ -185,7 +185,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     sendForReview: async (collectionId, id) => {
@@ -195,7 +195,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     approveContract: async (collectionId, id) => {
@@ -205,7 +205,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     rejectContract: async (collectionId, id) => {
@@ -215,7 +215,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch {}
+      } catch (_) { /* ignore tracking errors */ }
     },
 
     archiveContract: async (collectionId, contractId) => {
@@ -261,7 +261,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
                 ? Date.now() - new Date(curr.createdAt).getTime()
                 : undefined,
             });
-          } catch {}
+          } catch (_) { /* ignore tracking errors */ }
         }
       }
     },
