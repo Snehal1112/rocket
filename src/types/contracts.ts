@@ -46,6 +46,13 @@ export interface ContractPolicy {
   uptimeSla: number | null;
 }
 
+export type DiffLineKind = 'add' | 'remove' | 'context';
+
+export interface DiffLine {
+  kind: DiffLineKind;
+  text: string;
+}
+
 export interface ChangelogEntry {
   id: string;
   contractId: string;
@@ -63,6 +70,10 @@ export interface ChangelogEntry {
   isBreaking: boolean;
   authorId?: string;
   authorName?: string;
+  diffLines?: DiffLine[];
+  authorAvatarSeed?: string;
+  isSignEvent?: boolean;
+  signEventLabel?: string;
 }
 
 /** Map of requestId → shape at time of signing */
@@ -194,6 +205,28 @@ export interface ContractSummary {
   driftCount: number;
   breachCount: number;
   endpointCount: number;
+}
+
+// ─── Changelog drawer ─────────────────────────────────────
+
+export interface ChangelogFilters {
+  search: string;
+  kinds: ChangeKind[];
+  breakingOnly: boolean;
+  sinceSigned: boolean;
+}
+
+export const DEFAULT_FILTERS: ChangelogFilters = {
+  search: '',
+  kinds: [],
+  breakingOnly: false,
+  sinceSigned: false,
+};
+
+export interface DrawerState {
+  isOpen: boolean;
+  contractId: string | null;
+  filters: ChangelogFilters;
 }
 
 // ─── Computed helpers ─────────────────────────────────────
