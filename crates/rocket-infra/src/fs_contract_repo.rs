@@ -1,9 +1,12 @@
+use chrono::Local;
 use rocket_collection::contract::{
     changelog::ContractChangelog,
     repository::{ContractError, ContractRepository, ContractResult},
     snapshot::ContractSnapshot,
     types::Contract,
+    StatusEvent, transition_status,
 };
+use rocket_collection::contract::types::ContractStatus;
 use std::path::Path;
 use ulid::Ulid;
 
@@ -65,6 +68,9 @@ impl ContractRepository for FsContractRepo {
         if !dir.exists() {
             return Ok(vec![]);
         }
+        let today = Local::now().date_naive();
+        let thirty_days = chrono::Duration::days(30);
+
         let mut contracts = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -76,7 +82,50 @@ impl ContractRepository for FsContractRepo {
             {
                 let yaml = std::fs::read_to_string(&path)?;
                 match serde_yaml::from_str::<ContractRecord>(&yaml) {
-                    Ok(r) => contracts.push(r.into()),
+                    Ok(r) => {
+                        let mut contract: Contract = r.into();
+                        // Auto-transition expiry — skip already-terminal statuses.
+                        if !matches!(
+                            contract.status,
+                            ContractStatus::Expired
+                                | ContractStatus::Archived
+                                | ContractStatus::Draft
+                                | ContractStatus::InReview
+                        ) {
+                            if let Some(expiry) = contract.expiry_date {
+                                let event = if expiry < today {
+                                    Some(StatusEvent::ExpiryLapsed)
+                                } else if expiry - today <= thirty_days {
+                                    // Only transition Active → ExpiringIn30Days, not already-drifting.
+                                    if contract.status == ContractStatus::Active {
+                                        Some(StatusEvent::ExpiringSoon)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                if let Some(ev) = event {
+                                    if let Ok(new_status) =
+                                        transition_status(&contract.status, &ev)
+                                    {
+                                        contract.status = new_status;
+                                        contract.updated_at = Some(chrono::Utc::now());
+                                        if let Err(e) =
+                                            self.save_contract(collection_root, &contract)
+                                        {
+                                            tracing::warn!(
+                                                contract_id = %contract.id,
+                                                error = %e,
+                                                "expiry auto-transition save failed"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        contracts.push(contract);
+                    }
                     Err(e) => tracing::warn!(
                         path = %path.display(), error = %e,
                         "skipping malformed contract YAML"
