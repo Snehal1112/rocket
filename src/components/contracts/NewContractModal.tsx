@@ -79,6 +79,9 @@ function validate(f: FormState): FormErrors {
   if (!f.consumerNames.trim()) e.consumerNames = 'At least one consumer required';
   if (!f.effectiveAt) e.effectiveAt = 'Required';
   if (f.expiresAt && f.expiresAt <= f.effectiveAt) e.expiresAt = 'Must be after effective date';
+  if (f.scopeType !== 'collection' && !f.scopePath.trim()) {
+    e.scopePath = 'Select a path';
+  }
   if (f.uptimeSla !== '') {
     const n = Number(f.uptimeSla);
     if (Number.isNaN(n) || n < 0 || n > 100) e.uptimeSla = 'Must be 0–100';
@@ -150,18 +153,21 @@ export function NewContractModal({
 
   // Load folder/request lists for the scope dropdowns.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !collectionName) return;
+    let cancelled = false;
     getCollection(collectionName)
       .then((col) => {
+        if (cancelled) return;
         const f: string[] = [];
         const r: string[] = [];
         collectPaths(col.root.items, '', f, r);
         setFolders(f);
         setRequests(r);
       })
-      .catch(() => {
-        // Leave lists empty — dropdowns will show "No folders/requests found".
-      });
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [collectionName, open]);
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -195,6 +201,8 @@ export function NewContractModal({
     setErrors({});
     setWarnings({});
     setSaving(false);
+    setFolders([]);
+    setRequests([]);
     onOpenChange(false);
   }
 
@@ -472,6 +480,11 @@ export function NewContractModal({
                 )}
               </div>
             </RadioGroup>
+            {errors.scopePath && (
+              <p id='nc-scopePath-err' className='text-xs text-destructive mt-0.5' role='alert'>
+                {errors.scopePath}
+              </p>
+            )}
           </div>
 
           {/* ── Dates ────────────────────────── */}
