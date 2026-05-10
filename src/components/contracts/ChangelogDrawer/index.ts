@@ -1,3 +1,1 @@
-export { ChangelogDiffBlock } from './ChangelogDiffBlock';
-export { ChangelogEmptyState } from './ChangelogEmptyState';
-export { ChangelogEntry } from './ChangelogEntry';
+export { ChangelogDrawer } from './ChangelogDrawer'

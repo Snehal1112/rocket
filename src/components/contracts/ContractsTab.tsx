@@ -12,6 +12,7 @@ import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import type { ContractAction } from './ContractCard';
 import { ContractCard } from './ContractCard';
 import { ContractCardSkeleton } from './ContractCardSkeleton';
+import { ChangelogDrawer } from './ChangelogDrawer';
 import { ContractsEmptyState } from './ContractsEmptyState';
 import { ContractsFilterBar } from './ContractsFilterBar';
 import { ContractsGroupHeader } from './ContractsGroupHeader';
@@ -416,6 +417,8 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         collectionName={collectionName}
         contract={editingContract}
       />
+
+      <ChangelogDrawer />
     </div>
   );
 }
