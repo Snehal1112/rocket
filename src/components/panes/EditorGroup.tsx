@@ -33,6 +33,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
 import {
   isConflictTab,
+  isContractDiffTab,
   isContractTab,
   isDiffTab,
   isGitTab,
@@ -189,7 +190,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               collectionId={activeTab.collectionRoot}
               collectionName={activeTab.collectionName}
             />
-          ) : isWorkspaceTab(activeTab) ? (
+          ) : isContractDiffTab(activeTab) ? null : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
             ) : activeTab.activeSection === 'environments' ? (

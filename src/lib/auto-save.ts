@@ -49,7 +49,11 @@ export function scheduleAutoSave(
   const timer = setTimeout(async () => {
     timers.delete(tabId);
     try {
-      await saveRequest(collection, path, toApiRequest(tabId, title, request));
+      await saveRequest(
+        collection,
+        path,
+        toApiRequest(tabId || crypto.randomUUID(), title, request),
+      );
       // Mark tab clean after successful save.
       usePaneStore.getState().markClean(tabId);
     } catch (err) {

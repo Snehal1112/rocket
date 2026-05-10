@@ -21,6 +21,7 @@ const counts: ContractCounts = {
   draft: 1,
   paused: 0,
   expired: 0,
+  archived: 0,
   totalChanges: 4,
   changesAdded: 1,
   changesRemoved: 2,

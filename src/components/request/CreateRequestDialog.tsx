@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -130,6 +131,9 @@ export function CreateRequestDialog({
       <DialogContent className='sm:max-w-md' onKeyDown={handleKeyDown}>
         <DialogHeader>
           <DialogTitle>New Request</DialogTitle>
+          <DialogDescription className='sr-only'>
+            Add a new HTTP request to your collection.
+          </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col gap-4 py-2'>
           <div className='flex flex-col gap-1.5'>

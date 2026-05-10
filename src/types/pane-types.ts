@@ -91,6 +91,16 @@ export function isContractTab(tab: Tab): tab is ContractTab {
   return tab.tabType === 'contract';
 }
 
+export interface ContractDiffTab extends BaseTab {
+  tabType: 'contract_diff';
+  collectionId: string;
+  contractId: string;
+}
+
+export function isContractDiffTab(tab: Tab): tab is ContractDiffTab {
+  return tab.tabType === 'contract_diff';
+}
+
 export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
@@ -102,7 +112,8 @@ export type Tab =
   | DiffTab
   | ConflictTab
   | GitTab
-  | ContractTab;
+  | ContractTab
+  | ContractDiffTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

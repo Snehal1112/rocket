@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -89,6 +90,9 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: Props) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New workspace</DialogTitle>
+          <DialogDescription className='sr-only'>
+            Set up a new workspace to organise your collections and environments.
+          </DialogDescription>
         </DialogHeader>
 
         <div className='space-y-4 py-2'>

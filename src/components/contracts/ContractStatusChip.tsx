@@ -22,6 +22,7 @@ const chipVariants: Record<ContractStatus, string> = {
   expired: 'bg-[hsl(var(--muted-foreground)/0.18)] text-muted-foreground border-border border-2',
   expiring_in_30_days:
     'bg-[hsl(var(--warning)/0.10)] text-[hsl(var(--warning))] border-[hsl(var(--warning)/0.25)]',
+  archived: 'bg-muted text-muted-foreground/60 border-border',
 };
 
 const dotVariants: Record<ContractStatus, string | null> = {
@@ -33,6 +34,7 @@ const dotVariants: Record<ContractStatus, string | null> = {
   paused: null,
   expired: null,
   expiring_in_30_days: 'bg-[hsl(var(--warning))] animate-pulse',
+  archived: null,
 };
 
 export function ContractStatusChip({ status, count, className }: ContractStatusChipProps) {

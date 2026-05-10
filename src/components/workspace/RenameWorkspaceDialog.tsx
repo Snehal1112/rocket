@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -62,6 +63,9 @@ export function RenameWorkspaceDialog({ open, onOpenChange, workspaceId, current
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Rename workspace</DialogTitle>
+          <DialogDescription className='sr-only'>
+            Enter a new name for this workspace.
+          </DialogDescription>
         </DialogHeader>
 
         <div className='py-2'>

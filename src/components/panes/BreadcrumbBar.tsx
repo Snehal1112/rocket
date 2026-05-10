@@ -25,6 +25,7 @@ import type { CollectionSection, Tab, WorkspaceTabSection } from '@/types/pane-t
 import {
   isCollectionTab,
   isConflictTab,
+  isContractDiffTab,
   isContractTab,
   isDiffTab,
   isGitTab,
@@ -428,6 +429,11 @@ function deriveSegments(
       { label: 'Contracts', icon: <FileLock className='h-3 w-3' /> },
     ];
   }
+
+  if (isContractDiffTab(tab)) {
+    return [{ label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> }];
+  }
+
 
   const _exhaustive: never = tab;
   throw new Error(`Unhandled tab type: ${(_exhaustive as { tabType: string }).tabType}`);

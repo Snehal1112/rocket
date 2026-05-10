@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -60,6 +61,9 @@ export function ExportEvidenceDialog({ open, onOpenChange }: ExportEvidenceDialo
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Export Evidence Pack</DialogTitle>
+          <DialogDescription className='sr-only'>
+            Generate and download a compliance evidence pack for your contracts.
+          </DialogDescription>
         </DialogHeader>
         <div className='space-y-4 py-2'>
           <div className='space-y-1.5'>

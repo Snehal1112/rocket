@@ -1,5 +1,21 @@
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { AlertTriangle, ArrowRight, Calendar, Clock, Lock, MoreHorizontal } from 'lucide-react';
+import {
+  AlertTriangle,
+  Archive,
+  ArrowRight,
+  Calendar,
+  Check,
+  Clock,
+  GitBranch,
+  Infinity as InfinityIcon,
+  Lock,
+  MessageCircle,
+  MoreHorizontal,
+  Power,
+  TrendingUp,
+  User,
+  Users,
+} from 'lucide-react';
 import { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -32,7 +48,13 @@ export type ContractAction =
   | 'reject'
   | 'duplicate'
   | 'export'
-  | 'delete';
+  | 'delete'
+  | 'accept_drift'
+  | 'review_diff'
+  | 'open_review'
+  | 'remind_reviewers'
+  | 'archive'
+  | 'unarchive';
 
 interface ContractCardProps {
   contract: Contract;
@@ -54,6 +76,14 @@ function formatDate(iso: string): string {
       day: 'numeric',
       year: 'numeric',
     });
+  } catch {
+    return iso;
+  }
+}
+
+function formatMonthDay(iso: string): string {
+  try {
+    return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch {
     return iso;
   }
@@ -178,24 +208,107 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
 
           {/* Meta row */}
           <div className='flex gap-5 flex-wrap mb-3'>
-            <MetaItem
-              icon={<Calendar className='h-3 w-3' />}
-              label='Effective'
-              value={formatDate(contract.effectiveAt)}
-            />
-            <MetaItem
-              icon={<Clock className='h-3 w-3' />}
-              label={contract.expiresAt ? 'Expires' : 'No expiry'}
-              value={contract.expiresAt ? formatDate(contract.expiresAt) : '—'}
-              warning={isExpiringSoon(contract.expiresAt)}
-            />
-            {contract.driftCount > 0 && (
-              <MetaItem
-                icon={<AlertTriangle className='h-3 w-3' />}
-                value={`${contract.driftCount} change${contract.driftCount !== 1 ? 's' : ''}`}
-                danger={contract.breachCount > 0}
-                warning={contract.breachCount === 0}
-              />
+            {contract.status === 'paused' ? (
+              <>
+                {contract.pausedBy && (
+                  <MetaItem
+                    icon={<User className='h-3 w-3' />}
+                    label='Paused by'
+                    value={contract.pausedBy}
+                  />
+                )}
+                {contract.successorName && (
+                  <MetaItem
+                    icon={<GitBranch className='h-3 w-3' />}
+                    label='Superseded by'
+                    value={contract.successorName}
+                  />
+                )}
+                <MetaItem
+                  icon={<Power className='h-3 w-3' />}
+                  label='Drift detection'
+                  value={contract.driftDetectionEnabled === false ? 'off' : 'on'}
+                />
+              </>
+            ) : contract.status === 'expired' ? (
+              <>
+                {contract.expiresAt && (
+                  <MetaItem
+                    icon={<Clock className='h-3 w-3' />}
+                    label='Expired'
+                    value={`${formatDistanceToNow(parseISO(contract.expiresAt))} ago`}
+                  />
+                )}
+                {contract.isArchiveCandidate && (
+                  <MetaItem icon={<Archive className='h-3 w-3' />} value='Archive candidate' />
+                )}
+              </>
+            ) : contract.status === 'in_review' ? (
+              <>
+                <MetaItem
+                  icon={<Calendar className='h-3 w-3' />}
+                  label='Proposed effective'
+                  value={formatMonthDay(contract.effectiveAt)}
+                />
+                {contract.reviewerCount !== undefined && (
+                  <MetaItem
+                    icon={<Users className='h-3 w-3' />}
+                    value={`${contract.reviewerCount} reviewer${contract.reviewerCount !== 1 ? 's' : ''}`}
+                  />
+                )}
+                {contract.commentCount !== undefined && (
+                  <MetaItem
+                    icon={<MessageCircle className='h-3 w-3' />}
+                    value={`${contract.commentCount} comment${contract.commentCount !== 1 ? 's' : ''}`}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                <MetaItem
+                  icon={<Calendar className='h-3 w-3' />}
+                  label='Effective'
+                  value={formatDate(contract.effectiveAt)}
+                />
+                <MetaItem
+                  icon={
+                    contract.expiresAt ? (
+                      <Clock className='h-3 w-3' />
+                    ) : (
+                      <InfinityIcon className='h-3 w-3' />
+                    )
+                  }
+                  label={contract.expiresAt ? 'Expires' : 'No expiry'}
+                  value={contract.expiresAt ? formatDate(contract.expiresAt) : '· evergreen'}
+                  warning={isExpiringSoon(contract.expiresAt)}
+                />
+                {contract.status === 'active' || contract.status === 'expiring_in_30_days' ? (
+                  contract.policy.uptimeSla !== null ? (
+                    <MetaItem
+                      icon={<TrendingUp className='h-3 w-3' />}
+                      value={`${contract.policy.uptimeSla}% compliance`}
+                      success
+                    />
+                  ) : (
+                    <MetaItem
+                      icon={<Check className='h-3 w-3' />}
+                      value={`${contract.driftCount} break${contract.driftCount !== 1 ? 's' : ''} in 30d`}
+                    />
+                  )
+                ) : contract.driftCount > 0 ? (
+                  <MetaItem
+                    icon={<AlertTriangle className='h-3 w-3' />}
+                    value={
+                      contract.breachCount > 0
+                        ? `${contract.breachCount} breaking`
+                        : 'Additive drift'
+                    }
+                    danger={contract.breachCount > 0}
+                    warning={contract.breachCount === 0}
+                  />
+                ) : null}
+              </>
+
             )}
           </div>
 

@@ -53,7 +53,7 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
   const body = tab.request.body;
   const s = tab.request.settings;
   return {
-    uid: tab.id,
+    uid: tab.id || crypto.randomUUID(),
     name: tab.title,
     method: tab.request.method,
     url: tab.request.url,

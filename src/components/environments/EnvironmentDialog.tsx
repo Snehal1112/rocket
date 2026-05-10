@@ -7,7 +7,13 @@ import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
@@ -161,6 +167,9 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       <DialogContent className='max-w-3xl p-0 gap-0'>
         <DialogHeader className='px-5 py-4 border-b border-border/60'>
           <DialogTitle className='text-sm font-semibold'>Manage Environments</DialogTitle>
+          <DialogDescription className='sr-only'>
+            Create, edit, and manage environment variables for this collection.
+          </DialogDescription>
         </DialogHeader>
         <div className='flex min-h-[420px] max-h-[560px]'>
           {/* Left panel: environment list. */}
