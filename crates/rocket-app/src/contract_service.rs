@@ -1723,6 +1723,62 @@ mod tests {
         // XML detection is out of scope — falls back to text/plain.
         assert_eq!(ct, "text/plain");
     }
+
+    // ── auth_to_scheme ───────────────────────────────────────────────────────
+    #[test]
+    fn auth_bearer_maps_to_http_bearer() {
+        let result = super::openapi::auth_to_scheme("bearer", "supersec…");
+        let (name, scheme) = result.expect("bearer must produce a scheme");
+        assert_eq!(name, "BearerAuth");
+        assert_eq!(scheme.scheme_type, "http");
+        assert_eq!(scheme.scheme, Some("bearer"));
+    }
+
+    #[test]
+    fn auth_basic_maps_to_http_basic() {
+        let (name, scheme) = super::openapi::auth_to_scheme("basic", "alice")
+            .expect("basic must produce a scheme");
+        assert_eq!(name, "BasicAuth");
+        assert_eq!(scheme.scheme_type, "http");
+        assert_eq!(scheme.scheme, Some("basic"));
+    }
+
+    #[test]
+    fn auth_api_key_header_extracts_placement_and_name() {
+        // auth_detail format for api-key: "X-Api-Key=abc… (header)"
+        let (name, scheme) = super::openapi::auth_to_scheme("api-key", "X-Api-Key=abc… (header)")
+            .expect("api-key must produce a scheme");
+        assert_eq!(name, "ApiKeyAuth");
+        assert_eq!(scheme.scheme_type, "apiKey");
+        assert_eq!(scheme.location.as_deref(), Some("header"));
+        assert_eq!(scheme.name.as_deref(), Some("X-Api-Key"));
+    }
+
+    #[test]
+    fn auth_api_key_query_extracts_placement() {
+        let (_, scheme) = super::openapi::auth_to_scheme("api-key", "token=abc… (query)")
+            .expect("api-key must produce a scheme");
+        assert_eq!(scheme.location.as_deref(), Some("query"));
+    }
+
+    #[test]
+    fn auth_oauth2_maps_to_oauth2_with_empty_flows() {
+        let (name, scheme) = super::openapi::auth_to_scheme("oauth2", "my-client")
+            .expect("oauth2 must produce a scheme");
+        assert_eq!(name, "OAuth2Auth");
+        assert_eq!(scheme.scheme_type, "oauth2");
+        assert!(scheme.flows.is_some());
+    }
+
+    #[test]
+    fn auth_none_returns_none() {
+        assert!(super::openapi::auth_to_scheme("none", "").is_none());
+    }
+
+    #[test]
+    fn auth_inherit_returns_none() {
+        assert!(super::openapi::auth_to_scheme("inherit", "").is_none());
+    }
 }
 
 // ─── OpenAPI export types ─────────────────────────────────────────────────
@@ -1807,6 +1863,83 @@ mod openapi {
             }
         }
         ("text/plain", serde_yaml::Value::String(body.to_string()))
+    }
+
+    /// Maps a snapshot auth_type string to an OpenAPI security scheme name and object.
+    /// Returns None for "none" and "inherit" (no security requirement emitted).
+    pub fn auth_to_scheme(
+        auth_type: &str,
+        auth_detail: &str,
+    ) -> Option<(&'static str, SecuritySchemeObject)> {
+        match auth_type {
+            "bearer" => Some(("BearerAuth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("bearer"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            "basic" => Some(("BasicAuth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("basic"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            "api-key" => {
+                // auth_detail format: "KEY_NAME=value… (header|query)"
+                let placement = if auth_detail.contains("(query)") { "query" } else { "header" };
+                let key_name = auth_detail
+                    .split('=')
+                    .next()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("X-Api-Key")
+                    .to_string();
+                Some(("ApiKeyAuth", SecuritySchemeObject {
+                    scheme_type: "apiKey",
+                    scheme: None,
+                    location: Some(placement.to_string()),
+                    name: Some(key_name),
+                    flows: None,
+                }))
+            }
+            "oauth2" => Some(("OAuth2Auth", SecuritySchemeObject {
+                scheme_type: "oauth2",
+                scheme: None,
+                location: None,
+                name: None,
+                flows: Some(serde_yaml::Value::Mapping(serde_yaml::Mapping::new())),
+            })),
+            "aws-sig-v4" => Some(("AwsSigV4Auth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("aws-sig-v4"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            "wsse" => Some(("WsseAuth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("wsse"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            "digest" => Some(("DigestAuth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("digest"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            "ntlm" => Some(("NtlmAuth", SecuritySchemeObject {
+                scheme_type: "http",
+                scheme: Some("ntlm"),
+                location: None,
+                name: None,
+                flows: None,
+            })),
+            _ => None,
+        }
     }
 
     #[derive(Serialize)]
