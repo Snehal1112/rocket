@@ -49,6 +49,7 @@ tracing-subscriber.workspace = true
 tracing-log.workspace = true
 dirs.workspace = true
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+git2 = { version = "0.19", features = ["ssh"] }
 uuid.workspace = true
 reqwest.workspace = true
 url = "2"

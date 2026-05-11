@@ -7,6 +7,13 @@ use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
+}
+
 #[tauri::command]
 pub fn git_is_repo(collection_path: String, svc: State<'_, GitAppService>) -> Result<bool, DomainError> {
     Ok(svc.is_repo(&collection_path))
@@ -271,4 +278,34 @@ pub fn load_git_credentials() -> Result<Option<GitCredentialsPayload>, DomainErr
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(DomainError::Internal(e.to_string())),
     }
+}
+
+/// Read user.name and user.email from the repo's git config (local → global → system).
+/// Returns empty strings when the values are unset — never errors on a missing entry.
+#[tauri::command]
+pub fn git_get_identity(path: String) -> Result<GitIdentity, DomainError> {
+    let repo = git2::Repository::open(&path)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let cfg = repo.config()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let name = cfg.get_string("user.name").unwrap_or_default();
+    let email = cfg.get_string("user.email").unwrap_or_default();
+    Ok(GitIdentity { name, email })
+}
+
+/// Write user.name and user.email to the repo-local .git/config.
+#[tauri::command]
+pub fn git_set_identity(path: String, name: String, email: String) -> Result<(), DomainError> {
+    let repo = git2::Repository::open(&path)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let cfg = repo.config()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    // open_level gives us the repo-local config only, so we never write to ~/.gitconfig.
+    let mut local = cfg.open_level(git2::ConfigLevel::Local)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    local.set_str("user.name", &name)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    local.set_str("user.email", &email)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    Ok(())
 }

@@ -356,6 +356,8 @@ pub fn run() {
             commands::git::get_default_ssh_key_path,
             commands::git::save_git_credentials,
             commands::git::load_git_credentials,
+            commands::git::git_get_identity,
+            commands::git::git_set_identity,
             commands::workspaces::list_workspaces,
             commands::workspaces::get_active_workspace,
             commands::workspaces::create_workspace,
