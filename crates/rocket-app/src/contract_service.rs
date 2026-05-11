@@ -1621,6 +1621,48 @@ mod tests {
             "request-scoped contract must not log changes to other requests"
         );
     }
+
+    // ── extract_server_and_path ──────────────────────────────────────────────
+    #[test]
+    fn extract_full_https_url() {
+        let (server, path) = super::openapi::extract_server_and_path(
+            "https://api.example.com/users",
+        );
+        assert_eq!(server, Some("https://api.example.com".to_string()));
+        assert_eq!(path, "/users");
+    }
+
+    #[test]
+    fn extract_full_http_url_with_port_and_nested_path() {
+        let (server, path) = super::openapi::extract_server_and_path(
+            "http://localhost:3000/api/v1/users",
+        );
+        assert_eq!(server, Some("http://localhost:3000".to_string()));
+        assert_eq!(path, "/api/v1/users");
+    }
+
+    #[test]
+    fn extract_path_only_url() {
+        let (server, path) = super::openapi::extract_server_and_path("/users");
+        assert_eq!(server, None);
+        assert_eq!(path, "/users");
+    }
+
+    #[test]
+    fn extract_template_variable_url() {
+        let (server, path) = super::openapi::extract_server_and_path("{{baseUrl}}/users");
+        assert_eq!(server, Some("{{baseUrl}}".to_string()));
+        assert_eq!(path, "/users");
+    }
+
+    #[test]
+    fn extract_url_strips_query_string_from_path() {
+        let (server, path) = super::openapi::extract_server_and_path(
+            "https://api.example.com/users?page=1&limit=20",
+        );
+        assert_eq!(server, Some("https://api.example.com".to_string()));
+        assert_eq!(path, "/users");
+    }
 }
 
 // ─── OpenAPI export types ─────────────────────────────────────────────────
@@ -1628,6 +1670,46 @@ mod tests {
 mod openapi {
     use serde::Serialize;
     use std::collections::BTreeMap;
+
+    /// Splits a raw url_pattern into (optional_server_base, path_string).
+    ///
+    /// "https://api.example.com/users"  → (Some("https://api.example.com"), "/users")
+    /// "http://localhost:3000/api/v1"   → (Some("http://localhost:3000"), "/api/v1")
+    /// "/users"                          → (None, "/users")
+    /// "{{baseUrl}}/users"              → (Some("{{baseUrl}}"), "/users")
+    pub fn extract_server_and_path(url_pattern: &str) -> (Option<String>, String) {
+        // Strip query string first.
+        let url = url_pattern.split('?').next().unwrap_or(url_pattern);
+
+        // Handle http:// and https:// URLs.
+        for scheme in &["https://", "http://"] {
+            if let Some(after_scheme) = url.strip_prefix(scheme) {
+                return if let Some(slash_pos) = after_scheme.find('/') {
+                    let server = format!("{}{}", scheme, &after_scheme[..slash_pos]);
+                    let path = after_scheme[slash_pos..].to_string();
+                    (Some(server), path)
+                } else {
+                    // URL with no path component (e.g. "https://api.example.com")
+                    (Some(url.to_string()), "/".to_string())
+                };
+            }
+        }
+
+        // Handle template variable prefix like "{{baseUrl}}/users".
+        if let Some(brace_end) = url.find("}/") {
+            let server = url[..brace_end + 1].to_string();
+            let path = url[brace_end + 1..].to_string();
+            return (Some(server), path);
+        }
+
+        // Path-only URL — ensure leading slash.
+        let path = if url.starts_with('/') {
+            url.to_string()
+        } else {
+            format!("/{}", url)
+        };
+        (None, path)
+    }
 
     #[derive(Serialize)]
     pub struct OpenApiDoc {
