@@ -355,7 +355,7 @@ export function CollectionNode({
                           <span
                             role='button'
                             tabIndex={0}
-                            className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-opacity cursor-pointer'
+                            className='ml-auto flex items-center gap-[3px] text-[10px] font-semibold text-primary shrink-0 hover:opacity-80 transition-[opacity,margin] duration-150 cursor-pointer group-hover:mr-6'
                             onClick={(e) => {
                               e.stopPropagation();
                               openContractTab(summary.name, collectionRoot);

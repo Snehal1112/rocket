@@ -19,7 +19,9 @@ import { ContractsEmptyState } from './ContractsEmptyState';
 import { ContractsFilterBar } from './ContractsFilterBar';
 import { ContractsGroupHeader } from './ContractsGroupHeader';
 import { ContractsSummaryRow } from './ContractsSummaryRow';
+import { ExportContractDialog } from './ExportContractDialog';
 import { NewContractModal } from './NewContractModal';
+import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
 
 interface ContractsTabProps {
   /** Collection root path — used as key for all IPC calls */
@@ -29,6 +31,7 @@ interface ContractsTabProps {
 
 export function ContractsTab({ collectionId, collectionName }: ContractsTabProps) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(-1);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -324,7 +327,19 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             <RefreshCw className='h-3.5 w-3.5 mr-1.5' aria-hidden='true' />
             Sync
           </Button>
-          <Button variant='outline' size='sm' aria-label='Export contracts' disabled>
+          <Button
+            variant='outline'
+            size='sm'
+            aria-label='Export contracts'
+            disabled={contracts.length === 0}
+            onClick={() => {
+              if (contracts.length === 1) {
+                void saveContractAsOpenApi(collectionId, contracts[0].id, contracts[0].name);
+              } else {
+                setExportOpen(true);
+              }
+            }}
+          >
             <Download className='h-3.5 w-3.5 mr-1.5' aria-hidden='true' />
             Export
           </Button>
@@ -494,6 +509,16 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             )}
           </div>
         </ScrollArea>
+      )}
+
+      {/* ── Export dialog ──────────────────────────────── */}
+      {contracts.length > 1 && (
+        <ExportContractDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          contracts={contracts}
+          collectionRoot={collectionId}
+        />
       )}
 
       {/* ── New / edit contract modal ───────────────────── */}

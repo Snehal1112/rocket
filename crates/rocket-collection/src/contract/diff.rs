@@ -83,15 +83,24 @@ pub fn diff_signature(
         });
     }
 
-    // Key-value list diffs (new snapshot format)
-    diff_kv_list(&path, "header", &old.headers, &new.headers, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
-    diff_kv_list(&path, "query_param", &old.query_params, &new.query_params, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+    // Header and query-param diffs — format-aware.
+    // `from_request` always produces KV-format snapshots (populated `headers`/
+    // `query_params`, empty `header_keys`/`query_param_keys`).  Old on-disk
+    // baselines written by v0.6.x have it the other way around.  `diff_field`
+    // detects which format the old snapshot uses and picks the right strategy:
+    //   • Both KV  → full key+value comparison
+    //   • Old legacy + new KV → key-presence-only comparison (migration path)
+    diff_field(&path, "header", &old.header_keys, &old.headers, &new.header_keys, &new.headers, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+    diff_field(&path, "query_param", &old.query_param_keys, &old.query_params, &new.query_param_keys, &new.query_params, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
     diff_kv_list(&path, "form_field", &old.form_fields, &new.form_fields, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
 
-    // Legacy key-only list diffs (backward compat for old snapshots)
-    diff_key_only_list(&path, "query_param", &old.query_param_keys, &new.query_param_keys, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
-    diff_key_only_list(&path, "header", &old.header_keys, &new.header_keys, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
-    diff_key_only_list(&path, "body_field", &old.body_field_keys, &new.body_field_keys, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+    // Legacy body_field comparison — only when BOTH snapshots carry legacy keys.
+    // body_field_keys and body_content are incompatible representations; once a
+    // snapshot is in the new format (body_content, empty body_field_keys) there
+    // is nothing meaningful to compare here.
+    if !old.body_field_keys.is_empty() && !new.body_field_keys.is_empty() {
+        diff_key_only_list(&path, "body_field", &old.body_field_keys, &new.body_field_keys, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+    }
 
     // Body content diff
     match (&old.body_content, &new.body_content) {
@@ -141,6 +150,115 @@ pub fn diff_signature(
     }
 
     entries
+}
+
+/// Dispatches to the right comparison strategy based on snapshot format.
+///
+/// Three cases:
+/// 1. Both snapshots are in the new KV format (`old_kvs`/`new_kvs` present,
+///    key lists empty) → full key+value diff.
+/// 2. Both snapshots are in the old v0.6.x key-only format (`old_keys`/
+///    `new_keys` present, KV lists empty) → legacy key-only diff.
+/// 3. Old is legacy, new is KV (format migration) → key-presence-only diff
+///    via `diff_legacy_to_kv`, which prevents the false "key removed → breach"
+///    entries the raw legacy diff would otherwise emit.
+#[allow(clippy::too_many_arguments)]
+fn diff_field(
+    path: &std::path::Path,
+    prefix: &str,
+    old_keys: &[String],
+    old_kvs: &[KeyValueEntry],
+    new_keys: &[String],
+    new_kvs: &[KeyValueEntry],
+    policy: &BreakingChangePolicy,
+    now: chrono::DateTime<Utc>,
+    method: &str,
+    http_path: &str,
+    author: Option<&str>,
+    out: &mut Vec<ChangelogEntry>,
+) {
+    let old_is_legacy = old_kvs.is_empty() && !old_keys.is_empty();
+    let new_is_kv = !new_kvs.is_empty();
+
+    match (old_is_legacy, new_is_kv) {
+        (true, true) => {
+            // Old snapshot is legacy, new is KV → migration path.
+            // Compare by key presence only; values in the old snapshot are absent
+            // so a value comparison would produce false "changed → breaking" entries.
+            diff_legacy_to_kv(path, prefix, old_keys, new_kvs, policy, now, method, http_path, author, out);
+        }
+        (true, false) => {
+            // Both legacy → use the key-only diff (backward compat).
+            diff_key_only_list(path, prefix, old_keys, new_keys, policy, now, method, http_path, author, out);
+        }
+        _ => {
+            // Both KV (or both empty) → full key+value diff.
+            diff_kv_list(path, prefix, old_kvs, new_kvs, policy, now, method, http_path, author, out);
+        }
+    }
+}
+
+/// Compares a legacy key-only list against a new KV list by key presence.
+///
+/// Value changes are intentionally ignored: the old snapshot has no values,
+/// so we cannot tell whether values changed.  Only additions and removals are
+/// reported.
+#[allow(clippy::too_many_arguments)]
+fn diff_legacy_to_kv(
+    path: &std::path::Path,
+    prefix: &str,
+    old_keys: &[String],
+    new_kvs: &[KeyValueEntry],
+    policy: &BreakingChangePolicy,
+    now: chrono::DateTime<Utc>,
+    method: &str,
+    http_path: &str,
+    author: Option<&str>,
+    out: &mut Vec<ChangelogEntry>,
+) {
+    let path_buf = path.to_path_buf();
+    let new_key_set: std::collections::HashSet<&str> =
+        new_kvs.iter().map(|e| e.key.as_str()).collect();
+    let old_key_set: std::collections::HashSet<&str> =
+        old_keys.iter().map(|k| k.as_str()).collect();
+
+    for key in old_keys {
+        if !new_key_set.contains(key.as_str()) {
+            let is_breaking = match (prefix, policy) {
+                ("header", BreakingChangePolicy::AdditiveOk) => false,
+                _ => true,
+            };
+            out.push(ChangelogEntry {
+                timestamp: now,
+                request_path: path_buf.clone(),
+                field: format!("{prefix}.{key}"),
+                change_type: ChangeType::Removed,
+                old_value: Some(key.clone()),
+                new_value: None,
+                is_breaking,
+                request_method: Some(method.to_owned()),
+                http_path: Some(http_path.to_owned()),
+                author: author.map(ToOwned::to_owned),
+            });
+        }
+    }
+
+    for new_entry in new_kvs {
+        if !old_key_set.contains(new_entry.key.as_str()) {
+            out.push(ChangelogEntry {
+                timestamp: now,
+                request_path: path_buf.clone(),
+                field: format!("{prefix}.{}", new_entry.key),
+                change_type: ChangeType::Added,
+                old_value: None,
+                new_value: Some(new_entry.value.clone()),
+                is_breaking: matches!(policy, BreakingChangePolicy::Strict),
+                request_method: Some(method.to_owned()),
+                http_path: Some(http_path.to_owned()),
+                author: author.map(ToOwned::to_owned),
+            });
+        }
+    }
 }
 
 fn diff_kv_list(
@@ -574,5 +692,143 @@ mod tests {
         for e in &entries {
             assert!(!e.is_breaking, "additive change must not be breaking under AdditiveOk");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Legacy → KV format migration tests
+    // These cover the case where the baseline snapshot was written by the old
+    // v0.6.x code (key-only lists) and the current snapshot is in the new
+    // key+value format produced by `from_request`.
+    // -----------------------------------------------------------------------
+
+    fn legacy_snap_with_query_param(key: &str) -> RequestSignatureSnapshot {
+        RequestSignatureSnapshot {
+            request_path: PathBuf::from("req.yml"),
+            method: "GET".into(),
+            url_pattern: "/users".into(),
+            headers: vec![],
+            query_params: vec![],
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "none".into(),
+            auth_detail: String::new(),
+            captured_at: Utc::now(),
+            query_param_keys: vec![key.into()],
+            header_keys: vec![],
+            body_field_keys: vec![],
+        }
+    }
+
+    fn legacy_snap_with_header(key: &str) -> RequestSignatureSnapshot {
+        RequestSignatureSnapshot {
+            request_path: PathBuf::from("req.yml"),
+            method: "GET".into(),
+            url_pattern: "/users".into(),
+            headers: vec![],
+            query_params: vec![],
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "none".into(),
+            auth_detail: String::new(),
+            captured_at: Utc::now(),
+            query_param_keys: vec![],
+            header_keys: vec![key.into()],
+            body_field_keys: vec![],
+        }
+    }
+
+    fn new_format_snap_with_query_params(params: &[(&str, &str)]) -> RequestSignatureSnapshot {
+        RequestSignatureSnapshot {
+            request_path: PathBuf::from("req.yml"),
+            method: "GET".into(),
+            url_pattern: "/users".into(),
+            headers: vec![],
+            query_params: params.iter().map(|(k, v)| make_kv(k, v)).collect(),
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "none".into(),
+            auth_detail: String::new(),
+            captured_at: Utc::now(),
+            query_param_keys: vec![],
+            header_keys: vec![],
+            body_field_keys: vec![],
+        }
+    }
+
+    fn new_format_snap_with_headers(headers: &[(&str, &str)]) -> RequestSignatureSnapshot {
+        RequestSignatureSnapshot {
+            request_path: PathBuf::from("req.yml"),
+            method: "GET".into(),
+            url_pattern: "/users".into(),
+            headers: headers.iter().map(|(k, v)| make_kv(k, v)).collect(),
+            query_params: vec![],
+            body_content: None,
+            form_fields: vec![],
+            auth_type: "none".into(),
+            auth_detail: String::new(),
+            captured_at: Utc::now(),
+            query_param_keys: vec![],
+            header_keys: vec![],
+            body_field_keys: vec![],
+        }
+    }
+
+    #[test]
+    fn legacy_query_param_adding_new_param_is_drift_not_breach() {
+        // Regression: old baseline has query_param_keys: ["page"], new snapshot
+        // is in KV format with the same param plus a new one. The existing param
+        // must NOT appear as removed (which would cause a false Breach).
+        let old = legacy_snap_with_query_param("page");
+        let new = new_format_snap_with_query_params(&[("page", "1"), ("limit", "20")]);
+        let entries = diff_signature(&old, &new, &lenient(), None);
+        // "page" existed before → must not be reported as removed
+        assert!(
+            !entries.iter().any(|e| e.field == "query_param.page" && e.change_type == ChangeType::Removed),
+            "existing legacy param must not be reported as removed: {:?}", entries
+        );
+        // Adding "limit" is non-breaking under Lenient
+        let breach_count = entries.iter().filter(|e| e.is_breaking).count();
+        assert_eq!(breach_count, 0, "adding a new param to a legacy snapshot must not produce breach entries: {:?}", entries);
+    }
+
+    #[test]
+    fn legacy_header_adding_new_header_is_not_breach() {
+        // Regression: old baseline has header_keys: ["Authorization"], new snapshot
+        // is in KV format. Authorization must NOT appear as removed.
+        let old = legacy_snap_with_header("Authorization");
+        let new = new_format_snap_with_headers(&[("Authorization", "Bearer abc"), ("X-Request-Id", "123")]);
+        let entries = diff_signature(&old, &new, &lenient(), None);
+        assert!(
+            !entries.iter().any(|e| e.field == "header.Authorization" && e.change_type == ChangeType::Removed),
+            "existing legacy header must not be reported as removed: {:?}", entries
+        );
+        let breach_count = entries.iter().filter(|e| e.is_breaking).count();
+        assert_eq!(breach_count, 0, "adding a new header to a legacy snapshot must not produce breach entries: {:?}", entries);
+    }
+
+    #[test]
+    fn legacy_query_param_removing_existing_param_is_breach() {
+        // When a param that was in the old baseline is genuinely removed in the
+        // new snapshot, it must still be reported as breaking.
+        let old = legacy_snap_with_query_param("required_param");
+        let new = new_format_snap_with_query_params(&[]);
+        let entries = diff_signature(&old, &new, &lenient(), None);
+        assert!(
+            entries.iter().any(|e| e.field == "query_param.required_param" && e.is_breaking),
+            "removing a param that was in legacy baseline must be breaking: {:?}", entries
+        );
+    }
+
+    #[test]
+    fn legacy_header_removing_existing_header_is_breach() {
+        // When a header that was in the old baseline is genuinely removed, it
+        // must still be reported as breaking (non-AdditiveOk policy).
+        let old = legacy_snap_with_header("Authorization");
+        let new = new_format_snap_with_headers(&[]);
+        let entries = diff_signature(&old, &new, &lenient(), None);
+        assert!(
+            entries.iter().any(|e| e.field == "header.Authorization" && e.is_breaking),
+            "removing a header that was in legacy baseline must be breaking: {:?}", entries
+        );
     }
 }

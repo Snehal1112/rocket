@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Contract State Machine — Interactive Diagram</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: hsl(0 0% 9%);
+    --bg-2: hsl(0 0% 12%);
+    --card: hsl(0 0% 14%);
+    --card-2: hsl(0 0% 17%);
+    --fg: hsl(0 0% 92%);
+    --muted: hsl(0 0% 60%);
+    --muted-2: hsl(0 0% 42%);
+    --border: hsl(0 0% 22%);
+    --border-2: hsl(0 0% 30%);
+
+    --primary: hsl(207 100% 60%);
+    --primary-soft: hsl(207 100% 18%);
+    --success: hsl(160 63% 52%);
+    --success-soft: hsl(160 50% 16%);
+    --warning: hsl(38 92% 58%);
+    --warning-soft: hsl(38 60% 18%);
+    --destructive: hsl(0 72% 60%);
+    --destructive-soft: hsl(0 50% 18%);
+    --review: hsl(283 60% 64%);
+    --review-soft: hsl(283 40% 20%);
+    --muted-state: hsl(0 0% 50%);
+    --muted-state-soft: hsl(0 0% 20%);
+
+    --radius: 12px;
+  }
+  html.light {
+    --bg: hsl(214 44% 98%);
+    --bg-2: hsl(214 35% 96%);
+    --card: hsl(0 0% 100%);
+    --card-2: hsl(214 35% 96%);
+    --fg: hsl(222 47% 11%);
+    --muted: hsl(215 17% 40%);
+    --muted-2: hsl(215 15% 55%);
+    --border: hsl(214 31% 88%);
+    --border-2: hsl(214 25% 80%);
+    --primary: hsl(213 88% 42%);
+    --primary-soft: hsl(212 86% 94%);
+    --success: hsl(171 65% 35%);
+    --success-soft: hsl(171 45% 92%);
+    --warning: hsl(38 92% 48%);
+    --warning-soft: hsl(38 92% 93%);
+    --destructive: hsl(0 74% 52%);
+    --destructive-soft: hsl(0 74% 94%);
+    --review: hsl(283 60% 50%);
+    --review-soft: hsl(283 60% 94%);
+    --muted-state: hsl(215 17% 50%);
+    --muted-state-soft: hsl(213 35% 94%);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 14px; line-height: 1.45;
+    overflow: hidden;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+
+  /* Header */
+  .head {
+    padding: 18px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    background: var(--bg-2);
+  }
+  .head h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .head .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .head-actions { display: flex; gap: 8px; }
+  .btn {
+    background: var(--card); border: 1px solid var(--border-2); color: var(--fg);
+    padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 12px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--card-2); }
+  .btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+
+  .body { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+
+  /* Canvas */
+  .canvas-wrap { position: relative; overflow: hidden; background: var(--bg); }
+  .canvas-bg {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 1px 1px, hsl(0 0% 100% / 0.04) 1px, transparent 0);
+    background-size: 24px 24px;
+    pointer-events: none;
+  }
+  html.light .canvas-bg {
+    background-image: radial-gradient(circle at 1px 1px, hsl(0 0% 0% / 0.06) 1px, transparent 0);
+  }
+
+  svg.diagram {
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  /* Nodes */
+  .node-bg {
+    transition: filter 180ms, stroke-width 180ms;
+    cursor: pointer;
+  }
+  .node-group:hover .node-bg { filter: brightness(1.15); }
+  .node-group.dim { opacity: 0.28; }
+  .node-group.active .node-bg {
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 12px currentColor);
+  }
+  .node-label {
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px;
+    text-anchor: middle; dominant-baseline: middle; pointer-events: none;
+    fill: var(--fg);
+  }
+  .node-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px;
+    text-anchor: middle; dominant-baseline: middle; pointer-events: none;
+    text-transform: uppercase; letter-spacing: 0.08em; fill: var(--muted);
+  }
+
+  /* Edges */
+  .edge {
+    stroke-width: 1.6; fill: none; stroke: var(--border-2);
+    transition: stroke 180ms, stroke-width 180ms, opacity 180ms;
+  }
+  .edge-hit {
+    stroke: transparent; stroke-width: 16; fill: none; cursor: pointer;
+  }
+  .edge-label-bg {
+    fill: var(--bg); stroke: var(--border); stroke-width: 1;
+    transition: fill 180ms, stroke 180ms;
+    rx: 4;
+  }
+  .edge-label-text {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    text-anchor: middle; dominant-baseline: middle;
+    fill: var(--muted); pointer-events: none;
+    transition: fill 180ms;
+  }
+  .edge-group:hover .edge { stroke: var(--primary); stroke-width: 2.4; }
+  .edge-group:hover .edge-label-bg { fill: var(--primary-soft); stroke: var(--primary); }
+  .edge-group:hover .edge-label-text { fill: var(--primary); font-weight: 600; }
+  .edge-group.active .edge {
+    stroke: var(--primary); stroke-width: 2.6;
+    stroke-dasharray: 6 4; animation: flow 1.2s linear infinite;
+  }
+  .edge-group.active .edge-label-bg { fill: var(--primary-soft); stroke: var(--primary); }
+  .edge-group.active .edge-label-text { fill: var(--primary); font-weight: 700; }
+  .edge-group.dim { opacity: 0.18; }
+
+  .edge[data-trigger="auto"] { stroke-dasharray: 5 3; }
+
+  @keyframes flow {
+    to { stroke-dashoffset: -20; }
+  }
+
+  /* Arrow marker styling via CSS — handled in markers below */
+
+  /* Detail panel */
+  .panel {
+    background: var(--bg-2); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-head {
+    padding: 16px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .panel-head .swatch {
+    width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0;
+    border: 1.5px solid currentColor; background: color-mix(in oklab, currentColor 28%, transparent);
+  }
+  .panel-head h2 { font-size: 15px; font-weight: 600; }
+  .panel-head .panel-tag {
+    margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+    padding: 2px 7px; border-radius: 8px;
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 16px 18px 28px; }
+
+  .panel-section { margin-bottom: 18px; }
+  .panel-section h3 {
+    font-size: 10.5px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+  }
+  .panel-section p { font-size: 12.5px; color: var(--fg); line-height: 1.55; }
+  .panel-section .desc { color: var(--muted); }
+
+  .tran-list { display: flex; flex-direction: column; gap: 4px; }
+  .tran-row {
+    padding: 8px 10px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+    transition: border-color 140ms, background 140ms;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .tran-row:hover { border-color: var(--primary); background: var(--card-2); }
+  .tran-row .tran-head {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500;
+  }
+  .tran-row .tran-event {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    background: var(--primary-soft); color: var(--primary);
+    padding: 1px 5px; border-radius: 3px; font-weight: 600;
+  }
+  .tran-row[data-trigger="auto"] .tran-event { background: var(--warning-soft); color: var(--warning); }
+  .tran-row[data-trigger="schedule"] .tran-event { background: var(--review-soft); color: var(--review); }
+  .tran-row .tran-arrow { color: var(--muted-2); margin: 0 2px; }
+  .tran-row .tran-to { font-weight: 600; }
+  .tran-row .tran-meta { font-size: 10.5px; color: var(--muted); padding-left: 0; }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: color-mix(in oklab, var(--bg-2) 88%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; backdrop-filter: blur(6px);
+    display: flex; flex-direction: column; gap: 8px;
+    font-size: 11px; color: var(--muted);
+    max-width: 260px;
+  }
+  .legend h4 {
+    font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted-2); margin-bottom: 2px;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .legend-dot {
+    width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0;
+    border: 1.5px solid currentColor;
+    background: color-mix(in oklab, currentColor 28%, transparent);
+  }
+  .legend-line {
+    width: 22px; height: 0; border-top: 1.6px solid var(--border-2);
+    flex-shrink: 0;
+  }
+  .legend-line.auto { border-top-style: dashed; }
+
+  /* Controls */
+  .controls {
+    position: absolute; top: 16px; right: 16px;
+    background: color-mix(in oklab, var(--bg-2) 90%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px; backdrop-filter: blur(6px);
+    display: flex; gap: 4px;
+  }
+  .ctrl-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: transparent; color: var(--fg); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font: inherit; font-size: 13px;
+  }
+  .ctrl-btn:hover { background: var(--card-2); }
+
+  /* Search / play row */
+  .toolbar {
+    position: absolute; top: 16px; left: 16px;
+    background: color-mix(in oklab, var(--bg-2) 90%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px; backdrop-filter: blur(6px);
+    display: flex; gap: 4px; align-items: center;
+  }
+  .toolbar select {
+    background: transparent; border: none; color: var(--fg); font: inherit;
+    font-size: 12px; padding: 4px 8px; cursor: pointer; outline: none;
+  }
+  .toolbar select option { background: var(--card); color: var(--fg); }
+  .toolbar .sep { width: 1px; height: 18px; background: var(--border); }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 100;
+    background: var(--card); border: 1px solid var(--border-2); border-radius: 6px;
+    padding: 6px 9px; font-size: 11px; color: var(--fg);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    opacity: 0; transition: opacity 120ms;
+    max-width: 240px;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-event {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--primary); font-weight: 600;
+  }
+  .tooltip .tt-desc {
+    color: var(--muted); margin-top: 3px;
+  }
+
+  *::-webkit-scrollbar { width: 7px; }
+  *::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body data-screen-label="Contract State Machine — Interactive Diagram">
+
+<div class="app">
+  <header class="head">
+    <div>
+      <h1>Contract lifecycle — state machine</h1>
+      <p class="sub">Click any state or transition to inspect. Hover for tooltips. Use the simulator to trace flows.</p>
+    </div>
+    <div class="head-actions">
+      <button class="btn" id="resetBtn">↺ Reset view</button>
+      <button class="btn" id="themeBtn">◐ Theme</button>
+      <button class="btn primary" id="exportSvg">Download SVG</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <div class="canvas-wrap" id="canvasWrap">
+      <div class="canvas-bg"></div>
+
+      <div class="toolbar">
+        <select id="simSelect" title="Simulate a common flow">
+          <option value="">⏵ Simulate flow…</option>
+          <option value="happy">Happy path: Draft → Active</option>
+          <option value="drift_resign">Drift → Re-sign</option>
+          <option value="breach">Drift → Breach → Re-sign</option>
+          <option value="review">Send for review → Approve</option>
+          <option value="reject">Send for review → Reject</option>
+          <option value="expire">Expire → Renew</option>
+          <option value="archive">Expire → Archive → Unarchive</option>
+          <option value="pause">Pause → Resume</option>
+        </select>
+        <div class="sep"></div>
+        <button class="ctrl-btn" id="simPlay" title="Play simulation">▶</button>
+        <button class="ctrl-btn" id="simStep" title="Step forward">▶|</button>
+      </div>
+
+      <div class="controls">
+        <button class="ctrl-btn" id="zoomIn" title="Zoom in">+</button>
+        <button class="ctrl-btn" id="zoomOut" title="Zoom out">−</button>
+        <button class="ctrl-btn" id="zoomFit" title="Fit">⬚</button>
+      </div>
+
+      <svg class="diagram" id="diagram" viewBox="0 0 1120 720" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <!-- Arrow markers -->
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border-2)"/>
+          </marker>
+          <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)"/>
+          </marker>
+        </defs>
+
+        <g id="edgeLayer"></g>
+        <g id="nodeLayer"></g>
+      </svg>
+
+      <div class="legend">
+        <div>
+          <h4>States</h4>
+          <div class="legend-row" style="color: var(--muted-state);"><span class="legend-dot"></span>Draft</div>
+          <div class="legend-row" style="color: var(--success);"><span class="legend-dot"></span>Active / Healthy</div>
+          <div class="legend-row" style="color: var(--warning);"><span class="legend-dot"></span>Drift / ExpiringSoon</div>
+          <div class="legend-row" style="color: var(--destructive);"><span class="legend-dot"></span>Breach / Expired</div>
+          <div class="legend-row" style="color: var(--review);"><span class="legend-dot"></span>InReview</div>
+          <div class="legend-row" style="color: var(--muted-state);"><span class="legend-dot"></span>Paused / Archived</div>
+        </div>
+        <div style="border-top: 1px solid var(--border); padding-top: 8px;">
+          <h4>Transitions</h4>
+          <div class="legend-row"><span class="legend-line"></span>User action</div>
+          <div class="legend-row"><span class="legend-line auto"></span>System (auto)</div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <div class="panel-head" id="panelHead">
+        <span class="swatch"></span>
+        <h2 id="panelTitle">Select a state</h2>
+        <span class="panel-tag" id="panelTag">STATE</span>
+      </div>
+      <div class="panel-body" id="panelBody">
+        <div class="panel-section">
+          <p class="desc">Click any node in the diagram to see its incoming and outgoing transitions, semantics, and UI mapping.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+  // ─── State machine model ────────────────────────────────────
+  const STATES = {
+    Draft: {
+      x: 90, y: 360,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Contract is being defined but not yet enforced. No drift detection, no consumer notification.',
+      ui: 'Card: muted chip "Draft". No changelog tracking.',
+    },
+    Active: {
+      x: 320, y: 360,
+      color: 'var(--success)',
+      tone: 'success',
+      desc: 'Contract is published and being monitored. API shape matches the signed snapshot.',
+      ui: 'Card: green "Active" chip with pulse glow. Right rail shows recent changes.',
+    },
+    Drift: {
+      x: 600, y: 220,
+      color: 'var(--warning)',
+      tone: 'warning',
+      desc: 'Non-breaking changes detected against the signed snapshot. Consumer code still works, but contract is out of sync.',
+      ui: 'Card: amber left border + "⚠ Drift · N" chip. Sidebar shows amber dots.',
+    },
+    Breach: {
+      x: 880, y: 220,
+      color: 'var(--destructive)',
+      tone: 'destructive',
+      desc: 'Breaking changes detected. Consumer build will fail. Provider must re-sign or roll back.',
+      ui: 'Card: red bg + pulsing dot + "Breaching" chip. Sidebar shows pulsing red dot.',
+    },
+    Paused: {
+      x: 320, y: 555,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Monitoring suspended. Drift detection runs but does not change status or notify.',
+      ui: 'Card: muted gray bg + "Paused" chip. Mini-changelog dimmed.',
+    },
+    InReview: {
+      x: 600, y: 555,
+      color: 'var(--review)',
+      tone: 'review',
+      desc: 'Draft sent to consumer for sign-off. No monitoring until approved.',
+      ui: 'Card: purple "In review" chip + reviewer avatars in right rail.',
+    },
+    ExpiringIn30Days: {
+      x: 320, y: 80,
+      color: 'var(--warning)',
+      tone: 'warning',
+      desc: 'Behaves like Active but expiresAt is within 30 days. Surfaces a warning chip and a renew CTA.',
+      ui: 'Card: amber expiry text + "Renew" suggestion. All drift/breach paths still active.',
+    },
+    Expired: {
+      x: 600, y: 80,
+      color: 'var(--destructive)',
+      tone: 'destructive',
+      desc: 'expiresAt has lapsed. Contract no longer enforced. Consumer should renew or archive.',
+      ui: 'Card: 75% opacity + "Expired" chip + Renew / Clone / Archive actions.',
+    },
+    Archived: {
+      x: 880, y: 555,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Soft-deleted. Hidden from default list. Can be restored as a Draft.',
+      ui: 'Hidden from main list. Shown only in "View archived" filter.',
+    },
+  };
+
+  // Transitions: { id, from, to, event, trigger, desc, anchor: 'top|bottom|left|right', curve: 0..1 }
+  // trigger: 'user' | 'auto' | 'schedule'
+  const TRANSITIONS = [
+    { id: 't_publish',       from: 'Draft',    to: 'Active',   event: 'Publish',         trigger: 'user', desc: 'Provider signs the snapshot, contract becomes enforceable.' },
+    { id: 't_resign',        from: 'Drift',    to: 'Active',   event: 'Resign',          trigger: 'user', desc: 'Provider accepts current shape as the new signed snapshot.' },
+    { id: 't_resign_breach', from: 'Breach',   to: 'Active',   event: 'Resign',          trigger: 'user', desc: 'Provider accepts breaking changes after negotiating with consumer.' },
+    { id: 't_drift',         from: 'Active',   to: 'Drift',    event: 'DriftDetected',   trigger: 'auto', desc: 'System detected non-breaking changes against signed snapshot.' },
+    { id: 't_breach_active', from: 'Active',   to: 'Breach',   event: 'BreachDetected',  trigger: 'auto', desc: 'System detected a breaking change (method, path, required param removed).' },
+    { id: 't_breach_drift',  from: 'Drift',    to: 'Breach',   event: 'BreachDetected',  trigger: 'auto', desc: 'A drifted contract escalated to breach.' },
+    { id: 't_mark_breaking', from: 'Drift',    to: 'Breach',   event: 'MarkBreaking',    trigger: 'user', desc: 'Provider manually marks a drift as breaking.' },
+    { id: 't_pause',         from: 'Active',   to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Provider suspends monitoring.' },
+    { id: 't_pause_drift',   from: 'Drift',    to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Pause from a drifted contract.' },
+    { id: 't_pause_breach',  from: 'Breach',   to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Pause from a breaching contract — silences alerts.' },
+    { id: 't_resume',        from: 'Paused',   to: 'Active',   event: 'Resume',          trigger: 'user', desc: 'Resume monitoring; status re-computed.' },
+    { id: 't_review_active', from: 'Active',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send proposed changes to consumer for sign-off.' },
+    { id: 't_review_drift',  from: 'Drift',    to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send drift diff to consumer for review.' },
+    { id: 't_review_breach', from: 'Breach',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send breaking changes to consumer for sign-off.' },
+    { id: 't_review_paused', from: 'Paused',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send paused snapshot to consumer for sign-off.' },
+    { id: 't_approve',       from: 'InReview', to: 'Active',   event: 'Approve',         trigger: 'user', desc: 'Consumer signs off — new snapshot becomes signed.' },
+    { id: 't_reject',        from: 'InReview', to: 'Draft',    event: 'Reject',          trigger: 'user', desc: 'Consumer rejects — contract drops back to Draft.' },
+    { id: 't_expiring',      from: 'Active',   to: 'ExpiringIn30Days', event: 'ExpiringSoon', trigger: 'schedule', desc: 'expiresAt within 30 days — system flags the contract.' },
+    { id: 't_expired',       from: 'ExpiringIn30Days', to: 'Expired', event: 'ExpiryLapsed', trigger: 'schedule', desc: 'expiresAt elapsed.' },
+    { id: 't_expired_drift', from: 'Drift',    to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Drifted contract reached expiry.' },
+    { id: 't_expired_breach',from: 'Breach',   to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Breaching contract reached expiry.' },
+    { id: 't_renew',         from: 'Expired',  to: 'Active',   event: 'Renew',           trigger: 'user', desc: 'Provider extends expiresAt — contract resumes.' },
+    { id: 't_archive_exp',   from: 'Expired',  to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete an expired contract.' },
+    { id: 't_archive_paused',from: 'Paused',   to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete a paused contract.' },
+    { id: 't_unarchive',     from: 'Archived', to: 'Draft',    event: 'Unarchive',       trigger: 'user', desc: 'Restore an archived contract as a fresh Draft.' },
+  ];
+
+  // ─── SVG render ─────────────────────────────────────────────
+  const NODE_W = 132, NODE_H = 56;
+  const svg = document.getElementById('diagram');
+  const nodeLayer = document.getElementById('nodeLayer');
+  const edgeLayer = document.getElementById('edgeLayer');
+  const tooltip = document.getElementById('tooltip');
+
+  // Get rect side anchor point
+  function anchor(state, side) {
+    const s = STATES[state];
+    const cx = s.x, cy = s.y;
+    const hw = NODE_W / 2, hh = NODE_H / 2;
+    switch (side) {
+      case 'top':    return { x: cx, y: cy - hh };
+      case 'bottom': return { x: cx, y: cy + hh };
+      case 'left':   return { x: cx - hw, y: cy };
+      case 'right':  return { x: cx + hw, y: cy };
+    }
+  }
+
+  // Compute the best anchor pair for an edge based on relative position
+  function autoAnchors(from, to) {
+    const a = STATES[from], b = STATES[to];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0
+        ? [anchor(from, 'right'), anchor(to, 'left')]
+        : [anchor(from, 'left'),  anchor(to, 'right')];
+    } else {
+      return dy > 0
+        ? [anchor(from, 'bottom'), anchor(to, 'top')]
+        : [anchor(from, 'top'),    anchor(to, 'bottom')];
+    }
+  }
+
+  // Per-transition routing overrides for clarity
+  const ROUTE = {
+    t_resign:        { from: 'top', to: 'top', offset: -60 },
+    t_resign_breach: { from: 'bottom', to: 'bottom', offset: 50 },
+    t_drift:         { from: 'right', to: 'left', sameAxisOffset: -8 },
+    t_breach_active: { from: 'right', to: 'left', sameAxisOffset: 14, viaY: 280 },
+    t_breach_drift:  { from: 'right', to: 'left' },
+    t_mark_breaking: { from: 'top', to: 'top', offset: -40 },
+    t_pause:         { from: 'bottom', to: 'top', sameAxisOffset: -10 },
+    t_pause_drift:   { from: 'bottom', to: 'right' },
+    t_pause_breach:  { from: 'bottom', to: 'right' },
+    t_resume:        { from: 'top', to: 'bottom', sameAxisOffset: 10 },
+    t_review_active: { from: 'bottom', to: 'top', sameAxisOffset: 26 },
+    t_review_drift:  { from: 'bottom', to: 'top' },
+    t_review_breach: { from: 'bottom', to: 'top' },
+    t_review_paused: { from: 'right', to: 'left' },
+    t_approve:       { from: 'left', to: 'bottom', sameAxisOffset: 28 },
+    t_reject:        { from: 'left', to: 'bottom' },
+    t_expiring:      { from: 'top', to: 'bottom', sameAxisOffset: -8 },
+    t_expired:       { from: 'right', to: 'left' },
+    t_expired_drift: { from: 'top', to: 'bottom', sameAxisOffset: 8 },
+    t_expired_breach:{ from: 'top', to: 'right' },
+    t_renew:         { from: 'bottom', to: 'top', sameAxisOffset: 8 },
+    t_archive_exp:   { from: 'bottom', to: 'top' },
+    t_archive_paused:{ from: 'right', to: 'left' },
+    t_unarchive:     { from: 'left', to: 'right' },
+  };
+
+  function pathFor(tran) {
+    const r = ROUTE[tran.id];
+    let a, b;
+    if (r && r.from) {
+      a = anchor(tran.from, r.from);
+      b = anchor(tran.to, r.to);
+    } else {
+      [a, b] = autoAnchors(tran.from, tran.to);
+    }
+    // sameAxisOffset: add slight perpendicular offset to avoid overlap when from/to share an axis
+    if (r && r.sameAxisOffset) {
+      if (r.from === 'left' || r.from === 'right') {
+        a = { x: a.x, y: a.y + r.sameAxisOffset };
+        b = { x: b.x, y: b.y + r.sameAxisOffset };
+      } else {
+        a = { x: a.x + r.sameAxisOffset, y: a.y };
+        b = { x: b.x + r.sameAxisOffset, y: b.y };
+      }
+    }
+
+    // Build curve
+    let path;
+    if (r && r.offset !== undefined) {
+      // Loop over top/bottom — wide arc
+      const midY = (a.y + b.y) / 2 + r.offset;
+      path = `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`;
+    } else if (r && r.viaY !== undefined) {
+      path = `M ${a.x} ${a.y} C ${(a.x+b.x)/2} ${r.viaY}, ${(a.x+b.x)/2} ${r.viaY}, ${b.x} ${b.y}`;
+    } else {
+      // Smooth cubic with perpendicular control points
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const horiz = Math.abs(dx) > Math.abs(dy);
+      const c1 = horiz ? { x: a.x + dx * 0.5, y: a.y } : { x: a.x, y: a.y + dy * 0.5 };
+      const c2 = horiz ? { x: b.x - dx * 0.5, y: b.y } : { x: b.x, y: b.y - dy * 0.5 };
+      path = `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
+    }
+
+    // Label midpoint — approx
+    let labelX = (a.x + b.x) / 2;
+    let labelY = (a.y + b.y) / 2;
+    if (r && r.offset !== undefined) labelY = (a.y + b.y) / 2 + r.offset * 0.7;
+    if (r && r.viaY !== undefined) labelY = r.viaY;
+
+    return { path, labelX, labelY };
+  }
+
+  // Render edges
+  TRANSITIONS.forEach(tran => {
+    const { path, labelX, labelY } = pathFor(tran);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'edge-group');
+    g.setAttribute('data-id', tran.id);
+
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('class', 'edge-hit');
+    hit.setAttribute('d', path);
+    g.appendChild(hit);
+
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', 'edge');
+    p.setAttribute('d', path);
+    p.setAttribute('marker-end', 'url(#arrow)');
+    p.setAttribute('data-trigger', tran.trigger);
+    if (tran.trigger === 'auto' || tran.trigger === 'schedule') {
+      p.setAttribute('stroke-dasharray', '5 3');
+    }
+    g.appendChild(p);
+
+    // Label
+    const labelW = Math.max(48, tran.event.length * 6.2 + 12);
+    const lblBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    lblBg.setAttribute('class', 'edge-label-bg');
+    lblBg.setAttribute('x', labelX - labelW / 2);
+    lblBg.setAttribute('y', labelY - 9);
+    lblBg.setAttribute('width', labelW);
+    lblBg.setAttribute('height', 18);
+    g.appendChild(lblBg);
+
+    const lblTxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lblTxt.setAttribute('class', 'edge-label-text');
+    lblTxt.setAttribute('x', labelX);
+    lblTxt.setAttribute('y', labelY + 1);
+    lblTxt.textContent = tran.event;
+    g.appendChild(lblTxt);
+
+    g.addEventListener('mouseenter', (e) => showTooltip(e, `<span class="tt-event">${tran.event}</span><div class="tt-desc">${tran.from} → ${tran.to}<br>${tran.desc}</div>`));
+    g.addEventListener('mousemove', moveTooltip);
+    g.addEventListener('mouseleave', hideTooltip);
+    g.addEventListener('click', () => selectTransition(tran.id));
+
+    edgeLayer.appendChild(g);
+  });
+
+  // Render nodes
+  Object.entries(STATES).forEach(([name, s]) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'node-group');
+    g.setAttribute('data-id', name);
+    g.setAttribute('transform', `translate(${s.x - NODE_W/2}, ${s.y - NODE_H/2})`);
+    g.style.color = s.color;
+
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('class', 'node-bg');
+    bg.setAttribute('x', 0); bg.setAttribute('y', 0);
+    bg.setAttribute('width', NODE_W); bg.setAttribute('height', NODE_H);
+    bg.setAttribute('rx', 10);
+    bg.setAttribute('fill', `color-mix(in oklab, ${s.color} 14%, var(--card))`);
+    bg.setAttribute('stroke', s.color);
+    bg.setAttribute('stroke-width', '1.6');
+    g.appendChild(bg);
+
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lbl.setAttribute('class', 'node-label');
+    lbl.setAttribute('x', NODE_W / 2);
+    lbl.setAttribute('y', NODE_H / 2 - 4);
+    lbl.textContent = name;
+    g.appendChild(lbl);
+
+    const tag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tag.setAttribute('class', 'node-tag');
+    tag.setAttribute('x', NODE_W / 2);
+    tag.setAttribute('y', NODE_H / 2 + 12);
+    tag.textContent = s.tone.replace('-state','').replace('-soft','');
+    g.appendChild(tag);
+
+    g.addEventListener('mouseenter', (e) => showTooltip(e, `<span class="tt-event">${name}</span><div class="tt-desc">${s.desc}</div>`));
+    g.addEventListener('mousemove', moveTooltip);
+    g.addEventListener('mouseleave', hideTooltip);
+    g.addEventListener('click', () => selectState(name));
+
+    nodeLayer.appendChild(g);
+  });
+
+  // ─── Tooltip ────────────────────────────────────────────────
+  function showTooltip(e, html) {
+    tooltip.innerHTML = html;
+    tooltip.classList.add('show');
+    moveTooltip(e);
+  }
+  function moveTooltip(e) {
+    const pad = 14;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    if (x + tw > window.innerWidth - 8) x = e.clientX - tw - pad;
+    if (y + th > window.innerHeight - 8) y = e.clientY - th - pad;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }
+  function hideTooltip() { tooltip.classList.remove('show'); }
+
+  // ─── Selection / detail panel ───────────────────────────────
+  function clearActive() {
+    document.querySelectorAll('.node-group, .edge-group').forEach(g => {
+      g.classList.remove('active', 'dim');
+    });
+  }
+
+  function dimAllExcept(stateName, relatedTranIds) {
+    document.querySelectorAll('.node-group').forEach(g => {
+      const id = g.getAttribute('data-id');
+      const isRelated = id === stateName || TRANSITIONS.some(t =>
+        relatedTranIds.includes(t.id) && (t.from === id || t.to === id));
+      if (!isRelated) g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      const id = g.getAttribute('data-id');
+      if (!relatedTranIds.includes(id)) g.classList.add('dim');
+    });
+  }
+
+  function selectState(name) {
+    clearActive();
+    const node = document.querySelector(`.node-group[data-id="${name}"]`);
+    if (node) node.classList.add('active');
+
+    const incoming = TRANSITIONS.filter(t => t.to === name);
+    const outgoing = TRANSITIONS.filter(t => t.from === name);
+    const relIds = [...incoming, ...outgoing].map(t => t.id);
+    dimAllExcept(name, relIds);
+
+    relIds.forEach(id => {
+      const e = document.querySelector(`.edge-group[data-id="${id}"]`);
+      if (e) e.classList.add('active');
+    });
+
+    renderStatePanel(name, incoming, outgoing);
+  }
+
+  function selectTransition(id) {
+    clearActive();
+    const tran = TRANSITIONS.find(t => t.id === id);
+    if (!tran) return;
+
+    document.querySelectorAll('.node-group').forEach(g => {
+      const nid = g.getAttribute('data-id');
+      if (nid === tran.from || nid === tran.to) g.classList.add('active');
+      else g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      if (g.getAttribute('data-id') !== id) g.classList.add('dim');
+    });
+    document.querySelector(`.edge-group[data-id="${id}"]`).classList.add('active');
+
+    renderTransitionPanel(tran);
+  }
+
+  function renderStatePanel(name, incoming, outgoing) {
+    const s = STATES[name];
+    document.getElementById('panelHead').style.color = s.color;
+    document.querySelector('.panel-head .swatch').style.color = s.color;
+    document.getElementById('panelTitle').textContent = name;
+    document.getElementById('panelTag').textContent = 'STATE';
+
+    const tranRow = (t) => `
+      <div class="tran-row" data-trigger="${t.trigger}" data-tran="${t.id}">
+        <div class="tran-head">
+          <span class="tran-event">${t.event}</span>
+          <span class="tran-arrow">→</span>
+          <span class="tran-to">${t.from === name ? t.to : t.from}</span>
+        </div>
+        <span class="tran-meta">${t.desc}</span>
+      </div>`;
+
+    document.getElementById('panelBody').innerHTML = `
+      <div class="panel-section">
+        <h3>Meaning</h3>
+        <p class="desc">${s.desc}</p>
+      </div>
+      <div class="panel-section">
+        <h3>UI mapping</h3>
+        <p class="desc">${s.ui}</p>
+      </div>
+      <div class="panel-section">
+        <h3>Outgoing — ${outgoing.length}</h3>
+        <div class="tran-list">${outgoing.map(tranRow).join('') || '<p class="desc" style="font-size: 11.5px;">Terminal state — no outgoing transitions.</p>'}</div>
+      </div>
+      <div class="panel-section">
+        <h3>Incoming — ${incoming.length}</h3>
+        <div class="tran-list">${incoming.map(tranRow).join('') || '<p class="desc" style="font-size: 11.5px;">Initial state — no incoming transitions.</p>'}</div>
+      </div>
+    `;
+    bindTranRowClicks();
+  }
+
+  function renderTransitionPanel(tran) {
+    const fromColor = STATES[tran.from].color;
+    document.getElementById('panelHead').style.color = 'var(--primary)';
+    document.querySelector('.panel-head .swatch').style.color = 'var(--primary)';
+    document.getElementById('panelTitle').textContent = tran.event;
+    document.getElementById('panelTag').textContent = tran.trigger.toUpperCase();
+
+    document.getElementById('panelBody').innerHTML = `
+      <div class="panel-section">
+        <h3>Transition</h3>
+        <p style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600;">
+          <span style="color: ${fromColor};">${tran.from}</span>
+          <span style="color: var(--muted-2);">→</span>
+          <span style="color: ${STATES[tran.to].color};">${tran.to}</span>
+        </p>
+      </div>
+      <div class="panel-section">
+        <h3>Description</h3>
+        <p class="desc">${tran.desc}</p>
+      </div>
+      <div class="panel-section">
+        <h3>Trigger</h3>
+        <p class="desc">
+          ${tran.trigger === 'user' ? '👤 User action — provider or consumer initiates this from UI.' :
+            tran.trigger === 'auto' ? '⚙ System — emitted automatically when drift engine detects a change.' :
+            '⏱ Schedule — fires on time-based check (expiry).'}
+        </p>
+      </div>
+      <div class="panel-section">
+        <h3>Implementation</h3>
+        <p class="desc mono" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--card); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);">
+          dispatch({ type: '${tran.event}', contractId })
+        </p>
+      </div>
+    `;
+  }
+
+  function bindTranRowClicks() {
+    document.querySelectorAll('.tran-row').forEach(row => {
+      row.addEventListener('click', () => selectTransition(row.dataset.tran));
+    });
+  }
+
+  // ─── Simulator ──────────────────────────────────────────────
+  const SIMS = {
+    happy:        ['Draft', 't_publish', 'Active'],
+    drift_resign: ['Active', 't_drift', 'Drift', 't_resign', 'Active'],
+    breach:       ['Active', 't_drift', 'Drift', 't_breach_drift', 'Breach', 't_resign_breach', 'Active'],
+    review:       ['Active', 't_review_active', 'InReview', 't_approve', 'Active'],
+    reject:       ['Active', 't_review_active', 'InReview', 't_reject', 'Draft'],
+    expire:       ['Active', 't_expiring', 'ExpiringIn30Days', 't_expired', 'Expired', 't_renew', 'Active'],
+    archive:      ['Active', 't_expiring', 'ExpiringIn30Days', 't_expired', 'Expired', 't_archive_exp', 'Archived', 't_unarchive', 'Draft'],
+    pause:        ['Active', 't_pause', 'Paused', 't_resume', 'Active'],
+  };
+
+  let simSteps = [], simIdx = 0, simTimer = null;
+
+  function loadSim(key) {
+    stopSim();
+    simSteps = SIMS[key] || [];
+    simIdx = 0;
+    clearActive();
+    if (simSteps.length) highlightSimStep();
+  }
+
+  function highlightSimStep() {
+    clearActive();
+    // Highlight all steps up to current
+    for (let i = 0; i <= simIdx; i++) {
+      const step = simSteps[i];
+      if (STATES[step]) {
+        const node = document.querySelector(`.node-group[data-id="${step}"]`);
+        if (node) node.classList.add('active');
+      } else {
+        const edge = document.querySelector(`.edge-group[data-id="${step}"]`);
+        if (edge) edge.classList.add('active');
+      }
+    }
+    // Dim everything else
+    document.querySelectorAll('.node-group').forEach(g => {
+      if (!g.classList.contains('active')) g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      if (!g.classList.contains('active')) g.classList.add('dim');
+    });
+    // Open detail of last step
+    const last = simSteps[simIdx];
+    if (STATES[last]) {
+      const inc = TRANSITIONS.filter(t => t.to === last);
+      const out = TRANSITIONS.filter(t => t.from === last);
+      renderStatePanel(last, inc, out);
+    } else {
+      renderTransitionPanel(TRANSITIONS.find(t => t.id === last));
+    }
+  }
+
+  function stepSim() {
+    if (simIdx < simSteps.length - 1) {
+      simIdx++;
+      highlightSimStep();
+    } else {
+      stopSim();
+    }
+  }
+
+  function playSim() {
+    stopSim();
+    simTimer = setInterval(() => {
+      if (simIdx < simSteps.length - 1) { simIdx++; highlightSimStep(); }
+      else stopSim();
+    }, 900);
+  }
+
+  function stopSim() {
+    if (simTimer) clearInterval(simTimer);
+    simTimer = null;
+  }
+
+  document.getElementById('simSelect').addEventListener('change', (e) => {
+    if (e.target.value) loadSim(e.target.value);
+    else { clearActive(); renderEmpty(); }
+  });
+  document.getElementById('simPlay').addEventListener('click', () => {
+    if (simSteps.length) playSim();
+  });
+  document.getElementById('simStep').addEventListener('click', () => {
+    if (simSteps.length) stepSim();
+  });
+
+  // ─── Zoom / pan ─────────────────────────────────────────────
+  let zoom = 1, panX = 0, panY = 0;
+  const baseW = 1120, baseH = 720;
+
+  function applyZoom() {
+    const vbW = baseW / zoom;
+    const vbH = baseH / zoom;
+    const vbX = panX - (vbW - baseW) / 2;
+    const vbY = panY - (vbH - baseH) / 2;
+    svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+  }
+  document.getElementById('zoomIn').onclick = () => { zoom = Math.min(2.5, zoom + 0.2); applyZoom(); };
+  document.getElementById('zoomOut').onclick = () => { zoom = Math.max(0.5, zoom - 0.2); applyZoom(); };
+  document.getElementById('zoomFit').onclick = () => { zoom = 1; panX = 0; panY = 0; applyZoom(); };
+
+  let isPanning = false, panStart = null;
+  const canvasWrap = document.getElementById('canvasWrap');
+  canvasWrap.addEventListener('mousedown', (e) => {
+    if (e.target === svg || e.target.classList.contains('canvas-bg')) {
+      isPanning = true; panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY };
+      canvasWrap.style.cursor = 'grabbing';
+    }
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    panX = panStart.px - (e.clientX - panStart.x) / zoom;
+    panY = panStart.py - (e.clientY - panStart.y) / zoom;
+    applyZoom();
+  });
+  window.addEventListener('mouseup', () => { isPanning = false; canvasWrap.style.cursor = ''; });
+
+  canvasWrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    zoom = Math.max(0.5, Math.min(2.5, zoom + delta));
+    applyZoom();
+  }, { passive: false });
+
+  // Click on empty canvas → clear
+  svg.addEventListener('click', (e) => {
+    if (e.target === svg) {
+      clearActive();
+      renderEmpty();
+      document.getElementById('simSelect').value = '';
+      simSteps = []; simIdx = 0;
+    }
+  });
+
+  function renderEmpty() {
+    document.getElementById('panelHead').style.color = 'var(--fg)';
+    document.querySelector('.panel-head .swatch').style.color = 'var(--muted-2)';
+    document.getElementById('panelTitle').textContent = 'Select a state or transition';
+    document.getElementById('panelTag').textContent = '—';
+    document.getElementById('panelBody').innerHTML = `
+      <div class="panel-section">
+        <p class="desc">Click any node or arrow in the diagram to see its details, semantics, and UI mapping. Or pick a flow from the Simulate dropdown to trace common paths.</p>
+      </div>
+      <div class="panel-section">
+        <h3>Quick stats</h3>
+        <p class="desc">${Object.keys(STATES).length} states · ${TRANSITIONS.length} transitions</p>
+        <p class="desc" style="margin-top: 4px;">${TRANSITIONS.filter(t=>t.trigger==='user').length} user-driven · ${TRANSITIONS.filter(t=>t.trigger==='auto').length} system · ${TRANSITIONS.filter(t=>t.trigger==='schedule').length} scheduled</p>
+      </div>
+      <div class="panel-section">
+        <h3>Tip</h3>
+        <p class="desc">Drag the background to pan. Scroll to zoom. Press Esc to deselect.</p>
+      </div>
+    `;
+  }
+
+  // ─── Header buttons ─────────────────────────────────────────
+  document.getElementById('resetBtn').onclick = () => {
+    clearActive(); renderEmpty(); document.getElementById('simSelect').value = '';
+    zoom = 1; panX = 0; panY = 0; applyZoom(); stopSim();
+  };
+  document.getElementById('themeBtn').onclick = () => {
+    document.documentElement.classList.toggle('light');
+  };
+  document.getElementById('exportSvg').onclick = () => {
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'contract-state-machine.svg';
+    a.click();
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { clearActive(); renderEmpty(); stopSim(); document.getElementById('simSelect').value = ''; }
+  });
+
+  // Initial state
+  renderEmpty();
+</script>
+</body>
+</html>
