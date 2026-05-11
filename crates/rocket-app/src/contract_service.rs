@@ -1663,6 +1663,34 @@ mod tests {
         assert_eq!(server, Some("https://api.example.com".to_string()));
         assert_eq!(path, "/users");
     }
+
+    // ── tag_from_request_path ────────────────────────────────────────────────
+    #[test]
+    fn tag_from_nested_path_returns_first_segment() {
+        use std::path::Path;
+        assert_eq!(
+            super::openapi::tag_from_request_path(Path::new("users/get-users.yml")),
+            Some("users".to_string()),
+        );
+    }
+
+    #[test]
+    fn tag_from_deep_nested_path_returns_first_segment() {
+        use std::path::Path;
+        assert_eq!(
+            super::openapi::tag_from_request_path(Path::new("auth/v2/login.yml")),
+            Some("auth".to_string()),
+        );
+    }
+
+    #[test]
+    fn tag_from_root_level_file_returns_none() {
+        use std::path::Path;
+        assert_eq!(
+            super::openapi::tag_from_request_path(Path::new("root-request.yml")),
+            None,
+        );
+    }
 }
 
 // ─── OpenAPI export types ─────────────────────────────────────────────────
@@ -1709,6 +1737,25 @@ mod openapi {
             format!("/{}", url)
         };
         (None, path)
+    }
+
+    /// Returns the first directory segment of a collection-relative request path
+    /// as an OpenAPI tag, or None for root-level files.
+    ///
+    /// "users/get-users.yml" → Some("users")
+    /// "auth/v2/login.yml"   → Some("auth")
+    /// "root-request.yml"    → None
+    pub fn tag_from_request_path(request_path: &std::path::Path) -> Option<String> {
+        use std::path::Component;
+        let mut components = request_path.components();
+        let first = components.next()?;
+        // If there's no second component, the file is at the root (no folder tag).
+        let _has_more = components.next()?;
+        if let Component::Normal(s) = first {
+            s.to_str().map(|s| s.to_string())
+        } else {
+            None
+        }
     }
 
     #[derive(Serialize)]
