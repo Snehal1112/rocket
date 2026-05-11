@@ -309,3 +309,47 @@ pub fn git_set_identity(path: String, name: String, email: String) -> Result<(),
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn init_repo(dir: &TempDir) -> String {
+        let path = dir.path().to_string_lossy().to_string();
+        git2::Repository::init(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn get_identity_returns_empty_when_unset() {
+        let dir = TempDir::new().unwrap();
+        let path = init_repo(&dir);
+        let identity = git_get_identity(path).unwrap();
+        assert_eq!(identity.name, "");
+        assert_eq!(identity.email, "");
+    }
+
+    #[test]
+    fn set_and_get_identity_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = init_repo(&dir);
+        git_set_identity(path.clone(), "Bob".into(), "bob@example.com".into()).unwrap();
+        let identity = git_get_identity(path).unwrap();
+        assert_eq!(identity.name, "Bob");
+        assert_eq!(identity.email, "bob@example.com");
+    }
+
+    #[test]
+    fn set_identity_writes_to_local_config_only() {
+        let dir = TempDir::new().unwrap();
+        let path = init_repo(&dir);
+        git_set_identity(path.clone(), "Local".into(), "local@test.com".into()).unwrap();
+        // Read config at local level only to confirm it's there.
+        let repo = git2::Repository::open(&path).unwrap();
+        let cfg = repo.config().unwrap();
+        let local = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+        assert_eq!(local.get_string("user.name").unwrap(), "Local");
+        assert_eq!(local.get_string("user.email").unwrap(), "local@test.com");
+    }
+}

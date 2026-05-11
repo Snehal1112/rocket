@@ -125,6 +125,9 @@ mod tests {
             old_value: Some("GET".into()),
             new_value: Some("POST".into()),
             is_breaking: false,
+            request_method: None,
+            http_path: None,
+            author: None,
         };
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.contains("\"requestPath\":"));
