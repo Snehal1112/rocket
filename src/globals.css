@@ -517,13 +517,22 @@
 }
 
 /* Linux/Windows: decorations off — 1px window border matching VS Code's approach.
-   border-box sizing keeps the border inside the element; no body padding or height hacks needed. */
+   border-box sizing keeps the border inside the element; no body padding or height hacks needed.
+   overflow:clip (not hidden) — prevents scrollbars without creating a scroll container that clips
+   fixed-position portal children (Sheet, Dialog, Toaster). WebKitGTK incorrectly clips fixed
+   elements that are children of body/html when overflow:hidden is set. */
 html.linux #root,
 html.windows #root {
   border: 1px solid hsl(var(--border));
   box-sizing: border-box;
   height: 100%;
-  overflow: hidden;
+  overflow: clip;
+}
+
+/* Same fix for body on Linux — overflow:hidden on body clips Radix Portal (fixed) children. */
+html.linux body,
+html.windows body {
+  overflow: clip;
 }
 
 /* Dim the border when the window loses focus, matching VS Code's inactive border treatment. */
