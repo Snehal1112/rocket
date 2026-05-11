@@ -403,11 +403,52 @@
 
 /* WKWebView (Tauri/macOS) requires -webkit-backdrop-filter prefix and GPU compositing.
    Forces the floating overlay onto its own compositor layer so blur renders correctly.
-   blur-sm = 8px per Tailwind v4 theme. */
+   blur-sm = 8px, blur-md = 12px per Tailwind v4 theme. */
 .backdrop-blur-sm {
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   transform: translateZ(0);
+}
+
+.backdrop-blur-md {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transform: translateZ(0);
+}
+
+/* WebKitGTK on Linux does not enable GPU compositing by default, so
+   backdrop-filter silently does nothing and semi-transparent backgrounds
+   (bg-dropdown-bg/50, bg-card/50, bg-background/20) look washed-out or
+   invisible. When backdrop-filter is unsupported we disable the blur and
+   force opaque surfaces so overlays remain readable. */
+@supports not (backdrop-filter: blur(1px)) {
+  .backdrop-blur-sm,
+  .backdrop-blur-md {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+  }
+
+  /* Dropdowns / popovers / selects use bg-dropdown-bg/50 — make it opaque. */
+  [data-slot='dropdown-menu-content'],
+  [data-slot='dropdown-menu-sub-content'],
+  [data-slot='context-menu-content'],
+  [data-slot='context-menu-sub-content'],
+  [data-slot='select-content'],
+  [data-slot='popover-content'] {
+    background-color: hsl(var(--dropdown-bg));
+  }
+
+  /* Popovers and cards that use bg-card/50 — make them opaque. */
+  [data-slot='popover-content'],
+  .bg-card\/50 {
+    background-color: hsl(var(--card));
+  }
+
+  /* Sheet overlay uses bg-background/20 — bump to a visible dim. */
+  [data-slot='sheet-overlay'] {
+    background-color: hsl(var(--background) / 0.7);
+  }
 }
 
 /* Modern thin scrollbars. */
