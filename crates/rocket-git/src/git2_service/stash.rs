@@ -96,7 +96,6 @@ pub(super) fn stash_save(path: &str, message: &str) -> DomainResult<()> {
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     let sig = repo
         .signature()
-        .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     // INCLUDE_UNTRACKED matches `git stash` CLI default — captures new

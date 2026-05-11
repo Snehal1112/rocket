@@ -92,9 +92,8 @@ pub(super) fn discard(path: &str, files: &[&str]) -> DomainResult<()> {
 #[tracing::instrument(name = "git_commit", fields(repo_path = %path, message = %message.get(..50).unwrap_or(message)))]
 pub(super) fn commit(path: &str, message: &str) -> DomainResult<CommitInfo> {
     let repo = open_repo(path)?;
-    let sig = repo.signature().or_else(|_|
-        git2::Signature::now("RocketAPI User", "user@rocketapi.local")
-    ).map_err(|e| DomainError::Internal(e.to_string()))?;
+    let sig = repo.signature()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     let mut index = repo.index().map_err(|e| DomainError::Internal(e.to_string()))?;
     let tree_id = index.write_tree().map_err(|e| DomainError::Internal(e.to_string()))?;

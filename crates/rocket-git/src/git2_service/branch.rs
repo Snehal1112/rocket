@@ -276,7 +276,6 @@ pub(super) fn merge_branch(path: &str, name: &str) -> DomainResult<()> {
 
     let sig = repo
         .signature()
-        .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     let head_commit = repo
