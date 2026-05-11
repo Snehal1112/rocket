@@ -2028,4 +2028,72 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
         assert_eq!(content.trim(), "main version", "file not restored after abort");
     }
+
+    #[test]
+    fn commit_fails_without_identity() {
+        // Create a repo with NO user.name/user.email in its config.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        {
+            let repo = git2::Repository::init(&path).unwrap();
+            repo.set_head("refs/heads/main").ok();
+
+            // Make an initial commit using an explicit signature (bypassing repo.signature()).
+            let sig = git2::Signature::now("Setup", "setup@test.com").unwrap();
+            fs::write(dir.path().join("a.bru"), "v1").unwrap();
+            let mut idx = repo.index().unwrap();
+            idx.add_path(std::path::Path::new("a.bru")).unwrap();
+            idx.write().unwrap();
+            let tree_id = idx.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.set_head("refs/heads/main").unwrap();
+        }
+
+        // Stage a change.
+        fs::write(dir.path().join("a.bru"), "v2").unwrap();
+        Git2Service::new().stage(&path, &["a.bru"]).unwrap();
+
+        // Commit should fail — no identity in git config, no fallback.
+        let result = Git2Service::new().commit(&path, "second commit");
+        assert!(result.is_err(), "expected error when identity is missing, got: {:?}", result);
+    }
+
+    #[test]
+    fn commit_succeeds_with_identity() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        {
+            let repo = git2::Repository::init(&path).unwrap();
+            repo.set_head("refs/heads/main").ok();
+
+            // Write identity into the repo-local config.
+            let cfg = repo.config().unwrap();
+            let mut local = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+            local.set_str("user.name", "Alice").unwrap();
+            local.set_str("user.email", "alice@example.com").unwrap();
+            drop(local);
+            drop(cfg);
+
+            // Initial commit via explicit sig (identity not needed for this step).
+            let sig = git2::Signature::now("Setup", "setup@test.com").unwrap();
+            fs::write(dir.path().join("a.bru"), "v1").unwrap();
+            let mut idx = repo.index().unwrap();
+            idx.add_path(std::path::Path::new("a.bru")).unwrap();
+            idx.write().unwrap();
+            let tree_id = idx.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.set_head("refs/heads/main").unwrap();
+        }
+
+        // Stage a change and commit via the service — should use config identity.
+        fs::write(dir.path().join("a.bru"), "v2").unwrap();
+        Git2Service::new().stage(&path, &["a.bru"]).unwrap();
+        let result = Git2Service::new().commit(&path, "second commit");
+        assert!(result.is_ok(), "commit failed: {:?}", result);
+        let info = result.unwrap();
+        assert_eq!(info.author, "Alice");
+        assert_eq!(info.author_email, "alice@example.com");
+    }
 }
