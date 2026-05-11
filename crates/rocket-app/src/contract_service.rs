@@ -4,7 +4,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     contract::{
-        changelog::{ChangeType, ChangelogEntry, ContractChangelog},
+        changelog::{ChangelogEntry, ContractChangelog},
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
@@ -543,7 +543,6 @@ impl ContractService {
             let original_drift = contract.drift_count;
             let original_breach = contract.breach_count;
 
-            let mut all_entries: Vec<ChangelogEntry> = Vec::new();
             let mut drift_count = 0u32;
             let mut breach_count = 0u32;
 
@@ -554,19 +553,7 @@ impl ContractService {
 
                 match current {
                     None => {
-                        // Request removed — always breaking
-                        all_entries.push(ChangelogEntry {
-                            timestamp: chrono::Utc::now(),
-                            request_path: snap_entry.request_path.clone(),
-                            field: "request".into(),
-                            change_type: ChangeType::Removed,
-                            old_value: Some(format!("{} {}", snap_entry.method, snap_entry.url_pattern)),
-                            new_value: None,
-                            is_breaking: true,
-                            request_method: Some(snap_entry.method.clone()),
-                            http_path: Some(snap_entry.url_pattern.clone()),
-                            author: None,
-                        });
+                        // Request removed — always a breaking drift.
                         drift_count += 1;
                         breach_count += 1;
                     }
@@ -583,7 +570,6 @@ impl ContractService {
                                 breach_count += 1;
                             }
                         }
-                        all_entries.extend(changes);
                     }
                 }
             }
@@ -632,12 +618,9 @@ impl ContractService {
             contract.breach_count = breach_count;
             contract.updated_at = Some(chrono::Utc::now());
 
-            if !all_entries.is_empty() {
-                let mut incoming = ContractChangelog::new(contract.id);
-                incoming.append(all_entries);
-                self.repo.append_changelog(collection_root, &incoming)?;
-            }
-
+            // Changelog entries are written by on_request_saved (with author attribution)
+            // each time a request is saved. recompute_drift uses the diff only for
+            // counting — writing here would produce duplicate authorless entries.
             self.repo.save_contract(collection_root, &contract)?;
 
             summaries.push(ContractDriftSummary {
