@@ -197,6 +197,14 @@ mod tests {
         // Ensure the default branch is "main" regardless of system git config.
         repo.set_head("refs/heads/main").ok();
 
+        // Set git config identity so repo.signature() succeeds in service tests.
+        let cfg = repo.config().unwrap();
+        let mut local = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+        local.set_str("user.name", "Test").unwrap();
+        local.set_str("user.email", "test@test.com").unwrap();
+        drop(local);
+        drop(cfg);
+
         let sig = git2::Signature::now("Test", "test@test.com").unwrap();
         fs::write(dir.path().join("test.bru"), "meta { name: Test }").unwrap();
         let mut index = repo.index().unwrap();
@@ -227,6 +235,15 @@ mod tests {
 
         // Make an initial commit so the repo is non-empty.
         let repo = git2::Repository::open(&local_path).unwrap();
+
+        // Set git config identity so repo.signature() succeeds in tests.
+        let cfg = repo.config().unwrap();
+        let mut local = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+        local.set_str("user.name", "T").unwrap();
+        local.set_str("user.email", "t@t.com").unwrap();
+        drop(local);
+        drop(cfg);
+
         let sig = git2::Signature::now("T", "t@t.com").unwrap();
         std::fs::write(local_dir.path().join("a.bru"), "content").unwrap();
         let mut idx = repo.index().unwrap();
