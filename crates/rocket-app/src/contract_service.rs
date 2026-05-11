@@ -1622,3 +1622,165 @@ mod tests {
         );
     }
 }
+
+// ─── OpenAPI export types ─────────────────────────────────────────────────
+
+mod openapi {
+    use serde::Serialize;
+    use std::collections::BTreeMap;
+
+    #[derive(Serialize)]
+    pub struct OpenApiDoc {
+        pub openapi: &'static str,
+        pub info: InfoObject,
+        pub servers: Vec<ServerObject>,
+        pub paths: BTreeMap<String, BTreeMap<String, OperationObject>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub components: Option<ComponentsObject>,
+    }
+
+    #[derive(Serialize)]
+    pub struct ServerObject {
+        pub url: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct InfoObject {
+        pub title: String,
+        pub version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub contact: Option<ContactObject>,
+        #[serde(rename = "x-contract-id")]
+        pub x_contract_id: String,
+        #[serde(rename = "x-contract-status")]
+        pub x_contract_status: String,
+        #[serde(rename = "x-contract-enforcement-mode")]
+        pub x_contract_enforcement_mode: String,
+        #[serde(rename = "x-contract-provider")]
+        pub x_contract_provider: PartyValue,
+        #[serde(rename = "x-contract-consumers")]
+        pub x_contract_consumers: Vec<PartyValue>,
+        #[serde(rename = "x-contract-effective-date")]
+        pub x_contract_effective_date: String,
+        #[serde(rename = "x-contract-expiry-date", skip_serializing_if = "Option::is_none")]
+        pub x_contract_expiry_date: Option<String>,
+        #[serde(rename = "x-contract-policy")]
+        pub x_contract_policy: PolicyValue,
+        #[serde(rename = "x-contract-scope")]
+        pub x_contract_scope: String,
+        #[serde(rename = "x-contract-drift-count")]
+        pub x_contract_drift_count: u32,
+        #[serde(rename = "x-contract-breach-count")]
+        pub x_contract_breach_count: u32,
+        #[serde(rename = "x-contract-endpoint-count")]
+        pub x_contract_endpoint_count: u32,
+        #[serde(rename = "x-contract-document-paths", skip_serializing_if = "Vec::is_empty")]
+        pub x_contract_document_paths: Vec<String>,
+        #[serde(rename = "x-contract-created-by", skip_serializing_if = "Option::is_none")]
+        pub x_contract_created_by: Option<String>,
+        #[serde(rename = "x-contract-created-at", skip_serializing_if = "Option::is_none")]
+        pub x_contract_created_at: Option<String>,
+        #[serde(rename = "x-contract-updated-at", skip_serializing_if = "Option::is_none")]
+        pub x_contract_updated_at: Option<String>,
+    }
+
+    #[derive(Serialize)]
+    pub struct ContactObject {
+        pub name: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct PartyValue {
+        pub id: String,
+        pub name: String,
+        pub kind: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct PolicyValue {
+        #[serde(rename = "breakingChangePolicy")]
+        pub breaking_change_policy: String,
+        #[serde(rename = "noticeDays")]
+        pub notice_days: u32,
+        #[serde(rename = "uptimeSla", skip_serializing_if = "Option::is_none")]
+        pub uptime_sla: Option<f32>,
+    }
+
+    #[derive(Serialize)]
+    pub struct ParameterObject {
+        pub name: String,
+        #[serde(rename = "in")]
+        pub location: &'static str,
+        pub schema: SchemaObject,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub example: Option<String>,
+    }
+
+    #[derive(Serialize)]
+    pub struct SchemaObject {
+        #[serde(rename = "type")]
+        pub schema_type: &'static str,
+    }
+
+    #[derive(Serialize)]
+    pub struct RequestBodyObject {
+        pub required: bool,
+        pub content: BTreeMap<String, MediaTypeObject>,
+    }
+
+    #[derive(Serialize)]
+    pub struct MediaTypeObject {
+        pub schema: SchemaObject,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub example: Option<serde_yaml::Value>,
+    }
+
+    #[derive(Serialize)]
+    pub struct ResponseObject {
+        pub description: &'static str,
+    }
+
+    #[derive(Serialize)]
+    pub struct OperationObject {
+        #[serde(rename = "operationId")]
+        pub operation_id: String,
+        pub summary: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub tags: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub parameters: Vec<ParameterObject>,
+        #[serde(rename = "requestBody", skip_serializing_if = "Option::is_none")]
+        pub request_body: Option<RequestBodyObject>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub security: Option<Vec<BTreeMap<String, Vec<String>>>>,
+        pub responses: BTreeMap<String, ResponseObject>,
+        #[serde(rename = "x-source-path", skip_serializing_if = "Option::is_none")]
+        pub x_source_path: Option<String>,
+        #[serde(rename = "x-captured-at", skip_serializing_if = "Option::is_none")]
+        pub x_captured_at: Option<String>,
+        #[serde(rename = "x-auth-detail", skip_serializing_if = "Option::is_none")]
+        pub x_auth_detail: Option<String>,
+    }
+
+    #[derive(Serialize)]
+    pub struct ComponentsObject {
+        #[serde(rename = "securitySchemes")]
+        pub security_schemes: BTreeMap<String, SecuritySchemeObject>,
+    }
+
+    #[derive(Serialize)]
+    pub struct SecuritySchemeObject {
+        #[serde(rename = "type")]
+        pub scheme_type: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub scheme: Option<&'static str>,
+        #[serde(rename = "in", skip_serializing_if = "Option::is_none")]
+        pub location: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub flows: Option<serde_yaml::Value>,
+    }
+}
