@@ -275,6 +275,11 @@ export interface CommitInfo {
   filesChanged: number;
 }
 
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
 export interface Branch {
   name: string;
   isHead: boolean;
@@ -723,6 +728,12 @@ export const gitRemoveRemote = (collectionPath: string, name: string) =>
 
 export const gitSetRemoteUrl = (collectionPath: string, name: string, url: string) =>
   invoke<void>('git_set_remote_url', { collectionPath, name, url });
+
+export const gitGetIdentity = (collectionPath: string) =>
+  invoke<GitIdentity>('git_get_identity', { path: collectionPath });
+
+export const gitSetIdentity = (collectionPath: string, name: string, email: string) =>
+  invoke<void>('git_set_identity', { path: collectionPath, name, email });
 
 export const scanCollectionsInPath = (path: string) =>
   invoke<CollectionScanResult[]>('scan_collections_in_path', { path });
