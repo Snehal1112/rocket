@@ -142,6 +142,9 @@ newValue: POST
             old_value: Some("GET".into()),
             new_value: Some("POST".into()),
             is_breaking: true,
+            request_method: Some("GET".into()),
+            http_path: Some("/payments".into()),
+            author: Some("alice".into()),
         };
         let yaml = serde_yaml::to_string(&r).unwrap();
         assert!(yaml.contains("requestPath:"));

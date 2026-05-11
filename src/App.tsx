@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
-import { listWorkspaces, type Workspace } from '@/lib/tauri-api';
+import { getActiveWorkspace, listWorkspaces, type Workspace } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
@@ -37,12 +37,17 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      // Load workspaces fresh for startup, then seed the query cache.
-      const workspaces = await listWorkspaces();
+      // Load workspaces and the backend-persisted active workspace in parallel.
+      const [workspaces, activeWs] = await Promise.all([
+        listWorkspaces(),
+        getActiveWorkspace().catch(() => null),
+      ]);
       getQueryClient().setQueryData(workspaceKeys.all, workspaces);
 
-      if (workspaces.length > 0) {
-        useWorkspaceStore.getState().setActiveWorkspaceId(workspaces[0].id);
+      // Use the backend-persisted active workspace so the selection survives reloads.
+      const persistedId = activeWs?.id ?? workspaces[0]?.id;
+      if (persistedId) {
+        useWorkspaceStore.getState().setActiveWorkspaceId(persistedId);
       }
 
       const uiState = await restoreUiState();
@@ -79,11 +84,8 @@ function App() {
           };
           usePaneStore.getState().openTab(tab);
         }
-      } else {
-        const firstWs = workspaces[0];
-        if (firstWs) {
-          usePaneStore.getState().openWorkspaceTabs(firstWs.id);
-        }
+      } else if (persistedId) {
+        usePaneStore.getState().openWorkspaceTabs(persistedId);
       }
 
       // Process env vars, global env, and collection environments are now

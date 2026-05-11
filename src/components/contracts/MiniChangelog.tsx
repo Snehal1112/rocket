@@ -82,7 +82,7 @@ export function MiniChangelog({
           <button
             type='button'
             onClick={onViewAll}
-            className='text-[11px] text-primary hover:underline cursor-pointer'
+            className='text-[11px] font-semibold text-primary hover:underline cursor-pointer'
           >
             View all →
           </button>

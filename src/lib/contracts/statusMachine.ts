@@ -38,7 +38,7 @@ export function statusLabel(status: ContractStatus): string {
 
 /** Returns the display label for use inside ContractStatusChip (includes count for drift/breach). */
 export function statusChipLabel(status: ContractStatus, count?: number): string {
-  if (status === 'drift' && count && count > 0) return `⚠ Drift · ${count}`;
+  if (status === 'drift' && count && count > 0) return `Drift · ${count}`;
   if (status === 'breach') return 'Breaching';
   return statusLabel(status);
 }

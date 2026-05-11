@@ -27,12 +27,12 @@ const chipVariants: Record<ContractStatus, string> = {
 
 const dotVariants: Record<ContractStatus, string | null> = {
   active: 'bg-[hsl(var(--success))] animate-pulse',
-  drift: null,
-  breach: null,
-  in_review: null,
+  drift: 'bg-[hsl(var(--warning))]',
+  breach: 'bg-[hsl(var(--destructive))]',
+  in_review: 'bg-primary',
   draft: null,
-  paused: null,
-  expired: null,
+  paused: 'bg-muted-foreground/50',
+  expired: 'bg-muted-foreground/50',
   expiring_in_30_days: 'bg-[hsl(var(--warning))] animate-pulse',
   archived: null,
 };
