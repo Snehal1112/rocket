@@ -1691,6 +1691,38 @@ mod tests {
             None,
         );
     }
+
+    // ── infer_content_type_and_example ──────────────────────────────────────
+    #[test]
+    fn infer_json_object_body() {
+        let (ct, example) = super::openapi::infer_content_type_and_example(
+            r#"{"name":"Ada","email":"a@b.com"}"#,
+        );
+        assert_eq!(ct, "application/json");
+        // Example must be a YAML mapping (not a raw string).
+        assert!(example.is_mapping(), "expected mapping, got {:?}", example);
+    }
+
+    #[test]
+    fn infer_json_array_body() {
+        let (ct, example) = super::openapi::infer_content_type_and_example(r#"[1,2,3]"#);
+        assert_eq!(ct, "application/json");
+        assert!(example.is_sequence());
+    }
+
+    #[test]
+    fn infer_plain_text_body() {
+        let (ct, example) = super::openapi::infer_content_type_and_example("hello world");
+        assert_eq!(ct, "text/plain");
+        assert_eq!(example, serde_yaml::Value::String("hello world".into()));
+    }
+
+    #[test]
+    fn infer_xml_body_falls_back_to_text_plain() {
+        let (ct, _) = super::openapi::infer_content_type_and_example("<root><id>1</id></root>");
+        // XML detection is out of scope — falls back to text/plain.
+        assert_eq!(ct, "text/plain");
+    }
 }
 
 // ─── OpenAPI export types ─────────────────────────────────────────────────
@@ -1756,6 +1788,25 @@ mod openapi {
         } else {
             None
         }
+    }
+
+    /// Infers an OpenAPI content-type string and example value from a raw body string.
+    ///
+    /// JSON objects/arrays → ("application/json", parsed Value)
+    /// Anything else       → ("text/plain", String Value)
+    pub fn infer_content_type_and_example(body: &str) -> (&'static str, serde_yaml::Value) {
+        let trimmed = body.trim();
+        let looks_like_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+
+        if looks_like_json {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if let Ok(yaml_val) = serde_yaml::to_value(val) {
+                    return ("application/json", yaml_val);
+                }
+            }
+        }
+        ("text/plain", serde_yaml::Value::String(body.to_string()))
     }
 
     #[derive(Serialize)]
