@@ -1570,7 +1570,13 @@ mod tests {
         // Clone B: starts from the same base.
         let dir_b = TempDir::new().unwrap();
         let path_b = dir_b.path().to_string_lossy().to_string();
-        Repository::clone(&remote_path, &path_b).unwrap();
+        let repo_b = Repository::clone(&remote_path, &path_b).unwrap();
+        let cfg_b = repo_b.config().unwrap();
+        let mut local_b = cfg_b.open_level(git2::ConfigLevel::Local).unwrap();
+        local_b.set_str("user.name", "B").unwrap();
+        local_b.set_str("user.email", "b@test.com").unwrap();
+        drop(local_b);
+        drop(repo_b);
 
         let svc = Git2Service::new();
         let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
