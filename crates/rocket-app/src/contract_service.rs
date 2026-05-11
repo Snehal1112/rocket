@@ -696,38 +696,201 @@ impl ContractService {
             .collect())
     }
 
-    /// Generates a minimal OpenAPI 3.0 YAML stub for the given contract.
+    /// Generates a full OpenAPI 3.0.3 YAML document for the given contract.
     /// Returns the YAML as a String — the frontend triggers the native save dialog.
     pub fn export_as_openapi_yaml(
         &self,
         collection_root: &std::path::Path,
         id: ulid::Ulid,
     ) -> ContractResult<String> {
+        use openapi::*;
+        use std::collections::BTreeMap;
+
         let contract = self.repo.load_contract(collection_root, id)?;
         let snapshot = self.repo.load_snapshot(collection_root, id).ok();
 
-        let title = &contract.title;
-        let version = &contract.version;
+        // ── info ──────────────────────────────────────────────────────────────
+        let info = InfoObject {
+            title: contract.title.clone(),
+            version: contract.version.clone(),
+            description: Some(build_description(&contract)),
+            contact: Some(ContactObject { name: contract.provider.name.clone() }),
+            x_contract_id: contract.id.to_string(),
+            x_contract_status: contract_status_str(&contract.status).to_string(),
+            x_contract_enforcement_mode: enforcement_mode_str(&contract.enforcement_mode).to_string(),
+            x_contract_provider: PartyValue::from(&contract.provider),
+            x_contract_consumers: contract.consumers.iter().map(PartyValue::from).collect(),
+            x_contract_effective_date: contract.effective_date.to_string(),
+            x_contract_expiry_date: contract.expiry_date.map(|d| d.to_string()),
+            x_contract_policy: PolicyValue::from(&contract.policy),
+            x_contract_scope: scope_str(&contract.scope),
+            x_contract_drift_count: contract.drift_count,
+            x_contract_breach_count: contract.breach_count,
+            x_contract_endpoint_count: contract.endpoint_count,
+            x_contract_document_paths: contract
+                .document_paths
+                .iter()
+                .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                .collect(),
+            x_contract_created_by: contract.created_by.clone(),
+            x_contract_created_at: contract.created_at.map(|dt| dt.to_rfc3339()),
+            x_contract_updated_at: contract.updated_at.map(|dt| dt.to_rfc3339()),
+        };
 
-        let mut paths_yaml = String::new();
-        if let Some(snap) = &snapshot {
+        // ── paths + servers + security schemes ────────────────────────────────
+        let mut server_urls: Vec<String> = Vec::new();
+        let mut paths: BTreeMap<String, BTreeMap<String, OperationObject>> = BTreeMap::new();
+        let mut scheme_map: BTreeMap<String, SecuritySchemeObject> = BTreeMap::new();
+
+        let has_snapshot = snapshot
+            .as_ref()
+            .map(|s| !s.entries.is_empty())
+            .unwrap_or(false);
+
+        if let Some(snap) = snapshot.filter(|s| !s.entries.is_empty()) {
             for entry in &snap.entries {
-                let path_segment = entry.url_pattern.trim_start_matches('/');
+                let (server_opt, path_key) = extract_server_and_path(&entry.url_pattern);
+                if let Some(srv) = server_opt {
+                    if !server_urls.contains(&srv) {
+                        server_urls.push(srv);
+                    }
+                }
+
                 let method = entry.method.to_lowercase();
-                paths_yaml.push_str(&format!(
-                    "  /{}:\n    {}:\n      summary: '{} {}'\n      responses:\n        '200':\n          description: OK\n",
-                    path_segment, method, entry.method, entry.url_pattern
-                ));
+                let operation_id = format!("{} {}", entry.method, path_key);
+
+                // Parameters (query then header)
+                let parameters: Vec<ParameterObject> = entry
+                    .query_params
+                    .iter()
+                    .map(|qp| ParameterObject {
+                        name: qp.key.clone(),
+                        location: "query",
+                        schema: SchemaObject { schema_type: "string" },
+                        example: Some(qp.value.clone()),
+                    })
+                    .chain(entry.headers.iter().map(|h| ParameterObject {
+                        name: h.key.clone(),
+                        location: "header",
+                        schema: SchemaObject { schema_type: "string" },
+                        example: Some(h.value.clone()),
+                    }))
+                    .collect();
+
+                // Request body
+                let request_body: Option<RequestBodyObject> =
+                    if !entry.form_fields.is_empty() {
+                        let mut example_map = serde_yaml::Mapping::new();
+                        for f in &entry.form_fields {
+                            example_map.insert(
+                                serde_yaml::Value::String(f.key.clone()),
+                                serde_yaml::Value::String(f.value.clone()),
+                            );
+                        }
+                        let mut content = BTreeMap::new();
+                        content.insert(
+                            "application/x-www-form-urlencoded".into(),
+                            MediaTypeObject {
+                                schema: SchemaObject { schema_type: "object" },
+                                example: Some(serde_yaml::Value::Mapping(example_map)),
+                            },
+                        );
+                        Some(RequestBodyObject { required: true, content })
+                    } else if let Some(body) = &entry.body_content {
+                        let (content_type, example_val) = infer_content_type_and_example(body);
+                        let mut content = BTreeMap::new();
+                        content.insert(
+                            content_type.to_string(),
+                            MediaTypeObject {
+                                schema: SchemaObject { schema_type: "object" },
+                                example: Some(example_val),
+                            },
+                        );
+                        Some(RequestBodyObject { required: true, content })
+                    } else {
+                        None
+                    };
+
+                // Security
+                let scheme_info = auth_to_scheme(&entry.auth_type, &entry.auth_detail);
+                let security = scheme_info.as_ref().map(|(name, _)| {
+                    let mut m = BTreeMap::new();
+                    m.insert((*name).to_string(), vec![]);
+                    vec![m]
+                });
+                if let Some((name, scheme)) = scheme_info {
+                    scheme_map.entry(name.to_string()).or_insert(scheme);
+                }
+
+                // Responses
+                let mut responses: BTreeMap<String, ResponseObject> = BTreeMap::new();
+                responses.insert("200".into(), ResponseObject { description: "OK" });
+                if !matches!(entry.auth_type.as_str(), "none" | "inherit" | "") {
+                    responses.insert("401".into(), ResponseObject { description: "Unauthorized" });
+                }
+                if request_body.is_some() {
+                    responses.insert(
+                        "422".into(),
+                        ResponseObject { description: "Unprocessable Entity" },
+                    );
+                }
+
+                let tag = tag_from_request_path(&entry.request_path);
+
+                let op = OperationObject {
+                    operation_id,
+                    summary: format!("{} {}", entry.method, path_key),
+                    tags: tag.into_iter().collect(),
+                    parameters,
+                    request_body,
+                    security,
+                    responses,
+                    x_source_path: entry.request_path.to_str().map(|s| s.to_string()),
+                    x_captured_at: Some(entry.captured_at.to_rfc3339()),
+                    x_auth_detail: if entry.auth_detail.is_empty() {
+                        None
+                    } else {
+                        Some(entry.auth_detail.clone())
+                    },
+                };
+
+                paths.entry(path_key).or_default().insert(method, op);
             }
         }
-        if paths_yaml.is_empty() {
-            paths_yaml = "  /example:\n    get:\n      summary: Example endpoint\n      responses:\n        '200':\n          description: OK\n".to_string();
+
+        // Fallback when no snapshot entries exist.
+        if !has_snapshot {
+            let mut responses = BTreeMap::new();
+            responses.insert("200".into(), ResponseObject { description: "OK" });
+            let mut ops = BTreeMap::new();
+            ops.insert(
+                "get".into(),
+                OperationObject {
+                    operation_id: "example".into(),
+                    summary: "No snapshot available — contract has not been signed".into(),
+                    tags: vec![],
+                    parameters: vec![],
+                    request_body: None,
+                    security: None,
+                    responses,
+                    x_source_path: None,
+                    x_captured_at: None,
+                    x_auth_detail: None,
+                },
+            );
+            paths.insert("/example".into(), ops);
         }
 
-        Ok(format!(
-            "openapi: '3.0.3'\ninfo:\n  title: '{}'\n  version: '{}'\npaths:\n{}",
-            title, version, paths_yaml
-        ))
+        let servers: Vec<ServerObject> =
+            server_urls.into_iter().map(|url| ServerObject { url }).collect();
+        let components = if scheme_map.is_empty() {
+            None
+        } else {
+            Some(ComponentsObject { security_schemes: scheme_map })
+        };
+
+        let doc = OpenApiDoc { openapi: "3.0.3", info, servers, paths, components };
+        serde_yaml::to_string(&doc).map_err(|e| ContractError::Internal(e.to_string()))
     }
 }
 
@@ -1779,6 +1942,182 @@ mod tests {
     fn auth_inherit_returns_none() {
         assert!(super::openapi::auth_to_scheme("inherit", "").is_none());
     }
+
+    // ── export_as_openapi_yaml ───────────────────────────────────────────────
+
+    /// Parse YAML output from export_as_openapi_yaml and return as Value for assertions.
+    fn export_yaml(svc: &ContractService, contract_id: Ulid) -> serde_yaml::Value {
+        let yaml = svc
+            .export_as_openapi_yaml(root(), contract_id)
+            .expect("export must succeed");
+        serde_yaml::from_str(&yaml).expect("export must produce valid YAML")
+    }
+
+    // 1. Full export: contract metadata and endpoint appear in output.
+    #[test]
+    fn export_includes_contract_metadata() {
+        let svc = make_service();
+        let mut contract = make_contract();
+        contract.status = ContractStatus::Active;
+        let contract = svc.attach_contract(root(), contract, vec![], vec![]).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        // OpenAPI version
+        assert_eq!(doc["openapi"].as_str(), Some("3.0.3"));
+        // info fields
+        assert_eq!(doc["info"]["title"].as_str(), Some("Test API"));
+        assert_eq!(doc["info"]["version"].as_str(), Some("v1.0"));
+        // x-contract-id
+        assert_eq!(
+            doc["info"]["x-contract-id"].as_str(),
+            Some(contract.id.to_string().as_str()),
+        );
+        // x-contract-status
+        assert_eq!(doc["info"]["x-contract-status"].as_str(), Some("active"));
+        // provider
+        assert_eq!(doc["info"]["x-contract-provider"]["name"].as_str(), Some("Team A"));
+        // consumer
+        assert_eq!(doc["info"]["x-contract-consumers"][0]["name"].as_str(), Some("Team B"));
+        // policy
+        assert_eq!(doc["info"]["x-contract-policy"]["noticeDays"].as_u64(), Some(30));
+        // description present and non-empty
+        assert!(doc["info"]["description"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
+        // contact
+        assert_eq!(doc["info"]["contact"]["name"].as_str(), Some("Team A"));
+    }
+
+    // 2. URL extraction: full URL split into server + path.
+    #[test]
+    fn export_splits_full_url_into_server_and_path() {
+        let svc = make_service();
+        let contract = svc.attach_contract(root(), make_contract(), vec![], vec![]).unwrap();
+
+        // Manually upsert a snapshot with a full URL.
+        let mut snap = make_snap("get-users.yml");
+        snap.url_pattern = "https://api.example.com/users".into();
+        let mut snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        snapshot.upsert(snap);
+        svc.repo.save_snapshot(root(), &snapshot).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        assert_eq!(doc["servers"][0]["url"].as_str(), Some("https://api.example.com"));
+        assert!(doc["paths"]["/users"].is_mapping(), "path /users must exist");
+    }
+
+    // 3. Auth scheme: bearer produces BearerAuth in securitySchemes.
+    #[test]
+    fn export_bearer_auth_produces_security_scheme() {
+        let svc = make_service();
+        let contract = svc.attach_contract(root(), make_contract(), vec![], vec![]).unwrap();
+
+        let mut snap = make_snap("secure.yml");
+        snap.url_pattern = "/secure".into();
+        snap.auth_type = "bearer".into();
+        snap.auth_detail = "supersec\u{2026}".into();
+        let mut snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        snapshot.upsert(snap);
+        svc.repo.save_snapshot(root(), &snapshot).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        assert_eq!(
+            doc["components"]["securitySchemes"]["BearerAuth"]["type"].as_str(),
+            Some("http"),
+        );
+        assert_eq!(
+            doc["components"]["securitySchemes"]["BearerAuth"]["scheme"].as_str(),
+            Some("bearer"),
+        );
+        // Operation must reference the scheme.
+        let security = &doc["paths"]["/secure"]["get"]["security"];
+        assert!(security.is_sequence(), "security must be a sequence");
+    }
+
+    // 4. Body content-type: JSON body → application/json with parsed example.
+    #[test]
+    fn export_json_body_produces_request_body_with_content_type() {
+        let svc = make_service();
+        let contract = svc.attach_contract(root(), make_contract(), vec![], vec![]).unwrap();
+
+        let mut snap = make_snap("create.yml");
+        snap.url_pattern = "/users".into();
+        snap.method = "POST".into();
+        snap.body_content = Some(r#"{"name":"Ada","role":"admin"}"#.into());
+        let mut snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        snapshot.upsert(snap);
+        svc.repo.save_snapshot(root(), &snapshot).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        let content = &doc["paths"]["/users"]["post"]["requestBody"]["content"];
+        assert!(content["application/json"].is_mapping());
+        // 422 added because requestBody is present.
+        assert!(doc["paths"]["/users"]["post"]["responses"]["422"].is_mapping());
+    }
+
+    // 5. Path grouping: GET and POST on same URL share one path item.
+    #[test]
+    fn export_groups_same_path_methods_into_one_path_item() {
+        let svc = make_service();
+        let contract = svc.attach_contract(root(), make_contract(), vec![], vec![]).unwrap();
+
+        let mut get_snap = make_snap("get-users.yml");
+        get_snap.url_pattern = "/users".into();
+        get_snap.method = "GET".into();
+
+        let mut post_snap = make_snap("post-users.yml");
+        post_snap.url_pattern = "/users".into();
+        post_snap.method = "POST".into();
+
+        let mut snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        snapshot.upsert(get_snap);
+        snapshot.upsert(post_snap);
+        svc.repo.save_snapshot(root(), &snapshot).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        let path_item = &doc["paths"]["/users"];
+        assert!(path_item["get"].is_mapping(), "GET must be present");
+        assert!(path_item["post"].is_mapping(), "POST must be present");
+    }
+
+    // 6. Fallback: no snapshot → placeholder path emitted.
+    #[test]
+    fn export_with_no_snapshot_emits_placeholder_path() {
+        let svc = make_service();
+        let mut contract = make_contract();
+        contract.status = ContractStatus::Draft;
+        let contract = svc.attach_contract(root(), contract, vec![], vec![]).unwrap();
+
+        // Replace the saved snapshot with an empty one.
+        let empty = rocket_collection::contract::snapshot::ContractSnapshot::new(contract.id);
+        svc.repo.save_snapshot(root(), &empty).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        assert!(doc["paths"]["/example"].is_mapping(), "/example placeholder must be present");
+    }
+
+    // 7. Tag derivation: request in a subfolder gets a tag.
+    #[test]
+    fn export_derives_tag_from_request_path_folder() {
+        let svc = make_service();
+        let contract = svc.attach_contract(root(), make_contract(), vec![], vec![]).unwrap();
+
+        let mut snap = make_snap("auth/login.yml");
+        snap.url_pattern = "/login".into();
+        let mut snapshot = svc.repo.load_snapshot(root(), contract.id).unwrap();
+        snapshot.upsert(snap);
+        svc.repo.save_snapshot(root(), &snapshot).unwrap();
+
+        let doc = export_yaml(&svc, contract.id);
+
+        let tags = &doc["paths"]["/login"]["get"]["tags"];
+        assert!(tags.is_sequence());
+        assert_eq!(tags[0].as_str(), Some("auth"));
+    }
 }
 
 // ─── OpenAPI export types ─────────────────────────────────────────────────
@@ -1786,6 +2125,148 @@ mod tests {
 mod openapi {
     use serde::Serialize;
     use std::collections::BTreeMap;
+    use rocket_collection::contract::types::{
+        BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy,
+        ContractScope, ContractStatus, PartyKind,
+    };
+
+    pub fn contract_status_str(status: &ContractStatus) -> &'static str {
+        match status {
+            ContractStatus::Draft => "draft",
+            ContractStatus::Active => "active",
+            ContractStatus::Drift => "drift",
+            ContractStatus::Breach => "breach",
+            ContractStatus::InReview => "in_review",
+            ContractStatus::Paused => "paused",
+            ContractStatus::ExpiringIn30Days => "expiring_in_30_days",
+            ContractStatus::Expired => "expired",
+            ContractStatus::Archived => "archived",
+        }
+    }
+
+    pub fn enforcement_mode_str(mode: &ContractEnforcementMode) -> &'static str {
+        match mode {
+            ContractEnforcementMode::Informational => "informational",
+            ContractEnforcementMode::Warn => "warn",
+            ContractEnforcementMode::Block => "block",
+        }
+    }
+
+    pub fn scope_str(scope: &ContractScope) -> String {
+        match scope {
+            ContractScope::Collection => "collection".into(),
+            ContractScope::Folder { rel_path } => format!("folder:{}", rel_path.display()),
+            ContractScope::Request { rel_path } => format!("request:{}", rel_path.display()),
+        }
+    }
+
+    pub fn party_kind_str(kind: &PartyKind) -> &'static str {
+        match kind {
+            PartyKind::Team => "team",
+            PartyKind::Company => "company",
+            PartyKind::Service => "service",
+        }
+    }
+
+    pub fn breaking_policy_str(policy: &BreakingChangePolicy) -> &'static str {
+        match policy {
+            BreakingChangePolicy::Strict => "strict",
+            BreakingChangePolicy::Lenient => "lenient",
+            BreakingChangePolicy::AdditiveOk => "additive_ok",
+        }
+    }
+
+    pub fn build_description(contract: &Contract) -> String {
+        let consumers_str: String = if contract.consumers.is_empty() {
+            "—".into()
+        } else {
+            contract.consumers
+                .iter()
+                .map(|c| format!("{} ({})", c.name, party_kind_str(&c.kind)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let expiry = contract
+            .expiry_date
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "—".into());
+        let sla = contract
+            .policy
+            .uptime_sla
+            .map(|s| format!("{:.1}%", s))
+            .unwrap_or_else(|| "none".into());
+        let attachments = if contract.document_paths.is_empty() {
+            String::new()
+        } else {
+            let list = contract
+                .document_paths
+                .iter()
+                .filter_map(|p| p.to_str())
+                .map(|s| format!("- {}", s))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("\n\n## Attachments\n{}", list)
+        };
+        let created_suffix = match (&contract.created_by, &contract.created_at) {
+            (Some(by), Some(at)) => format!(" — created by {} on {}", by, at.to_rfc3339()),
+            (Some(by), None) => format!(" — created by {}", by),
+            (None, Some(at)) => format!(" — created on {}", at.to_rfc3339()),
+            _ => String::new(),
+        };
+
+        format!(
+            "# {title} v{version}\n\n\
+             **Provider:** {provider} ({provider_kind})\n\
+             **Consumers:** {consumers}\n\
+             **Status:** {status}  |  **Enforcement:** {enforcement}\n\
+             **Effective:** {effective}  |  **Expires:** {expiry}\n\
+             **Scope:** {scope}\n\
+             **Drift:** {drift} changes  |  **Breach:** {breach} breaking\n\n\
+             ## Policy\n\
+             - Breaking change policy: {policy}\n\
+             - Notice period: {notice} days\n\
+             - Uptime SLA: {sla}\
+             {attachments}\n\n\
+             *Exported from Rocket API{created_suffix}*",
+            title = contract.title,
+            version = contract.version,
+            provider = contract.provider.name,
+            provider_kind = party_kind_str(&contract.provider.kind),
+            consumers = consumers_str,
+            status = contract_status_str(&contract.status),
+            enforcement = enforcement_mode_str(&contract.enforcement_mode),
+            effective = contract.effective_date,
+            expiry = expiry,
+            scope = scope_str(&contract.scope),
+            drift = contract.drift_count,
+            breach = contract.breach_count,
+            policy = breaking_policy_str(&contract.policy.breaking_change_policy),
+            notice = contract.policy.notice_days,
+            sla = sla,
+            attachments = attachments,
+            created_suffix = created_suffix,
+        )
+    }
+
+    impl From<&ContractParty> for PartyValue {
+        fn from(p: &ContractParty) -> Self {
+            PartyValue {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                kind: party_kind_str(&p.kind).to_string(),
+            }
+        }
+    }
+
+    impl From<&ContractPolicy> for PolicyValue {
+        fn from(p: &ContractPolicy) -> Self {
+            PolicyValue {
+                breaking_change_policy: breaking_policy_str(&p.breaking_change_policy).to_string(),
+                notice_days: p.notice_days,
+                uptime_sla: p.uptime_sla,
+            }
+        }
+    }
 
     /// Splits a raw url_pattern into (optional_server_base, path_string).
     ///
