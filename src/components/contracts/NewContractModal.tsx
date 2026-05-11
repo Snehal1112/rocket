@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { track } from '@/lib/telemetry';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { collectPaths } from '@/lib/contracts/collectPaths';
 import { getCollection } from '@/lib/tauri-api';
+import { track } from '@/lib/telemetry';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import type { Contract, ContractPolicy, ContractScope, Party } from '@/types/contracts';
 
@@ -164,7 +164,9 @@ export function NewContractModal({
         setFolders(f);
         setRequests(r);
       })
-      .catch(() => {});
+      .catch(() => {
+        /* noop */
+      });
     return () => {
       cancelled = true;
     };
@@ -257,7 +259,9 @@ export function NewContractModal({
             to: updated.status,
             action: 'edit',
           });
-        } catch {}
+        } catch {
+          /* noop */
+        }
         toast.success('Contract updated.');
       } else {
         const created = await createContract(collectionId, values, []);
@@ -269,13 +273,17 @@ export function NewContractModal({
               consumerCount: consumers.length,
               publishedImmediately: true,
             });
-          } catch {}
+          } catch {
+            /* noop */
+          }
           try {
             track('contracts.published', {
               contractId: created.id,
               endpointCount: created.endpointCount,
             });
-          } catch {}
+          } catch {
+            /* noop */
+          }
           toast.success('Contract created and published.');
         } else {
           try {
@@ -284,7 +292,9 @@ export function NewContractModal({
               scopeType: form.scopeType,
               consumerCount: consumers.length,
             });
-          } catch {}
+          } catch {
+            /* noop */
+          }
           toast('Contract saved as draft.');
         }
       }

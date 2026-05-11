@@ -27,12 +27,7 @@ interface SheetContentProps extends React.ComponentProps<typeof DialogPrimitive.
   side?: 'top' | 'right' | 'bottom' | 'left';
 }
 
-function SheetContent({
-  side = 'right',
-  className,
-  children,
-  ...props
-}: SheetContentProps) {
+function SheetContent({ side = 'right', className, children, ...props }: SheetContentProps) {
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -58,10 +53,7 @@ function SheetContent({
   );
 }
 
-function SheetTitle({
-  className,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Title>) {
+function SheetTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
       data-slot='sheet-title'
@@ -84,4 +76,13 @@ function SheetDescription({
   );
 }
 
-export { Sheet, SheetClose, SheetContent, SheetDescription, SheetOverlay, SheetPortal, SheetTitle, SheetTrigger };
+export {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetOverlay,
+  SheetPortal,
+  SheetTitle,
+  SheetTrigger,
+};

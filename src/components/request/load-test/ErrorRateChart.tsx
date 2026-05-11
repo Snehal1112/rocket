@@ -2,6 +2,9 @@ import { useMemo } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
+const TICK_STYLE = { fontSize: 10 };
+const TOOLTIP_STYLE = { fontSize: 11 };
+
 export function ErrorRateChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const data = useMemo(
@@ -19,9 +22,9 @@ export function ErrorRateChart() {
       <div className='min-h-0 flex-1'>
         <ResponsiveContainer width='100%' height='100%'>
           <LineChart data={data}>
-            <XAxis dataKey='t' tick={{ fontSize: 10 }} interval='preserveStartEnd' />
-            <YAxis tick={{ fontSize: 10 }} width={36} domain={[0, 100]} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
+            <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
+            <YAxis tick={TICK_STYLE} width={36} domain={[0, 100]} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
             <Line
               type='monotone'
               dataKey='err'

@@ -2,6 +2,10 @@ import { useMemo } from 'react';
 import { Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
+const TICK_STYLE = { fontSize: 10 };
+const TOOLTIP_STYLE = { fontSize: 11 };
+const LEGEND_STYLE = { fontSize: 10 };
+
 export function LatencyChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const data = useMemo(
@@ -21,10 +25,10 @@ export function LatencyChart() {
       <div className='min-h-0 flex-1'>
         <ResponsiveContainer width='100%' height='100%'>
           <LineChart data={data}>
-            <XAxis dataKey='t' tick={{ fontSize: 10 }} interval='preserveStartEnd' />
-            <YAxis tick={{ fontSize: 10 }} width={36} />
-            <Tooltip contentStyle={{ fontSize: 11 }} />
-            <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+            <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
+            <YAxis tick={TICK_STYLE} width={36} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Legend iconSize={8} wrapperStyle={LEGEND_STYLE} />
             <Line
               type='monotone'
               dataKey='p50'

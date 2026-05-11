@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { transitionStatus } from './statusMachine';
+import { describe, expect, it } from 'vitest';
 import type { DriftReport } from '@/types/contracts';
+import { transitionStatus } from './statusMachine';
 
 function report(driftCount: number, breachCount: number): DriftReport {
   return { contractId: 'c1', computedAt: '', diffs: [], driftCount, breachCount };

@@ -1,16 +1,16 @@
-import { create } from 'zustand'
-import type { DrawerState, ChangeKind } from '@/types/contracts'
-import { DEFAULT_FILTERS } from '@/types/contracts'
+import { create } from 'zustand';
+import type { ChangeKind, DrawerState } from '@/types/contracts';
+import { DEFAULT_FILTERS } from '@/types/contracts';
 
 interface DrawerStore extends DrawerState {
-  open: (contractId: string) => void
-  close: () => void
-  clearContract: () => void
-  setSearch: (search: string) => void
-  toggleKind: (kind: ChangeKind) => void
-  toggleBreakingOnly: () => void
-  toggleSinceSigned: () => void
-  resetFilters: () => void
+  open: (contractId: string) => void;
+  close: () => void;
+  clearContract: () => void;
+  setSearch: (search: string) => void;
+  toggleKind: (kind: ChangeKind) => void;
+  toggleBreakingOnly: () => void;
+  toggleSinceSigned: () => void;
+  resetFilters: () => void;
 }
 
 export const useDrawerStore = create<DrawerStore>((set) => ({
@@ -37,4 +37,4 @@ export const useDrawerStore = create<DrawerStore>((set) => ({
   toggleSinceSigned: () =>
     set((s) => ({ filters: { ...s.filters, sinceSigned: !s.filters.sinceSigned } })),
   resetFilters: () => set({ filters: { ...DEFAULT_FILTERS } }),
-}))
+}));

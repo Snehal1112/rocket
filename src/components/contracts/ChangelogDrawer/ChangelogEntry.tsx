@@ -16,19 +16,19 @@ interface ChangelogEntryProps {
 
 function timeAgo(iso: string): string {
   try {
-    const diffMs = Date.now() - new Date(iso).getTime()
-    const mins = Math.floor(diffMs / 60_000)
-    if (mins < 1) return 'now'
-    if (mins < 60) return `${mins}m ago`
-    const hours = Math.floor(mins / 60)
-    if (hours < 24) return `${hours}h ago`
-    const days = Math.floor(hours / 24)
-    if (days < 30) return `${days}d ago`
-    const months = Math.floor(days / 30)
-    if (months < 12) return `${months}mo ago`
-    return `${Math.floor(months / 12)}y ago`
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60_000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo ago`;
+    return `${Math.floor(months / 12)}y ago`;
   } catch {
-    return '—'
+    return '—';
   }
 }
 
@@ -73,14 +73,14 @@ export function ChangelogEntry({
   const initials = entry.authorName ? initialsForName(entry.authorName) : '?';
 
   return (
-    <div
-      role='article'
+    <article
       aria-labelledby={`changelog-entry-${entry.id}`}
       className={cn(
         'group px-3 py-2.5 rounded-xl transition-all duration-150',
         'border border-transparent',
         isSign && 'border-dashed border-border/30',
-        !isSign && 'hover:bg-muted/60 hover:border-border/50 hover:shadow-sm dark:hover:bg-accent dark:hover:border-border dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)]',
+        !isSign &&
+          'hover:bg-muted/60 hover:border-border/50 hover:shadow-sm dark:hover:bg-accent dark:hover:border-border dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)]',
       )}
     >
       {/* Line 1: chip + breaking tag + summary + time */}
@@ -96,9 +96,7 @@ export function ChangelogEntry({
           </span>
         )}
         <span id={`changelog-entry-${entry.id}`} className='text-[12px] text-foreground flex-1'>
-          {entry.isBreaking && !isSign && (
-            <span className='sr-only'>Breaking change. </span>
-          )}
+          {entry.isBreaking && !isSign && <span className='sr-only'>Breaking change. </span>}
           {isSign ? entry.signEventLabel : entry.summary}
         </span>
         <span className='text-[11px] text-muted-foreground/50 tabular-nums shrink-0'>
@@ -113,13 +111,15 @@ export function ChangelogEntry({
             {entry.requestMethod && (
               <span className='text-primary font-bold'>{entry.requestMethod}</span>
             )}
-            {entry.requestPath && <span className='text-muted-foreground'>{entry.requestPath}</span>}
+            {entry.requestPath && (
+              <span className='text-muted-foreground'>{entry.requestPath}</span>
+            )}
           </span>
         </div>
       )}
 
       {/* Diff block */}
-      {hasDiff && <ChangelogDiffBlock diffLines={entry.diffLines!} />}
+      {hasDiff && entry.diffLines && <ChangelogDiffBlock diffLines={entry.diffLines} />}
 
       {/* Author row */}
       {hasAuthor && (
@@ -143,41 +143,47 @@ export function ChangelogEntry({
               variant='outline'
               size='sm'
               className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
-              onClick={() => onOpenRequest(entry.requestId!)}
+              onClick={() => entry.requestId && onOpenRequest(entry.requestId)}
             >
               Open request
             </Button>
           )}
-          {(entry.kind === 'remove' || entry.kind === 'modify') && entry.isBreaking && onMarkNonBreaking && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
-              onClick={() => onMarkNonBreaking(entry.id)}
-            >
-              Mark non-breaking
-            </Button>
-          )}
-          {(entry.kind === 'remove' || entry.kind === 'modify') && entry.isBreaking && onNotifyConsumer && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
-              onClick={() => onNotifyConsumer(entry.id)}
-            >
-              Notify consumer <ChevronRight className="w-3 h-3" aria-hidden="true" />
-            </Button>
-          )}
-          {(entry.kind === 'remove' || entry.kind === 'modify') && !entry.isBreaking && onMarkBreaking && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
-              onClick={() => onMarkBreaking(entry.id)}
-            >
-              Mark breaking
-            </Button>
-          )}
+          {(entry.kind === 'remove' || entry.kind === 'modify') &&
+            entry.isBreaking &&
+            onMarkNonBreaking && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
+                onClick={() => onMarkNonBreaking(entry.id)}
+              >
+                Mark non-breaking
+              </Button>
+            )}
+          {(entry.kind === 'remove' || entry.kind === 'modify') &&
+            entry.isBreaking &&
+            onNotifyConsumer && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
+                onClick={() => onNotifyConsumer(entry.id)}
+              >
+                Notify consumer <ChevronRight className='w-3 h-3' aria-hidden='true' />
+              </Button>
+            )}
+          {(entry.kind === 'remove' || entry.kind === 'modify') &&
+            !entry.isBreaking &&
+            onMarkBreaking && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='text-[11px] px-2 h-6 rounded border border-border hover:bg-accent'
+                onClick={() => onMarkBreaking(entry.id)}
+              >
+                Mark breaking
+              </Button>
+            )}
           {entry.kind === 'add' && onSnapshotToContract && (
             <Button
               variant='outline'
@@ -190,6 +196,6 @@ export function ChangelogEntry({
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 }

@@ -98,8 +98,8 @@ export function MiniChangelog({
           </p>
           {successorName && consumersCount !== undefined && consumersCount > 0 && (
             <p className='text-[11px] text-muted-foreground/80'>
-              <span className='font-semibold text-foreground/80'>{consumersCount}</span>
-              {' '}consumer{consumersCount !== 1 ? 's' : ''} → migrating to{' '}
+              <span className='font-semibold text-foreground/80'>{consumersCount}</span> consumer
+              {consumersCount !== 1 ? 's' : ''} → migrating to{' '}
               <span className='font-semibold text-foreground/80'>{successorName}</span>
             </p>
           )}

@@ -1,1 +1,1 @@
-export { ChangelogDrawer } from './ChangelogDrawer'
+export { ChangelogDrawer } from './ChangelogDrawer';

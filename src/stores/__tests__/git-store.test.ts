@@ -293,19 +293,19 @@ describe('staging', () => {
   });
 
   it('stageAll stages only unstaged non-unchanged files', async () => {
-    const { gitStage } = await import('@/lib/tauri-api');
-    useGitStore.setState({
-      status: {
-        branch: 'main',
-        ahead: 0,
-        behind: 0,
-        isClean: false,
-        files: [
-          { path: 'already-staged.bru', status: 'modified', staged: true },
-          { path: 'unstaged-modified.bru', status: 'modified', staged: false },
-          { path: 'unchanged.bru', status: 'unchanged', staged: false },
-        ],
-      },
+    const { gitStage, gitStatus } = await import('@/lib/tauri-api');
+    const files = [
+      { path: 'already-staged.bru', status: 'modified', staged: true },
+      { path: 'unstaged-modified.bru', status: 'modified', staged: false },
+      { path: 'unchanged.bru', status: 'unchanged', staged: false },
+    ];
+    // stageAll calls refreshStatus first, so mock gitStatus to return these files.
+    vi.mocked(gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      ahead: 0,
+      behind: 0,
+      isClean: false,
+      files,
     });
 
     await useGitStore.getState().stageAll();

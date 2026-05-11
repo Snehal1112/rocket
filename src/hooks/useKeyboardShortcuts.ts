@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { sendRequest } from '@/lib/execute-request';
 import { findActiveLeaf } from '@/lib/pane-utils';
@@ -6,7 +7,6 @@ import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { isRequestTab } from '@/types/pane-types';
-import { useQueryClient } from '@tanstack/react-query';
 
 // Registers global keyboard shortcuts for tab management across all pane groups.
 export function useKeyboardShortcuts() {
@@ -117,5 +117,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [qc.getQueryData]);
 }

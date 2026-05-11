@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { computeDrift } from './drift';
+import { describe, expect, it } from 'vitest';
 import type { Contract } from '@/types/contracts';
+import { computeDrift } from './drift';
 
 function makeContract(overrides: Partial<Contract> = {}): Contract {
   return {

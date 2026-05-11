@@ -18,9 +18,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { getContractChangelog } from '@/lib/tauri-api';
-import type { ChangeKind } from '@/types/contracts';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
+import type { ChangeKind } from '@/types/contracts';
 
 interface ContractDiffPaneProps {
   collectionId: string;
@@ -138,6 +138,7 @@ export function ContractDiffPane({ collectionId, contractId }: ContractDiffPaneP
                 <TableBody>
                   {entries.map((entry, idx) => (
                     <TableRow
+                      // biome-ignore lint/suspicious/noArrayIndexKey: changelog entries have no stable id
                       key={`${entry.requestPath}-${entry.field}-${idx}`}
                       className='hover:bg-muted/20'
                     >

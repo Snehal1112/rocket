@@ -37,14 +37,14 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
         ? 'text-warning'
         : 'text-muted-foreground';
 
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+  const handleClick = (event: MouseEvent<HTMLSpanElement>) => {
     // Prevent the sidebar row click from selecting the collection.
     event.stopPropagation();
     openContractTab(collectionName, collectionRoot);
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === '') {
+  const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       event.stopPropagation();
       openContractTab(collectionName, collectionRoot);
@@ -55,7 +55,8 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div
+          {/* biome-ignore lint/a11y/useSemanticElements: nested inside TreeItem's <button> row — HTML forbids button-in-button */}
+          <span
             role='button'
             tabIndex={0}
             onClick={handleClick}
@@ -67,7 +68,7 @@ export function ContractBadge({ contracts, collectionName, collectionRoot }: Con
             aria-label='Manage contracts'
           >
             <FileLock className='h-4 w-4 shrink-0' />
-          </div>
+          </span>
         </TooltipTrigger>
         <TooltipContent side='right'>
           <p className='text-xs font-medium'>{primary.title}</p>

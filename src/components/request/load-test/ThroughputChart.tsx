@@ -1,6 +1,9 @@
 import { Area, AreaChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
 
+const TICK_STYLE = { fontSize: 10 };
+const TOOLTIP_STYLE = { fontSize: 11 };
+
 /** Returns the target rate (rps) at a given elapsed_ms timestamp. */
 function targetRateAt(
   elapsedMs: number,
@@ -40,9 +43,9 @@ export function ThroughputChart() {
       <p className='mb-1 text-[11px] font-medium text-muted-foreground'>Throughput (req / sec)</p>
       <ResponsiveContainer width='100%' height='100%'>
         <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <XAxis dataKey='t' tick={{ fontSize: 10 }} interval='preserveStartEnd' />
-          <YAxis tick={{ fontSize: 10 }} width={36} />
-          <Tooltip contentStyle={{ fontSize: 11 }} />
+          <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
+          <YAxis tick={TICK_STYLE} width={36} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
           <Area
             type='monotone'
             dataKey='rps'

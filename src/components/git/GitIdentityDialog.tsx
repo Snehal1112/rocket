@@ -1,11 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -76,20 +71,10 @@ export function GitIdentityDialog({ open, onConfirm, onCancel }: Props) {
           </div>
 
           <div className='flex gap-2'>
-            <Button
-              onClick={handleConfirm}
-              disabled={!isValid}
-              className='flex-1'
-              size='sm'
-            >
+            <Button onClick={handleConfirm} disabled={!isValid} className='flex-1' size='sm'>
               Save &amp; Commit
             </Button>
-            <Button
-              onClick={onCancel}
-              variant='outline'
-              className='flex-1'
-              size='sm'
-            >
+            <Button onClick={onCancel} variant='outline' className='flex-1' size='sm'>
               Cancel
             </Button>
           </div>

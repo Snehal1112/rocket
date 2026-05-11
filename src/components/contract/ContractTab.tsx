@@ -2,13 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type {
-  AttachContractInput,
-  ContractParty,
-  UpdateContractInput,
-} from '@/lib/tauri-api';
-import { getCollection, onCollectionChanged } from '@/lib/tauri-api';
 import { collectPaths } from '@/lib/contracts/collectPaths';
+import type { AttachContractInput, ContractParty, UpdateContractInput } from '@/lib/tauri-api';
+import { getCollection, onCollectionChanged } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import type { ContractTab as ContractTabType } from '@/types/pane-types';
 

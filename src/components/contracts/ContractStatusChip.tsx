@@ -1,5 +1,5 @@
-import { cn } from '@/lib/utils';
 import { statusChipLabel } from '@/lib/contracts/statusMachine';
+import { cn } from '@/lib/utils';
 import type { ContractStatus } from '@/types/contracts';
 
 interface ContractStatusChipProps {

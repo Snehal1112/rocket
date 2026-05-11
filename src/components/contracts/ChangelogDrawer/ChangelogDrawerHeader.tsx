@@ -1,15 +1,15 @@
-import { Clock, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { SheetDescription, SheetTitle } from '@/components/ui/sheet'
-import type { Contract } from '@/types/contracts'
+import { Clock, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import type { Contract } from '@/types/contracts';
 
 interface ChangelogDrawerHeaderProps {
-  contract: Contract
-  onClose: () => void
+  contract: Contract;
+  onClose: () => void;
 }
 
 export function ChangelogDrawerHeader({ contract, onClose }: ChangelogDrawerHeaderProps) {
-  const sinceSignedCount = contract.changelog.filter(e => e.at >= contract.effectiveAt).length
+  const sinceSignedCount = contract.changelog.filter((e) => e.at >= contract.effectiveAt).length;
 
   return (
     <div className='p-5 pb-3.5 border-b border-border flex justify-between items-start gap-3'>
@@ -24,7 +24,8 @@ export function ChangelogDrawerHeader({ contract, onClose }: ChangelogDrawerHead
           Changelog · {contract.name}
         </div>
         <div className='text-[12px] text-muted-foreground mt-0.5'>
-          v{contract.version} · {contract.changelog.length} entries · {sinceSignedCount} since published
+          v{contract.version} · {contract.changelog.length} entries · {sinceSignedCount} since
+          published
         </div>
       </div>
       <Button
@@ -37,5 +38,5 @@ export function ChangelogDrawerHeader({ contract, onClose }: ChangelogDrawerHead
         <X className='w-4 h-4' aria-hidden='true' />
       </Button>
     </div>
-  )
+  );
 }

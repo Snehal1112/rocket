@@ -8,6 +8,10 @@ vi.mock('@tauri-apps/api/app', () => ({
   getVersion: vi.fn().mockResolvedValue('0.4.0'),
 }));
 
+vi.mock('@/components/status-bar/ContractsStatusItem', () => ({
+  ContractsStatusItem: () => null,
+}));
+
 vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ isDark: false, toggleTheme: vi.fn() }),
 }));

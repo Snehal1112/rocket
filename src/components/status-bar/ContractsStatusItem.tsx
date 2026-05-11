@@ -1,10 +1,10 @@
 import { Lock } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { track } from '@/lib/telemetry';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
-import { useDrawerStore } from '@/stores/contracts/drawerSlice';
+import { track } from '@/lib/telemetry';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -67,10 +67,17 @@ export function ContractsStatusItem() {
         className='flex items-center gap-[5px] text-[11px] text-muted-foreground hover:text-foreground transition-colors'
         onClick={() => {
           if (meta.mostRecentId) {
-            try { track('contracts.changelog_drawer_opened', { contractId: meta.mostRecentId, source: 'status_bar' }) } catch {}
+            try {
+              track('contracts.changelog_drawer_opened', {
+                contractId: meta.mostRecentId,
+                source: 'status_bar',
+              });
+            } catch {
+              /* noop */
+            }
             openDrawer(meta.mostRecentId);
           } else {
-            openContractTab(activeCollection, collectionRoot!);
+            openContractTab(activeCollection, collectionRoot ?? '');
           }
         }}
         aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}

@@ -19,8 +19,8 @@ import {
 import { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { track } from '@/lib/telemetry';
+import { cn } from '@/lib/utils';
 import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import type { Contract } from '@/types/contracts';
 import { ContractContextMenu, ContractDropdownMenu } from './ContractContextMenu';
@@ -149,7 +149,6 @@ function reviewFooterLabel(contract: Contract): string {
     return 'Awaiting review';
   }
 }
-
 
 function isExpiringSoon(expiresAt: string | null): boolean {
   if (!expiresAt) return false;
@@ -649,8 +648,15 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
             consumersCount={contract.consumers.length}
             successorName={contract.successorName}
             onViewAll={() => {
-              try { track('contracts.changelog_drawer_opened', { contractId: contract.id, source: 'card_link' }) } catch {}
-              openDrawer(contract.id)
+              try {
+                track('contracts.changelog_drawer_opened', {
+                  contractId: contract.id,
+                  source: 'card_link',
+                });
+              } catch {
+                /* noop */
+              }
+              openDrawer(contract.id);
             }}
           />
         </div>

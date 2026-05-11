@@ -351,7 +351,7 @@ export function CollectionNode({
                         <TooltipTrigger asChild>
                           {/* span instead of button: lock pin lives inside the tree-item-row <button>,
                               and HTML forbids nested buttons. span+role="button" is the correct pattern. */}
-                          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: lock pin is interactive */}
+                          {/* biome-ignore lint/a11y/useSemanticElements: nested inside <button>, cannot use <button> */}
                           <span
                             role='button'
                             tabIndex={0}

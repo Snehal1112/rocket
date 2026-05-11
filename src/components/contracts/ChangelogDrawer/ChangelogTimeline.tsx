@@ -1,14 +1,18 @@
-import { Clock } from 'lucide-react'
-import { useDrawerStore } from '@/stores/contracts/drawerSlice'
-import { cn } from '@/lib/utils'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import type { DayGroup } from '@/hooks/useChangelogEntries'
-import type { ChangelogEntry } from '@/types/contracts'
-import { ChangelogEmptyState } from './ChangelogEmptyState'
-import { ChangelogEntry as ChangelogEntryComponent } from './ChangelogEntry'
+import { Clock } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import type { DayGroup } from '@/hooks/useChangelogEntries';
+import { cn } from '@/lib/utils';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
+import type { ChangelogEntry } from '@/types/contracts';
+import { ChangelogEmptyState } from './ChangelogEmptyState';
+import { ChangelogEntry as ChangelogEntryComponent } from './ChangelogEntry';
 
 interface ChangelogTimelineProps {
-  groups: DayGroup[]
+  groups: DayGroup[];
+}
+
+function noop(_id: string): void {
+  /* read-only timeline — actions not wired */
 }
 
 // Layout constants:
@@ -26,7 +30,7 @@ function TimelineDot({ kind, isSign }: { kind: ChangelogEntry['kind']; isSign: b
       >
         <Clock className='w-2.5 h-2.5 text-muted-foreground' />
       </span>
-    )
+    );
   }
   return (
     <span
@@ -38,11 +42,11 @@ function TimelineDot({ kind, isSign }: { kind: ChangelogEntry['kind']; isSign: b
         kind === 'modify' && 'border-[hsl(var(--warning))] shadow-[0_0_10px_rgba(251,191,36,0.25)]',
       )}
     />
-  )
+  );
 }
 
 export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
-  const resetFilters = useDrawerStore(s => s.resetFilters)
+  const resetFilters = useDrawerStore((s) => s.resetFilters);
 
   return (
     <ScrollArea className='flex-1'>
@@ -50,25 +54,26 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
         {groups.length === 0 ? (
           <ChangelogEmptyState onReset={resetFilters} />
         ) : (
-          <div
-            role='feed'
-            aria-label='Changelog timeline'
-            className='relative pl-14 pr-5'
-          >
+          <div role='feed' aria-label='Changelog timeline' className='relative pl-14 pr-5'>
             {/* Spine with fade at top and bottom */}
             <span
               aria-hidden='true'
               className='absolute left-[34px] top-0 bottom-0 w-px pointer-events-none'
-              style={{ background: 'linear-gradient(to bottom, transparent, hsl(var(--border)) 6%, hsl(var(--border)) 94%, transparent)' }}
+              style={{
+                background:
+                  'linear-gradient(to bottom, transparent, hsl(var(--border)) 6%, hsl(var(--border)) 94%, transparent)',
+              }}
             />
 
             {groups.map((group, i) => (
               <div key={group.day}>
                 {/* Day header */}
-                <div className={cn(
-                  'text-[12px] font-semibold uppercase tracking-[0.07em] text-muted-foreground flex items-center gap-2 mb-3 relative',
-                  i === 0 ? 'mt-1' : 'mt-7',
-                )}>
+                <div
+                  className={cn(
+                    'text-[12px] font-semibold uppercase tracking-[0.07em] text-muted-foreground flex items-center gap-2 mb-3 relative',
+                    i === 0 ? 'mt-1' : 'mt-7',
+                  )}
+                >
                   <span
                     aria-hidden='true'
                     className='absolute left-[-22px] top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-background border-[1.5px] border-border z-10'
@@ -87,10 +92,10 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
                     />
                     <ChangelogEntryComponent
                       entry={entry}
-                      onMarkBreaking={() => {}}
-                      onMarkNonBreaking={() => {}}
-                      onNotifyConsumer={() => {}}
-                      onSnapshotToContract={() => {}}
+                      onMarkBreaking={noop}
+                      onMarkNonBreaking={noop}
+                      onNotifyConsumer={noop}
+                      onSnapshotToContract={noop}
                     />
                   </div>
                 ))}
@@ -100,5 +105,5 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
         )}
       </div>
     </ScrollArea>
-  )
+  );
 }

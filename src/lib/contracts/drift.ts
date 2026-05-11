@@ -1,11 +1,11 @@
 import type {
+  BreakingChangePolicy,
   Contract,
   DriftReport,
-  RequestDiff,
   FieldChange,
-  BreakingChangePolicy,
+  RequestDiff,
 } from '@/types/contracts';
-import { computeSnapshot, type CollectionRequest } from './snapshot';
+import { type CollectionRequest, computeSnapshot } from './snapshot';
 
 /**
  * PREVIEW-ONLY frontend drift engine.
@@ -81,7 +81,7 @@ export function computeDrift(
 
   // New endpoints added to collection
   for (const [reqId, current] of Object.entries(currentSnapshot)) {
-    if (!contract.signedSnapshot![reqId]) {
+    if (!contract.signedSnapshot?.[reqId]) {
       diffs.push({
         requestId: reqId,
         method: current.method,

@@ -6,22 +6,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useContractDrift } from '@/hooks/useContractDrift';
 import { useContracts } from '@/hooks/useContracts';
 import { useContractsFilter } from '@/hooks/useContractsFilter';
+import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
 import { track } from '@/lib/telemetry';
 import { groupContracts } from '@/stores/contracts/contractsSelectors';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import { usePaneStore } from '@/stores/pane-store';
+import { ChangelogDrawer } from './ChangelogDrawer';
 import type { ContractAction } from './ContractCard';
 import { ContractCard } from './ContractCard';
 import { ContractCardSkeleton } from './ContractCardSkeleton';
-import { ChangelogDrawer } from './ChangelogDrawer';
 import { ContractsEmptyState } from './ContractsEmptyState';
 import { ContractsFilterBar } from './ContractsFilterBar';
 import { ContractsGroupHeader } from './ContractsGroupHeader';
 import { ContractsSummaryRow } from './ContractsSummaryRow';
 import { ExportContractDialog } from './ExportContractDialog';
 import { NewContractModal } from './NewContractModal';
-import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
 
 interface ContractsTabProps {
   /** Collection root path — used as key for all IPC calls */
@@ -75,7 +75,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             collectionId,
             contractCount: useContractsStore.getState().byCollection[collectionId]?.length ?? 0,
           });
-        } catch {}
+        } catch {
+          /* noop */
+        }
       })
       .catch((err) => setLoadError(String(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,7 +87,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
     async (action: ContractAction, contractId: string) => {
       try {
         track('contracts.card_action', { contractId, action });
-      } catch {}
+      } catch {
+        /* noop */
+      }
       try {
         switch (action) {
           case 'pause':
@@ -177,6 +181,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
       unarchiveContract,
       openTab,
       byId,
+      acceptDrift,
     ],
   );
 
@@ -256,7 +261,11 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
         e.preventDefault();
         const c = cards[idx];
         if (c) {
-          try { track('contracts.changelog_drawer_opened', { contractId: c.id, source: 'keyboard' }) } catch {}
+          try {
+            track('contracts.changelog_drawer_opened', { contractId: c.id, source: 'keyboard' });
+          } catch {
+            /* noop */
+          }
           openDrawerRef.current(c.id);
         }
       }
@@ -295,10 +304,7 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             <h1 className='text-xl font-semibold text-foreground leading-tight tracking-[-0.01em]'>
               Contracts
             </h1>
-            <div
-              className='text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap'
-              aria-label={`${collectionName} / Contracts`}
-            >
+            <div className='text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap'>
               <span>{collectionName}</span>
               <span aria-hidden='true'>/</span>
               <span className='text-foreground/70'>Contracts</span>
@@ -386,20 +392,26 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
             if (q.length > 0) {
               try {
                 track('contracts.filter_used', { filterType: 'search' });
-              } catch {}
+              } catch {
+                /* noop */
+              }
             }
           }}
           onToggleStatus={(s) => {
             toggleStatus(s);
             try {
               track('contracts.filter_used', { filterType: 'status', value: s });
-            } catch {}
+            } catch {
+              /* noop */
+            }
           }}
           onSetSort={(s) => {
             setSort(s);
             try {
               track('contracts.filter_used', { filterType: 'sort', value: s });
-            } catch {}
+            } catch {
+              /* noop */
+            }
           }}
           onSetView={setView}
         />
@@ -411,7 +423,9 @@ export function ContractsTab({ collectionId, collectionName }: ContractsTabProps
           onStartFromCurrent={() => {
             try {
               track('contracts.empty_state_cta', { action: 'start_from_current' });
-            } catch {}
+            } catch {
+              /* noop */
+            }
             setModalOpen(true);
           }}
         />

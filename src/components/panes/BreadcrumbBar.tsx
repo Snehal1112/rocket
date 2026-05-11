@@ -431,9 +431,7 @@ function deriveSegments(
   }
 
   if (isContractDiffTab(tab)) {
-    return [
-      { label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> },
-    ];
+    return [{ label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> }];
   }
 
   const _exhaustive: never = tab;

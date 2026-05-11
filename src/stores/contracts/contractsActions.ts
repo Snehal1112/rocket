@@ -156,7 +156,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     acceptDrift: async (collectionId, id, newVersion) => {
@@ -165,8 +167,15 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       const contract = adaptIpcContract(raw);
       upsertInCollection(collectionId, contract);
       try {
-        track('contracts.status_changed', { contractId: id, from: prev, to: contract.status, newVersion });
-      } catch (_) { /* ignore tracking errors */ }
+        track('contracts.status_changed', {
+          contractId: id,
+          from: prev,
+          to: contract.status,
+          newVersion,
+        });
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     pauseContract: async (collectionId, id) => {
@@ -176,7 +185,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     resumeContract: async (collectionId, id) => {
@@ -186,7 +197,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     renewContract: async (collectionId, id, newExpiresAt) => {
@@ -196,7 +209,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     sendForReview: async (collectionId, id) => {
@@ -206,7 +221,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     approveContract: async (collectionId, id) => {
@@ -216,7 +233,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     rejectContract: async (collectionId, id) => {
@@ -226,7 +245,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
       upsertInCollection(collectionId, contract);
       try {
         track('contracts.status_changed', { contractId: id, from: prev, to: contract.status });
-      } catch (_) { /* ignore tracking errors */ }
+      } catch (_) {
+        /* ignore tracking errors */
+      }
     },
 
     archiveContract: async (collectionId, contractId) => {
@@ -272,7 +293,9 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
                 ? Date.now() - new Date(curr.createdAt).getTime()
                 : undefined,
             });
-          } catch (_) { /* ignore tracking errors */ }
+          } catch (_) {
+            /* ignore tracking errors */
+          }
         }
       }
     },
@@ -301,19 +324,20 @@ function adaptChangeKind(changeType: string): ChangeKind {
 
 /** Turns a raw field path + change type into a human-readable summary. */
 function humanizeSummary(field: string, changeType: string): string {
-  const action = changeType === 'added' ? 'added' : changeType === 'removed' ? 'removed' : 'changed'
-  if (field.startsWith('query_param.')) return `Query parameter ${action}`
-  if (field.startsWith('header.')) return `Header ${action}`
-  if (field.startsWith('form_field.')) return `Form field ${action}`
-  if (field.startsWith('body_field.')) return `Body field ${action}`
-  if (field === 'body') return `Body ${action}`
-  if (field === 'method') return 'HTTP method changed'
-  if (field === 'url_pattern') return 'URL pattern changed'
-  if (field === 'auth_type') return 'Auth type changed'
-  if (field === 'auth_detail') return 'Auth credentials changed'
+  const action =
+    changeType === 'added' ? 'added' : changeType === 'removed' ? 'removed' : 'changed';
+  if (field.startsWith('query_param.')) return `Query parameter ${action}`;
+  if (field.startsWith('header.')) return `Header ${action}`;
+  if (field.startsWith('form_field.')) return `Form field ${action}`;
+  if (field.startsWith('body_field.')) return `Body field ${action}`;
+  if (field === 'body') return `Body ${action}`;
+  if (field === 'method') return 'HTTP method changed';
+  if (field === 'url_pattern') return 'URL pattern changed';
+  if (field === 'auth_type') return 'Auth type changed';
+  if (field === 'auth_detail') return 'Auth credentials changed';
   // Generic fallback
-  const label = field.replace(/_/g, ' ').replace(/\./g, ': ').toLowerCase()
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${action}`
+  const label = field.replace(/_/g, ' ').replace(/\./g, ': ').toLowerCase();
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} ${action}`;
 }
 
 /**
@@ -344,7 +368,8 @@ function adaptIpcChangelogEntry(
     at: raw.timestamp,
     kind: adaptChangeKind(raw.changeType),
     summary: humanizeSummary(raw.field, raw.changeType),
-    detail: diffLines.map(l => `${l.kind === 'remove' ? '−' : '+'} ${l.text}`).join('\n') || undefined,
+    detail:
+      diffLines.map((l) => `${l.kind === 'remove' ? '−' : '+'} ${l.text}`).join('\n') || undefined,
     diffLines: diffLines.length > 0 ? diffLines : undefined,
     requestPath,
     // Use requestPath as a stable id so the "Open request" action button renders.

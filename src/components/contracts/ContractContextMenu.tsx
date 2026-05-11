@@ -14,7 +14,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useState } from 'react';
-import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,8 +38,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { track } from '@/lib/telemetry';
 import { saveContractAsOpenApi } from '@/lib/contracts/exportOpenApi';
+import { track } from '@/lib/telemetry';
+import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import type { Contract } from '@/types/contracts';
 import type { ContractAction } from './ContractCard';
 
@@ -76,10 +76,19 @@ function renderItems(
         <Pencil className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
         Edit
       </Item>
-      <Item onSelect={() => {
-        try { track('contracts.changelog_drawer_opened', { contractId: contract.id, source: 'context_menu' }) } catch {}
-        openDrawer(contract.id)
-      }}>
+      <Item
+        onSelect={() => {
+          try {
+            track('contracts.changelog_drawer_opened', {
+              contractId: contract.id,
+              source: 'context_menu',
+            });
+          } catch {
+            /* noop */
+          }
+          openDrawer(contract.id);
+        }}
+      >
         <History className='h-3.5 w-3.5 mr-2' aria-hidden='true' />
         Show changelog
       </Item>

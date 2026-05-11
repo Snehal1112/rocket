@@ -296,6 +296,13 @@ fn diff_kv_list(
                 });
             }
             Some(new_entry) if new_entry.value != old_entry.value => {
+                // Header value changes follow the same policy as removals: only
+                // breaking under Strict. Query params and other fields remain
+                // always-breaking because their values are semantically required.
+                let is_breaking = match (prefix, policy) {
+                    ("header", BreakingChangePolicy::Lenient | BreakingChangePolicy::AdditiveOk) => false,
+                    _ => true,
+                };
                 out.push(ChangelogEntry {
                     timestamp: now,
                     request_path: path_buf.clone(),
@@ -303,7 +310,7 @@ fn diff_kv_list(
                     change_type: ChangeType::Changed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: Some(new_entry.value.clone()),
-                    is_breaking: true,
+                    is_breaking,
                     request_method: Some(method.to_owned()),
                     http_path: Some(http_path.to_owned()),
                     author: author.map(ToOwned::to_owned),
@@ -503,6 +510,38 @@ mod tests {
         assert_eq!(changes[0].change_type, ChangeType::Changed);
         assert_eq!(changes[0].old_value.as_deref(), Some("Bearer old"));
         assert_eq!(changes[0].new_value.as_deref(), Some("Bearer new"));
+    }
+
+    #[test]
+    fn header_value_change_is_not_breaking_under_lenient() {
+        // Regression: changing a header value was hardcoded is_breaking=true,
+        // causing contracts to jump to Breach instead of Drift.
+        let old = base_snap_v2();
+        let mut new = base_snap_v2();
+        new.headers[0].value = "Bearer new".into();
+        let changes = diff_signature(&old, &new, &lenient(), None);
+        assert_eq!(changes.len(), 1);
+        assert!(!changes[0].is_breaking, "header value change must not be breaking under Lenient");
+    }
+
+    #[test]
+    fn header_value_change_is_not_breaking_under_additive_ok() {
+        let old = base_snap_v2();
+        let mut new = base_snap_v2();
+        new.headers[0].value = "Bearer new".into();
+        let changes = diff_signature(&old, &new, &BreakingChangePolicy::AdditiveOk, None);
+        assert_eq!(changes.len(), 1);
+        assert!(!changes[0].is_breaking, "header value change must not be breaking under AdditiveOk");
+    }
+
+    #[test]
+    fn header_value_change_is_breaking_under_strict() {
+        let old = base_snap_v2();
+        let mut new = base_snap_v2();
+        new.headers[0].value = "Bearer new".into();
+        let changes = diff_signature(&old, &new, &BreakingChangePolicy::Strict, None);
+        assert_eq!(changes.len(), 1);
+        assert!(changes[0].is_breaking, "header value change must be breaking under Strict");
     }
 
     #[test]
