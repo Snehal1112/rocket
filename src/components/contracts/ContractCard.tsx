@@ -367,11 +367,13 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                     <MetaItem
                       icon={<TrendingUp className='h-3 w-3' />}
                       value={`${contract.policy.uptimeSla}% compliance`}
+                      success
                     />
                   ) : (
                     <MetaItem
                       icon={<Check className='h-3 w-3' />}
                       value={`${contract.driftCount} break${contract.driftCount !== 1 ? 's' : ''} in 30d`}
+                      success={contract.driftCount === 0}
                     />
                   )
                 ) : contract.driftCount > 0 ? (
@@ -379,7 +381,7 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                     icon={<AlertTriangle className='h-3 w-3' />}
                     value={
                       contract.breachCount > 0
-                        ? `${contract.breachCount} breaking`
+                        ? `${contract.breachCount} breaking change${contract.breachCount !== 1 ? 's' : ''}`
                         : 'Additive drift'
                     }
                     danger={contract.breachCount > 0}
@@ -503,7 +505,7 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='h-7 text-xs'
+                    className='h-7 text-xs text-[hsl(var(--warning))] hover:text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.08)]'
                     onClick={(e) => {
                       stopPropagation(e);
                       onAction('archive', contract.id);
@@ -530,7 +532,9 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
                       onAction('accept_drift', contract.id);
                     }}
                   >
-                    Accept as {nextVersion(contract.version)}
+                    {contract.status === 'breach'
+                      ? `Propose ${nextVersion(contract.version)}`
+                      : `Accept as ${nextVersion(contract.version)}`}
                   </Button>
                   <ContractDropdownMenu
                     contract={contract}
@@ -590,7 +594,13 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
             ) : (
               <>
                 <span className='flex items-center gap-1 text-[11px] text-muted-foreground'>
-                  <Check className='h-3 w-3 shrink-0' aria-hidden='true' />
+                  <Check
+                    className={cn(
+                      'h-3 w-3 shrink-0',
+                      contract.changelog.length === 0 && 'text-[hsl(var(--success))]',
+                    )}
+                    aria-hidden='true'
+                  />
                   {footerLabel(contract)}
                 </span>
                 <div className='flex gap-1 shrink-0'>

@@ -15,8 +15,21 @@ export function PrimaryAction({ contract, onAction }: PrimaryActionProps) {
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
   switch (contract.status) {
-    case 'drift':
     case 'breach':
+      return (
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7 text-xs'
+          onClick={(e) => {
+            stop(e);
+            onAction('review_diff', contract.id);
+          }}
+        >
+          Review breach →
+        </Button>
+      );
+    case 'drift':
       return (
         <Button
           variant='outline'
