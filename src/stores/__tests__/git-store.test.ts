@@ -850,4 +850,13 @@ describe('git-store identity setup flow', () => {
 
     expect(vi.mocked(gitPush)).toHaveBeenCalledWith('/some/repo', 'origin', creds);
   });
+
+  it('activatePendingCredentials is a no-op when no pending credentials exist', () => {
+    useGitStore.setState({ credentials: { type: 'token', token: 'existing' } as unknown as GitCredentials });
+
+    useGitStore.getState().activatePendingCredentials();
+
+    // Should not overwrite existing credentials
+    expect(useGitStore.getState().credentials).toEqual({ type: 'token', token: 'existing' });
+  });
 });

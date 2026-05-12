@@ -555,8 +555,9 @@ export const useGitStore = create<GitState>((set, get) => ({
 
     // SSH key: prompt user to confirm/update git identity before activating.
     if (creds.type === 'sshKey' && collectionPath) {
-      gitGetIdentity(collectionPath)
-        .then((identity) => {
+      void (async () => {
+        try {
+          const identity = await gitGetIdentity(collectionPath);
           set({
             showCredentialsDialog: false,
             pendingCredentialsForIdentitySetup: creds,
@@ -564,12 +565,13 @@ export const useGitStore = create<GitState>((set, get) => ({
             identitySetupInitialName: identity.name,
             identitySetupInitialEmail: identity.email,
           });
-        })
-        .catch(() => {
+        } catch {
           // Identity fetch failed — activate creds immediately rather than blocking.
+          const currentOp = get().pendingNetworkOp;
           set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
-          if (pendingNetworkOp) get()[pendingNetworkOp]();
-        });
+          if (currentOp) get()[currentOp]();
+        }
+      })();
       return;
     }
 
@@ -586,6 +588,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   activatePendingCredentials: () => {
     const { pendingCredentialsForIdentitySetup, pendingNetworkOp } = get();
+    if (!pendingCredentialsForIdentitySetup) return;
     const creds = pendingCredentialsForIdentitySetup;
     set({
       credentials: creds,
