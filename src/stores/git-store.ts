@@ -40,6 +40,7 @@ import {
   type RepoStatus,
   type StashEntry,
 } from '@/lib/tauri-api';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 interface GitState {
   isRepo: boolean;
@@ -126,14 +127,16 @@ export const useGitStore = create<GitState>((set, get) => ({
       const isRepo = await gitIsRepo(path);
       set({ isRepo });
       if (isRepo) {
-        // Auto-load persisted credentials if none are set in memory.
-        if (!get().credentials) {
-          try {
-            const saved = await loadGitCredentials();
-            if (saved) set({ credentials: saved });
-          } catch {
-            // Keychain unavailable — proceed without credentials.
+        // Always reload workspace-scoped credentials so switching workspaces
+        // picks up the right identity without requiring a manual re-entry.
+        try {
+          const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+          if (workspaceId) {
+            const saved = await loadGitCredentials(workspaceId);
+            set({ credentials: saved ?? null });
           }
+        } catch {
+          // Keychain unavailable — proceed without credentials.
         }
         const [status] = await Promise.all([
           gitStatus(path),
