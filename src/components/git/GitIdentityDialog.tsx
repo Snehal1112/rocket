@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -8,11 +8,29 @@ interface Props {
   open: boolean;
   onConfirm: (name: string, email: string) => void;
   onCancel: () => void;
+  initialName?: string;
+  initialEmail?: string;
+  confirmLabel?: string;
 }
 
-export function GitIdentityDialog({ open, onConfirm, onCancel }: Props) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+export function GitIdentityDialog({
+  open,
+  onConfirm,
+  onCancel,
+  initialName = '',
+  initialEmail = '',
+  confirmLabel = 'Save & Commit',
+}: Props) {
+  const [name, setName] = useState(initialName);
+  const [email, setEmail] = useState(initialEmail);
+
+  // Sync fields each time the dialog opens so pre-populated values are fresh.
+  useEffect(() => {
+    if (open) {
+      setName(initialName);
+      setEmail(initialEmail);
+    }
+  }, [open]);
 
   const isValid = name.trim().length > 0 && email.includes('@');
 
@@ -72,7 +90,7 @@ export function GitIdentityDialog({ open, onConfirm, onCancel }: Props) {
 
           <div className='flex gap-2'>
             <Button onClick={handleConfirm} disabled={!isValid} className='flex-1' size='sm'>
-              Save &amp; Commit
+              {confirmLabel}
             </Button>
             <Button onClick={onCancel} variant='outline' className='flex-1' size='sm'>
               Cancel
