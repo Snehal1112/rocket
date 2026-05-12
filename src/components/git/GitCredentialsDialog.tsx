@@ -15,6 +15,7 @@ import {
 import type { GitCredentials } from '@/lib/tauri-api';
 import { getDefaultSshKeyPath, loadGitCredentials, saveGitCredentials } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 type AuthType = 'sshKey' | 'sshAgent' | 'userPass' | 'token';
 
@@ -28,6 +29,8 @@ export function GitCredentialsDialog() {
   const [token, setToken] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+
   const keyPathHintId = useId();
 
   // On open: load persisted credentials first; fall back to SSH key auto-detection.
@@ -37,7 +40,7 @@ export function GitCredentialsDialog() {
 
     (async () => {
       try {
-        const saved = await loadGitCredentials();
+        const saved = await loadGitCredentials(activeWorkspaceId);
         if (saved) {
           if (saved.type === 'sshKey') {
             setAuthType('sshKey');
@@ -106,7 +109,7 @@ export function GitCredentialsDialog() {
 
     // Persist to OS keychain; surface error inline but never block the connect.
     try {
-      await saveGitCredentials(creds);
+      await saveGitCredentials(activeWorkspaceId, creds);
     } catch (e) {
       setSaveError(`Could not save credentials to keychain: ${String(e)}`);
     }
