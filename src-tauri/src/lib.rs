@@ -354,6 +354,7 @@ pub fn run() {
             commands::git::git_remove_remote,
             commands::git::git_set_remote_url,
             commands::git::get_default_ssh_key_path,
+            commands::git::list_ssh_key_paths,
             commands::git::save_git_credentials,
             commands::git::load_git_credentials,
             commands::git::git_get_identity,

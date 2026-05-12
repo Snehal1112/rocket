@@ -744,6 +744,9 @@ export const detectClonedStructure = (path: string) =>
 export const getDefaultSshKeyPath = (): Promise<string | null> =>
   invoke<string | null>('get_default_ssh_key_path');
 
+export const listSshKeyPaths = (): Promise<string[]> =>
+  invoke<string[]>('list_ssh_key_paths');
+
 export const saveGitCredentials = (workspaceId: string, creds: GitCredentials): Promise<void> =>
   invoke<void>('save_git_credentials', { workspaceId, creds });
 

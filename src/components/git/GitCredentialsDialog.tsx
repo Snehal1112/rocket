@@ -1,6 +1,6 @@
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
 import { FolderOpen } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { GitCredentials } from '@/lib/tauri-api';
-import { getDefaultSshKeyPath, loadGitCredentials, saveGitCredentials } from '@/lib/tauri-api';
+import { getDefaultSshKeyPath, listSshKeyPaths, loadGitCredentials, saveGitCredentials } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -28,10 +28,9 @@ export function GitCredentialsDialog() {
   const [password, setPassword] = useState('');
   const [token, setToken] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [availableKeyPaths, setAvailableKeyPaths] = useState<string[]>([]);
 
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-
-  const keyPathHintId = useId();
 
   // On open: load persisted credentials first; fall back to SSH key auto-detection.
   useEffect(() => {
@@ -39,6 +38,14 @@ export function GitCredentialsDialog() {
     setSaveError(null);
 
     (async () => {
+      // Load all available SSH keys in ~/.ssh/ for the picker.
+      try {
+        const keys = await listSshKeyPaths();
+        setAvailableKeyPaths(keys);
+      } catch {
+        setAvailableKeyPaths([]);
+      }
+
       try {
         const saved = await loadGitCredentials(activeWorkspaceId);
         if (saved) {
@@ -154,35 +161,56 @@ export function GitCredentialsDialog() {
           {authType === 'sshKey' && (
             <>
               <div>
-                <Label htmlFor='ssh-key-picker' className='text-sm'>
-                  Private Key Path
+                <Label htmlFor='ssh-key-select' className='text-sm'>
+                  Private Key
                 </Label>
-                <button
-                  id='ssh-key-picker'
-                  type='button'
-                  onClick={handleBrowseKey}
-                  aria-label='Select SSH private key file'
-                  aria-describedby={keyPathHintId}
-                  className={[
-                    'flex h-8 w-full items-center justify-between rounded-md px-3 text-sm transition-colors',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                    'border bg-background hover:bg-accent hover:text-accent-foreground',
-                    privateKeyPath
-                      ? 'border-input text-foreground'
-                      : 'border-dashed border-muted-foreground/50 text-muted-foreground italic',
-                  ].join(' ')}
-                >
-                  <span className='font-mono'>
-                    {privateKeyPath || 'Click to select a key file…'}
-                  </span>
-                  <FolderOpen
-                    className='ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground'
-                    aria-hidden='true'
-                  />
-                </button>
-                <p id={keyPathHintId} className='mt-1 text-xs text-muted-foreground'>
-                  Click to choose a file — opens in ~/.ssh/
-                </p>
+                {availableKeyPaths.length > 0 ? (
+                  <Select
+                    value={privateKeyPath}
+                    onValueChange={async (val) => {
+                      if (val === '__browse__') {
+                        await handleBrowseKey();
+                      } else {
+                        setPrivateKeyPath(val);
+                      }
+                    }}
+                  >
+                    <SelectTrigger id='ssh-key-select' className='h-8 text-sm font-mono'>
+                      <SelectValue placeholder='Select a key…' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Show all detected keys; if the current path isn't in the list add it */}
+                      {[
+                        ...availableKeyPaths,
+                        ...(privateKeyPath && !availableKeyPaths.includes(privateKeyPath)
+                          ? [privateKeyPath]
+                          : []),
+                      ].map((keyPath) => (
+                        <SelectItem key={keyPath} value={keyPath} className='font-mono text-xs'>
+                          {keyPath.replace(/.*[\\/]/, '')}
+                          <span className='ml-2 font-sans text-[10px] text-muted-foreground'>
+                            {keyPath.replace(/[\\/][^\\/]+$/, '')}
+                          </span>
+                        </SelectItem>
+                      ))}
+                      <SelectItem value='__browse__' className='text-xs text-muted-foreground'>
+                        <FolderOpen className='mr-1.5 inline h-3 w-3' aria-hidden='true' />
+                        Browse for another key…
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Button
+                    id='ssh-key-select'
+                    variant='outline'
+                    size='sm'
+                    className='h-8 w-full justify-between font-mono text-xs'
+                    onClick={handleBrowseKey}
+                  >
+                    <span>{privateKeyPath || 'Click to select a key file…'}</span>
+                    <FolderOpen className='ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
+                  </Button>
+                )}
               </div>
 
               <div>

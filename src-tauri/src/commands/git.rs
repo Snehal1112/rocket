@@ -252,6 +252,65 @@ pub fn get_default_ssh_key_path() -> Option<String> {
     None
 }
 
+/// Return all SSH private key paths found in `~/.ssh/` — both standard-named
+/// keys (id_ed25519, id_rsa, …) and custom-named keys (id_ed25519_snehal1112,
+/// etc.). A file is treated as a private key if a corresponding `.pub` file
+/// exists alongside it. Standard names are returned first; the rest are sorted
+/// alphabetically.
+#[tauri::command]
+pub fn list_ssh_key_paths() -> Vec<String> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    let ssh_dir = home.join(".ssh");
+    let Ok(entries) = std::fs::read_dir(&ssh_dir) else {
+        return Vec::new();
+    };
+
+    const STANDARD: &[&str] = &["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"];
+    // Files in ~/.ssh/ that are definitely not private keys.
+    const SKIP: &[&str] = &[
+        "known_hosts", "known_hosts.old", "authorized_keys",
+        "config", "environment", "rc",
+    ];
+
+    let mut standard: Vec<String> = Vec::new();
+    let mut custom: Vec<String> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if name.ends_with(".pub") || name.starts_with('.') { continue; }
+        if SKIP.contains(&name.as_str()) { continue; }
+
+        // Require a paired .pub file — strong signal this is a key pair.
+        if !ssh_dir.join(format!("{}.pub", name)).exists() { continue; }
+
+        let Some(path_str) = path.to_str().map(String::from) else { continue };
+
+        if STANDARD.contains(&name.as_str()) {
+            standard.push(path_str);
+        } else {
+            custom.push(path_str);
+        }
+    }
+
+    // Standard names in the preferred order; custom names alphabetically after.
+    standard.sort_by_key(|p| {
+        let name = std::path::Path::new(p).file_name()
+            .and_then(|n| n.to_str()).unwrap_or("");
+        STANDARD.iter().position(|&s| s == name).unwrap_or(usize::MAX)
+    });
+    custom.sort();
+    standard.extend(custom);
+    standard
+}
+
 /// Persist git credentials to the OS keychain (macOS Keychain, Windows
 /// Credential Manager, Linux Secret Service). The passphrase, if present,
 /// is stored inside the encrypted keychain entry — never written to disk.
