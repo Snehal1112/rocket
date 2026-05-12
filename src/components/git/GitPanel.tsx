@@ -13,6 +13,7 @@ import { GitCloneDialog } from '@/components/git/GitCloneDialog';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
+import { GitIdentityDialog } from '@/components/git/GitIdentityDialog';
 import { GitFileList } from '@/components/git/GitFileList';
 import { GitLandingPanel } from '@/components/git/GitLandingPanel';
 import { GitLinksSection } from '@/components/git/GitLinksSection';
@@ -22,7 +23,7 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { CommitInfo, ConflictFile, FileDiff, FileStatus } from '@/lib/tauri-api';
-import { gitDiffCommit, onCollectionChanged } from '@/lib/tauri-api';
+import { gitDiffCommit, gitSetIdentity, onCollectionChanged } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 
 type RightPanelView =
@@ -58,6 +59,10 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
     collectionPath: loadedPath,
     isRepo: storeIsRepo,
     initRepo,
+    showIdentitySetupDialog,
+    identitySetupInitialName,
+    identitySetupInitialEmail,
+    activatePendingCredentials,
   } = useGitStore();
   const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
@@ -98,6 +103,19 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
       setLeftWidth((w) => Math.min(500, Math.max(200, w + 20)));
     }
   }, []);
+
+  const handleIdentitySetupConfirm = async (name: string, email: string) => {
+    try {
+      await gitSetIdentity(collectionPath, name, email);
+    } catch {
+      // Non-blocking — proceed even if identity save fails.
+    }
+    activatePendingCredentials();
+  };
+
+  const handleIdentitySetupCancel = () => {
+    activatePendingCredentials();
+  };
 
   const handleCommitClick = async (commit: CommitInfo) => {
     try {
@@ -176,6 +194,16 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           </Button>
         </div>
         {showCredentialsDialog && <GitCredentialsDialog />}
+        {showIdentitySetupDialog && (
+          <GitIdentityDialog
+            open={showIdentitySetupDialog}
+            onConfirm={handleIdentitySetupConfirm}
+            onCancel={handleIdentitySetupCancel}
+            initialName={identitySetupInitialName}
+            initialEmail={identitySetupInitialEmail}
+            confirmLabel='Save Identity'
+          />
+        )}
         <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
       </div>
     );
@@ -315,6 +343,16 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
       {/* Dialogs */}
       {showCredentialsDialog && <GitCredentialsDialog />}
+      {showIdentitySetupDialog && (
+        <GitIdentityDialog
+          open={showIdentitySetupDialog}
+          onConfirm={handleIdentitySetupConfirm}
+          onCancel={handleIdentitySetupCancel}
+          initialName={identitySetupInitialName}
+          initialEmail={identitySetupInitialEmail}
+          confirmLabel='Save Identity'
+        />
+      )}
       <GitRemotesDialog open={showRemotesDialog} onOpenChange={setShowRemotesDialog} />
       <GitCloneDialog open={showCloneDialog} onOpenChange={setShowCloneDialog} />
     </div>
