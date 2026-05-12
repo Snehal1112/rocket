@@ -25,6 +25,7 @@ export function GitIdentityDialog({
   const [email, setEmail] = useState(initialEmail);
 
   // Sync fields each time the dialog opens so pre-populated values are fresh.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally syncs only on open transition — including initialName/Email would reset the form while the user is mid-edit
   useEffect(() => {
     if (open) {
       setName(initialName);

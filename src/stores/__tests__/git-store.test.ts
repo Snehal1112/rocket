@@ -55,7 +55,7 @@ vi.mock('@/stores/workspace-store', () => ({
       selector({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
     {
       getState: () => ({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
-    }
+    },
   ),
 }));
 
@@ -705,7 +705,11 @@ describe('git-store credential auto-load', () => {
 
   it('auto-loads saved credentials from keychain when collection is a repo', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
-    const savedCreds = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519', passphrase: undefined };
+    const savedCreds = {
+      type: 'sshKey',
+      privateKeyPath: '~/.ssh/id_ed25519',
+      passphrase: undefined,
+    };
     vi.mocked(gitIsRepo).mockResolvedValue(true);
     vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
 
@@ -852,7 +856,9 @@ describe('git-store identity setup flow', () => {
   });
 
   it('activatePendingCredentials is a no-op when no pending credentials exist', () => {
-    useGitStore.setState({ credentials: { type: 'token', token: 'existing' } as unknown as GitCredentials });
+    useGitStore.setState({
+      credentials: { type: 'token', token: 'existing' } as unknown as GitCredentials,
+    });
 
     useGitStore.getState().activatePendingCredentials();
 
