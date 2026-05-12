@@ -46,6 +46,7 @@ vi.mock('@/lib/tauri-api', () => ({
   gitRemoveRemote: vi.fn().mockResolvedValue(undefined),
   gitSetRemoteUrl: vi.fn().mockResolvedValue(undefined),
   loadGitCredentials: vi.fn().mockResolvedValue(null),
+  gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
 }));
 
 vi.mock('@/stores/workspace-store', () => ({
@@ -738,5 +739,115 @@ describe('git-store credential auto-load', () => {
     // keychain returning null clears any previously-set in-memory credentials.
     expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
     expect(useGitStore.getState().credentials).toBeNull();
+  });
+});
+
+describe('git-store identity setup flow', () => {
+  beforeEach(() => {
+    useGitStore.setState({
+      collectionPath: null,
+      credentials: null,
+      showCredentialsDialog: false,
+      showIdentitySetupDialog: false,
+      identitySetupInitialName: '',
+      identitySetupInitialEmail: '',
+      pendingCredentialsForIdentitySetup: null,
+      pendingNetworkOp: null,
+      remotes: [],
+      error: null,
+    });
+    vi.clearAllMocks();
+  });
+
+  it('setCredentials with sshKey and collectionPath shows identity setup dialog', async () => {
+    const { gitGetIdentity } = await import('@/lib/tauri-api');
+    vi.mocked(gitGetIdentity).mockResolvedValue({ name: 'Snehal', email: 'snehal@example.com' });
+    useGitStore.setState({ collectionPath: '/some/repo' });
+
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
+    useGitStore.getState().setCredentials(creds);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const state = useGitStore.getState();
+    expect(state.credentials).toBeNull();
+    expect(state.showCredentialsDialog).toBe(false);
+    expect(state.showIdentitySetupDialog).toBe(true);
+    expect(state.pendingCredentialsForIdentitySetup).toEqual(creds);
+    expect(state.identitySetupInitialName).toBe('Snehal');
+    expect(state.identitySetupInitialEmail).toBe('snehal@example.com');
+  });
+
+  it('setCredentials with sshKey but no collectionPath activates immediately', () => {
+    useGitStore.setState({ collectionPath: null });
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
+
+    useGitStore.getState().setCredentials(creds);
+
+    const state = useGitStore.getState();
+    expect(state.credentials).toEqual(creds);
+    expect(state.showIdentitySetupDialog).toBe(false);
+  });
+
+  it('setCredentials with token creds activates immediately without identity dialog', () => {
+    useGitStore.setState({ collectionPath: '/some/repo' });
+    const creds: GitCredentials = { type: 'token', token: 'ghp_xxx' };
+
+    useGitStore.getState().setCredentials(creds);
+
+    const state = useGitStore.getState();
+    expect(state.credentials).toEqual(creds);
+    expect(state.showIdentitySetupDialog).toBe(false);
+  });
+
+  it('setCredentials with sshKey falls back to immediate activation when gitGetIdentity throws', async () => {
+    const { gitGetIdentity } = await import('@/lib/tauri-api');
+    vi.mocked(gitGetIdentity).mockRejectedValue(new Error('no repo'));
+    useGitStore.setState({ collectionPath: '/some/repo' });
+
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
+    useGitStore.getState().setCredentials(creds);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const state = useGitStore.getState();
+    expect(state.credentials).toEqual(creds);
+    expect(state.showIdentitySetupDialog).toBe(false);
+  });
+
+  it('activatePendingCredentials sets credentials and clears identity setup state', () => {
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
+    useGitStore.setState({
+      pendingCredentialsForIdentitySetup: creds,
+      showIdentitySetupDialog: true,
+      identitySetupInitialName: 'Snehal',
+      identitySetupInitialEmail: 'snehal@example.com',
+      pendingNetworkOp: null,
+    });
+
+    useGitStore.getState().activatePendingCredentials();
+
+    const state = useGitStore.getState();
+    expect(state.credentials).toEqual(creds);
+    expect(state.showIdentitySetupDialog).toBe(false);
+    expect(state.pendingCredentialsForIdentitySetup).toBeNull();
+    expect(state.identitySetupInitialName).toBe('');
+    expect(state.identitySetupInitialEmail).toBe('');
+  });
+
+  it('activatePendingCredentials retries pending push after activating', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
+    useGitStore.setState({
+      collectionPath: '/some/repo',
+      pendingCredentialsForIdentitySetup: creds,
+      showIdentitySetupDialog: true,
+      pendingNetworkOp: 'push',
+      remotes: [{ name: 'origin', url: 'git@github.com:test/test.git' }],
+    });
+
+    useGitStore.getState().activatePendingCredentials();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('/some/repo', 'origin', creds);
   });
 });

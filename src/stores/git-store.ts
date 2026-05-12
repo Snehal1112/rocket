@@ -35,6 +35,7 @@ import {
   gitStatus,
   gitSwitchBranch,
   gitUnstage,
+  gitGetIdentity,
   loadGitCredentials,
   type RemoteInfo,
   type RepoStatus,
@@ -57,6 +58,11 @@ interface GitState {
   showCredentialsDialog: boolean;
   /** Operation that triggered the credentials dialog — auto-retried once credentials are saved. */
   pendingNetworkOp: 'pull' | 'push' | 'fetch' | null;
+  showIdentitySetupDialog: boolean;
+  identitySetupInitialName: string;
+  identitySetupInitialEmail: string;
+  pendingCredentialsForIdentitySetup: GitCredentials | null;
+  activatePendingCredentials: () => void;
 
   setCollection: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -119,6 +125,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   credentials: null,
   showCredentialsDialog: false,
   pendingNetworkOp: null,
+  showIdentitySetupDialog: false,
+  identitySetupInitialName: '',
+  identitySetupInitialEmail: '',
+  pendingCredentialsForIdentitySetup: null,
 
   // Set the active collection path and check if it is a git repo.
   setCollection: async (path: string) => {
@@ -541,11 +551,31 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Store credentials, close the dialog, and auto-retry the operation that triggered it.
   setCredentials: (creds) => {
-    const { pendingNetworkOp } = get();
-    set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
-    if (pendingNetworkOp) {
-      get()[pendingNetworkOp]();
+    const { pendingNetworkOp, collectionPath } = get();
+
+    // SSH key: prompt user to confirm/update git identity before activating.
+    if (creds.type === 'sshKey' && collectionPath) {
+      gitGetIdentity(collectionPath)
+        .then((identity) => {
+          set({
+            showCredentialsDialog: false,
+            pendingCredentialsForIdentitySetup: creds,
+            showIdentitySetupDialog: true,
+            identitySetupInitialName: identity.name,
+            identitySetupInitialEmail: identity.email,
+          });
+        })
+        .catch(() => {
+          // Identity fetch failed — activate creds immediately rather than blocking.
+          set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
+          if (pendingNetworkOp) get()[pendingNetworkOp]();
+        });
+      return;
     }
+
+    // All other credential types: activate immediately.
+    set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
+    if (pendingNetworkOp) get()[pendingNetworkOp]();
   },
 
   // Show or hide the credentials dialog.
@@ -553,6 +583,22 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
 
   clearPendingNetworkOp: () => set({ pendingNetworkOp: null }),
+
+  activatePendingCredentials: () => {
+    const { pendingCredentialsForIdentitySetup, pendingNetworkOp } = get();
+    const creds = pendingCredentialsForIdentitySetup;
+    set({
+      credentials: creds,
+      showIdentitySetupDialog: false,
+      pendingCredentialsForIdentitySetup: null,
+      identitySetupInitialName: '',
+      identitySetupInitialEmail: '',
+      pendingNetworkOp: null,
+    });
+    if (pendingNetworkOp && creds) {
+      get()[pendingNetworkOp]();
+    }
+  },
 
   // Push local commits to the remote, prompting for credentials if needed.
   push: async (remote) => {
@@ -642,6 +688,10 @@ export const useGitStore = create<GitState>((set, get) => ({
       credentials: null,
       showCredentialsDialog: false,
       pendingNetworkOp: null,
+      showIdentitySetupDialog: false,
+      identitySetupInitialName: '',
+      identitySetupInitialEmail: '',
+      pendingCredentialsForIdentitySetup: null,
     });
   },
 }));
