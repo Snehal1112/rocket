@@ -744,11 +744,11 @@ export const detectClonedStructure = (path: string) =>
 export const getDefaultSshKeyPath = (): Promise<string | null> =>
   invoke<string | null>('get_default_ssh_key_path');
 
-export const saveGitCredentials = (creds: GitCredentials): Promise<void> =>
-  invoke<void>('save_git_credentials', { creds });
+export const saveGitCredentials = (workspaceId: string, creds: GitCredentials): Promise<void> =>
+  invoke<void>('save_git_credentials', { workspaceId, creds });
 
-export const loadGitCredentials = (): Promise<GitCredentials | null> =>
-  invoke<GitCredentials | null>('load_git_credentials');
+export const loadGitCredentials = (workspaceId: string): Promise<GitCredentials | null> =>
+  invoke<GitCredentials | null>('load_git_credentials', { workspaceId });
 
 // ============================================================
 // Realtime events
