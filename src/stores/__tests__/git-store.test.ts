@@ -48,6 +48,16 @@ vi.mock('@/lib/tauri-api', () => ({
   loadGitCredentials: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('@/stores/workspace-store', () => ({
+  useWorkspaceStore: Object.assign(
+    (selector: (s: { activeWorkspaceId: string; multiWorkspaceMode: boolean }) => unknown) =>
+      selector({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
+    {
+      getState: () => ({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
+    }
+  ),
+}));
+
 describe('git-store clearError', () => {
   beforeEach(() => {
     useGitStore.setState({
@@ -694,30 +704,28 @@ describe('git-store credential auto-load', () => {
 
   it('auto-loads saved credentials from keychain when collection is a repo', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
-    const savedCreds = {
-      type: 'sshKey' as const,
-      privateKeyPath: '/home/user/.ssh/id_ed25519',
-      passphrase: undefined,
-    };
-    vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
+    const savedCreds = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519', passphrase: undefined };
     vi.mocked(gitIsRepo).mockResolvedValue(true);
+    vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
 
-    await useGitStore.getState().setCollection('/some/collection');
+    await useGitStore.getState().setCollection('/some/path');
 
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
     expect(useGitStore.getState().credentials).toEqual(savedCreds);
   });
 
   it('leaves credentials null when keychain returns null', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
-    vi.mocked(loadGitCredentials).mockResolvedValue(null);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
+    vi.mocked(loadGitCredentials).mockResolvedValue(null);
 
-    await useGitStore.getState().setCollection('/some/collection');
+    await useGitStore.getState().setCollection('/some/path');
 
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
     expect(useGitStore.getState().credentials).toBeNull();
   });
 
-  it('does not overwrite already-set credentials when keychain returns null', async () => {
+  it('overwrites existing credentials with keychain result (always reloads on setCollection)', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
     const existing = { type: 'token' as const, token: 'mytoken' };
     useGitStore.setState({ credentials: existing as unknown as GitCredentials });
@@ -726,6 +734,9 @@ describe('git-store credential auto-load', () => {
 
     await useGitStore.getState().setCollection('/some/collection');
 
-    expect(useGitStore.getState().credentials).toEqual(existing);
+    // New design: always reloads workspace-scoped credentials on setCollection;
+    // keychain returning null clears any previously-set in-memory credentials.
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
+    expect(useGitStore.getState().credentials).toBeNull();
   });
 });
