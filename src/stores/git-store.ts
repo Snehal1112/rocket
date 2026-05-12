@@ -553,13 +553,18 @@ export const useGitStore = create<GitState>((set, get) => ({
   setCredentials: (creds) => {
     const { pendingNetworkOp, collectionPath } = get();
 
+    // Close the credentials dialog immediately so the user gets instant feedback and
+    // so no user action (Escape/overlay click) can fire onOpenChange and clear
+    // pendingNetworkOp while the async identity fetch is in flight.
+    // Use set() directly — setShowCredentialsDialog() would clear pendingNetworkOp.
+    set({ showCredentialsDialog: false });
+
     // SSH key: prompt user to confirm/update git identity before activating.
     if (creds.type === 'sshKey' && collectionPath) {
       void (async () => {
         try {
           const identity = await gitGetIdentity(collectionPath);
           set({
-            showCredentialsDialog: false,
             pendingCredentialsForIdentitySetup: creds,
             showIdentitySetupDialog: true,
             identitySetupInitialName: identity.name,
@@ -568,7 +573,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         } catch {
           // Identity fetch failed — activate creds immediately rather than blocking.
           const currentOp = get().pendingNetworkOp;
-          set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
+          set({ credentials: creds, pendingNetworkOp: null });
           if (currentOp) get()[currentOp]();
         }
       })();
@@ -576,7 +581,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
 
     // All other credential types: activate immediately.
-    set({ credentials: creds, showCredentialsDialog: false, pendingNetworkOp: null });
+    set({ credentials: creds, pendingNetworkOp: null });
     if (pendingNetworkOp) get()[pendingNetworkOp]();
   },
 
@@ -617,7 +622,14 @@ export const useGitStore = create<GitState>((set, get) => ({
       await gitPush(collectionPath, resolvedRemote, credentials);
       await get().refreshStatus();
     } catch (e) {
-      set({ error: String(e) });
+      const msg = String(e);
+      // SSH auth failures: wrong key, repo access denied, host key mismatch.
+      // Set pendingNetworkOp so that "Change credentials" auto-retries the push.
+      const isAuthError = msg.includes('class=Ssh') ||
+        msg.includes('authentication failed') ||
+        msg.includes('Repository not found') ||
+        msg.includes('Permission denied');
+      set({ error: msg, ...(isAuthError ? { pendingNetworkOp: 'push' } : {}) });
     }
   },
 
@@ -634,7 +646,12 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       await gitPull(collectionPath, resolvedRemote, credentials);
     } catch (e) {
-      set({ error: String(e) });
+      const msg = String(e);
+      const isAuthError = msg.includes('class=Ssh') ||
+        msg.includes('authentication failed') ||
+        msg.includes('Repository not found') ||
+        msg.includes('Permission denied');
+      set({ error: msg, ...(isAuthError ? { pendingNetworkOp: 'pull' } : {}) });
     }
     // Always refresh status and conflicts after a pull attempt — whether it
     // succeeded or produced merge conflicts — so the UI reflects the real
@@ -659,7 +676,12 @@ export const useGitStore = create<GitState>((set, get) => ({
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
-      set({ error: String(e) });
+      const msg = String(e);
+      const isAuthError = msg.includes('class=Ssh') ||
+        msg.includes('authentication failed') ||
+        msg.includes('Repository not found') ||
+        msg.includes('Permission denied');
+      set({ error: msg, ...(isAuthError ? { pendingNetworkOp: 'fetch' } : {}) });
     }
   },
 
