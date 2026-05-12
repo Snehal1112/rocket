@@ -1848,14 +1848,8 @@ mod tests {
         git2::build::RepoBuilder::new()
             .clone(&remote_path, clone2_dir.path())
             .unwrap();
+        // The clone already checks out main at the tip commit.
         let clone2 = git2::Repository::open(clone2_dir.path()).unwrap();
-        // Get the tip commit from the remote tracking branch.
-        let origin_main = clone2.find_reference("refs/remotes/origin/main").unwrap();
-        let tip_commit = origin_main.peel_to_commit().unwrap();
-        // Create a local main branch pointing at the tip commit.
-        clone2.branch("main", &tip_commit, false).unwrap();
-        clone2.set_head("refs/heads/main").unwrap();
-        clone2.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
         let sig = git2::Signature::now("T", "t@t.com").unwrap();
         std::fs::write(clone2_dir.path().join("remote_change.bru"), "from remote").unwrap();
         let mut idx = clone2.index().unwrap();
@@ -1897,14 +1891,8 @@ mod tests {
             .clone(&remote_path, clone2_dir.path())
             .unwrap();
 
-        // Add a commit in clone2 and push it.
+        // Add a commit in clone2 and push it. The clone already checks out main.
         let clone2 = git2::Repository::open(clone2_dir.path()).unwrap();
-        // Create a local main branch from the remote tracking ref and check it out.
-        let origin_main = clone2.find_reference("refs/remotes/origin/main").unwrap();
-        let tip_commit = origin_main.peel_to_commit().unwrap();
-        clone2.branch("main", &tip_commit, false).unwrap();
-        clone2.set_head("refs/heads/main").unwrap();
-        clone2.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
         let sig = git2::Signature::now("T", "t@t.com").unwrap();
         std::fs::write(clone2_dir.path().join("roundtrip.bru"), "roundtrip").unwrap();
         let mut idx = clone2.index().unwrap();
