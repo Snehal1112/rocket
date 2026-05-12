@@ -183,8 +183,10 @@ pub fn git_set_remote_url(collection_path: String, name: String, url: String, sv
 }
 
 const KEYRING_SERVICE: &str = "rocket-api";
-// One global entry per app; not scoped to a collection or workspace.
-const KEYRING_ACCOUNT: &str = "git-credentials";
+
+fn keyring_account(workspace_id: &str) -> String {
+    format!("git-credentials-{}", workspace_id)
+}
 
 /// Serialisable mirror of GitCredentials — used only for keychain persistence.
 /// Kept separate from the domain type so the wire format is stable even if
@@ -254,10 +256,10 @@ pub fn get_default_ssh_key_path() -> Option<String> {
 /// Credential Manager, Linux Secret Service). The passphrase, if present,
 /// is stored inside the encrypted keychain entry — never written to disk.
 #[tauri::command]
-pub fn save_git_credentials(creds: GitCredentialsPayload) -> Result<(), DomainError> {
+pub fn save_git_credentials(workspace_id: String, creds: GitCredentialsPayload) -> Result<(), DomainError> {
     let json = serde_json::to_string(&creds)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(&workspace_id))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     entry.set_password(&json).map_err(|e| DomainError::Internal(e.to_string()))
 }
@@ -266,8 +268,8 @@ pub fn save_git_credentials(creds: GitCredentialsPayload) -> Result<(), DomainEr
 /// Returns None if no entry exists yet (first run). Errors if the keychain
 /// is unavailable (e.g. locked) — callers should treat this as no-credentials.
 #[tauri::command]
-pub fn load_git_credentials() -> Result<Option<GitCredentialsPayload>, DomainError> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+pub fn load_git_credentials(workspace_id: String) -> Result<Option<GitCredentialsPayload>, DomainError> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(&workspace_id))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     match entry.get_password() {
         Ok(json) => {
@@ -338,6 +340,12 @@ mod tests {
         let identity = git_get_identity(path).unwrap();
         assert_eq!(identity.name, "Bob");
         assert_eq!(identity.email, "bob@example.com");
+    }
+
+    #[test]
+    fn keyring_account_includes_workspace_id() {
+        assert_eq!(keyring_account("ws-abc"), "git-credentials-ws-abc");
+        assert_eq!(keyring_account("default"), "git-credentials-default");
     }
 
     #[test]
