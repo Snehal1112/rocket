@@ -932,6 +932,13 @@ mod tests {
         {
             let local_repo = Repository::clone(&remote_path, &local_path).unwrap();
             local_repo.set_head("refs/heads/main").ok();
+            // Set identity so the merge commit can be authored.
+            {
+                let cfg = local_repo.config().unwrap();
+                let mut local_cfg = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+                local_cfg.set_str("user.name", "Test").unwrap();
+                local_cfg.set_str("user.email", "test@test.com").unwrap();
+            }
             {
                 let base_c = local_repo.find_commit(base_oid).unwrap();
                 local_repo.reset(base_c.as_object(), git2::ResetType::Hard, None).unwrap();
@@ -986,6 +993,13 @@ mod tests {
         let local_path = local_dir.path().to_string_lossy().to_string();
         let local_repo = Repository::init(&local_path).unwrap();
         local_repo.set_head("refs/heads/main").ok();
+        // Set identity so the merge commit can be authored.
+        {
+            let cfg = local_repo.config().unwrap();
+            let mut local_cfg = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+            local_cfg.set_str("user.name", "Test").unwrap();
+            local_cfg.set_str("user.email", "test@test.com").unwrap();
+        }
         fs::write(local_dir.path().join("base.txt"), "base").unwrap();
         let mut idx = local_repo.index().unwrap();
         idx.add_path(Path::new("base.txt")).unwrap();
@@ -2106,5 +2120,105 @@ mod tests {
         let info = result.unwrap();
         assert_eq!(info.author, "Alice");
         assert_eq!(info.author_email, "alice@example.com");
+    }
+
+    #[test]
+    fn pull_merge_commit_fails_without_identity() {
+        // Set up a bare remote.
+        let remote_dir = TempDir::new().unwrap();
+        let remote_path = remote_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&remote_path).unwrap();
+
+        // Create a local repo with a shared base commit but NO identity in local config.
+        // Note: git2 reads local → global → system config. Writing empty strings to
+        // local config overrides any identity the CI runner may have in ~/.gitconfig.
+        let local_dir = TempDir::new().unwrap();
+        let local_path = local_dir.path().to_string_lossy().to_string();
+        let local_repo = Repository::init(&local_path).unwrap();
+        local_repo.set_head("refs/heads/main").ok();
+        {
+            let cfg = local_repo.config().unwrap();
+            let mut local_cfg = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+            local_cfg.set_str("user.name", "").unwrap();
+            local_cfg.set_str("user.email", "").unwrap();
+        }
+
+        // Create the shared base commit using an explicit signature (bypasses repo.signature()).
+        let setup_sig = git2::Signature::now("Setup", "setup@test.com").unwrap();
+        {
+            fs::write(local_dir.path().join("base.txt"), "base").unwrap();
+            let mut idx = local_repo.index().unwrap();
+            idx.add_path(Path::new("base.txt")).unwrap();
+            idx.write().unwrap();
+            let tree_id = idx.write_tree().unwrap();
+            let tree = local_repo.find_tree(tree_id).unwrap();
+            local_repo
+                .commit(Some("refs/heads/main"), &setup_sig, &setup_sig, "base", &tree, &[])
+                .unwrap();
+        }
+
+        // Push the base commit to the bare remote.
+        {
+            let mut remote_obj = local_repo.remote("origin", &remote_path).unwrap();
+            remote_obj
+                .push(&["refs/heads/main:refs/heads/main"], None)
+                .unwrap();
+        }
+
+        // Add a LOCAL commit so histories diverge (local is ahead by 1).
+        {
+            fs::write(local_dir.path().join("local.txt"), "local change").unwrap();
+            let mut idx2 = local_repo.index().unwrap();
+            idx2.add_path(Path::new("local.txt")).unwrap();
+            idx2.write().unwrap();
+            let tree_id2 = idx2.write_tree().unwrap();
+            let tree2 = local_repo.find_tree(tree_id2).unwrap();
+            let head = local_repo.head().unwrap().peel_to_commit().unwrap();
+            local_repo
+                .commit(Some("refs/heads/main"), &setup_sig, &setup_sig, "local", &tree2, &[&head])
+                .unwrap();
+        }
+        drop(local_repo);
+
+        // Add a REMOTE commit via a second repo so remote is also ahead of base by 1.
+        let other_dir = TempDir::new().unwrap();
+        let other_repo = Repository::clone(&remote_path, other_dir.path()).unwrap();
+        {
+            let cfg = other_repo.config().unwrap();
+            let mut local_cfg = cfg.open_level(git2::ConfigLevel::Local).unwrap();
+            local_cfg.set_str("user.name", "Other").unwrap();
+            local_cfg.set_str("user.email", "other@test.com").unwrap();
+            drop(local_cfg);
+            drop(cfg);
+        }
+        fs::write(other_dir.path().join("remote.txt"), "remote change").unwrap();
+        let mut oi = other_repo.index().unwrap();
+        oi.add_path(Path::new("remote.txt")).unwrap();
+        oi.write().unwrap();
+        let otid = oi.write_tree().unwrap();
+        let otree = other_repo.find_tree(otid).unwrap();
+        let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
+        let other_sig = git2::Signature::now("Other", "other@test.com").unwrap();
+        other_repo
+            .commit(Some("refs/heads/main"), &other_sig, &other_sig, "remote", &otree, &[&ohead])
+            .unwrap();
+        other_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
+
+        // Pull must fail with a DomainError — identity is missing in local config.
+        let svc = Git2Service::new();
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
+        let result = svc.pull(&local_path, "origin", &creds);
+        assert!(
+            result.is_err(),
+            "pull merge commit must fail when git identity is missing, got: {:?}",
+            result
+        );
     }
 }
