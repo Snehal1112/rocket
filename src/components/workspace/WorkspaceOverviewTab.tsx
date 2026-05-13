@@ -12,7 +12,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
 import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
@@ -140,7 +139,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     <div className='flex h-full overflow-hidden'>
       {/* ── LEFT COLUMN ── */}
       <div className='flex-1 border-r border-border overflow-hidden flex flex-col'>
-        <ScrollArea className='flex-1'>
+        <div className='flex-1 overflow-y-auto'>
           <div className='p-5 flex flex-col gap-5'>
             {/* Page header */}
             <h2 className='text-base font-semibold leading-tight'>
@@ -326,7 +325,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               )}
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </div>
 
       <ImportCollectionDialog
