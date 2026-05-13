@@ -305,7 +305,7 @@ describe('staging', () => {
 
   it('stageAll stages only unstaged non-unchanged files', async () => {
     const { gitStage, gitStatus } = await import('@/lib/tauri-api');
-    const files = [
+    const files: import('@/lib/tauri-api').FileStatus[] = [
       { path: 'already-staged.bru', status: 'modified', staged: true },
       { path: 'unstaged-modified.bru', status: 'modified', staged: false },
       { path: 'unchanged.bru', status: 'unchanged', staged: false },
