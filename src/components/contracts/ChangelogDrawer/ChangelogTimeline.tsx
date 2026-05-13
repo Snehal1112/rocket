@@ -83,7 +83,7 @@ export function ChangelogTimeline({ groups }: ChangelogTimelineProps) {
                 </div>
 
                 {group.items.map((entry) => (
-                  <div key={entry.id} className='relative mb-3'>
+                  <div key={entry.id} className='relative mb-3 min-w-0'>
                     <TimelineDot kind={entry.kind} isSign={entry.isSignEvent === true} />
                     {/* Connector: from dot right edge to card left */}
                     <span

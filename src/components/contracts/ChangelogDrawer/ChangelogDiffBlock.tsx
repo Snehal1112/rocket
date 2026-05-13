@@ -17,12 +17,13 @@ export function ChangelogDiffBlock({ diffLines }: ChangelogDiffBlockProps) {
     shouldCollapse && !expanded ? diffLines.slice(0, COLLAPSE_THRESHOLD) : diffLines;
 
   return (
-    <div className='mt-1.5 px-2.5 py-2 bg-background border border-border rounded-sm font-mono text-[11px]'>
+    <div className='mt-1.5 px-2.5 py-2 bg-background border border-border rounded-sm font-mono text-[11px] w-full'>
       {visibleLines.map((line, idx) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no stable identity
           key={`${idx}-${line.kind}`}
           className={cn(
+            'whitespace-pre-wrap break-all',
             line.kind === 'add' && 'text-[hsl(var(--success))]',
             line.kind === 'remove' && 'text-destructive',
             line.kind === 'context' && 'text-muted-foreground',
