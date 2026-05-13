@@ -29,19 +29,19 @@ yarn tauri build          # release build
 
 | Crate | Role |
 |---|---|
-| `rocket-shared` | Common types: `DomainError`, `DomainResult`, events, HTTP primitives |
-| `rocket-collection` | Collection/folder/request domain model + `CollectionRepository` trait |
+| `rocket-shared` | `DomainError`, `DomainResult`, events, HTTP primitives |
+| `rocket-collection` | Collection/folder/request model + `CollectionRepository` trait |
 | `rocket-environment` | Environment model, `{{var}}` resolution via `resolve()` |
-| `rocket-history` | Request execution history with filtering |
-| `rocket-workspace` | Workspace domain model + `WorkspaceRepository` trait |
-| `rocket-http` | `HttpExecutor` trait, `ReqwestExecutor`, auth schemes, cookies |
+| `rocket-history` | Request execution history |
+| `rocket-workspace` | Workspace model + `WorkspaceRepository` trait |
+| `rocket-http` | `HttpExecutor` trait, `ReqwestExecutor`, auth, cookies |
 | `rocket-git` | `GitService` trait + `Git2Service` (libgit2) |
-| `rocket-app` | Orchestration services — wires domain traits, no I/O |
-| `rocket-infra` | Filesystem implementations of all repository/service traits |
-| `rocket-import` | Bruno importer — parses `.bru`/`.yml`, converts to domain types |
-| `src-tauri` | Tauri IPC commands, app initialization, managed state |
+| `rocket-app` | Orchestration — wires domain traits, no I/O |
+| `rocket-infra` | Filesystem impls of all repository/service traits |
+| `rocket-import` | Bruno importer (`.bru`/`.yml` → domain types) |
+| `src-tauri` | Tauri IPC commands, app init, managed state |
 
-Per-crate design rules live in `crates/*/CLAUDE.md` and load automatically when you touch files in that crate.
+Per-crate rules in `crates/*/CLAUDE.md` — load automatically when you touch files there.
 
 ### Data Flow
 
@@ -49,26 +49,15 @@ Per-crate design rules live in `crates/*/CLAUDE.md` and load automatically when 
 Frontend (React) → Tauri command → rocket-app service → rocket-infra repo → filesystem
 ```
 
-- `rocket-app` services hold `Box<dyn Trait>` only — no concrete impls, fully testable.
-- `rocket-infra` provides concrete impls wired at startup in `src-tauri/src/lib.rs`.
-- Active workspace path lives in `Arc<Mutex<PathBuf>>` shared across all services.
-- Environment variables override collection variables before HTTP dispatch (`rocket_environment::resolve()`).
-- `DomainEvent` is published fire-and-forget via `EventPublisher`; `TauriEventBus` in prod, `NullEventPublisher` in tests.
-
-### Key Patterns
-
-- All Rust service methods return `DomainResult<T>` (`Result<T, DomainError>`).
-- Repository traits defined in domain crates; implementations only in `rocket-infra`.
-- Tests use `tempfile` for filesystem fixtures and `wiremock` for HTTP mocking.
-- `cargo check` is sufficient for most Rust validation; full compilation is slow.
+- `rocket-app` holds `Box<dyn Trait>` only; `rocket-infra` wired at startup in `src-tauri/src/lib.rs`.
+- Environment vars override collection vars before HTTP dispatch (`rocket_environment::resolve()`).
+- `DomainEvent` published fire-and-forget; `TauriEventBus` in prod, `NullEventPublisher` in tests.
+- Tests: `tempfile` for fs fixtures, `wiremock` for HTTP mocking. `cargo check` for fast validation.
 
 ## Rules and conventions
 
-Rules live in `.claude/rules/` — one file per concern, numbered by read order. Start with [`.claude/rules/00-shortcuts.md`](.claude/rules/00-shortcuts.md) for a pointer map, then read the relevant rule file for your task. See [`.claude/rules/README.md`](.claude/rules/README.md) for the full index.
-
-## Frontend-specific notes
-
-See `.claude/frontend.md` for Zustand stores, tab system, keyboard shortcuts, sandbox mode, and UI state persistence. See `.claude/tauri-commands.md` for IPC command modules and service wiring.
+Rules in `.claude/rules/` — start with `.claude/rules/00-shortcuts.md` for a pointer map.
+See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands.md` for IPC modules.
 
 ---
 
