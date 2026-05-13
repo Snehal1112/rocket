@@ -279,7 +279,6 @@ pub(super) fn pull(path: &str, remote: &str, creds: &GitCredentials) -> DomainRe
 
     let sig = repo
         .signature()
-        .or_else(|_| git2::Signature::now("RocketAPI User", "user@rocketapi.local"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     let head_commit = repo
