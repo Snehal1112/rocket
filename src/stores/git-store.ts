@@ -625,7 +625,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       const msg = String(e);
       // SSH auth failures: wrong key, repo access denied, host key mismatch.
       // Set pendingNetworkOp so that "Change credentials" auto-retries the push.
-      const isAuthError = msg.includes('class=Ssh') ||
+      const isAuthError =
+        msg.includes('class=Ssh') ||
         msg.includes('authentication failed') ||
         msg.includes('Repository not found') ||
         msg.includes('Permission denied');
@@ -647,7 +648,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       await gitPull(collectionPath, resolvedRemote, credentials);
     } catch (e) {
       const msg = String(e);
-      const isAuthError = msg.includes('class=Ssh') ||
+      const isAuthError =
+        msg.includes('class=Ssh') ||
         msg.includes('authentication failed') ||
         msg.includes('Repository not found') ||
         msg.includes('Permission denied');
@@ -677,7 +679,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       await get().refreshBranches();
     } catch (e) {
       const msg = String(e);
-      const isAuthError = msg.includes('class=Ssh') ||
+      const isAuthError =
+        msg.includes('class=Ssh') ||
         msg.includes('authentication failed') ||
         msg.includes('Repository not found') ||
         msg.includes('Permission denied');

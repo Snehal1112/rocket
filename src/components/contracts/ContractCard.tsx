@@ -2,7 +2,6 @@ import { formatDistanceToNow, parseISO } from 'date-fns';
 import {
   AlertTriangle,
   Archive,
-  ArrowRight,
   Calendar,
   Check,
   Clock,
@@ -18,11 +17,11 @@ import {
 } from 'lucide-react';
 import { forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { track } from '@/lib/telemetry';
 import { cn } from '@/lib/utils';
 import { useDrawerStore } from '@/stores/contracts/drawerSlice';
 import type { Contract } from '@/types/contracts';
+import { ContractParties } from './ConsumerTree';
 import { ContractContextMenu, ContractDropdownMenu } from './ContractContextMenu';
 import { ContractStatusChip } from './ContractStatusChip';
 import { MetaItem } from './internal/MetaItem';
@@ -30,7 +29,6 @@ import { PrimaryAction } from './internal/PrimaryAction';
 import { StatusSubline } from './internal/StatusSubline';
 import { VersionTag } from './internal/VersionTag';
 import { MiniChangelog } from './MiniChangelog';
-import { PartyPill } from './PartyPill';
 import { ScopeTag } from './ScopeTag';
 
 // All actions a parent can receive from this card.
@@ -208,15 +206,15 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
         }}
         className={cn(
           // Base
-          'group relative bg-card border border-border rounded-[var(--radius)]',
-          'p-[18px_20px] grid grid-cols-1 md:grid-cols-[1fr_220px] gap-6 mb-[10px]',
-          'cursor-pointer transition-[border-color,box-shadow] duration-[120ms]',
+          'group relative bg-card border border-border rounded-(--radius)',
+          'p-[18px_20px] grid grid-cols-1 md:grid-cols-[1fr_220px] gap-6 mb-2.5',
+          'cursor-pointer transition-[border-color,box-shadow] duration-120',
           'hover:border-[hsl(var(--border)/1.4)] hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)]',
           'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
           // Status modifiers (spec §7.2)
-          contract.status === 'drift' && 'border-l-[3px] border-l-[hsl(var(--warning))] pl-[17px]',
+          contract.status === 'drift' && 'border-l-[3px] border-l-[hsl(var(--warning))] pl-4.25',
           contract.status === 'breach' &&
-            'border-l-[3px] border-l-[hsl(var(--destructive))] pl-[17px] bg-[color-mix(in_oklab,hsl(var(--destructive-soft))_25%,hsl(var(--card)))]',
+            'border-l-[3px] border-l-[hsl(var(--destructive))] pl-4.25 bg-[color-mix(in_oklab,hsl(var(--destructive-soft))_25%,hsl(var(--card)))]',
           contract.status === 'paused' &&
             'bg-[color-mix(in_oklab,hsl(var(--muted))_50%,hsl(var(--card)))]',
           contract.status === 'expired' && 'opacity-75',
@@ -255,34 +253,8 @@ export const ContractCard = forwardRef<HTMLElement, ContractCardProps>(function 
           </div>
 
           {/* Parties */}
-          <div className='flex items-center gap-2 flex-wrap mb-3'>
-            <PartyPill party={contract.provider} partyRole='provider' />
-            <ArrowRight className='w-4 h-3.5 text-muted-foreground shrink-0' aria-hidden='true' />
-            {contract.consumers.length === 1 ? (
-              <PartyPill party={contract.consumers[0]} partyRole='consumer' />
-            ) : (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className='inline-flex items-center gap-[7px] pl-[4px] pr-[10px] py-1 border border-border rounded-full bg-card text-xs text-foreground cursor-default'>
-                      <span className='w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-semibold flex items-center justify-center shrink-0'>
-                        +{contract.consumers.length}
-                      </span>
-                      <span>{contract.consumers.length} consumers</span>
-                      <span className='text-[10px] text-muted-foreground font-medium shrink-0'>
-                        · Consumer
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side='top'>
-                    {contract.consumers.map((c) => c.name).join(', ')}
-                  </TooltipContent>
-                </Tooltip>
-                <span className='text-xs text-muted-foreground truncate max-w-[200px]'>
-                  · {contract.consumers.map((c) => c.name).join(', ')}
-                </span>
-              </>
-            )}
+          <div className='mb-3'>
+            <ContractParties provider={contract.provider} consumers={contract.consumers} />
           </div>
 
           {/* Meta row — content varies by status */}

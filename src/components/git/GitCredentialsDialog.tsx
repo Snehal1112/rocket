@@ -13,7 +13,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { GitCredentials } from '@/lib/tauri-api';
-import { getDefaultSshKeyPath, listSshKeyPaths, loadGitCredentials, saveGitCredentials } from '@/lib/tauri-api';
+import {
+  getDefaultSshKeyPath,
+  listSshKeyPaths,
+  loadGitCredentials,
+  saveGitCredentials,
+} from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -208,7 +213,10 @@ export function GitCredentialsDialog() {
                     onClick={handleBrowseKey}
                   >
                     <span>{privateKeyPath || 'Click to select a key file…'}</span>
-                    <FolderOpen className='ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
+                    <FolderOpen
+                      className='ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                      aria-hidden='true'
+                    />
                   </Button>
                 )}
               </div>
