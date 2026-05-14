@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# PreToolUse guard for Rocket repo safety rules.
+# Blocks:
+# - git CLI shell-outs via terminal tools
+# - introducing unwrap() in Rust edits via apply_patch/create_file
+
+set -euo pipefail
+
+payload="$(cat)"
+
+emit_deny() {
+  local reason="$1"
+  printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "PreToolUse",\n    "permissionDecision": "deny",\n    "permissionDecisionReason": "%s"\n  }\n}\n' "$reason"
+  exit 2
+}
+
+# 1) Block git CLI shell-outs in terminal command tools.
+if echo "$payload" | grep -Eq 'run_in_terminal|send_to_terminal'; then
+  if echo "$payload" | grep -Eq '"command"\s*:\s*"[^"]*(^|[[:space:];|&])git([[:space:]]|$)'; then
+    emit_deny "Blocked: use git2-backed project services, not git CLI shell-outs."
+  fi
+fi
+
+# 2) Block unwrap() introductions in Rust-targeting edit payloads.
+# This intentionally keys on tool names that can carry file content changes.
+if echo "$payload" | grep -Eq 'apply_patch|create_file'; then
+  if echo "$payload" | grep -Eq '\.rs"|\.rs\b'; then
+    if echo "$payload" | grep -Eq 'unwrap\s*\('; then
+      emit_deny "Blocked: unwrap() detected in Rust edit request. Use DomainResult and explicit error mapping."
+    fi
+  fi
+fi
+
+exit 0

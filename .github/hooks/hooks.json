@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" rust-safety-pretool",
+            "async": false
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",
