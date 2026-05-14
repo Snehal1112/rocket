@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.6.10](https://github.com/Snehal1112/rocket/compare/v0.6.9...v0.6.10) (2026-05-14)
+
+### Features
+
+* add initialName/initialEmail/confirmLabel props to GitIdentityDialog ([88c1203](https://github.com/Snehal1112/rocket/commit/88c1203aabffeca8f1700d55eee66918e42382d3))
+* add Rocket verification checks and safety hooks ([c22ed77](https://github.com/Snehal1112/rocket/commit/c22ed7726e75c7f22f28dbf7547aea341c5ac8d3))
+* add workspaceId param to saveGitCredentials and loadGitCredentials ([e532c40](https://github.com/Snehal1112/rocket/commit/e532c4020918403c25a8befd78076b5fb76743e1))
+* **contracts:** add ConsumerTree component ([31a83f2](https://github.com/Snehal1112/rocket/commit/31a83f2780660092826346e8da2fd47f738baa80))
+* **contracts:** enhance ContractStatusChip and MiniChangelog components with improved status rendering and styles ([6440cc0](https://github.com/Snehal1112/rocket/commit/6440cc053edf991d10c2427f31219074b47bbc5e))
+* enhance Changelog components with responsive styling and overflow handling ([dd66214](https://github.com/Snehal1112/rocket/commit/dd66214a188c0c5ede95220aca6ebd5636c00eaa))
+* **git:** add git_get_identity and git_set_identity Tauri commands ([422bca3](https://github.com/Snehal1112/rocket/commit/422bca3043448810fbc72f8aca08211979ecd1ff))
+* **git:** add gitGetIdentity and gitSetIdentity TypeScript wrappers ([0050be0](https://github.com/Snehal1112/rocket/commit/0050be08cf24a14d5a5f7e082426d81f61063bdb))
+* **git:** prompt for author identity before committing when git config is unset ([f969f7b](https://github.com/Snehal1112/rocket/commit/f969f7be162d29aecc9a3eedf3c9d49072be22d6))
+* implement per-workspace SSH key selection and update credential handling ([8d85e3f](https://github.com/Snehal1112/rocket/commit/8d85e3f646684b5ee6777a9815c785b954c1a7dc))
+* list all ~/.ssh/ key files in credentials dialog so correct key is always visible ([295f91f](https://github.com/Snehal1112/rocket/commit/295f91f0c9c7dbddd282b01d6adb6c3a7148cc68))
+* pass workspaceId to credential save/load in GitCredentialsDialog ([a965ab5](https://github.com/Snehal1112/rocket/commit/a965ab569a67265b3b28a1db1beb0daa31fb08d9))
+* reload workspace-scoped credentials on setCollection ([7a3de84](https://github.com/Snehal1112/rocket/commit/7a3de84942b33f52a404835ea87ec13e45c18a64))
+* render identity setup dialog in GitPanel after SSH key change ([3bcdeb5](https://github.com/Snehal1112/rocket/commit/3bcdeb59a3d4410cf54f7058e09a82a2b6563219))
+* scope git keychain entry per workspace id ([a041414](https://github.com/Snehal1112/rocket/commit/a041414c931c122792c9a112af7b4e28b4dbfad7))
+* trigger identity setup dialog after SSH key credential change ([f7ec68a](https://github.com/Snehal1112/rocket/commit/f7ec68afcceeadf13bb9426931ee54afb633b9e5))
+
+### Bug Fixes
+
+* close credentials dialog synchronously and auto-retry on SSH auth errors ([9b73f99](https://github.com/Snehal1112/rocket/commit/9b73f99510f36841a614d8a8649c362e5483e5bc))
+* **contracts:** remove duplicate changelog append from recompute_drift ([b473bf5](https://github.com/Snehal1112/rocket/commit/b473bf5fd4d16cf49d75e98f2149da4530ee7dba))
+* **git:** remove hardcoded identity fallback from pull merge-commit path ([8cb661b](https://github.com/Snehal1112/rocket/commit/8cb661bb6206682ee489fca7704a5567e1252309))
+* **git:** remove hardcoded RocketAPI User fallback signature ([7ed53ae](https://github.com/Snehal1112/rocket/commit/7ed53aebb1c385de595255bb21370b051ee2cd5f))
+* **git:** set git config identity in setup_repo() helpers for tests ([02aef5b](https://github.com/Snehal1112/rocket/commit/02aef5bed90b01ed02e30611686af4227fd6ed5a))
+* **git:** set identity in push_fails_with_non_fast_forward test helper ([245b258](https://github.com/Snehal1112/rocket/commit/245b25859963c29531c0bd457cf09d37b59a7bc5))
+* **test:** narrow FileStatus.status to GitStatusKind in git-store test ([2208c3b](https://github.com/Snehal1112/rocket/commit/2208c3b8b4678cb8b6e8ac16dd014c3d36e6c9d1))
+* **ui:** opaque overlay fallback for WebKitGTK where backdrop-filter is unsupported ([5da5d25](https://github.com/Snehal1112/rocket/commit/5da5d25d2385d7674c62b71761ab68954657b6d7))
+* **ui:** use overflow:clip on Linux body/[#root](https://github.com/Snehal1112/rocket/issues/root) so fixed portals are not clipped by WebKitGTK ([478da63](https://github.com/Snehal1112/rocket/commit/478da635688aa827ce66a8581139e0e823b872f9))
+* use async IIFE in setCredentials and guard activatePendingCredentials ([219c093](https://github.com/Snehal1112/rocket/commit/219c0939fe5fbc9a1f6cdd9919d584d53c1b26a2))
+
 ## [0.6.9](https://github.com/Snehal1112/rocket/compare/v0.6.8...v0.6.9) (2026-05-11)
 
 ### Features
