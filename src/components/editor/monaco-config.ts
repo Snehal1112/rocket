@@ -5,7 +5,7 @@ import type * as monacoNs from 'monaco-editor';
 type EditorOptions = EditorProps['options'];
 
 export const BASE_EDITOR_OPTIONS: EditorOptions = {
-  fontSize: 13,
+  fontSize: 15,
   fontFamily: "'JetBrains Mono', monospace",
   tabSize: 2,
   wordWrap: 'on',

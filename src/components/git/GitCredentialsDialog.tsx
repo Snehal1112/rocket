@@ -82,7 +82,7 @@ export function GitCredentialsDialog() {
         // Auto-detection failed — leave field empty (placeholder shown).
       }
     })();
-  }, [showCredentialsDialog]);
+  }, [showCredentialsDialog, activeWorkspaceId]);
 
   const handleBrowseKey = async () => {
     // Always open the picker in ~/.ssh/ — use getDefaultSshKeyPath to resolve

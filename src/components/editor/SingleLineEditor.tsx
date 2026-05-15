@@ -108,6 +108,9 @@ export function SingleLineEditor({
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
 
+  const onCurlImportRef = useRef(onCurlImport);
+  onCurlImportRef.current = onCurlImport;
+
   // Build extensions list. Memoized to avoid recreating on every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: extensions rebuild only when presence toggles, not on identity change.
   const extensions = useMemo(() => {
@@ -166,7 +169,10 @@ export function SingleLineEditor({
         urlTokens({
           pathParams,
           queryParams,
-          onCurlImport,
+          // Read through ref at paste-time so tab switches don't leave a stale closure.
+          onCurlImport: onCurlImport
+            ? (parsed: ParsedCurl) => onCurlImportRef.current?.(parsed)
+            : undefined,
         }),
       );
     }
