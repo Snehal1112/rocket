@@ -167,6 +167,7 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
         ],
         successRule: { statusBelow: get().successStatusBelow },
         ringBufferSize: totalRequests,
+        maxRequests: totalRequests,
       };
 
       unlistenProgress = await listen<LoadTestProgressEvent>('load_test_progress', (event) => {

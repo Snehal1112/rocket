@@ -295,6 +295,11 @@ pub struct LoadTestConfigV2 {
     pub success_rule: SuccessRule,
     #[serde(default = "default_ring_buffer_size")]
     pub ring_buffer_size: usize,
+    /// Hard cap on total requests spawned. The run stops once this many requests
+    /// have been dispatched, even if the phase duration has not yet elapsed.
+    /// `None` means no cap (run for the full duration).
+    #[serde(default)]
+    pub max_requests: Option<u32>,
 }
 
 fn default_ring_buffer_size() -> usize { 5000 }
@@ -447,6 +452,8 @@ struct RunAccumulator {
     failed_status: u32,
     failed_transport: u32,
     completed: u32,
+    /// Peak in-flight request count observed during the run.
+    peak_concurrent: u32,
     /// Completion timestamps in the last 2 s for rolling RPS.
     recent_completions: VecDeque<std::time::Instant>,
 }
@@ -462,6 +469,7 @@ impl RunAccumulator {
             failed_status: 0,
             failed_transport: 0,
             completed: 0,
+            peak_concurrent: 0,
             recent_completions: VecDeque::new(),
         }
     }
@@ -718,8 +726,17 @@ pub async fn run_load_test_v2(
     let loop_start = std::time::Instant::now();
     let mut seq: u32 = 0;
     let mut join_handles = Vec::new();
+    let max_requests = config.max_requests;
 
     while loop_start.elapsed() < total_duration {
+        // Enforce the optional request cap before acquiring any gate.
+        if let Some(max) = max_requests {
+            let completed = accumulator.lock().await.completed;
+            if completed >= max {
+                break;
+            }
+        }
+
         // Gate spawn rate by the active mode.
         let owned_permit = match (&semaphore, &rate_driver) {
             (Some(sem), _) => {
@@ -767,6 +784,11 @@ pub async fn run_load_test_v2(
 
             let mut acc = acc.lock().await;
             acc.completed += 1;
+            // Capture peak while the current request is still counted as active.
+            let current_active = active.load(Ordering::SeqCst);
+            if current_active > acc.peak_concurrent {
+                acc.peak_concurrent = current_active;
+            }
             acc.record_completion(now);
             match outcome {
                 Ok(resp) => {
@@ -823,7 +845,46 @@ pub async fn run_load_test_v2(
     }
 
     let total_duration_ms = run_start.elapsed().as_secs_f64() * 1000.0;
-    let acc = accumulator.lock().await;
+    let mut acc = accumulator.lock().await;
+
+    // Guarantee at least two time-series points so line charts always render a
+    // line (not just a dot). Fast tests finishing in under 250 ms may complete
+    // before the snapshot ticker fires even once, leaving time_series empty.
+    if acc.time_series.len() < 2 {
+        let rps_now = acc.rolling_rps();
+        let (p50, p95, p99) = acc.current_percentiles();
+        let error_rate = if acc.completed > 0 {
+            (acc.failed_status + acc.failed_transport) as f64 / acc.completed as f64 * 100.0
+        } else {
+            0.0
+        };
+        // Insert a zeroed anchor at t=0 if the series is completely empty, so
+        // the chart has a visible start point and the line spans the full run.
+        if acc.time_series.is_empty() {
+            acc.time_series.push(TimeSeriesPoint {
+                elapsed_ms: 0,
+                rps: 0.0,
+                p50_ms: 0.0,
+                p95_ms: 0.0,
+                p99_ms: 0.0,
+                error_rate_pct: 0.0,
+                active_concurrent: 0,
+            });
+        }
+        // Use peak_concurrent so the active-concurrent chart shows the highest
+        // in-flight count observed. The live atomic is always 0 by this point
+        // because all tasks have already completed and decremented it.
+        let peak = acc.peak_concurrent;
+        acc.time_series.push(TimeSeriesPoint {
+            elapsed_ms: total_duration_ms.max(1.0) as u64,
+            rps: rps_now,
+            p50_ms: p50,
+            p95_ms: p95,
+            p99_ms: p99,
+            error_rate_pct: error_rate,
+            active_concurrent: peak,
+        });
+    }
 
     let mut sorted_latencies = acc.latencies.clone();
     sorted_latencies.sort_by(|a, b| a.total_cmp(b));
@@ -1311,6 +1372,7 @@ mod tests {
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 5000,
+            max_requests: None,
         };
         assert_eq!(config.max_concurrency(), 25);
         assert_eq!(config.total_duration_secs(), 60);
@@ -1322,6 +1384,7 @@ mod tests {
             phases: vec![],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 5000,
+            max_requests: None,
         };
         assert_eq!(config.max_concurrency(), 1);
         assert_eq!(config.total_duration_secs(), 0);
@@ -1407,6 +1470,7 @@ mod tests {
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         assert!(cfg.has_uniform_target_unit());
         assert_eq!(cfg.target_unit(), Some(TargetUnit::Concurrency));
@@ -1421,6 +1485,7 @@ mod tests {
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         assert!(cfg.has_uniform_target_unit());
         assert_eq!(cfg.target_unit(), Some(TargetUnit::Rps));
@@ -1435,6 +1500,7 @@ mod tests {
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         assert!(!cfg.has_uniform_target_unit());
     }
@@ -1521,6 +1587,7 @@ mod tests {
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 1000,
+            max_requests: None,
         };
         let result = run_load_test_v2(executor, &test_request(), &config, None).await;
         assert!(result.total_requests > 0);
@@ -1541,6 +1608,7 @@ mod tests {
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         let result = run_load_test_v2(executor, &test_request(), &config, None).await;
         assert!(result.total_requests > 0);
@@ -1581,6 +1649,7 @@ mod tests {
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 1000,
+            max_requests: None,
         };
         assert!(config.has_uniform_target_unit());
         assert_eq!(config.target_unit(), Some(TargetUnit::Rps));
@@ -1605,6 +1674,7 @@ mod tests {
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         let result = run_load_test_v2(executor, &test_request(), &config, None).await;
         assert_eq!(result.total_requests, 0);

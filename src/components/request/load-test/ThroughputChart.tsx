@@ -1,5 +1,6 @@
 import { Area, AreaChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
+import { makeTimeLabel } from './chart-utils';
 
 const TICK_STYLE = { fontSize: 10 };
 const TOOLTIP_STYLE = { fontSize: 11 };
@@ -32,8 +33,9 @@ export function ThroughputChart() {
   const phases = useLoadTestStore((s) => s.phases);
   const showTarget = targetUnit === 'rps' && phases.every((p) => p.target.kind === 'rps');
 
+  const fmt = makeTimeLabel(timeSeries);
   const data = timeSeries.map((p) => ({
-    t: (p.elapsedMs / 1000).toFixed(1),
+    t: fmt(p.elapsedMs),
     rps: +p.rps.toFixed(1),
     target: showTarget ? targetRateAt(p.elapsedMs, phases) : null,
   }));
@@ -41,6 +43,7 @@ export function ThroughputChart() {
   return (
     <div className='flex h-full flex-col'>
       <p className='mb-1 text-[11px] font-medium text-muted-foreground'>Throughput (req / sec)</p>
+      <div className='min-h-0 flex-1'>
       <ResponsiveContainer width='100%' height='100%'>
         <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
@@ -69,6 +72,7 @@ export function ThroughputChart() {
           )}
         </AreaChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

@@ -319,6 +319,7 @@ mod tests {
             }],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
 
         let load_exec: Arc<dyn HttpExecutor> = Arc::new(SharedExec(Arc::clone(&exec_arc)));
@@ -363,6 +364,7 @@ mod tests {
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
+            max_requests: None,
         };
         assert!(!mixed.has_uniform_target_unit());
     }

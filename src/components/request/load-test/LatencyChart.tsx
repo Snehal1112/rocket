@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
+import { makeTimeLabel } from './chart-utils';
 
 const TICK_STYLE = { fontSize: 10 };
 const TOOLTIP_STYLE = { fontSize: 11 };
@@ -9,13 +10,15 @@ const LEGEND_STYLE = { fontSize: 10 };
 export function LatencyChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const data = useMemo(
-    () =>
-      timeSeries.map((p) => ({
-        t: (p.elapsedMs / 1000).toFixed(1),
+    () => {
+      const fmt = makeTimeLabel(timeSeries);
+      return timeSeries.map((p) => ({
+        t: fmt(p.elapsedMs),
         p50: +p.p50Ms.toFixed(1),
         p95: +p.p95Ms.toFixed(1),
         p99: +p.p99Ms.toFixed(1),
-      })),
+      }));
+    },
     [timeSeries],
   );
 

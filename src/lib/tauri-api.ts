@@ -494,6 +494,8 @@ export interface LoadTestConfigV2 {
   phases: LoadTestPhase[];
   successRule: SuccessRule;
   ringBufferSize: number;
+  /** Hard cap on total requests; backend stops spawning once this is reached. */
+  maxRequests?: number;
 }
 
 export interface LoadTestProgressEvent {

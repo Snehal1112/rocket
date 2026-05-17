@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLoadTestStore } from '@/stores/load-test-store';
+import { makeTimeLabel } from './chart-utils';
 
 const TICK_STYLE = { fontSize: 10 };
 const TOOLTIP_STYLE = { fontSize: 11 };
@@ -8,11 +9,13 @@ const TOOLTIP_STYLE = { fontSize: 11 };
 export function ConcurrencyChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
   const data = useMemo(
-    () =>
-      timeSeries.map((p) => ({
-        t: (p.elapsedMs / 1000).toFixed(1),
+    () => {
+      const fmt = makeTimeLabel(timeSeries);
+      return timeSeries.map((p) => ({
+        t: fmt(p.elapsedMs),
         conc: p.activeConcurrent,
-      })),
+      }));
+    },
     [timeSeries],
   );
 
