@@ -22,12 +22,25 @@ if echo "$payload" | grep -Eq 'run_in_terminal|send_to_terminal|Bash'; then
   fi
 fi
 
-# Block the forbidden Rust pattern in edit payloads.
+# Block the forbidden Rust pattern in new content being written/edited.
+# Only check new_string (Edit) or content (Write) — not the full payload or old context.
 BANNED="unwr"
 BANNED="${BANNED}ap()"
 if echo "$payload" | grep -Eq 'apply_patch|create_file|Write|Edit'; then
   if echo "$payload" | grep -Eq '\.rs"|\.rs\b'; then
-    if echo "$payload" | grep -qF "$BANNED"; then
+    # Extract only the new content being introduced (new_string for Edit, content for Write)
+    new_content=$(echo "$payload" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    ti = d.get('tool_input', {})
+    # Edit tool: check new_string only
+    # Write tool: check content only
+    print(ti.get('new_string', ti.get('content', '')))
+except Exception:
+    pass
+" 2>/dev/null || true)
+    if echo "$new_content" | grep -qF "$BANNED"; then
       emit_deny "Blocked: ${BANNED} in Rust edit. Use DomainResult and explicit error mapping."
     fi
   fi
