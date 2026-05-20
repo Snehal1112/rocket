@@ -1,10 +1,16 @@
-import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Trash2, XCircle } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { statusTextColor } from '@/lib/colors';
 import { cn } from '@/lib/utils';
-import { type ConsoleEntry, useConsoleStore } from '@/stores/console-store';
+import {
+  type ConsoleEntry,
+  type HttpConsoleEntry,
+  type ScriptLogEntry,
+  type TestResultEntry,
+  useConsoleStore,
+} from '@/stores/console-store';
 
 interface ConsolePanelProps {
   isOpen: boolean;
@@ -25,7 +31,7 @@ function formatTime(iso: string): string {
   });
 }
 
-function EntryDetail({ entry }: { entry: ConsoleEntry }) {
+function HttpEntryDetail({ entry }: { entry: HttpConsoleEntry }) {
   const sections = [
     {
       label: 'Request Headers',
@@ -53,6 +59,78 @@ function EntryDetail({ entry }: { entry: ConsoleEntry }) {
   );
 }
 
+const scriptLevelColor: Record<ScriptLogEntry['level'], string> = {
+  log: 'text-foreground/80',
+  warn: 'text-yellow-500',
+  error: 'text-red-500',
+};
+
+const scriptLevelLabel: Record<ScriptLogEntry['level'], string> = {
+  log: 'log',
+  warn: 'warn',
+  error: 'err',
+};
+
+function ScriptLogRow({ entry }: { entry: ScriptLogEntry }) {
+  return (
+    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border/30'>
+      {/* Spacer matching the chevron width used in HTTP rows. */}
+      <span className='w-3.5 shrink-0' />
+      <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
+      <span
+        className={cn(
+          'font-semibold w-12 shrink-0 uppercase text-2xs',
+          scriptLevelColor[entry.level],
+        )}
+      >
+        {scriptLevelLabel[entry.level]}
+      </span>
+      <span className='text-muted-foreground shrink-0 truncate max-w-[8rem]'>
+        {entry.requestName}
+      </span>
+      <span className={cn('flex-1 break-all', scriptLevelColor[entry.level])}>{entry.message}</span>
+    </div>
+  );
+}
+
+function TestResultRow({ entry }: { entry: TestResultEntry }) {
+  return (
+    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border/30'>
+      <span className='w-3.5 shrink-0' />
+      <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
+      {entry.status === 'passed' ? (
+        <CheckCircle2 className='h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0' />
+      ) : (
+        <XCircle className='h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0' />
+      )}
+      <span className='text-muted-foreground shrink-0 truncate max-w-[8rem]'>
+        {entry.requestName}
+      </span>
+      <span
+        className={cn(
+          'flex-1 break-all',
+          entry.status === 'passed' ? 'text-green-500' : 'text-red-400',
+        )}
+      >
+        {entry.name}
+        {entry.error && <span className='block text-red-400 font-mono mt-0.5'>{entry.error}</span>}
+      </span>
+    </div>
+  );
+}
+
+function matchesSearch(entry: ConsoleEntry, term: string): boolean {
+  const lower = term.toLowerCase();
+  if (entry.kind === 'http') return entry.url.toLowerCase().includes(lower);
+  if (entry.kind === 'test')
+    return (
+      entry.name.toLowerCase().includes(lower) || entry.requestName.toLowerCase().includes(lower)
+    );
+  return (
+    entry.message.toLowerCase().includes(lower) || entry.requestName.toLowerCase().includes(lower)
+  );
+}
+
 export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelProps) {
   const entries = useConsoleStore((s) => s.entries);
   const clearEntries = useConsoleStore((s) => s.clearEntries);
@@ -62,9 +140,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
 
   if (!isOpen) return null;
 
-  const filtered = search
-    ? entries.filter((e) => e.url.toLowerCase().includes(search.toLowerCase()))
-    : entries;
+  const filtered = search ? entries.filter((e) => matchesSearch(e, search)) : entries;
 
   const handleDragDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -104,7 +180,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
         )}
         <div className='flex-1' />
         <Input
-          placeholder='Filter by URL'
+          placeholder='Filter by URL or message'
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className='h-6 text-sm w-48'
@@ -128,44 +204,53 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
             No requests sent yet
           </div>
         ) : (
-          filtered.map((entry) => (
-            <div key={entry.id}>
-              <button
-                type='button'
-                className='flex items-center gap-1.5 px-2 py-1 hover:bg-accent/40 cursor-pointer border-b border-border/30 w-full text-left'
-                onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setExpandedId(expandedId === entry.id ? null : entry.id);
-                  }
-                }}
-              >
-                {expandedId === entry.id ? (
-                  <ChevronDown className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-                ) : (
-                  <ChevronRight className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-                )}
-                <span className='text-muted-foreground w-16 shrink-0'>
-                  {formatTime(entry.timestamp)}
-                </span>
-                <span className='font-semibold w-12 shrink-0'>{entry.method}</span>
-                <span className='flex-1 truncate text-foreground/80'>{entry.url}</span>
-                <span
-                  className={cn(
-                    'w-10 text-right shrink-0 font-semibold',
-                    statusTextColor(entry.status),
-                  )}
+          filtered.map((entry) => {
+            if (entry.kind === 'script') {
+              return <ScriptLogRow key={entry.id} entry={entry} />;
+            }
+            if (entry.kind === 'test') {
+              return <TestResultRow key={entry.id} entry={entry} />;
+            }
+
+            return (
+              <div key={entry.id}>
+                <button
+                  type='button'
+                  className='flex items-center gap-1.5 px-2 py-1 hover:bg-accent/40 cursor-pointer border-b border-border/30 w-full text-left'
+                  onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setExpandedId(expandedId === entry.id ? null : entry.id);
+                    }
+                  }}
                 >
-                  {entry.status || 'ERR'}
-                </span>
-                <span className='text-muted-foreground w-16 text-right shrink-0'>
-                  {entry.durationMs}ms
-                </span>
-              </button>
-              {expandedId === entry.id && <EntryDetail entry={entry} />}
-            </div>
-          ))
+                  {expandedId === entry.id ? (
+                    <ChevronDown className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                  ) : (
+                    <ChevronRight className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                  )}
+                  <span className='text-muted-foreground w-16 shrink-0'>
+                    {formatTime(entry.timestamp)}
+                  </span>
+                  <span className='font-semibold w-12 shrink-0'>{entry.method}</span>
+                  <span className='flex-1 truncate text-foreground/80'>{entry.url}</span>
+                  <span
+                    className={cn(
+                      'w-10 text-right shrink-0 font-semibold',
+                      statusTextColor(entry.status),
+                    )}
+                  >
+                    {entry.status || 'ERR'}
+                  </span>
+                  <span className='text-muted-foreground w-16 text-right shrink-0'>
+                    {entry.durationMs}ms
+                  </span>
+                </button>
+                {expandedId === entry.id && <HttpEntryDetail entry={entry} />}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

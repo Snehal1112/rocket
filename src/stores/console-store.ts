@@ -2,7 +2,8 @@ import { create } from 'zustand';
 
 const MAX_ENTRIES = 200;
 
-export interface ConsoleEntry {
+export interface HttpConsoleEntry {
+  kind: 'http';
   id: string;
   timestamp: string;
   method: string;
@@ -17,18 +18,66 @@ export interface ConsoleEntry {
   responseBody: string;
 }
 
+export interface ScriptLogEntry {
+  kind: 'script';
+  id: string;
+  timestamp: string;
+  level: 'log' | 'warn' | 'error';
+  message: string;
+  requestName: string;
+}
+
+export interface TestResultEntry {
+  kind: 'test';
+  id: string;
+  timestamp: string;
+  name: string;
+  status: 'passed' | 'failed';
+  error: string | null;
+  requestName: string;
+}
+
+export type ConsoleEntry = HttpConsoleEntry | ScriptLogEntry | TestResultEntry;
+
 interface ConsoleState {
   entries: ConsoleEntry[];
-  addEntry: (entry: Omit<ConsoleEntry, 'id' | 'timestamp'>) => void;
+  addHttpEntry: (entry: Omit<HttpConsoleEntry, 'id' | 'timestamp' | 'kind'>) => void;
+  addScriptEntry: (entry: Omit<ScriptLogEntry, 'id' | 'timestamp' | 'kind'>) => void;
+  addTestEntry: (entry: Omit<TestResultEntry, 'id' | 'timestamp' | 'kind'>) => void;
   clearEntries: () => void;
 }
 
 export const useConsoleStore = create<ConsoleState>((set) => ({
   entries: [],
 
-  addEntry: (entry) => {
-    const full: ConsoleEntry = {
+  addHttpEntry: (entry) => {
+    const full: HttpConsoleEntry = {
       ...entry,
+      kind: 'http',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    };
+    set((state) => ({
+      entries: [full, ...state.entries].slice(0, MAX_ENTRIES),
+    }));
+  },
+
+  addScriptEntry: (entry) => {
+    const full: ScriptLogEntry = {
+      ...entry,
+      kind: 'script',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    };
+    set((state) => ({
+      entries: [full, ...state.entries].slice(0, MAX_ENTRIES),
+    }));
+  },
+
+  addTestEntry: (entry) => {
+    const full: TestResultEntry = {
+      ...entry,
+      kind: 'test',
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
     };

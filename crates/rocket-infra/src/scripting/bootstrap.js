@@ -1,10 +1,17 @@
 "use strict";
 
 // ── console ──────────────────────────────────────────────────────────────────
+function _fmt(v) {
+  if (v === null || v === undefined) return String(v);
+  if (typeof v === 'object' || Array.isArray(v)) {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+  return String(v);
+}
 const console = {
-  log:   (...args) => Deno.core.ops.op_console_log(args.map(String).join(" ")),
-  warn:  (...args) => Deno.core.ops.op_console_warn(args.map(String).join(" ")),
-  error: (...args) => Deno.core.ops.op_console_error(args.map(String).join(" ")),
+  log:   (...args) => Deno.core.ops.op_console_log(args.map(_fmt).join(" ")),
+  warn:  (...args) => Deno.core.ops.op_console_warn(args.map(_fmt).join(" ")),
+  error: (...args) => Deno.core.ops.op_console_error(args.map(_fmt).join(" ")),
 };
 globalThis.console = console;
 
@@ -76,6 +83,10 @@ globalThis.res = {
 // ── test() + expect() (chai subset) ──────────────────────────────────────────
 function expect(actual) {
   return {
+    // jest-style shorthand: rok.expect(x).toBe(y)
+    toBe: (expected) => {
+      if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`);
+    },
     to: {
       equal: (expected) => {
         if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`);
@@ -117,6 +128,10 @@ globalThis.test = function(name, fn) {
     Deno.core.ops.op_test_fail(name, String(e));
   }
 };
+
+// rok.test / rok.expect aliases so both calling styles work.
+rok.test   = globalThis.test;
+rok.expect = globalThis.expect;
 
 // ── require() module loader ───────────────────────────────────────────────────
 globalThis.require = function(name) {
