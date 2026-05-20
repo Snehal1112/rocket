@@ -97,7 +97,7 @@ export interface Request {
   settings?: ApiRequestSettings;
   preRequestScript?: string | null;
   postResponseScript?: string | null;
-  testsScript?: string | null;
+  tests?: string | null;
 }
 
 export interface Folder {

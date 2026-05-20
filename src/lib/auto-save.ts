@@ -30,7 +30,7 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
     tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
     preRequestScript: request.preRequestScript ?? null,
     postResponseScript: request.postResponseScript ?? null,
-    testsScript: request.testsScript ?? null,
+    tests: request.testsScript ?? null,
     settings: {
       timeout: s.timeoutMs,
       followRedirects: s.followRedirects,

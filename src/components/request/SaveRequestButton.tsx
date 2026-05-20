@@ -75,7 +75,7 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
     docs: tab.request.docs ?? null,
     preRequestScript: tab.request.preRequestScript ?? null,
     postResponseScript: tab.request.postResponseScript ?? null,
-    testsScript: tab.request.testsScript ?? null,
+    tests: tab.request.testsScript ?? null,
   };
 }
 
