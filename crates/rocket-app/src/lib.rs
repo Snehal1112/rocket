@@ -13,6 +13,7 @@ pub mod oauth2_service;
 pub mod security_audit_service;
 pub mod template_service;
 pub mod workspace_service;
+pub mod assertion_evaluator;
 
 pub use collection_service::CollectionService;
 pub use contract_service::ContractService;
