@@ -906,3 +906,33 @@ fn rename_request_holds_collection_mutex() {
     assert!(finished.load(Ordering::SeqCst));
     assert!(repo.collection_path("col").join("req2.yml").exists());
 }
+
+#[test]
+fn script_roundtrip_matches_bruno_oc_spec() {
+    let (_dir, repo) = setup();
+    repo.create("api").expect("create collection");
+
+    let mut req = rocket_collection::Request::new("Test Scripts", HttpMethod::Get, "https://example.com");
+    req.pre_request_script = Some("req.setHeader('X-Trace', '1');".into());
+    req.post_response_script = Some("res.status;".into());
+    req.tests = Some("expect(res.status).to.equal(200);".into());
+
+    repo.save_request("api", "test-scripts.yml", &req).expect("save request");
+
+    // Inspect the raw YAML to confirm it matches the Bruno OpenCollection spec format.
+    let col_dir = repo.collection_path("api");
+    let raw = std::fs::read_to_string(col_dir.join("test-scripts.yml")).expect("read yml");
+    // Spec requires: runtime.scripts[].type and runtime.scripts[].code
+    assert!(raw.contains("runtime:"), "missing runtime block:\n{raw}");
+    assert!(raw.contains("scripts:"), "missing scripts key:\n{raw}");
+    assert!(raw.contains("type: before-request"), "missing before-request type:\n{raw}");
+    assert!(raw.contains("type: after-response"), "missing after-response type:\n{raw}");
+    assert!(raw.contains("type: tests"), "missing tests type:\n{raw}");
+    assert!(raw.contains("code:"), "missing code key:\n{raw}");
+
+    // Confirm full roundtrip preserves all three scripts.
+    let loaded = repo.get_request("api", "test-scripts.yml").expect("load request");
+    assert_eq!(loaded.pre_request_script.as_deref(), Some("req.setHeader('X-Trace', '1');"));
+    assert_eq!(loaded.post_response_script.as_deref(), Some("res.status;"));
+    assert_eq!(loaded.tests.as_deref(), Some("expect(res.status).to.equal(200);"));
+}
