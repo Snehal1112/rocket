@@ -122,7 +122,7 @@ describe('ContractCard', () => {
     expect(document.getElementById('cc-name-c-test')?.textContent).toBe('Payments API');
   });
 
-  it('shows consumer count pill when >1 consumer', () => {
+  it('shows all consumer pills when consumers fit within the visible cap', () => {
     const c = makeContract('active', {
       consumers: [
         { id: 'c1', name: 'Platform', kind: 'team' },
@@ -131,6 +131,8 @@ describe('ContractCard', () => {
       ],
     });
     wrap(<ContractCard contract={c} collectionRoot='/ws/col' onAction={vi.fn()} />);
-    expect(screen.getByText('3 consumers')).toBeInTheDocument();
+    expect(screen.getByText('Platform')).toBeInTheDocument();
+    expect(screen.getByText('Mobile')).toBeInTheDocument();
+    expect(screen.getByText('Web')).toBeInTheDocument();
   });
 });
