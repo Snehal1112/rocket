@@ -105,13 +105,13 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
 
     let mut scripts = Vec::new();
     if let Some(ref code) = req.pre_request_script {
-        scripts.push(OcScript { script_type: "before-request".into(), code: code.clone() });
+        scripts.push(OcScript { script_type: "before-request".into(), code: code.trim_end_matches('\n').to_string() });
     }
     if let Some(ref code) = req.post_response_script {
-        scripts.push(OcScript { script_type: "after-response".into(), code: code.clone() });
+        scripts.push(OcScript { script_type: "after-response".into(), code: code.trim_end_matches('\n').to_string() });
     }
     if let Some(ref code) = req.tests {
-        scripts.push(OcScript { script_type: "tests".into(), code: code.clone() });
+        scripts.push(OcScript { script_type: "tests".into(), code: code.trim_end_matches('\n').to_string() });
     }
 
     let actions: Vec<OcAction> = req.actions.iter().map(|a| {

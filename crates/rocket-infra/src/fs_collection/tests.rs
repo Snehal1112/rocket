@@ -928,11 +928,27 @@ fn script_roundtrip_matches_bruno_oc_spec() {
     assert!(raw.contains("type: before-request"), "missing before-request type:\n{raw}");
     assert!(raw.contains("type: after-response"), "missing after-response type:\n{raw}");
     assert!(raw.contains("type: tests"), "missing tests type:\n{raw}");
-    assert!(raw.contains("code:"), "missing code key:\n{raw}");
+    // Bruno always uses |- (strip chomping) — assert no bare '| ' block scalars remain.
+    assert!(!raw.contains("code: |\n"), "tests script must use |- not |:\n{raw}");
 
     // Confirm full roundtrip preserves all three scripts.
     let loaded = repo.get_request("api", "test-scripts.yml").expect("load request");
     assert_eq!(loaded.pre_request_script.as_deref(), Some("req.setHeader('X-Trace', '1');"));
     assert_eq!(loaded.post_response_script.as_deref(), Some("res.status;"));
     assert_eq!(loaded.tests.as_deref(), Some("expect(res.status).to.equal(200);"));
+
+    // Scripts entered with trailing newlines (as Monaco produces) must be normalized to |-
+    // so the file matches the Bruno format regardless of editor behavior.
+    let mut req2 = rocket_collection::Request::new("Trailing NL", HttpMethod::Get, "https://example.com");
+    req2.pre_request_script = Some("console.log('pre');\n".into());
+    req2.post_response_script = Some("console.log('post');\n".into());
+    req2.tests = Some("expect(res.status).to.equal(200);\n".into());
+    repo.save_request("api", "trailing-nl.yml", &req2).expect("save trailing-nl");
+    let raw2 = std::fs::read_to_string(col_dir.join("trailing-nl.yml")).expect("read trailing-nl");
+    assert!(!raw2.contains("code: |\n"), "trailing-newline scripts must serialize as |-:\n{raw2}");
+    let loaded2 = repo.get_request("api", "trailing-nl.yml").expect("load trailing-nl");
+    // Trailing newline is stripped on write, so readback does not have it.
+    assert_eq!(loaded2.pre_request_script.as_deref(), Some("console.log('pre');"));
+    assert_eq!(loaded2.post_response_script.as_deref(), Some("console.log('post');"));
+    assert_eq!(loaded2.tests.as_deref(), Some("expect(res.status).to.equal(200);"));
 }
