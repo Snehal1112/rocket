@@ -95,6 +95,9 @@ export interface Request {
   tags?: string[];
   docs?: string | null;
   settings?: ApiRequestSettings;
+  preRequestScript?: string | null;
+  postResponseScript?: string | null;
+  testsScript?: string | null;
 }
 
 export interface Folder {
@@ -228,6 +231,7 @@ export interface ExecuteRequestInput {
   preRequestScript?: string;
   postResponseScript?: string;
   testsScript?: string;
+  globalEnvName?: string;
 }
 
 export interface FileChangedEvent {
