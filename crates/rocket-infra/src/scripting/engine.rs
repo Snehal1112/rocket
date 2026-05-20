@@ -56,10 +56,17 @@ fn op_test_fail(state: &mut OpState, #[string] name: String, #[string] error: St
 #[op2]
 #[string]
 fn op_require_module(#[string] name: String) -> String {
-    // Returns the UMD source for the requested module, or empty string if unknown.
-    // Module bundles added in SP3-05.
     match name.as_str() {
-        _ => String::new(),
+        "chai"          => include_str!("modules/chai.js").to_string(),
+        "crypto-js"     => include_str!("modules/crypto-js.js").to_string(),
+        "jsonwebtoken"  => include_str!("modules/jsonwebtoken.js").to_string(),
+        "uuid"          => include_str!("modules/uuid.js").to_string(),
+        "moment"        => include_str!("modules/moment.js").to_string(),
+        "nanoid"        => include_str!("modules/nanoid.js").to_string(),
+        "tv4"           => include_str!("modules/tv4.js").to_string(),
+        "axios"         => include_str!("modules/axios.js").to_string(),
+        "atob" | "btoa" => include_str!("modules/atob-btoa.js").to_string(),
+        _               => String::new(),
     }
 }
 
@@ -299,6 +306,54 @@ mod tests {
         let ctx = minimal_ctx("rok.runner.setNextRequest('Poll Status')");
         let result = engine.execute(ctx).await.expect("execute");
         assert!(matches!(result.next_request, Some(rocket_scripting::NextRequest::Name(s)) if s == "Poll Status"));
+    }
+
+    #[tokio::test]
+    async fn console_warn_and_error_captured() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("console.warn('watch out'); console.error('bad thing')");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries.len(), 2);
+        assert_eq!(result.console_entries[0].level, rocket_scripting::ConsoleLevel::Warn);
+        assert_eq!(result.console_entries[1].level, rocket_scripting::ConsoleLevel::Error);
+    }
+
+    #[tokio::test]
+    async fn require_chai_and_use_expect() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"
+            const chai = require('chai');
+            const chaiExpect = chai.expect;
+            rok.setVar('result', 'pass');
+            chaiExpect(1 + 1).to.equal(2);
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("result").expect("result"), "pass");
+    }
+
+    #[tokio::test]
+    async fn require_uuid_v4() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"
+            const { v4: uuidv4 } = require('uuid');
+            const id = uuidv4();
+            rok.setVar('id', id);
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none());
+        let id = result.runtime_vars.get("id").expect("id present").as_str().expect("id is string");
+        assert_eq!(id.len(), 36);
+        assert_eq!(&id[14..15], "4");
+    }
+
+    #[tokio::test]
+    async fn unknown_require_returns_error() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("require('not-a-real-module')");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_some());
+        assert!(result.error.as_ref().expect("error").contains("Module not found"));
     }
 
     fn stub_response(status: u16) -> rocket_http::HttpResponse {
