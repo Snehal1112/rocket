@@ -12,6 +12,7 @@ members = [
     "crates/rocket-git",
     "crates/rocket-workspace",
     "crates/rocket-import",
+    "crates/rocket-scripting",
     "src-tauri",
 ]
 

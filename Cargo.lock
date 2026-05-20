@@ -4248,6 +4248,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-scripting"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "rocket-environment",
+ "rocket-http",
+ "rocket-shared",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "rocket-shared"
 version = "0.1.0"
 dependencies = [
