@@ -16,7 +16,7 @@ emit_deny() {
 if echo "$payload" | grep -Eq 'run_in_terminal|send_to_terminal|Bash'; then
   cmd=$(echo "$payload" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null || true)
   if echo "$cmd" | grep -Eq '(^|[[:space:];|&`$(])git[[:space:]]'; then
-    if ! echo "$cmd" | grep -Eq '^\s*git (commit|add|status|log|diff|push|pull|fetch|stash|tag|branch|checkout|restore|reset|rebase|merge|show|describe|rev-parse|config|remote)'; then
+    if ! echo "$cmd" | grep -Eq '^\s*git (commit|add|status|log|diff|push|pull|fetch|stash|tag|branch|checkout|restore|reset|rebase|merge|show|describe|rev-parse|config|remote|worktree)'; then
       emit_deny "Blocked: use git2-backed project services, not git CLI shell-outs."
     fi
   fi
