@@ -10,7 +10,7 @@ edition = "2021"
 [lib]
 # The `_lib` suffix avoids name collision between the lib and bin on Windows.
 name = "rocket_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
