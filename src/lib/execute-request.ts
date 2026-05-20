@@ -448,6 +448,10 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     requestPath,
   } = await resolveRequestFields(tabId, effectiveRequest);
 
+  const globalEnvName =
+    (getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? undefined) ||
+    undefined;
+
   try {
     const result = await executeRequest({
       method: effectiveRequest.method,
@@ -467,6 +471,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       preRequestScript: effectiveRequest.preRequestScript ?? undefined,
       postResponseScript: effectiveRequest.postResponseScript ?? undefined,
       testsScript: effectiveRequest.testsScript ?? undefined,
+      assertions: effectiveRequest.assertions ?? [],
+      globalEnvName,
     });
 
     const responseState: ResponseState = {
@@ -498,7 +504,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       ...authHeaders.filter((h) => !explicitKeys.has(h.key.toLowerCase())),
       ...effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
     ];
-    useConsoleStore.getState().addEntry({
+    useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
       url: resolvedUrl,
       status: result.status,
@@ -510,6 +516,24 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
       responseBody: result.body,
     });
+    // Forward script console.log/warn/error entries to the Console panel.
+    const requestName = found?.tab.title ?? resolvedUrl;
+    for (const entry of result.consoleEntries) {
+      useConsoleStore.getState().addScriptEntry({
+        level: entry.level,
+        message: entry.message,
+        requestName,
+      });
+    }
+    // Forward rok.test() results to the Console panel.
+    for (const t of result.testResults) {
+      useConsoleStore.getState().addTestEntry({
+        name: t.name,
+        status: t.status,
+        error: t.error,
+        requestName,
+      });
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     usePaneStore.getState().setResponse(tabId, {
@@ -522,7 +546,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       sizeBytes: msg.length,
       activeView: 'raw',
     });
-    useConsoleStore.getState().addEntry({
+    useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
       url: resolvedUrl,
       status: 0,

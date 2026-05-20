@@ -31,6 +31,7 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
     preRequestScript: request.preRequestScript ?? null,
     postResponseScript: request.postResponseScript ?? null,
     tests: request.testsScript ?? null,
+    assertions: request.assertions ?? [],
     settings: {
       timeout: s.timeoutMs,
       followRedirects: s.followRedirects,
