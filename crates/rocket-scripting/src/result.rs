@@ -162,7 +162,7 @@ mod tests {
         let json = serde_json::to_string(&w).expect("serialize");
         let back: EnvVarWrite = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.key, "TOKEN");
-        assert_eq!(back.persist, true);
+        assert!(back.persist);
     }
 
     #[test]

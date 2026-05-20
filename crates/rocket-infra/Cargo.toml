@@ -26,6 +26,8 @@ uuid.workspace = true
 chrono.workspace = true
 ulid.workspace = true
 dashmap = { workspace = true }
+rocket-scripting.workspace = true
+deno_core = "0.400.0"
 
 [dev-dependencies]
 tempfile = "3"

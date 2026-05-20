@@ -1,13 +1,13 @@
 [package]
 name = "rocket-scripting"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-rocket-shared = { path = "../rocket-shared" }
-rocket-environment = { path = "../rocket-environment" }
-rocket-http = { path = "../rocket-http" }
-async-trait = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "1"
+rocket-shared.workspace = true
+rocket-environment.workspace = true
+rocket-http.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

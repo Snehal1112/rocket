@@ -101,7 +101,7 @@ impl ScriptContext {
 mod tests {
     use super::*;
     use rocket_environment::VariableContext;
-    use rocket_http::{HttpRequest, HttpResponse};
+    use rocket_http::HttpRequest;
     use rocket_shared::types::HttpMethod;
 
     fn stub_request() -> HttpRequest {
@@ -131,12 +131,13 @@ mod tests {
         assert_eq!(ctx.phase, ScriptPhase::BeforeRequest);
         assert!(ctx.response.is_none());
         assert_eq!(ctx.execution_platform, "app");
+        assert_eq!(ctx.execution_mode, "standalone");
     }
 
     #[test]
     fn after_response_has_response() {
         let ctx = ScriptContext::after_response(
-            "".into(),
+            String::new(),
             VariableContext::default(),
             stub_request(),
             stub_response(),
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn tests_phase_has_response() {
         let ctx = ScriptContext::tests(
-            "".into(),
+            String::new(),
             VariableContext::default(),
             stub_request(),
             stub_response(),
