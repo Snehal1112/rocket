@@ -96,7 +96,7 @@ impl ReqwestExecutor {
             // reqwest::Client::clone is cheap — internally Arc.
             return Ok(c.clone());
         }
-        let client = build_client_impl(follow_redirects, verify_ssl)?;
+        let client = build_client_impl(follow_redirects, verify_ssl, None)?;
         cache.insert(key, client.clone());
         Ok(client)
     }
@@ -219,10 +219,14 @@ impl Default for ReqwestExecutor {
 #[async_trait]
 impl HttpExecutor for ReqwestExecutor {
     async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
-        let client = self.get_or_build_client(
-            request.options.follow_redirects,
-            request.options.verify_ssl,
-        )?;
+        let client = if let Some(n) = request.options.max_redirects {
+            build_client_impl(request.options.follow_redirects, request.options.verify_ssl, Some(n))?
+        } else {
+            self.get_or_build_client(
+                request.options.follow_redirects,
+                request.options.verify_ssl,
+            )?
+        };
         let method = map_method(&request.method);
         let start = Instant::now();
 
@@ -300,9 +304,9 @@ impl HttpExecutor for ReqwestExecutor {
     }
 }
 
-fn build_client_impl(follow_redirects: bool, verify_ssl: bool) -> DomainResult<Client> {
+fn build_client_impl(follow_redirects: bool, verify_ssl: bool, max_redirects: Option<u32>) -> DomainResult<Client> {
     let redirect_policy = if follow_redirects {
-        redirect::Policy::limited(10)
+        redirect::Policy::limited(max_redirects.unwrap_or(10) as usize)
     } else {
         redirect::Policy::none()
     };
@@ -516,7 +520,7 @@ mod tests {
     #[test]
     fn build_client_impl_respects_ssl_option() {
         // Should not error when building a client that accepts invalid certs.
-        assert!(build_client_impl(true, false).is_ok());
+        assert!(build_client_impl(true, false, None).is_ok());
     }
 
     #[test]

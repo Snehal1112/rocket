@@ -24,6 +24,9 @@ pub struct RequestOptions {
     pub timeout_ms: u64,
     #[serde(default = "default_true")]
     pub verify_ssl: bool,
+    /// Override the maximum number of redirects to follow. `None` uses the executor default (10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_redirects: Option<u32>,
 }
 
 fn default_true() -> bool { true }
@@ -35,6 +38,7 @@ impl Default for RequestOptions {
             follow_redirects: true,
             timeout_ms: 30_000,
             verify_ssl: true,
+            max_redirects: None,
         }
     }
 }
