@@ -51,6 +51,10 @@ impl EventPublisher for TauriEventBus {
             | DomainEvent::GitCloned { .. }
             | DomainEvent::GitRemoteAdded { .. }
             | DomainEvent::GitRemoteRemoved { .. } => "git-changed",
+            // Script events
+            DomainEvent::ConsoleOutput { .. } => "script-console",
+            DomainEvent::TestsCompleted { .. } => "script-tests",
+            DomainEvent::ScriptError { .. } => "script-error",
         };
         let _ = self.app.emit(event_name, &event);
         // A branch switch replaces the working-tree content visible to the

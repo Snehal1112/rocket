@@ -26,6 +26,7 @@ rocket-app.workspace = true
 rocket-audit.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true
+rocket-scripting.workspace = true
 rocket-workspace.workspace = true
 rocket-import.workspace = true
 

@@ -19,7 +19,7 @@ pub use contract_service::ContractService;
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use export_service::{ExportFormat, ExportService};
-pub use execution_service::{ExecuteRequestInput, RequestExecutionService};
+pub use execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
 pub use git_service::GitAppService;
 pub use history_service::HistoryService;
 pub use load_test_service::LoadTestService;

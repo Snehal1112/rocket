@@ -16,6 +16,7 @@ use rocket_infra::{
     FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo, FsContractRepo, FsCookieRepo,
     FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo,
     NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
+    scripting::DenoScriptEngine,
 };
 use rocket_workspace::WorkspaceConfigRepository;
 use rocket_shared::events::NullEventPublisher;
@@ -199,7 +200,7 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(NullEventPublisher),
                 audit_publisher.clone(),
-            );
+            ).with_script_engine(Box::new(DenoScriptEngine::new()));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Uses its own repo instances pointed at the same paths as the exec service.

@@ -4578,6 +4578,7 @@ dependencies = [
  "rocket-http",
  "rocket-import",
  "rocket-infra",
+ "rocket-scripting",
  "rocket-shared",
  "rocket-workspace",
  "serde",

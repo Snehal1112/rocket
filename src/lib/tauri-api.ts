@@ -189,6 +189,23 @@ export interface HttpResponse {
   sizeBytes: number;
 }
 
+export interface TestResult {
+  name: string;
+  status: 'passed' | 'failed';
+  error: string | null;
+}
+
+export interface ConsoleEntry {
+  level: 'log' | 'warn' | 'error';
+  message: string;
+}
+
+export interface ExecuteRequestResponse extends HttpResponse {
+  testResults: TestResult[];
+  consoleEntries: ConsoleEntry[];
+  scriptError: string | null;
+}
+
 export interface QueryParam {
   key: string;
   value: string;
@@ -208,6 +225,9 @@ export interface ExecuteRequestInput {
   requestName?: string;
   /** Path of the request file relative to the collection root (e.g. "auth/login.yml"). */
   requestPath?: string;
+  preRequestScript?: string;
+  postResponseScript?: string;
+  testsScript?: string;
 }
 
 export interface FileChangedEvent {
@@ -544,7 +564,14 @@ export type ExportFormat = 'html' | 'csv' | 'json' | 'pdf';
 // ============================================================
 
 export const executeRequest = (input: ExecuteRequestInput) =>
-  invoke<HttpResponse>('execute_request', { input });
+  invoke<ExecuteRequestResponse>('execute_request', { input });
+
+export const evaluateVarExpression = (
+  collectionRoot: string,
+  expression: string,
+  responseJson: string,
+): Promise<unknown> =>
+  invoke('evaluate_var_expression', { collectionRoot, expression, responseJson });
 
 export const runLoadTest = (
   request: {
