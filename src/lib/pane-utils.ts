@@ -100,6 +100,9 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     },
     tags: req.tags ?? [],
     docs: req.docs ?? null,
+    preRequestScript: req.preRequestScript ?? undefined,
+    postResponseScript: req.postResponseScript ?? undefined,
+    testsScript: req.testsScript ?? undefined,
   };
 }
 
