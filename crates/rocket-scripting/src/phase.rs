@@ -7,7 +7,7 @@ pub enum ScriptPhase {
     BeforeRequest,
     /// Runs after the HTTP response is received. `res` is read-only, `req` mutations are rejected.
     AfterResponse,
-    /// Runs after after-response. `res` is read-only. `test()` + `expect()` are available.
+    /// Runs after the after-response phase. `res` is read-only. `test()` + `expect()` are available.
     Tests,
 }
 
@@ -41,6 +41,8 @@ mod tests {
 
     #[test]
     fn phase_display() {
+        assert_eq!(ScriptPhase::BeforeRequest.to_string(), "before-request");
+        assert_eq!(ScriptPhase::AfterResponse.to_string(), "after-response");
         assert_eq!(ScriptPhase::Tests.to_string(), "tests");
     }
 }
