@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
 import type { ResponseState } from '@/types/pane-types';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
+import { TestsPanel } from './TestsPanel';
 
 type ViewTab = ResponseState['activeView'];
 
@@ -318,6 +319,26 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
               <span className='ml-1 text-2xs text-muted-foreground'>({headerCount})</span>
             )}
           </TabButton>
+          {(response.testResults?.length ?? 0) > 0 && (
+            <TabButton
+              active={activeView === 'tests'}
+              onClick={() => setActiveView('tests')}
+              role='tab'
+              ariaSelected={activeView === 'tests'}
+            >
+              Tests
+              <span
+                className={`ml-1 text-2xs ${
+                  response.testResults?.some((r) => r.status === 'failed')
+                    ? 'text-red-500'
+                    : 'text-green-500'
+                }`}
+              >
+                ({response.testResults?.filter((r) => r.status === 'passed').length}/
+                {response.testResults?.length})
+              </span>
+            </TabButton>
+          )}
         </div>
 
         {/* Toolbar actions for body tabs. */}
@@ -438,6 +459,11 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           <div className='h-full p-3 overflow-auto'>
             <ResponseHeadersTable headers={response.headers} />
           </div>
+        )}
+
+        {/* Tests tab. */}
+        {activeView === 'tests' && (
+          <TestsPanel results={response.testResults ?? []} />
         )}
       </div>
     </div>

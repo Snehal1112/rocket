@@ -464,6 +464,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       collection: collection ?? undefined,
       environmentName,
       requestPath,
+      preRequestScript: effectiveRequest.preRequestScript ?? undefined,
+      postResponseScript: effectiveRequest.postResponseScript ?? undefined,
+      testsScript: effectiveRequest.testsScript ?? undefined,
     });
 
     const responseState: ResponseState = {
@@ -479,7 +482,10 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       durationMs: result.durationMs,
       ttfbMs: result.ttfbMs,
       sizeBytes: result.sizeBytes,
-      activeView: 'pretty',
+      activeView: result.testResults.length > 0 ? 'tests' : 'pretty',
+      testResults: result.testResults,
+      consoleEntries: result.consoleEntries,
+      scriptError: result.scriptError,
     };
     usePaneStore.getState().setResponse(tabId, responseState);
     // Merge auth-synthesized headers with explicit headers for the console.

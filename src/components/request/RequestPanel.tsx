@@ -75,6 +75,7 @@ import { RequestDocsPanel } from './RequestDocsPanel';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { RocketTabBar } from './RocketTabBar';
 import { SaveRequestButton } from './SaveRequestButton';
+import { ScriptsTab } from './ScriptsTab';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
@@ -110,7 +111,8 @@ type SectionTab =
   | 'variables'
   | 'docs'
   | 'settings'
-  | 'load-test';
+  | 'load-test'
+  | 'scripts';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -382,7 +384,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
   // Docs and Settings don't use the response panel — expand to full height.
   const expandFull =
-    activeSection === 'docs' || activeSection === 'settings' || activeSection === 'load-test';
+    activeSection === 'docs' ||
+    activeSection === 'settings' ||
+    activeSection === 'load-test' ||
+    activeSection === 'scripts';
   // Use safe access in case settings is absent on a request loaded from an older saved state.
   const settings = request.settings ?? {
     verifySsl: true,
@@ -731,6 +736,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'load-test',
         onClick: () => setActiveSection('load-test'),
       },
+      {
+        value: 'scripts',
+        label: (
+          <>
+            Scripts
+            {(request.preRequestScript || request.postResponseScript || request.testsScript) && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'scripts',
+        onClick: () => setActiveSection('scripts'),
+      },
     ],
     [
       activeSection,
@@ -947,9 +965,23 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <LoadTestTab request={request} tabId={tab.id} />
         </div>
       ) : null}
+      {activeSection === 'scripts' ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <ScriptsTab
+            preRequestScript={request.preRequestScript ?? ''}
+            postResponseScript={request.postResponseScript ?? ''}
+            testsScript={request.testsScript ?? ''}
+            onChangePreRequest={(v) => updateRequest(tab.id, { preRequestScript: v })}
+            onChangePostResponse={(v) => updateRequest(tab.id, { postResponseScript: v })}
+            onChangeTests={(v) => updateRequest(tab.id, { testsScript: v })}
+          />
+        </div>
+      ) : null}
       <div
         className={
-          activeSection === 'docs' || activeSection === 'load-test'
+          activeSection === 'docs' ||
+          activeSection === 'load-test' ||
+          activeSection === 'scripts'
             ? 'hidden'
             : 'flex-1 overflow-auto p-3'
         }

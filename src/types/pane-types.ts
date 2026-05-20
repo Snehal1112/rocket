@@ -155,6 +155,9 @@ export interface RequestState {
   settings: RequestSettings;
   docs: string | null;
   tags: string[];
+  preRequestScript?: string;
+  postResponseScript?: string;
+  testsScript?: string;
 }
 
 export interface KeyValueEntry {
@@ -261,7 +264,10 @@ export interface ResponseState {
   durationMs: number;
   ttfbMs: number;
   sizeBytes: number;
-  activeView: 'pretty' | 'raw' | 'preview' | 'headers';
+  activeView: 'pretty' | 'raw' | 'preview' | 'headers' | 'tests';
+  testResults?: import('@/lib/tauri-api').TestResult[];
+  consoleEntries?: import('@/lib/tauri-api').ConsoleEntry[];
+  scriptError?: string | null;
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
