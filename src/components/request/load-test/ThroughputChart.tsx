@@ -44,34 +44,34 @@ export function ThroughputChart() {
     <div className='flex h-full flex-col'>
       <p className='mb-1 text-[11px] font-medium text-muted-foreground'>Throughput (req / sec)</p>
       <div className='min-h-0 flex-1'>
-      <ResponsiveContainer width='100%' height='100%'>
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
-          <YAxis tick={TICK_STYLE} width={36} />
-          <Tooltip contentStyle={TOOLTIP_STYLE} />
-          <Area
-            type='monotone'
-            dataKey='rps'
-            stroke='hsl(var(--chart-4))'
-            fill='hsl(var(--chart-4) / 0.12)'
-            strokeWidth={1.5}
-            dot={false}
-            name='actual'
-          />
-          {showTarget && (
-            <Line
+        <ResponsiveContainer width='100%' height='100%'>
+          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <XAxis dataKey='t' tick={TICK_STYLE} interval='preserveStartEnd' />
+            <YAxis tick={TICK_STYLE} width={36} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Area
               type='monotone'
-              dataKey='target'
-              stroke='hsl(var(--chart-2))'
-              strokeDasharray='4 3'
-              strokeWidth={1.2}
+              dataKey='rps'
+              stroke='hsl(var(--chart-4))'
+              fill='hsl(var(--chart-4) / 0.12)'
+              strokeWidth={1.5}
               dot={false}
-              name='target'
-              isAnimationActive={false}
+              name='actual'
             />
-          )}
-        </AreaChart>
-      </ResponsiveContainer>
+            {showTarget && (
+              <Line
+                type='monotone'
+                dataKey='target'
+                stroke='hsl(var(--chart-2))'
+                strokeDasharray='4 3'
+                strokeWidth={1.2}
+                dot={false}
+                name='target'
+                isAnimationActive={false}
+              />
+            )}
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

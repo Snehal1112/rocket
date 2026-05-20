@@ -462,9 +462,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
         )}
 
         {/* Tests tab. */}
-        {activeView === 'tests' && (
-          <TestsPanel results={response.testResults ?? []} />
-        )}
+        {activeView === 'tests' && <TestsPanel results={response.testResults ?? []} />}
       </div>
     </div>
   );

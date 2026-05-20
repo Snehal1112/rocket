@@ -9,18 +9,15 @@ const LEGEND_STYLE = { fontSize: 10 };
 
 export function LatencyChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
-  const data = useMemo(
-    () => {
-      const fmt = makeTimeLabel(timeSeries);
-      return timeSeries.map((p) => ({
-        t: fmt(p.elapsedMs),
-        p50: +p.p50Ms.toFixed(1),
-        p95: +p.p95Ms.toFixed(1),
-        p99: +p.p99Ms.toFixed(1),
-      }));
-    },
-    [timeSeries],
-  );
+  const data = useMemo(() => {
+    const fmt = makeTimeLabel(timeSeries);
+    return timeSeries.map((p) => ({
+      t: fmt(p.elapsedMs),
+      p50: +p.p50Ms.toFixed(1),
+      p95: +p.p95Ms.toFixed(1),
+      p99: +p.p99Ms.toFixed(1),
+    }));
+  }, [timeSeries]);
 
   return (
     <div className='flex h-full flex-col'>

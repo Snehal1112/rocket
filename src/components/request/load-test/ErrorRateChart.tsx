@@ -8,16 +8,13 @@ const TOOLTIP_STYLE = { fontSize: 11 };
 
 export function ErrorRateChart() {
   const timeSeries = useLoadTestStore((s) => s.timeSeries);
-  const data = useMemo(
-    () => {
-      const fmt = makeTimeLabel(timeSeries);
-      return timeSeries.map((p) => ({
-        t: fmt(p.elapsedMs),
-        err: +p.errorRatePct.toFixed(2),
-      }));
-    },
-    [timeSeries],
-  );
+  const data = useMemo(() => {
+    const fmt = makeTimeLabel(timeSeries);
+    return timeSeries.map((p) => ({
+      t: fmt(p.elapsedMs),
+      err: +p.errorRatePct.toFixed(2),
+    }));
+  }, [timeSeries]);
 
   return (
     <div className='flex h-full flex-col'>

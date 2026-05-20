@@ -54,9 +54,7 @@ export function TestsPanel({ results }: TestsPanelProps) {
             )}
             <div className='flex flex-col gap-0.5 min-w-0'>
               <span
-                className={
-                  result.status === 'failed' ? 'text-foreground' : 'text-muted-foreground'
-                }
+                className={result.status === 'failed' ? 'text-foreground' : 'text-muted-foreground'}
               >
                 {result.name}
               </span>
