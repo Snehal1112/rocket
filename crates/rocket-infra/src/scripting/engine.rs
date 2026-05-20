@@ -66,12 +66,30 @@ fn op_require_module(#[string] name: String) -> String {
 extension!(
     rocket_scripting_ext,
     ops = [
+        // rok ops
         rok::op_rok_get_var,
+        rok::op_rok_set_var,
+        rok::op_rok_get_env_var,
+        rok::op_rok_set_env_var,
+        rok::op_rok_has_env_var,
+        rok::op_rok_delete_env_var,
+        rok::op_rok_get_env_name,
+        rok::op_rok_get_collection_var,
+        rok::op_rok_set_collection_var,
+        rok::op_rok_get_global_env_var,
+        rok::op_rok_set_global_env_var,
+        rok::op_rok_interpolate,
+        rok::op_rok_set_next_request,
+        rok::op_rok_skip_request,
+        // req ops (stubs until SP3-04)
         req::op_req_get_url,
+        // res ops (stubs until SP3-04)
         res::op_res_get_status,
+        // console ops
         console::op_console_log,
         console::op_console_warn,
         console::op_console_error,
+        // test runner ops
         op_test_run,
         op_test_pass,
         op_test_fail,
@@ -178,5 +196,82 @@ mod tests {
         assert!(result.error.is_some());
         let err = result.error.expect("error present");
         assert!(err.contains("deliberate"));
+    }
+
+    #[tokio::test]
+    async fn rok_set_and_get_runtime_var() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('token', 'abc123')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let val = result.runtime_vars.get("token").expect("token present");
+        assert_eq!(val, "abc123");
+    }
+
+    #[tokio::test]
+    async fn rok_get_env_var_reads_from_context() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("BASE_URL".into(), "https://api.example.com".into());
+        let mut ctx = minimal_ctx("rok.setVar('url', rok.getEnvVar('BASE_URL'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let val = result.runtime_vars.get("url").expect("url present");
+        assert_eq!(val, "https://api.example.com");
+    }
+
+    #[tokio::test]
+    async fn rok_set_env_var_no_persist() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setEnvVar('SESSION', 'xyz')");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.env_var_writes.len(), 1);
+        assert_eq!(result.env_var_writes[0].key, "SESSION");
+        assert!(!result.env_var_writes[0].persist);
+    }
+
+    #[tokio::test]
+    async fn rok_set_env_var_with_persist() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setEnvVar('TOKEN', 'abc', { persist: true })");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.env_var_writes[0].persist);
+    }
+
+    #[tokio::test]
+    async fn rok_has_env_var() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("EXISTS".into(), "yes".into());
+        let mut ctx = minimal_ctx("rok.setVar('found', rok.hasEnvVar('EXISTS') ? '1' : '0')");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("found").expect("found present"), "1");
+    }
+
+    #[tokio::test]
+    async fn rok_interpolate() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("host".into(), "api.example.com".into());
+        let mut ctx = minimal_ctx("rok.setVar('url', rok.interpolate('https://{{host}}/users'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("url").expect("url present"), "https://api.example.com/users");
+    }
+
+    #[tokio::test]
+    async fn rok_runner_skip_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.runner.skipRequest()");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.skip_request);
+    }
+
+    #[tokio::test]
+    async fn rok_runner_set_next_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.runner.setNextRequest('Poll Status')");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(matches!(result.next_request, Some(rocket_scripting::NextRequest::Name(s)) if s == "Poll Status"));
     }
 }
