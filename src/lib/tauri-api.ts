@@ -83,6 +83,13 @@ export interface ApiRequestSettings {
   encodeUrl?: boolean;
 }
 
+export interface AssertionEntry {
+  expression: string;
+  operator: string;
+  value?: string;
+  disabled?: boolean;
+}
+
 export interface Request {
   uid: string;
   name: string;
@@ -98,6 +105,7 @@ export interface Request {
   preRequestScript?: string | null;
   postResponseScript?: string | null;
   tests?: string | null;
+  assertions?: AssertionEntry[];
 }
 
 export interface Folder {
@@ -231,6 +239,7 @@ export interface ExecuteRequestInput {
   preRequestScript?: string;
   postResponseScript?: string;
   testsScript?: string;
+  assertions?: AssertionEntry[];
   globalEnvName?: string;
 }
 
