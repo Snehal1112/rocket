@@ -308,6 +308,9 @@ mod tests {
             collection: None,
             request_name: None,
             request_path: None,
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
         };
 
         // One short Hold phase to keep the test fast.

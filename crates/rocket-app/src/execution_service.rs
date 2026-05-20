@@ -9,6 +9,9 @@ use rocket_http::{
     run_load_test as http_run_load_test, CookieRepository, HttpExecutor, HttpRequest, HttpResponse,
     LoadTestConfig, LoadTestResult, RequestOptions,
 };
+use rocket_scripting::{
+    ConsoleEntry, ConsoleLevel, ScriptContext, ScriptEngine, ScriptResult, TestResult, TestStatus,
+};
 use rocket_shared::error::DomainResult;
 use std::sync::Arc;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -32,6 +35,25 @@ pub struct ExecuteRequestInput {
     /// Used to load folder-chain and request-level variables.
     #[serde(default)]
     pub request_path: Option<String>,
+
+    /// JS script to run before the request is sent.
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    /// JS script to run after the response is received.
+    #[serde(default)]
+    pub post_response_script: Option<String>,
+    /// JS test script to run after after-response.
+    #[serde(default)]
+    pub tests_script: Option<String>,
+}
+
+/// Extended response from `execute()` that includes HTTP response plus script outputs.
+#[derive(Debug, Clone)]
+pub struct ExecuteRequestOutput {
+    pub response: HttpResponse,
+    pub test_results: Vec<TestResult>,
+    pub console_entries: Vec<ConsoleEntry>,
+    pub script_error: Option<String>,
 }
 
 pub struct RequestExecutionService {
@@ -44,6 +66,7 @@ pub struct RequestExecutionService {
     cookie_repo: Box<dyn CookieRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    script_engine: Option<Box<dyn ScriptEngine>>,
 }
 
 impl RequestExecutionService {
@@ -63,6 +86,7 @@ impl RequestExecutionService {
             cookie_repo,
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
+            script_engine: None,
         }
     }
 
@@ -83,7 +107,14 @@ impl RequestExecutionService {
             cookie_repo,
             events,
             audit,
+            script_engine: None,
         }
+    }
+
+    /// Attach a script engine. Call this after construction in the DI layer.
+    pub fn with_script_engine(mut self, engine: Box<dyn ScriptEngine>) -> Self {
+        self.script_engine = Some(engine);
+        self
     }
 
     /// Builds a flattened variable map from all backend-accessible scopes
@@ -185,6 +216,41 @@ impl RequestExecutionService {
         })
     }
 
+    async fn run_script_phase(
+        &self,
+        _code: &str,
+        ctx: ScriptContext,
+        request_name: &str,
+        phase: &str,
+        all_console: &mut Vec<ConsoleEntry>,
+    ) -> ScriptResult {
+        let engine = match self.script_engine.as_ref() {
+            Some(e) => e,
+            None => return ScriptResult::default(),
+        };
+        match engine.execute(ctx).await {
+            Ok(result) => {
+                if let Some(ref err) = result.error {
+                    self.events.publish(DomainEvent::ScriptError {
+                        request_name: request_name.to_string(),
+                        phase: phase.to_string(),
+                        message: err.clone(),
+                    });
+                }
+                all_console.extend(result.console_entries.clone());
+                result
+            }
+            Err(e) => {
+                self.events.publish(DomainEvent::ScriptError {
+                    request_name: request_name.to_string(),
+                    phase: phase.to_string(),
+                    message: e.to_string(),
+                });
+                ScriptResult::default()
+            }
+        }
+    }
+
     #[tracing::instrument(
         name = "http_request",
         skip(self, input),
@@ -193,8 +259,8 @@ impl RequestExecutionService {
             url = %input.url,
         )
     )]
-    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<HttpResponse> {
-        let http_request = self.resolve_request(&input)?;
+    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
+        let mut http_request = self.resolve_request(&input)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -211,6 +277,78 @@ impl RequestExecutionService {
             );
         }
 
+        let request_name = input.request_name.clone().unwrap_or_default();
+        let env_name = input.environment_name.clone();
+        let mut all_console: Vec<ConsoleEntry> = Vec::new();
+        let mut all_test_results: Vec<TestResult> = Vec::new();
+        let mut script_error: Option<String> = None;
+
+        // Build variable context for script phases.
+        let var_flat = self.build_variable_context(
+            input.collection.as_deref(),
+            input.environment_name.as_deref(),
+            input.request_path.as_deref(),
+        );
+        let mut var_ctx = VariableContext::default();
+        // Populate env scope from flattened map (best-effort; full scope separation not needed here).
+        for (k, v) in &var_flat {
+            var_ctx.env.insert(k.clone(), v.clone());
+        }
+
+        // ── Before-request script ─────────────────────────────────────────────
+        if let Some(code) = &input.pre_request_script {
+            if !code.trim().is_empty() {
+                let ctx = ScriptContext::before_request(
+                    code.clone(),
+                    var_ctx.clone(),
+                    http_request.clone(),
+                    env_name.clone(),
+                );
+                let result = self.run_script_phase(
+                    code, ctx, &request_name, "before-request", &mut all_console,
+                ).await;
+
+                // Apply request mutations.
+                if let Some(ref mutations) = result.request_mutations {
+                    if let Some(ref url) = mutations.url {
+                        http_request.url = url.clone();
+                    }
+                    if let Some(ref method_str) = mutations.method {
+                        if let Ok(m) = method_str.parse() {
+                            http_request.method = m;
+                        }
+                    }
+                    for (name, value) in &mutations.headers_set {
+                        if let Some(h) = http_request.headers.iter_mut()
+                            .find(|h| h.key.eq_ignore_ascii_case(name))
+                        {
+                            h.value = value.clone();
+                        } else {
+                            http_request.headers.push(Header::new(name, value));
+                        }
+                    }
+                    http_request.headers.retain(|h| {
+                        !mutations.headers_deleted.iter().any(|d| d.eq_ignore_ascii_case(&h.key))
+                    });
+                    if let Some(ms) = mutations.timeout_ms {
+                        http_request.options.timeout_ms = ms;
+                    }
+                }
+
+                // Propagate runtime vars into env scope for subsequent phases.
+                for (k, v) in &result.runtime_vars {
+                    if let Some(s) = v.as_str() {
+                        var_ctx.runtime.insert(k.clone(), s.to_string());
+                    }
+                }
+
+                if result.error.is_some() {
+                    script_error = result.error;
+                }
+            }
+        }
+
+        // ── HTTP execution ────────────────────────────────────────────────────
         let response = self.executor.execute(&http_request).await?;
 
         tracing::info!(
@@ -219,6 +357,75 @@ impl RequestExecutionService {
             size_bytes = response.size_bytes,
             "Request completed"
         );
+
+        // ── After-response script ─────────────────────────────────────────────
+        if let Some(code) = &input.post_response_script {
+            if !code.trim().is_empty() {
+                let ctx = ScriptContext::after_response(
+                    code.clone(),
+                    var_ctx.clone(),
+                    http_request.clone(),
+                    response.clone(),
+                    env_name.clone(),
+                );
+                let result = self.run_script_phase(
+                    code, ctx, &request_name, "after-response", &mut all_console,
+                ).await;
+                if result.error.is_some() && script_error.is_none() {
+                    script_error = result.error;
+                }
+            }
+        }
+
+        // ── Tests script ──────────────────────────────────────────────────────
+        if let Some(code) = &input.tests_script {
+            if !code.trim().is_empty() {
+                let ctx = ScriptContext::tests(
+                    code.clone(),
+                    var_ctx.clone(),
+                    http_request.clone(),
+                    response.clone(),
+                    env_name.clone(),
+                );
+                let result = self.run_script_phase(
+                    code, ctx, &request_name, "tests", &mut all_console,
+                ).await;
+                all_test_results.extend(result.test_results.clone());
+                if result.error.is_some() && script_error.is_none() {
+                    script_error = result.error;
+                }
+            }
+        }
+
+        // ── Emit events ───────────────────────────────────────────────────────
+        if !all_console.is_empty() {
+            let entries = all_console.iter().map(|e| {
+                let level = match e.level {
+                    ConsoleLevel::Log => "log",
+                    ConsoleLevel::Warn => "warn",
+                    ConsoleLevel::Error => "error",
+                };
+                serde_json::json!({ "level": level, "message": e.message })
+            }).collect();
+            self.events.publish(DomainEvent::ConsoleOutput {
+                request_name: request_name.clone(),
+                entries,
+            });
+        }
+
+        if !all_test_results.is_empty() {
+            let results = all_test_results.iter().map(|t| {
+                let status = match t.status {
+                    TestStatus::Passed => "passed",
+                    TestStatus::Failed => "failed",
+                };
+                serde_json::json!({ "name": t.name, "status": status, "error": t.error })
+            }).collect();
+            self.events.publish(DomainEvent::TestsCompleted {
+                request_name: request_name.clone(),
+                results,
+            });
+        }
 
         // Persist history (non-fatal — a save failure won't cancel the response).
         let mut entry = HistoryEntry::new(
@@ -241,7 +448,12 @@ impl RequestExecutionService {
             duration_ms: response.duration_ms,
         });
 
-        Ok(response)
+        Ok(ExecuteRequestOutput {
+            response,
+            test_results: all_test_results,
+            console_entries: all_console,
+            script_error,
+        })
     }
 
     pub async fn run_load_test(
@@ -506,6 +718,9 @@ mod tests {
             environment_name: env_name.map(str::to_string),
             collection: None,
             request_name: None,
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
             request_path: None,
         }
     }
@@ -583,11 +798,11 @@ mod tests {
             Box::new(NullEventPublisher),
         );
 
-        let resp = svc
+        let out = svc
             .execute(sample_input("{{BASE_URL}}/users", Some("prod")))
             .await
-            .unwrap();
-        assert_eq!(resp.status, 200);
+            .expect("execute");
+        assert_eq!(out.response.status, 200);
     }
 
     #[tokio::test]

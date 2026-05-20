@@ -48,6 +48,27 @@ pub enum DomainEvent {
     GitCloned { url: String, dest: String },
     GitRemoteAdded { collection: String, name: String, url: String },
     GitRemoteRemoved { collection: String, name: String },
+
+    // Script events
+    /// Emitted after all script phases complete. Carries combined console output.
+    ConsoleOutput {
+        request_name: String,
+        /// JSON array of {level, message} objects.
+        entries: Vec<serde_json::Value>,
+    },
+    /// Emitted after the tests phase completes.
+    TestsCompleted {
+        request_name: String,
+        /// JSON array of {name, status, error?} objects.
+        results: Vec<serde_json::Value>,
+    },
+    /// Emitted when a script throws an uncaught exception.
+    ScriptError {
+        request_name: String,
+        /// "before-request" | "after-response" | "tests"
+        phase: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
