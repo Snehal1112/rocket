@@ -311,6 +311,8 @@ mod tests {
             pre_request_script: None,
             post_response_script: None,
             tests_script: None,
+            global_env_name: None,
+            assertions: vec![],
         };
 
         // One short Hold phase to keep the test fast.

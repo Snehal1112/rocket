@@ -45,6 +45,14 @@ pub struct ExecuteRequestInput {
     /// JS test script to run after after-response.
     #[serde(default)]
     pub tests_script: Option<String>,
+
+    /// Name of the active global environment. Used to apply `rok.setGlobalEnvVar` writes.
+    #[serde(default)]
+    pub global_env_name: Option<String>,
+
+    /// Declarative assertions to evaluate after the tests-script phase.
+    #[serde(default)]
+    pub assertions: Vec<rocket_shared::Assertion>,
 }
 
 /// Extended response from `execute()` that includes HTTP response plus script outputs.
@@ -216,6 +224,107 @@ impl RequestExecutionService {
         })
     }
 
+    /// Applies the persistent and in-memory side effects from a `ScriptResult`.
+    ///
+    /// - `env_var_writes` with `persist: true` → read-modify-write via `env_repo`
+    /// - `collection_var_writes` → read-modify-write via `collection_repo.save_settings`
+    /// - `global_env_var_writes` → same repo, keyed by `global_env_name`
+    /// - `runtime_vars` → merged into `var_ctx.runtime` for the next script phase
+    ///
+    /// Non-fatal: individual repo errors are logged but do not abort the response.
+    fn apply_script_side_effects(
+        &self,
+        result: &ScriptResult,
+        env_name: Option<&str>,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        var_ctx: &mut rocket_environment::VariableContext,
+    ) {
+        // Apply active-environment writes.
+        if !result.env_var_writes.is_empty() {
+            if let Some(name) = env_name {
+                self.apply_env_writes(name, &result.env_var_writes, false);
+            }
+        }
+
+        // Apply global-environment writes (always persisted — modifying a shared env).
+        if !result.global_env_var_writes.is_empty() {
+            if let Some(name) = global_env_name {
+                self.apply_env_writes(name, &result.global_env_var_writes, true);
+            }
+        }
+
+        // Apply collection variable writes.
+        if !result.collection_var_writes.is_empty() {
+            if let Some(col) = collection {
+                if let Ok(mut settings) = self.collection_repo.get_settings(col) {
+                    for write in &result.collection_var_writes {
+                        let str_val = write.value.as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| write.value.to_string());
+                        if let Some(existing) = settings.variables.iter_mut()
+                            .find(|v| v.key == write.key)
+                        {
+                            existing.value = str_val;
+                        } else {
+                            settings.variables.push(rocket_collection::CollectionVariable {
+                                key: write.key.clone(),
+                                value: str_val,
+                                initial_value: String::new(),
+                                enabled: true,
+                                secret: false,
+                            });
+                        }
+                    }
+                    let _ = self.collection_repo.save_settings(col, &settings);
+                }
+            }
+        }
+
+        // Merge runtime vars into context for subsequent phases.
+        for (k, v) in &result.runtime_vars {
+            if let Some(s) = v.as_str() {
+                var_ctx.runtime.insert(k.clone(), s.to_owned());
+            }
+        }
+    }
+
+    /// Read-modify-write helper for env var writes against a named environment.
+    ///
+    /// When `force_persist` is true (used for global env writes), all writes go
+    /// to disk regardless of the individual `persist` flag. For active-environment
+    /// writes, only entries with `persist: true` are saved.
+    fn apply_env_writes(
+        &self,
+        env_name: &str,
+        writes: &[rocket_scripting::EnvVarWrite],
+        force_persist: bool,
+    ) {
+        let persist_writes: Vec<_> = writes
+            .iter()
+            .filter(|w| force_persist || w.persist)
+            .collect();
+        if persist_writes.is_empty() {
+            return;
+        }
+        if let Ok(mut env) = self.env_repo.get(env_name) {
+            for write in persist_writes {
+                if write.value.is_null() {
+                    env.remove_variable(&write.key);
+                } else {
+                    let str_val = write.value.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| write.value.to_string());
+                    env.set_variable(rocket_environment::Variable::new(
+                        write.key.clone(),
+                        str_val,
+                    ));
+                }
+            }
+            let _ = self.env_repo.save(&env);
+        }
+    }
+
     async fn run_script_phase(
         &self,
         _code: &str,
@@ -333,14 +442,29 @@ impl RequestExecutionService {
                     if let Some(ms) = mutations.timeout_ms {
                         http_request.options.timeout_ms = ms;
                     }
-                }
-
-                // Propagate runtime vars into env scope for subsequent phases.
-                for (k, v) in &result.runtime_vars {
-                    if let Some(s) = v.as_str() {
-                        var_ctx.runtime.insert(k.clone(), s.to_string());
+                    if let Some(ref body_val) = mutations.body {
+                        let content = body_val.as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| body_val.to_string());
+                        http_request.body = Some(rocket_shared::types::Body {
+                            mode: rocket_shared::types::BodyMode::Json,
+                            content: Some(content),
+                            form_data: None,
+                            file_path: None,
+                        });
+                    }
+                    if let Some(n) = mutations.max_redirects {
+                        http_request.options.max_redirects = Some(n);
                     }
                 }
+
+                self.apply_script_side_effects(
+                    &result,
+                    input.environment_name.as_deref(),
+                    input.global_env_name.as_deref(),
+                    input.collection.as_deref(),
+                    &mut var_ctx,
+                );
 
                 if result.error.is_some() {
                     script_error = result.error;
@@ -371,6 +495,13 @@ impl RequestExecutionService {
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "after-response", &mut all_console,
                 ).await;
+                self.apply_script_side_effects(
+                    &result,
+                    input.environment_name.as_deref(),
+                    input.global_env_name.as_deref(),
+                    input.collection.as_deref(),
+                    &mut var_ctx,
+                );
                 if result.error.is_some() && script_error.is_none() {
                     script_error = result.error;
                 }
@@ -390,12 +521,27 @@ impl RequestExecutionService {
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "tests", &mut all_console,
                 ).await;
+                self.apply_script_side_effects(
+                    &result,
+                    input.environment_name.as_deref(),
+                    input.global_env_name.as_deref(),
+                    input.collection.as_deref(),
+                    &mut var_ctx,
+                );
                 all_test_results.extend(result.test_results.clone());
                 if result.error.is_some() && script_error.is_none() {
                     script_error = result.error;
                 }
             }
         }
+
+        // ── Declarative assertions ────────────────────────────────────────────
+        // Run after tests script so JS test results appear first in TestsPanel.
+        let assertion_results = crate::assertion_evaluator::evaluate_assertions(
+            &input.assertions,
+            &response,
+        );
+        all_test_results.extend(assertion_results);
 
         // ── Emit events ───────────────────────────────────────────────────────
         if !all_console.is_empty() {
@@ -722,6 +868,8 @@ mod tests {
             post_response_script: None,
             tests_script: None,
             request_path: None,
+            global_env_name: None,
+            assertions: vec![],
         }
     }
 
@@ -1200,5 +1348,455 @@ mod tests {
             "Auth::None must not emit SensitiveAuthUsed, got {:?}",
             *captured
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Script side-effect tests (Critical #1 and #2)
+    // -------------------------------------------------------------------------
+
+    use rocket_scripting::{
+        CollectionVarWrite, EnvVarWrite, ScriptContext, ScriptEngine, ScriptResult,
+    };
+
+    struct MockScriptEngine {
+        post_response_result: Mutex<ScriptResult>,
+    }
+
+    impl MockScriptEngine {
+        fn returning_post_response(result: ScriptResult) -> Self {
+            Self { post_response_result: Mutex::new(result) }
+        }
+    }
+
+    #[async_trait]
+    impl ScriptEngine for MockScriptEngine {
+        async fn execute(
+            &self,
+            ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
+            use rocket_scripting::ScriptPhase;
+            if ctx.phase == ScriptPhase::AfterResponse {
+                Ok(self.post_response_result.lock().expect("lock poisoned").clone())
+            } else {
+                Ok(ScriptResult::default())
+            }
+        }
+    }
+
+    struct RecordingEnvRepo {
+        initial: Mutex<Option<Environment>>,
+        saved: Mutex<Vec<Environment>>,
+    }
+
+    impl RecordingEnvRepo {
+        fn with_env(env: Environment) -> Arc<Self> {
+            Arc::new(Self {
+                initial: Mutex::new(Some(env)),
+                saved: Mutex::new(vec![]),
+            })
+        }
+        fn last_saved(&self) -> Option<Environment> {
+            self.saved.lock().expect("lock poisoned").last().cloned()
+        }
+    }
+
+    impl rocket_environment::EnvironmentRepository for RecordingEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(self.initial.lock().expect("lock").iter().cloned().collect())
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.initial
+                .lock()
+                .expect("lock")
+                .as_ref()
+                .filter(|e| e.name == name)
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn save(&self, env: &Environment) -> DomainResult<()> {
+            self.saved.lock().expect("lock").push(env.clone());
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+    }
+
+    struct SharedEnvRepo(Arc<RecordingEnvRepo>);
+    impl rocket_environment::EnvironmentRepository for SharedEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> { self.0.list() }
+        fn get(&self, name: &str) -> DomainResult<Environment> { self.0.get(name) }
+        fn save(&self, env: &Environment) -> DomainResult<()> { self.0.save(env) }
+        fn delete(&self, name: &str) -> DomainResult<()> { self.0.delete(name) }
+    }
+
+    struct RecordingCollectionRepo {
+        settings: Mutex<CollectionSettings>,
+        saved_settings: Mutex<Vec<CollectionSettings>>,
+    }
+
+    impl RecordingCollectionRepo {
+        fn with_settings(settings: CollectionSettings) -> Arc<Self> {
+            Arc::new(Self {
+                settings: Mutex::new(settings),
+                saved_settings: Mutex::new(vec![]),
+            })
+        }
+        fn last_saved_settings(&self) -> Option<CollectionSettings> {
+            self.saved_settings.lock().expect("lock").last().cloned()
+        }
+    }
+
+    impl CollectionRepository for RecordingCollectionRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> { Ok(vec![]) }
+        fn get(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
+        fn get_summaries(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
+        fn create(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
+        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> { Err(DomainError::NotFound("stub".into())) }
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> { Ok(path.to_string()) }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
+        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
+            Ok(self.settings.lock().expect("lock").clone())
+        }
+        fn save_settings(&self, _: &str, settings: &CollectionSettings) -> DomainResult<()> {
+            self.saved_settings.lock().expect("lock").push(settings.clone());
+            Ok(())
+        }
+        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
+        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+    }
+
+    struct SharedCollectionRepo(Arc<RecordingCollectionRepo>);
+    impl CollectionRepository for SharedCollectionRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> { self.0.list() }
+        fn get(&self, n: &str) -> DomainResult<Collection> { self.0.get(n) }
+        fn get_summaries(&self, n: &str) -> DomainResult<Collection> { self.0.get_summaries(n) }
+        fn create(&self, n: &str) -> DomainResult<Collection> { self.0.create(n) }
+        fn delete(&self, n: &str) -> DomainResult<()> { self.0.delete(n) }
+        fn rename(&self, a: &str, b: &str) -> DomainResult<()> { self.0.rename(a, b) }
+        fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> { self.0.get_request(a, b) }
+        fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> { self.0.save_request(a, b, c) }
+        fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> { self.0.rename_request(a, b, c) }
+        fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_request(a, b) }
+        fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.create_folder(a, b) }
+        fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_folder(a, b) }
+        fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> { self.0.move_item(a, b, c, d) }
+        fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> { self.0.reorder_items(a, b, c) }
+        fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> { self.0.get_settings(n) }
+        fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> { self.0.save_settings(n, s) }
+        fn get_folder_chain_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_chain_variables(a, b) }
+        fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_variables(a, b) }
+        fn save_folder_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_folder_variables(a, b, c) }
+        fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_request_variables(a, b) }
+        fn save_request_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_request_variables(a, b, c) }
+    }
+
+    /// Script engine that returns a custom ScriptResult for the before-request phase.
+    struct MockBeforeRequestEngine {
+        result: Mutex<ScriptResult>,
+    }
+
+    impl MockBeforeRequestEngine {
+        fn returning(result: ScriptResult) -> Self {
+            Self { result: Mutex::new(result) }
+        }
+    }
+
+    #[async_trait]
+    impl ScriptEngine for MockBeforeRequestEngine {
+        async fn execute(
+            &self,
+            ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
+            use rocket_scripting::ScriptPhase;
+            if ctx.phase == ScriptPhase::BeforeRequest {
+                Ok(self.result.lock().expect("lock poisoned").clone())
+            } else {
+                Ok(ScriptResult::default())
+            }
+        }
+    }
+
+    /// Executor that captures the last request body it received.
+    struct BodyCapturingExecutor {
+        last_body: Mutex<Option<rocket_shared::types::Body>>,
+    }
+
+    impl BodyCapturingExecutor {
+        fn new() -> Arc<Self> {
+            Arc::new(Self { last_body: Mutex::new(None) })
+        }
+        fn last_body(&self) -> Option<rocket_shared::types::Body> {
+            self.last_body.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl HttpExecutor for BodyCapturingExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            *self.last_body.lock().expect("lock") = req.body.clone();
+            Ok(HttpResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: "{}".into(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+                size_bytes: 2,
+            })
+        }
+    }
+
+    fn build_svc_with_script(
+        env_repo: Box<dyn rocket_environment::EnvironmentRepository>,
+        collection_repo: Box<dyn CollectionRepository>,
+        engine: Box<dyn ScriptEngine>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            env_repo,
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            collection_repo,
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(engine)
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_persist_calls_env_repo_save() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "TOKEN".into(),
+                value: serde_json::json!("new-token"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved()
+            .expect("env_repo.save() should have been called");
+        assert_eq!(saved.get_value("TOKEN"), Some("new-token"));
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_no_persist_skips_env_repo_save() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "TOKEN".into(),
+                value: serde_json::json!("runtime-only"),
+                persist: false,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        assert!(
+            env_repo.last_saved().is_none(),
+            "env_repo.save() must NOT be called for non-persist writes"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_response_script_collection_var_write_calls_save_settings() {
+        let initial_settings = CollectionSettings {
+            variables: vec![CollectionVariable {
+                key: "BASE_URL".into(),
+                value: "https://old.example.com".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            }],
+            ..Default::default()
+        };
+        let col_repo = RecordingCollectionRepo::with_settings(initial_settings);
+
+        let result = ScriptResult {
+            collection_var_writes: vec![CollectionVarWrite {
+                key: "BASE_URL".into(),
+                value: serde_json::json!("https://new.example.com"),
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("my-api".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = col_repo.last_saved_settings()
+            .expect("save_settings should have been called");
+        let written = saved.variables.iter().find(|v| v.key == "BASE_URL");
+        assert_eq!(written.map(|v| v.value.as_str()), Some("https://new.example.com"));
+    }
+
+    #[tokio::test]
+    async fn post_response_script_global_env_var_write_calls_env_repo_save() {
+        let mut global_env = Environment::new("global-prod");
+        global_env.set_variable(Variable::new("API_KEY", "old-key"));
+        let env_repo = RecordingEnvRepo::with_env(global_env);
+
+        let result = ScriptResult {
+            global_env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("new-key"),
+                persist: false,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.global_env_name = Some("global-prod".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved()
+            .expect("env_repo.save() should have been called for global env write");
+        assert_eq!(saved.get_value("API_KEY"), Some("new-key"));
+    }
+
+    #[tokio::test]
+    async fn before_request_script_body_mutation_reaches_executor() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_shared::types::BodyMode;
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                body: Some(serde_json::json!(r#"{"injected":true}"#)),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let body = body_capturing.last_body().expect("executor should have received a body");
+        assert_eq!(body.mode, BodyMode::Json);
+        assert_eq!(body.content.as_deref(), Some(r#"{"injected":true}"#));
+    }
+
+    /// Executor that captures the RequestOptions it received.
+    struct OptionsCapturingExecutor {
+        last_options: Mutex<Option<RequestOptions>>,
+    }
+
+    impl OptionsCapturingExecutor {
+        fn new() -> Arc<Self> {
+            Arc::new(Self { last_options: Mutex::new(None) })
+        }
+        fn last_options(&self) -> Option<RequestOptions> {
+            self.last_options.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl HttpExecutor for OptionsCapturingExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            *self.last_options.lock().expect("lock") = Some(req.options.clone());
+            Ok(HttpResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: "{}".into(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+                size_bytes: 2,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn before_request_script_max_redirects_mutation_reaches_executor() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+
+        let options_capturing = OptionsCapturingExecutor::new();
+        let executor_arc = Arc::clone(&options_capturing);
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                max_redirects: Some(3),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let opts = options_capturing.last_options().expect("executor should have received options");
+        assert_eq!(opts.max_redirects, Some(3));
     }
 }
