@@ -1,11 +1,19 @@
-/// Stub — console ops implemented in SP3-05.
-use deno_core::op2;
+/// Console ops — capture log/warn/error into ScriptOutputState.
+use deno_core::{op2, OpState};
+use rocket_scripting::ConsoleLevel;
+use crate::scripting::state::ScriptOutputState;
 
 #[op2(fast)]
-pub fn op_console_log(#[string] _msg: String) {}
+pub fn op_console_log(state: &mut OpState, #[string] msg: String) {
+    state.borrow_mut::<ScriptOutputState>().add_console(ConsoleLevel::Log, msg);
+}
 
 #[op2(fast)]
-pub fn op_console_warn(#[string] _msg: String) {}
+pub fn op_console_warn(state: &mut OpState, #[string] msg: String) {
+    state.borrow_mut::<ScriptOutputState>().add_console(ConsoleLevel::Warn, msg);
+}
 
 #[op2(fast)]
-pub fn op_console_error(#[string] _msg: String) {}
+pub fn op_console_error(state: &mut OpState, #[string] msg: String) {
+    state.borrow_mut::<ScriptOutputState>().add_console(ConsoleLevel::Error, msg);
+}
