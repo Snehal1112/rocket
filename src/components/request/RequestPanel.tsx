@@ -74,6 +74,7 @@ import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { RocketTabBar } from './RocketTabBar';
+import { AssertionsTab } from './AssertionsTab';
 import { SaveRequestButton } from './SaveRequestButton';
 import { ScriptsTab } from './ScriptsTab';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
@@ -112,7 +113,8 @@ type SectionTab =
   | 'docs'
   | 'settings'
   | 'load-test'
-  | 'scripts';
+  | 'scripts'
+  | 'assertions';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -387,7 +389,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     activeSection === 'docs' ||
     activeSection === 'settings' ||
     activeSection === 'load-test' ||
-    activeSection === 'scripts';
+    activeSection === 'scripts' ||
+    activeSection === 'assertions';
   // Use safe access in case settings is absent on a request loaded from an older saved state.
   const settings = request.settings ?? {
     verifySsl: true,
@@ -749,6 +752,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         isActive: activeSection === 'scripts',
         onClick: () => setActiveSection('scripts'),
       },
+      {
+        value: 'assertions',
+        label: (
+          <>
+            Assertions
+            {request.assertions.some((a) => !a.disabled) && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'assertions',
+        onClick: () => setActiveSection('assertions'),
+      },
     ],
     [
       activeSection,
@@ -759,6 +775,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       requestVarCount,
       request.docs,
       settingsModified,
+      request.assertions,
     ],
   );
 
@@ -977,11 +994,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           />
         </div>
       ) : null}
+      {activeSection === 'assertions' ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <AssertionsTab
+            assertions={request.assertions}
+            onChange={(newAssertions) => updateRequest(tab.id, { assertions: newAssertions })}
+          />
+        </div>
+      ) : null}
       <div
         className={
           activeSection === 'docs' ||
           activeSection === 'load-test' ||
-          activeSection === 'scripts'
+          activeSection === 'scripts' ||
+          activeSection === 'assertions'
             ? 'hidden'
             : 'flex-1 overflow-auto p-3'
         }
@@ -1294,8 +1320,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <div className='flex flex-1 min-h-0'>
           {/* Request side — full width when response is suppressed. */}
           <div
-            className='flex flex-col overflow-hidden bg-card min-w-[20%] max-w-[80%]'
-            style={{ width: expandFull ? '100%' : `${requestWidth}%` }}
+            className={cn(
+              'flex flex-col overflow-hidden bg-card',
+              expandFull ? 'flex-1' : 'min-w-[20%] max-w-[80%]',
+            )}
+            style={expandFull ? undefined : { width: `${requestWidth}%` }}
           >
             {sectionTabs}
           </div>
