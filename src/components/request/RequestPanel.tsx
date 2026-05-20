@@ -652,6 +652,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         onClick: () => setActiveSection('params'),
       },
       {
+        value: 'body',
+        label: (
+          <>
+            Body
+            {request.body.mode !== 'none' && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'body',
+        onClick: () => setActiveSection('body'),
+      },
+      {
         value: 'headers',
         label: (
           <>
@@ -665,19 +678,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         ),
         isActive: activeSection === 'headers',
         onClick: () => setActiveSection('headers'),
-      },
-      {
-        value: 'body',
-        label: (
-          <>
-            Body
-            {request.body.mode !== 'none' && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'body',
-        onClick: () => setActiveSection('body'),
       },
       {
         value: 'auth',
@@ -708,38 +708,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         onClick: () => setActiveSection('variables'),
       },
       {
-        value: 'docs',
-        label: (
-          <>
-            Docs
-            {request.docs && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'docs',
-        onClick: () => setActiveSection('docs'),
-      },
-      {
-        value: 'settings',
-        label: (
-          <>
-            Settings
-            {settingsModified && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'settings',
-        onClick: () => setActiveSection('settings'),
-      },
-      {
-        value: 'load-test',
-        label: 'Load test',
-        isActive: activeSection === 'load-test',
-        onClick: () => setActiveSection('load-test'),
-      },
-      {
         value: 'scripts',
         label: (
           <>
@@ -764,6 +732,38 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         ),
         isActive: activeSection === 'assertions',
         onClick: () => setActiveSection('assertions'),
+      },
+      {
+        value: 'load-test',
+        label: 'Load test',
+        isActive: activeSection === 'load-test',
+        onClick: () => setActiveSection('load-test'),
+      },
+      {
+        value: 'docs',
+        label: (
+          <>
+            Docs
+            {request.docs && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'docs',
+        onClick: () => setActiveSection('docs'),
+      },
+      {
+        value: 'settings',
+        label: (
+          <>
+            Settings
+            {settingsModified && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'settings',
+        onClick: () => setActiveSection('settings'),
       },
     ],
     [
