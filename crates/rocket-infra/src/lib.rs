@@ -1,5 +1,6 @@
 mod atomic_write;
 mod yaml_io;
+pub mod scripting;
 pub mod file_watcher;
 pub(crate) mod migration;
 pub(crate) mod conversions;
