@@ -81,10 +81,36 @@ extension!(
         rok::op_rok_interpolate,
         rok::op_rok_set_next_request,
         rok::op_rok_skip_request,
-        // req ops (stubs until SP3-04)
+        // req read ops
         req::op_req_get_url,
-        // res ops (stubs until SP3-04)
+        req::op_req_get_host,
+        req::op_req_get_path,
+        req::op_req_get_query_string,
+        req::op_req_get_method,
+        req::op_req_get_auth_mode,
+        req::op_req_get_header,
+        req::op_req_get_headers,
+        req::op_req_get_body,
+        req::op_req_get_timeout,
+        req::op_req_get_execution_mode,
+        req::op_req_get_execution_platform,
+        // req write ops
+        req::op_req_set_url,
+        req::op_req_set_method,
+        req::op_req_set_header,
+        req::op_req_set_headers,
+        req::op_req_delete_header,
+        req::op_req_delete_headers,
+        req::op_req_set_body,
+        req::op_req_set_timeout,
+        req::op_req_set_max_redirects,
+        // res ops
         res::op_res_get_status,
+        res::op_res_get_status_text,
+        res::op_res_get_header,
+        res::op_res_get_headers,
+        res::op_res_get_body,
+        res::op_res_get_response_time,
         // console ops
         console::op_console_log,
         console::op_console_warn,
@@ -273,5 +299,64 @@ mod tests {
         let ctx = minimal_ctx("rok.runner.setNextRequest('Poll Status')");
         let result = engine.execute(ctx).await.expect("execute");
         assert!(matches!(result.next_request, Some(rocket_scripting::NextRequest::Name(s)) if s == "Poll Status"));
+    }
+
+    fn stub_response(status: u16) -> rocket_http::HttpResponse {
+        rocket_http::HttpResponse {
+            status,
+            status_text: "OK".into(),
+            headers: vec![],
+            body: String::new(),
+            duration_ms: 0,
+            ttfb_ms: 0,
+            size_bytes: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn req_set_header_in_before_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("req.setHeader('x-custom', 'my-value')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let mutations = result.request_mutations.expect("mutations present");
+        assert_eq!(mutations.headers_set.get("x-custom").expect("header"), "my-value");
+    }
+
+    #[tokio::test]
+    async fn req_set_url_in_before_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("req.setUrl('https://new.example.com/api')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let mutations = result.request_mutations.expect("mutations present");
+        assert_eq!(mutations.url.expect("url"), "https://new.example.com/api");
+    }
+
+    #[tokio::test]
+    async fn req_mutation_rejected_in_after_response() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("req.setUrl('https://blocked.com')");
+        ctx.phase = rocket_scripting::ScriptPhase::AfterResponse;
+        ctx.response = Some(stub_response(200));
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_some(), "expected phase guard error");
+        assert!(result.request_mutations.is_none());
+    }
+
+    #[tokio::test]
+    async fn res_get_status_in_after_response() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("rok.setVar('code', String(res.getStatus()))");
+        ctx.phase = rocket_scripting::ScriptPhase::AfterResponse;
+        ctx.response = Some(stub_response(201));
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("code").expect("code"), "201");
+    }
+
+    #[tokio::test]
+    async fn res_unavailable_in_before_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("res.getStatus()");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_some(), "expected res unavailable error");
     }
 }
