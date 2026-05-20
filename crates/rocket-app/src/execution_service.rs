@@ -1768,6 +1768,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn assertions_run_after_tests_script_and_appear_in_results() {
+        use rocket_scripting::TestStatus;
+        use rocket_shared::Assertion;
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        // One passing and one failing assertion.
+        input.assertions = vec![
+            Assertion::new("res.status", "eq", Some("200".into())),
+            Assertion::new("res.status", "eq", Some("404".into())),
+        ];
+
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(output.test_results.len(), 2);
+        assert_eq!(output.test_results[0].status, TestStatus::Passed);
+        assert_eq!(output.test_results[1].status, TestStatus::Failed);
+    }
+
+    #[tokio::test]
     async fn before_request_script_max_redirects_mutation_reaches_executor() {
         use rocket_scripting::{RequestMutations, ScriptResult};
 
