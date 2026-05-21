@@ -106,7 +106,7 @@ export function MonacoWrapper({
     };
   }, [phase]);
 
-  // Clean up all Monaco disposables when the component unmounts.
+  // Clean up content-change and hover disposables on unmount; extraLibDisposableRef is cleaned by the phase effect.
   useEffect(() => {
     return () => {
       contentChangeDisposableRef.current?.dispose();
