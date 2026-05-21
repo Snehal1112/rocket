@@ -1,6 +1,7 @@
 import './monaco-setup';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
+import * as monacoStatic from 'monaco-editor';
 import { useEffect, useRef } from 'react';
 import { generateDynamicVar, isDynamicVar } from '@/lib/dynamic-vars';
 import { parseTextTokens } from '@/lib/text-variables';
@@ -92,18 +93,15 @@ export function MonacoWrapper({
   }, []);
 
   // Register phase-appropriate IntelliSense type definitions when phase changes.
+  // Use the top-level `typescript` namespace — `languages.typescript` is deprecated.
   useEffect(() => {
     if (!phase) return;
-    // Dynamically import monaco so this effect only runs client-side.
-    // Use the top-level `typescript` namespace — `languages.typescript` is deprecated.
-    import('monaco-editor').then((monaco) => {
-      extraLibDisposableRef.current?.dispose();
-      extraLibDisposableRef.current =
-        monaco.typescript.javascriptDefaults.addExtraLib(
-          ROK_TYPE_DEFS_FOR_PHASE(phase),
-          'ts:rok-global.d.ts',
-        );
-    });
+    extraLibDisposableRef.current?.dispose();
+    extraLibDisposableRef.current =
+      monacoStatic.typescript.javascriptDefaults.addExtraLib(
+        ROK_TYPE_DEFS_FOR_PHASE(phase),
+        'ts:rok-global.d.ts',
+      );
     return () => {
       extraLibDisposableRef.current?.dispose();
       extraLibDisposableRef.current = null;
