@@ -54,6 +54,7 @@ export function ScriptsTab({
           forceMoveMarkers: true,
         },
       ]);
+      editor.focus();
       return;
     }
     editor.executeEdits('snippet-insert', [
