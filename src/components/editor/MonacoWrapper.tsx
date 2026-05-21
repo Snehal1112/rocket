@@ -95,11 +95,10 @@ export function MonacoWrapper({
   useEffect(() => {
     if (!phase) return;
     extraLibDisposableRef.current?.dispose();
-    extraLibDisposableRef.current =
-      monacoNs.typescript.javascriptDefaults.addExtraLib(
-        ROK_TYPE_DEFS_FOR_PHASE(phase),
-        `ts:rok-${phase}.d.ts`,
-      );
+    extraLibDisposableRef.current = monacoNs.typescript.javascriptDefaults.addExtraLib(
+      ROK_TYPE_DEFS_FOR_PHASE(phase),
+      `ts:rok-${phase}.d.ts`,
+    );
     return () => {
       extraLibDisposableRef.current?.dispose();
       extraLibDisposableRef.current = null;

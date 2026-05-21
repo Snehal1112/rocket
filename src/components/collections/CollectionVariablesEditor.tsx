@@ -66,10 +66,7 @@ export function CollectionVariablesEditor({
           {/* Data rows. */}
           {variables.map((v, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: index is stable — rows are not reordered
-            <div
-              key={i}
-              className='flex items-center gap-1 border-b px-2 py-1 hover:bg-muted/20'
-            >
+            <div key={i} className='flex items-center gap-1 border-b px-2 py-1 hover:bg-muted/20'>
               {/* Enabled toggle. */}
               <div className='w-6 shrink-0 flex items-center'>
                 <Checkbox

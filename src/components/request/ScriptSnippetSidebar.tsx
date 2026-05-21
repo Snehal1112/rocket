@@ -1,10 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ROK_SNIPPETS } from '@/components/editor/rok-types';
 import type {

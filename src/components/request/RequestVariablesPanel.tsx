@@ -86,7 +86,11 @@ export function RequestVariablesPanel({
   return (
     <div className='flex flex-col h-full overflow-hidden'>
       <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
-        <CollectionVariablesEditor variables={vars} onChange={handleChange} showDescription={false} />
+        <CollectionVariablesEditor
+          variables={vars}
+          onChange={handleChange}
+          showDescription={false}
+        />
       </div>
     </div>
   );
