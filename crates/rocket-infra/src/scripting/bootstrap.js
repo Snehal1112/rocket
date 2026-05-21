@@ -80,48 +80,15 @@ globalThis.res = {
   getResponseTime:  ()      => Deno.core.ops.op_res_get_response_time(),
 };
 
-// ── test() + expect() (chai subset) ──────────────────────────────────────────
-function expect(actual) {
-  return {
-    // jest-style shorthand: rok.expect(x).toBe(y)
-    toBe: (expected) => {
-      if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`);
-    },
-    to: {
-      equal: (expected) => {
-        if (actual !== expected) throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`);
-      },
-      be: {
-        true:  () => { if (actual !== true)  throw new Error(`Expected true`); },
-        false: () => { if (actual !== false) throw new Error(`Expected false`); },
-        null:  () => { if (actual !== null)  throw new Error(`Expected null`); },
-        below:  (n)       => { if (!(actual < n))   throw new Error(`Expected ${actual} to be below ${n}`); },
-        above:  (n)       => { if (!(actual > n))   throw new Error(`Expected ${actual} to be above ${n}`); },
-        within: (lo, hi)  => { if (actual < lo || actual > hi) throw new Error(`Expected ${actual} to be within ${lo}..${hi}`); },
-        an:     (type)    => { if (typeof actual !== type) throw new Error(`Expected ${JSON.stringify(actual)} to be an ${type}`); },
-      },
-      include: (val) => {
-        if (typeof actual === 'string' && !actual.includes(val)) throw new Error(`Expected "${actual}" to include "${val}"`);
-        if (Array.isArray(actual) && !actual.includes(val)) throw new Error(`Expected array to include ${JSON.stringify(val)}`);
-      },
-      have: {
-        property: (key) => {
-          if (typeof actual !== 'object' || actual === null || !(key in actual))
-            throw new Error(`Expected object to have property "${key}"`);
-        },
-        status: (code) => {
-          if (actual.status !== code) throw new Error(`Expected status ${code}, got ${actual.status}`);
-        },
-      },
-      not: {
-        equal: (expected) => {
-          if (actual === expected) throw new Error(`Expected ${JSON.stringify(actual)} to not equal ${JSON.stringify(expected)}`);
-        },
-      },
-    },
-  };
-}
-globalThis.expect = expect;
+// ── test() + expect() ────────────────────────────────────────────────────────
+// Delegate to bundled Chai for full API parity.
+const _chai = require('chai');
+globalThis.expect = function(actual) {
+  const assertion = _chai.expect(actual);
+  // jest-style alias — not in Chai natively.
+  assertion.toBe = (expected) => _chai.expect(actual).to.equal(expected);
+  return assertion;
+};
 
 globalThis.test = function(name, fn) {
   Deno.core.ops.op_test_run(name);
