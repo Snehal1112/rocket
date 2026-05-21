@@ -28,15 +28,20 @@ export function ScriptsTab({
 }: ScriptsTabProps) {
   const editorRef = useRef<monacoNs.editor.IStandaloneCodeEditor | null>(null);
 
+  const handleEditorReady = useCallback((editor: monacoNs.editor.IStandaloneCodeEditor) => {
+    editorRef.current = editor;
+  }, []);
+
   const handleInsert = useCallback((code: string) => {
     const editor = editorRef.current;
     if (!editor) return;
-    const position = editor.getPosition();
     const model = editor.getModel();
-    if (!model || !position) {
-      // No cursor — append at end with a leading newline.
-      const lastLine = model ? model.getLineCount() : 1;
-      const lastCol = model ? model.getLineMaxColumn(lastLine) : 1;
+    if (!model) return;
+    const position = editor.getPosition();
+    if (!position) {
+      // No cursor — append at end with leading and trailing newlines.
+      const lastLine = model.getLineCount();
+      const lastCol = model.getLineMaxColumn(lastLine);
       editor.executeEdits('snippet-insert', [
         {
           range: {
@@ -45,7 +50,7 @@ export function ScriptsTab({
             endLineNumber: lastLine,
             endColumn: lastCol,
           },
-          text: `\n${code}`,
+          text: `\n${code}\n`,
           forceMoveMarkers: true,
         },
       ]);
@@ -116,9 +121,7 @@ export function ScriptsTab({
               readOnly={readOnly}
               height='100%'
               phase='tests'
-              onEditorReady={(editor) => {
-                editorRef.current = editor;
-              }}
+              onEditorReady={handleEditorReady}
             />
           </Suspense>
         </div>
