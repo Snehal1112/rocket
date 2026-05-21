@@ -32,6 +32,10 @@ pub trait CollectionRepository: Send + Sync {
 
     /// Save a request to a specific path within a collection.
     /// Returns the actual filename used (may differ from `path` if a unique name was generated).
+    ///
+    /// **Variables ownership:** `request.variables` is NOT authoritative for the stored
+    /// `runtime.variables` block. Use `save_request_variables` to mutate variables; callers
+    /// that pass an empty `request.variables` will have the existing on-disk variables preserved.
     fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String>;
 
     /// Rename a request file within a collection (fs::rename, single event).

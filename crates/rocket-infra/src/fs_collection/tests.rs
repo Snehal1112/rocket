@@ -564,6 +564,32 @@ fn folder_variables_roundtrip() {
 }
 
 #[test]
+fn save_request_preserves_variables_written_by_save_request_variables() {
+    // Regression: save_request (used by auto-save on tab switch) must not erase
+    // variables written by save_request_variables; the IPC payload never carries them.
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
+    repo.save_request("my-api", "get-users.yml", &req).expect("initial save");
+
+    let vars = vec![
+        CollectionVariable { key: "TOKEN".into(), value: "abc".into(), initial_value: "".into(), enabled: true, secret: true },
+    ];
+    repo.save_request_variables("my-api", "get-users.yml", vars).expect("save vars");
+
+    // Simulate the frontend auto-save payload — variables field is intentionally empty.
+    let mut req_without_vars = repo.get_request("my-api", "get-users.yml").expect("load request");
+    req_without_vars.variables = vec![];
+    req_without_vars.pre_request_script = Some("console.log('pre');".into());
+    repo.save_request("my-api", "get-users.yml", &req_without_vars).expect("save request after scripts edit");
+
+    let preserved = repo.get_request_variables("my-api", "get-users.yml").expect("load vars");
+    assert_eq!(preserved.len(), 1, "variables must survive save_request when payload carries none");
+    assert_eq!(preserved[0].key, "TOKEN");
+    assert_eq!(preserved[0].value, "abc");
+}
+
+#[test]
 fn request_variables_roundtrip() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();
