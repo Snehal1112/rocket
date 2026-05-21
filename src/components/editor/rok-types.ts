@@ -1,3 +1,5 @@
+import chaiTypeDefsRaw from './chai-types.d.ts.txt?raw';
+
 export type ScriptPhase = 'pre-request' | 'post-response' | 'tests';
 
 export interface ScriptSnippetItem {
@@ -187,28 +189,17 @@ declare const req: {
 };
 `;
 
+// Strip triple-slash reference directives that Monaco cannot resolve at runtime.
+const CHAI_TYPE_DEFS = (chaiTypeDefsRaw as string).replace(/\/\/\/\s*<reference[^>]*>\s*\n/g, '');
+
 const TEST_DEFS = `
+${CHAI_TYPE_DEFS}
+
 /** Register a named assertion block. Each block runs independently. */
 declare function test(name: string, fn: () => void): void;
 
-interface ChaiAssertion {
-  to: ChaiAssertion;
-  be: ChaiAssertion & {
-    an(type: string): ChaiAssertion;
-    within(min: number, max: number): ChaiAssertion;
-    below(n: number): ChaiAssertion;
-  };
-  not: ChaiAssertion;
-  exist: void;
-  equal(value: unknown): void;
-  include(str: string): void;
-  have: {
-    property(key: string, value?: unknown): ChaiAssertion;
-  };
-}
-
-/** Chai expect — chain assertions with .to.equal(), .to.have.property(), etc. */
-declare const expect: (value: unknown) => ChaiAssertion;
+/** Full Chai expect — chain assertions with .to.equal(), .to.have.property(), .to.match(), etc. */
+declare const expect: Chai.ExpectStatic;
 `;
 
 /** Returns the Monaco extra-lib `.d.ts` string for the given script phase. */
