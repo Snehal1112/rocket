@@ -95,6 +95,10 @@ function expect(actual) {
         true:  () => { if (actual !== true)  throw new Error(`Expected true`); },
         false: () => { if (actual !== false) throw new Error(`Expected false`); },
         null:  () => { if (actual !== null)  throw new Error(`Expected null`); },
+        below:  (n)       => { if (!(actual < n))   throw new Error(`Expected ${actual} to be below ${n}`); },
+        above:  (n)       => { if (!(actual > n))   throw new Error(`Expected ${actual} to be above ${n}`); },
+        within: (lo, hi)  => { if (actual < lo || actual > hi) throw new Error(`Expected ${actual} to be within ${lo}..${hi}`); },
+        an:     (type)    => { if (typeof actual !== type) throw new Error(`Expected ${JSON.stringify(actual)} to be an ${type}`); },
       },
       include: (val) => {
         if (typeof actual === 'string' && !actual.includes(val)) throw new Error(`Expected "${actual}" to include "${val}"`);
