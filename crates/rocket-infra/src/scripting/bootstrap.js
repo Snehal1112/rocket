@@ -80,6 +80,16 @@ globalThis.res = {
   getResponseTime:  ()      => Deno.core.ops.op_res_get_response_time(),
 };
 
+// ── require() module loader ───────────────────────────────────────────────────
+globalThis.require = function(name) {
+  const src = Deno.core.ops.op_require_module(name);
+  if (!src) throw new Error(`Module not found: ${name}`);
+  const mod = { exports: {} };
+  const fn = new Function("module", "exports", "require", src);
+  fn(mod, mod.exports, globalThis.require);
+  return mod.exports;
+};
+
 // ── test() + expect() ────────────────────────────────────────────────────────
 // Delegate to bundled Chai for full API parity.
 const _chai = require('chai');
@@ -103,13 +113,3 @@ globalThis.test = function(name, fn) {
 // rok.test / rok.expect aliases so both calling styles work.
 rok.test   = globalThis.test;
 rok.expect = globalThis.expect;
-
-// ── require() module loader ───────────────────────────────────────────────────
-globalThis.require = function(name) {
-  const src = Deno.core.ops.op_require_module(name);
-  if (!src) throw new Error(`Module not found: ${name}`);
-  const mod = { exports: {} };
-  const fn = new Function("module", "exports", "require", src);
-  fn(mod, mod.exports, globalThis.require);
-  return mod.exports;
-};
