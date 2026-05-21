@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.7.0](https://github.com/Snehal1112/rocket/compare/v0.6.10...v0.7.0) (2026-05-21)
+
+### Features
+
+* **frontend:** add AssertionEntry type and assertions to Request IPC interface ([588ffbf](https://github.com/Snehal1112/rocket/commit/588ffbf05a1a34a1d574dde1bd4c26ec8ee9f8f6))
+* **frontend:** add assertions to RequestState and mapping utilities ([fadf71c](https://github.com/Snehal1112/rocket/commit/fadf71c8314f8e479302db18823e8b50f1a403e6))
+* **frontend:** add AssertionsTab component and wire into RequestPanel ([003ae1c](https://github.com/Snehal1112/rocket/commit/003ae1c2dd88d6f119de2fadfdee4bdeb173b05d))
+* **frontend:** ScriptsTab, TestsPanel, script fields in RequestState/ResponseState ([4cd71e7](https://github.com/Snehal1112/rocket/commit/4cd71e7648656997b5b094943b33352a9edd7e02))
+* **frontend:** wire assertions through save, auto-save, and execute paths ([9fd295c](https://github.com/Snehal1112/rocket/commit/9fd295cee148c5dc40fa6203493cc07ac572bc27))
+* **http:** add max_redirects option to RequestOptions ([13e51b5](https://github.com/Snehal1112/rocket/commit/13e51b587cfbac5fdd3d0417be6566e1cd62a39b))
+* **load-test:** add max_requests cap and improve chart time formatting ([fa6ce54](https://github.com/Snehal1112/rocket/commit/fa6ce54e9c7644d98315bbbf6916b24ece84a974))
+* **request:** add overflow menu and reorder tabs by priority ([b5c9a17](https://github.com/Snehal1112/rocket/commit/b5c9a17a18847bf585ece5599f523f81d03bf660))
+* **rocket-app:** 3-phase script pipeline + DomainEvent script variants ([e356888](https://github.com/Snehal1112/rocket/commit/e3568885d9a1a74e7c966bc1ae5cc8b8badc83ae))
+* **rocket-app:** add assertion_evaluator with full Bruno operator set ([6cf09f1](https://github.com/Snehal1112/rocket/commit/6cf09f1bf2453cbc0e94ce967d71ce4c5ee9e82f))
+* **rocket-app:** wire evaluate_assertions into execution pipeline ([222a880](https://github.com/Snehal1112/rocket/commit/222a8809cf2857fba079d74e9e64ef4cf48587dc))
+* **rocket-infra:** add OpState structs and JS bootstrap script ([e92f01c](https://github.com/Snehal1112/rocket/commit/e92f01c0e848fdb3495a713699e6c26892a4a87e))
+* **rocket-infra:** console tests + embedded JS module bundles + require() wiring ([fafb61e](https://github.com/Snehal1112/rocket/commit/fafb61e3a15a419e1156e17ff9d98188b83e839d))
+* **rocket-infra:** DenoScriptEngine skeleton — runtime lifecycle, test ops, smoke tests ([cbabede](https://github.com/Snehal1112/rocket/commit/cbabede11c45680f2957beea8ee78e563813532f))
+* **rocket-infra:** implement rok.* ops and integration tests ([e8056b9](https://github.com/Snehal1112/rocket/commit/e8056b92eb83c4f6b660463c2fd1a071211a815a))
+* **rocket-infra:** req/res ops with phase guards + integration tests ([150b6cb](https://github.com/Snehal1112/rocket/commit/150b6cbf60f476a659f93f899b91b32ceb80fc4a))
+* **rocket-infra:** scaffold scripting module + deno_core dependency ([a5d64b3](https://github.com/Snehal1112/rocket/commit/a5d64b303176b1f05c3ed2aa0a3b99ba8895e1af))
+* **rocket-scripting:** add ScriptContext, convenience constructors, CLAUDE.md ([e530bce](https://github.com/Snehal1112/rocket/commit/e530bce67ce22c828ddb63ad1bafd0e1b31128e7))
+* **rocket-scripting:** add ScriptContext, convenience constructors, CLAUDE.md ([867d0f2](https://github.com/Snehal1112/rocket/commit/867d0f2fd91cd99bf58b301dc10bcd9fabec1091))
+* **rocket-scripting:** add ScriptResult and all output types ([027a6e3](https://github.com/Snehal1112/rocket/commit/027a6e3ebe9af338d7f7f3ec3f00be7b47d9929b))
+* **rocket-scripting:** add ScriptResult and all output types ([8d0778e](https://github.com/Snehal1112/rocket/commit/8d0778e3f880124fa3aea66a04c3a850b305b692))
+* **rocket-scripting:** scaffold crate, ScriptPhase, ScriptEngine trait ([2da27b3](https://github.com/Snehal1112/rocket/commit/2da27b3846b55f6d1ac693cd7ddacad6cc5f192c))
+* **rocket-scripting:** scaffold crate, ScriptPhase, ScriptEngine trait ([3973cc3](https://github.com/Snehal1112/rocket/commit/3973cc39691479a27fb3411060804020178102b3))
+* **scripting:** add script/test console entry types and pretty-print objects ([ad88743](https://github.com/Snehal1112/rocket/commit/ad88743b5e7905416b130fb87326f33b7aba1745))
+* **src-tauri:** wire DenoScriptEngine, extend IPC types, add TS script types ([e328fd1](https://github.com/Snehal1112/rocket/commit/e328fd12f3c03ca743ab765c096fc0d2a38a8b8f))
+
+### Bug Fixes
+
+* **assertions:** remove horizontal scroll from Assertions tab ([1d51e22](https://github.com/Snehal1112/rocket/commit/1d51e22adf774377dc1fbc54a1cbb1dc9a3940da))
+* **build:** remove cdylib crate-type to fix V8 TPOFF32 hidden-symbol link error ([2ccf98a](https://github.com/Snehal1112/rocket/commit/2ccf98ac7147c4bac1c52d3cd7cd0a1929bf9352))
+* **build:** use gcc linker to resolve V8 TPOFF32 TLS relocation in cdylib ([a7c22f9](https://github.com/Snehal1112/rocket/commit/a7c22f9c00927a39807709ce9b126216ed57446b))
+* **contracts:** update ContractCard test to match ContractParties behavior ([c109703](https://github.com/Snehal1112/rocket/commit/c1097032b51492c346d368a01b3dff95aa9ed55c))
+* **frontend:** align tests field name with Rust IPC contract ([e6b0b7d](https://github.com/Snehal1112/rocket/commit/e6b0b7d4fe4963d4f508aeba605c8fd3bb263c88))
+* **frontend:** hydrate script fields when opening a saved request ([d3f9025](https://github.com/Snehal1112/rocket/commit/d3f90256272f10e85d19e42c9c0928af392e5f2d))
+* **frontend:** persist script fields on save and auto-save ([5938d9c](https://github.com/Snehal1112/rocket/commit/5938d9c56eff3260fcc22a71150fcfc6a8103225))
+* **hooks:** scope unwrap guard to new_string/content only ([f4b1546](https://github.com/Snehal1112/rocket/commit/f4b1546522ee2e756c687c5537dd362ddf1a0301))
+* resolve biome failures and stale curl paste handler ([7325972](https://github.com/Snehal1112/rocket/commit/73259723472a4309ece1c41220f461a1d148ec64))
+* **rocket-infra:** strip trailing newlines from scripts before YAML write ([4ffa0c1](https://github.com/Snehal1112/rocket/commit/4ffa0c13b40a53734b431624c13512329adaf58d))
+* **rocket-scripting:** use workspace deps, fix doc typo, complete Display tests ([4af7e01](https://github.com/Snehal1112/rocket/commit/4af7e01faf6c5c0698cebab7df9e492f28fe2b7b))
+* **variables:** preserve request vars on save_request ([35b4602](https://github.com/Snehal1112/rocket/commit/35b460226d5bb9fd035c7e52cd19b444e971fc72))
+* **variables:** show count badge on request open ([8dabce1](https://github.com/Snehal1112/rocket/commit/8dabce1152a11f52feb18cec4f80077288fcbd88))
+
 ## [0.6.10](https://github.com/Snehal1112/rocket/compare/v0.6.9...v0.6.10) (2026-05-14)
 
 ### Features
