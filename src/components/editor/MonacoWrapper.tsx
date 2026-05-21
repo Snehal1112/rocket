@@ -8,6 +8,8 @@ import type { VariableScopeEntry } from '@/lib/url-variables';
 import { EditorSkeleton } from './EditorSkeleton';
 import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
 import { useMonacoTheme } from './useMonacoTheme';
+import type { ScriptPhase } from './rok-types';
+import { ROK_TYPE_DEFS_FOR_PHASE } from './rok-types';
 
 interface MonacoWrapperProps {
   value: string;
@@ -18,6 +20,8 @@ interface MonacoWrapperProps {
   readOnly?: boolean;
   height?: string;
   variableContext?: Map<string, VariableScopeEntry>;
+  phase?: ScriptPhase;
+  onEditorReady?: (editor: monacoNs.editor.IStandaloneCodeEditor) => void;
 }
 
 // CSS class names used for Monaco inline decorations per variable source.
@@ -61,6 +65,8 @@ export function MonacoWrapper({
   readOnly = false,
   height = '300px',
   variableContext,
+  phase,
+  onEditorReady,
 }: MonacoWrapperProps) {
   const { themeName } = useMonacoTheme();
   const resolvedLanguage = language ?? detectLanguage(bodyMode, contentType);
@@ -78,11 +84,31 @@ export function MonacoWrapper({
   // Refs for disposables that must be cleaned up when the editor unmounts.
   const contentChangeDisposableRef = useRef<monacoNs.IDisposable | null>(null);
   const hoverDisposablesRef = useRef<monacoNs.IDisposable[]>([]);
+  const extraLibDisposableRef = useRef<monacoNs.IDisposable | null>(null);
 
   // Inject decoration styles once on mount.
   useEffect(() => {
     ensureDecorationStyles();
   }, []);
+
+  // Register phase-appropriate IntelliSense type definitions when phase changes.
+  useEffect(() => {
+    if (!phase) return;
+    // Dynamically import monaco so this effect only runs client-side.
+    // Use the top-level `typescript` namespace — `languages.typescript` is deprecated.
+    import('monaco-editor').then((monaco) => {
+      extraLibDisposableRef.current?.dispose();
+      extraLibDisposableRef.current =
+        monaco.typescript.javascriptDefaults.addExtraLib(
+          ROK_TYPE_DEFS_FOR_PHASE(phase),
+          'ts:rok-global.d.ts',
+        );
+    });
+    return () => {
+      extraLibDisposableRef.current?.dispose();
+      extraLibDisposableRef.current = null;
+    };
+  }, [phase]);
 
   // Clean up all Monaco disposables when the component unmounts.
   useEffect(() => {
@@ -223,6 +249,8 @@ export function MonacoWrapper({
       });
       hoverDisposablesRef.current.push(d);
     }
+
+    onEditorReady?.(editor);
   };
 
   return (
