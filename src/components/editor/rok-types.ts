@@ -108,7 +108,6 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
   },
 ];
 
-// Shared rok.* definitions available in all phases.
 const ROK_DEFS = `
 declare const rok: {
   /** Read a runtime variable set in a previous script. */
@@ -144,7 +143,6 @@ declare const rok: {
 };
 `;
 
-// res.* definitions available in after-response and tests phases.
 const RES_DEFS = `
 declare const res: {
   /** Returns the HTTP status code (e.g. 200). */
@@ -162,7 +160,6 @@ declare const res: {
 };
 `;
 
-// req.* definitions available in the before-request phase only.
 const REQ_DEFS = `
 declare const req: {
   getUrl(): string;
@@ -190,7 +187,6 @@ declare const req: {
 };
 `;
 
-// test() and expect definitions for the tests phase only.
 const TEST_DEFS = `
 /** Register a named assertion block. Each block runs independently. */
 declare function test(name: string, fn: () => void): void;
