@@ -1,5 +1,7 @@
-import { lazy, Suspense } from 'react';
+import type * as monacoNs from 'monaco-editor';
+import { lazy, Suspense, useCallback, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
 
 const MonacoWrapper = lazy(() =>
   import('@/components/editor/MonacoWrapper').then((m) => ({ default: m.MonacoWrapper })),
@@ -24,6 +26,46 @@ export function ScriptsTab({
   onChangeTests,
   readOnly = false,
 }: ScriptsTabProps) {
+  const editorRef = useRef<monacoNs.editor.IStandaloneCodeEditor | null>(null);
+
+  const handleInsert = useCallback((code: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const position = editor.getPosition();
+    const model = editor.getModel();
+    if (!model || !position) {
+      // No cursor — append at end with a leading newline.
+      const lastLine = model ? model.getLineCount() : 1;
+      const lastCol = model ? model.getLineMaxColumn(lastLine) : 1;
+      editor.executeEdits('snippet-insert', [
+        {
+          range: {
+            startLineNumber: lastLine,
+            startColumn: lastCol,
+            endLineNumber: lastLine,
+            endColumn: lastCol,
+          },
+          text: `\n${code}`,
+          forceMoveMarkers: true,
+        },
+      ]);
+      return;
+    }
+    editor.executeEdits('snippet-insert', [
+      {
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: position.column,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        },
+        text: `\n${code}\n`,
+        forceMoveMarkers: true,
+      },
+    ]);
+    editor.focus();
+  }, []);
+
   return (
     <Tabs defaultValue='pre-request' className='flex flex-col h-full'>
       <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
@@ -46,6 +88,7 @@ export function ScriptsTab({
             onChange={readOnly ? undefined : onChangePreRequest}
             readOnly={readOnly}
             height='100%'
+            phase='pre-request'
           />
         </Suspense>
       </TabsContent>
@@ -58,20 +101,28 @@ export function ScriptsTab({
             onChange={readOnly ? undefined : onChangePostResponse}
             readOnly={readOnly}
             height='100%'
+            phase='post-response'
           />
         </Suspense>
       </TabsContent>
 
-      <TabsContent value='tests' className='flex-1 m-0 p-0'>
-        <Suspense fallback={null}>
-          <MonacoWrapper
-            language='javascript'
-            value={testsScript}
-            onChange={readOnly ? undefined : onChangeTests}
-            readOnly={readOnly}
-            height='100%'
-          />
-        </Suspense>
+      <TabsContent value='tests' className='flex-1 m-0 p-0 flex overflow-hidden'>
+        <div className='flex-1 min-w-0'>
+          <Suspense fallback={null}>
+            <MonacoWrapper
+              language='javascript'
+              value={testsScript}
+              onChange={readOnly ? undefined : onChangeTests}
+              readOnly={readOnly}
+              height='100%'
+              phase='tests'
+              onEditorReady={(editor) => {
+                editorRef.current = editor;
+              }}
+            />
+          </Suspense>
+        </div>
+        {!readOnly && <ScriptSnippetSidebar onInsert={handleInsert} />}
       </TabsContent>
     </Tabs>
   );
