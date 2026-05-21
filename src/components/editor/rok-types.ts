@@ -142,18 +142,15 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
         id: 'expect',
         label: 'expect',
         items: [
-          // Equality
           { label: '.to.equal(value)', kind: 'expression', code: '.to.equal(value)' },
           { label: '.to.deep.equal(value)', kind: 'expression', code: '.to.deep.equal(value)' },
           { label: '.to.eql(value)', kind: 'expression', code: '.to.eql(value)' },
-          // Existence / truthiness
           { label: '.to.exist', kind: 'expression', code: '.to.exist' },
           { label: '.to.be.ok', kind: 'expression', code: '.to.be.ok' },
           { label: '.to.be.true', kind: 'expression', code: '.to.be.true' },
           { label: '.to.be.false', kind: 'expression', code: '.to.be.false' },
           { label: '.to.be.null', kind: 'expression', code: '.to.be.null' },
           { label: '.to.be.undefined', kind: 'expression', code: '.to.be.undefined' },
-          // Type
           { label: '.to.be.a("type")', kind: 'expression', code: '.to.be.a("type")' },
           { label: '.to.be.an("array")', kind: 'expression', code: '.to.be.an("array")' },
           {
@@ -161,7 +158,6 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: '.to.be.instanceof(Constructor)',
           },
-          // Numeric
           { label: '.to.be.above(n)', kind: 'expression', code: '.to.be.above(n)' },
           { label: '.to.be.below(n)', kind: 'expression', code: '.to.be.below(n)' },
           { label: '.to.be.within(min, max)', kind: 'expression', code: '.to.be.within(min, max)' },
@@ -172,7 +168,6 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
           },
           { label: '.to.be.at.least(n)', kind: 'expression', code: '.to.be.at.least(n)' },
           { label: '.to.be.at.most(n)', kind: 'expression', code: '.to.be.at.most(n)' },
-          // String / array / object
           { label: '.to.include("str")', kind: 'expression', code: '.to.include("str")' },
           { label: '.to.have.length(n)', kind: 'expression', code: '.to.have.length(n)' },
           {
@@ -195,7 +190,6 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
           { label: '.to.match(/regex/)', kind: 'expression', code: '.to.match(/regex/)' },
           { label: '.to.be.empty', kind: 'expression', code: '.to.be.empty' },
           { label: '.to.satisfy(fn)', kind: 'expression', code: '.to.satisfy((val) => val > 0)' },
-          // Negation
           { label: '.to.not.equal(value)', kind: 'expression', code: '.to.not.equal(value)' },
           {
             label: '.to.not.have.property("key")',
@@ -206,7 +200,6 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
           { label: '.to.not.be.null', kind: 'expression', code: '.to.not.be.null' },
           { label: '.to.not.be.undefined', kind: 'expression', code: '.to.not.be.undefined' },
           { label: '.to.not.be.empty', kind: 'expression', code: '.to.not.be.empty' },
-          // Function
           { label: '.to.throw()', kind: 'expression', code: '.to.throw()' },
         ],
       },
