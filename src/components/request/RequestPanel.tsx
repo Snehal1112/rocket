@@ -139,7 +139,6 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [folderVariables, setFolderVariables] = useState<CollectionVariable[]>([]);
   const [requestVariables, setRequestVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
-  const [requestVarCount, setRequestVarCount] = useState(0);
   const [tagInput, setTagInput] = useState('');
 
   // Resizable split: request height as percentage.
@@ -697,9 +696,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         label: (
           <>
             Variables
-            {requestVarCount > 0 && (
+            {requestVariables.length > 0 && (
               <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
-                {requestVarCount}
+                {requestVariables.length}
               </span>
             )}
           </>
@@ -772,7 +771,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       enabledHeaderCount,
       request.body.mode,
       request.auth.authType,
-      requestVarCount,
+      requestVariables.length,
       request.docs,
       settingsModified,
       request.assertions,
@@ -1060,7 +1059,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             <RequestVariablesPanel
               collection={tab.source.collection}
               requestPath={tab.source.path}
-              onVarCountChange={setRequestVarCount}
+              onSaved={setRequestVariables}
             />
           ) : (
             <div className='flex flex-col items-center justify-center gap-4 py-10 text-center'>

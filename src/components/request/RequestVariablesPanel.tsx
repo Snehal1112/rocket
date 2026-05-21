@@ -1,92 +1,92 @@
-import { Check, Info } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
-import { Button } from '@/components/ui/button';
 import type { CollectionVariable } from '@/lib/tauri-api';
 import { getRequestVariables, saveRequestVariables } from '@/lib/tauri-api';
 
 interface RequestVariablesPanelProps {
   collection: string;
   requestPath: string;
-  onVarCountChange?: (count: number) => void;
+  /** Called after each auto-save so the parent can refresh its variable context. */
+  onSaved?: (vars: CollectionVariable[]) => void;
 }
 
 export function RequestVariablesPanel({
   collection,
   requestPath,
-  onVarCountChange,
+  onSaved,
 }: RequestVariablesPanelProps) {
   const [vars, setVars] = useState<CollectionVariable[]>([]);
-  const [saved, setSaved] = useState(false);
-  // Timer ref to cancel the "Saved" indicator on unmount.
-  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether vars have been loaded from disk at least once.
+  const loadedRef = useRef(false);
+  // Debounce timer for auto-save.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest vars that have not yet been flushed to disk. Null means no pending write.
+  const pendingVarsRef = useRef<CollectionVariable[] | null>(null);
+  // Stable refs so the unmount flush can access the latest values without stale closures.
+  const collectionRef = useRef(collection);
+  const requestPathRef = useRef(requestPath);
+  const onSavedRef = useRef(onSaved);
+  collectionRef.current = collection;
+  requestPathRef.current = requestPath;
+  onSavedRef.current = onSaved;
 
   // Load variables on mount or when the request path changes.
   useEffect(() => {
     let active = true;
+    loadedRef.current = false;
+    pendingVarsRef.current = null;
     getRequestVariables(collection, requestPath)
       .then((loaded) => {
         if (!active) return;
+        loadedRef.current = true;
         setVars(loaded);
-        onVarCountChange?.(loaded.length);
       })
       .catch((err) => console.error('[RequestVariablesPanel] load failed:', err));
     return () => {
       active = false;
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        // Flush any pending unsaved changes before unmounting so a concurrent
+        // save_request call cannot overwrite them with stale disk content.
+        if (pendingVarsRef.current !== null) {
+          const pending = pendingVarsRef.current;
+          void saveRequestVariables(collectionRef.current, requestPathRef.current, pending)
+            .then(() => onSavedRef.current?.(pending))
+            .catch((err) => console.error('[RequestVariablesPanel] flush-on-unmount failed:', err));
+          pendingVarsRef.current = null;
+        }
+      }
     };
-  }, [collection, requestPath, onVarCountChange]);
+  }, [collection, requestPath]);
 
-  // Clear the "Saved" timer on unmount.
+  // Auto-save with 400ms debounce whenever vars change after the initial load.
   useEffect(() => {
+    if (!loadedRef.current) return;
+    pendingVarsRef.current = vars;
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      const toSave = pendingVarsRef.current;
+      if (toSave === null) return;
+      pendingVarsRef.current = null;
+      void saveRequestVariables(collection, requestPath, toSave)
+        .then(() => onSaved?.(toSave))
+        .catch((err) => console.error('[RequestVariablesPanel] auto-save failed:', err));
+    }, 400);
     return () => {
-      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
     };
+  }, [vars, collection, requestPath, onSaved]);
+
+  const handleChange = useCallback((updated: CollectionVariable[]) => {
+    setVars(updated);
   }, []);
 
-  const handleChange = useCallback(
-    (updated: CollectionVariable[]) => {
-      setVars(updated);
-      onVarCountChange?.(updated.length);
-    },
-    [onVarCountChange],
-  );
-
-  const handleSave = useCallback(() => {
-    void saveRequestVariables(collection, requestPath, vars)
-      .then(() => {
-        setSaved(true);
-        if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
-        savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
-      })
-      .catch((err) => console.error('[RequestVariablesPanel] save failed:', err));
-  }, [collection, requestPath, vars]);
-
   return (
-    <div className='space-y-3'>
-      {/* Info banner. */}
-      <div className='flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2.5'>
-        <Info className='h-3.5 w-3.5 text-muted-foreground/60 mt-0.5 shrink-0' />
-        <p className='text-[11px] text-muted-foreground leading-relaxed'>
-          Request variables are scoped to this request only and take priority over folder,
-          environment, and collection variables.
-        </p>
-      </div>
-
-      {/* showDescription=false avoids duplicating the built-in info banner. */}
-      <CollectionVariablesEditor variables={vars} onChange={handleChange} showDescription={false} />
-
-      {/* Save footer. */}
-      <div className='flex items-center gap-2.5 pt-1'>
-        <Button size='sm' onClick={handleSave} className='gap-1.5'>
-          {saved ? (
-            <>
-              <Check className='h-3.5 w-3.5' />
-              Saved
-            </>
-          ) : (
-            'Save'
-          )}
-        </Button>
+    <div className='flex flex-col h-full overflow-hidden'>
+      <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
+        <CollectionVariablesEditor variables={vars} onChange={handleChange} showDescription={false} />
       </div>
     </div>
   );
