@@ -114,9 +114,9 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
 
 export function toApiBody(body: BodyState, resolve = (s: string) => s): Body | undefined {
   if (body.mode === 'none') return undefined;
-  if (body.mode === 'formdata') {
+  if (body.mode === 'formdata' || body.mode === 'formurlencoded') {
     return {
-      mode: 'formdata',
+      mode: body.mode,
       formData: body.formData
         .filter((e) => e.enabled)
         .map((e) => ({
