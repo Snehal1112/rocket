@@ -169,7 +169,7 @@ export interface KeyValueEntry {
 }
 
 export interface BodyState {
-  mode: 'none' | 'json' | 'xml' | 'text' | 'formdata' | 'binary';
+  mode: 'none' | 'json' | 'xml' | 'text' | 'formdata' | 'formurlencoded' | 'binary';
   content: string;
   formData: KeyValueEntry[];
   filePath?: string;
