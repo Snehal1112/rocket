@@ -92,6 +92,18 @@ export function BodyEditor({
         />
       )}
 
+      {body.mode === 'formurlencoded' && (
+        <KeyValueEditor
+          entries={body.formData}
+          onChange={setFormData}
+          keyPlaceholder='Field name'
+          valuePlaceholder='Value'
+          addLabel='Add Field'
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
+        />
+      )}
+
       {body.mode === 'binary' &&
         (body.filePath ? (
           <Card className='max-w-sm'>
