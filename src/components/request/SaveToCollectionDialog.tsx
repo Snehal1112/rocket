@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { toApiBody } from '@/lib/execute-request';
 import { sanitizeFilename } from '@/lib/filename-utils';
 import type { CollectionSummary } from '@/lib/tauri-api';
 import { createCollection, listCollections, saveRequest } from '@/lib/tauri-api';
@@ -79,10 +80,7 @@ export function SaveToCollectionDialog({ open, tab, onClose }: SaveToCollectionD
         headers: tab.request.headers
           .filter((h) => h.key)
           .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-        body:
-          tab.request.body.mode !== 'none'
-            ? { mode: tab.request.body.mode, content: tab.request.body.content }
-            : undefined,
+        body: toApiBody(tab.request.body),
         auth: { authType: 'none' as const },
         fileName: fsName,
       };

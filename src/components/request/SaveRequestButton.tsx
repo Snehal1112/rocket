@@ -1,6 +1,7 @@
 import { Check, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { toApiBody } from '@/lib/execute-request';
 import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
 import { type Request as ApiRequest, type Auth, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -60,7 +61,7 @@ function buildPayloadFromTab(tab: RequestTab): ApiRequest {
     headers: tab.request.headers
       .filter((h) => h.key)
       .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-    body: body.mode !== 'none' ? { mode: body.mode, content: body.content } : undefined,
+    body: toApiBody(body),
     auth: authForSave(tab.request.auth),
     tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,
     settings: s
