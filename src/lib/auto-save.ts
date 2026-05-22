@@ -1,4 +1,4 @@
-import { toApiAuth } from '@/lib/execute-request';
+import { toApiAuth, toApiBody } from '@/lib/execute-request';
 import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
 import { type Request, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -22,10 +22,7 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
     headers: request.headers
       .filter((h) => h.enabled)
       .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-    body:
-      request.body.mode !== 'none'
-        ? { mode: request.body.mode, content: request.body.content }
-        : undefined,
+    body: toApiBody(request.body),
     auth,
     tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
     preRequestScript: request.preRequestScript ?? null,
