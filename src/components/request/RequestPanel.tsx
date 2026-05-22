@@ -81,12 +81,13 @@ import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
-const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
+export const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
   { label: 'None', value: 'none' },
   { label: 'JSON', value: 'json' },
   { label: 'XML', value: 'xml' },
   { label: 'Text', value: 'text' },
   { label: 'Form Data', value: 'formdata' },
+  { label: 'Form URL Encoded', value: 'formurlencoded' },
   { label: 'Binary', value: 'binary' },
 ];
 
