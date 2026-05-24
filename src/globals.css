@@ -723,6 +723,7 @@ html.windows.window-inactive #root {
   text-decoration: underline;
 }
 .prose-doc pre {
+  font-family: var(--font-mono);
   background: hsl(var(--text-code-bg));
   border-radius: 8px;
   padding: 1rem 1.125rem;
