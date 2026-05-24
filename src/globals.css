@@ -2,6 +2,9 @@
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 @import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/lora/400.css";
+@import "@fontsource/lora/400-italic.css";
+@import "@fontsource/lora/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @config "../tailwind.config.js";
@@ -60,6 +63,7 @@
     --chart-5: 3 93% 35%;
     --radius: 0.5rem;
     --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+    --font-serif: "Lora", Georgia, serif;
     /* VSCode 2026 Light: gitDecoration tokens */
     --git-added: 88 74% 26%; /* #587c0c */
     --git-modified: 72 74% 22%; /* #667309 */
@@ -626,6 +630,7 @@ html.windows.window-inactive #root {
 
 /* Markdown document preview — GitHub/VSCode preview aesthetic */
 .prose-doc {
+  font-family: var(--font-serif);
   font-size: 0.9375rem;
   line-height: 1.7;
   color: hsl(var(--foreground));
