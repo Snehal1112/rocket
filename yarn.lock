@@ -863,24 +863,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@fontsource-variable/inter@npm:^5.2.8":
-  version: 5.2.8
-  resolution: "@fontsource-variable/inter@npm:5.2.8"
-  checksum: 10c0/35b46df31c8c18f55f87228acf6297e4dac6cc9f38d0faaafdaf5a40e40c386cf1bfb115fb0fe0dcdb9b7e14f582843693ccf070d9c903072a5b2fc0f8dfde56
-  languageName: node
-  linkType: hard
-
 "@fontsource-variable/plus-jakarta-sans@npm:^5.2.8":
   version: 5.2.8
   resolution: "@fontsource-variable/plus-jakarta-sans@npm:5.2.8"
   checksum: 10c0/33fcffdf8ca3f2822f9b495c7f172bfd0b6fe69832082e033924ad88cddcefb54b22d9114c641a6603782094e578a83e7d10b25086c5c2f586be51b407dbc246
-  languageName: node
-  linkType: hard
-
-"@fontsource/inter@npm:^5.2.8":
-  version: 5.2.8
-  resolution: "@fontsource/inter@npm:5.2.8"
-  checksum: 10c0/f737dd50005e4809887ba55ae0c9b7174216d6d14875d17a4fbb9a0ad75dec4265928b805a43fe16a23f14a878f1974a398bbfc84ad65c79fc4d4b9c3ea154e1
   languageName: node
   linkType: hard
 
@@ -7368,9 +7354,7 @@ __metadata:
     "@codemirror/state": "npm:^6.6.0"
     "@codemirror/view": "npm:^6.41.0"
     "@faker-js/faker": "npm:^10.4.0"
-    "@fontsource-variable/inter": "npm:^5.2.8"
     "@fontsource-variable/plus-jakarta-sans": "npm:^5.2.8"
-    "@fontsource/inter": "npm:^5.2.8"
     "@fontsource/jetbrains-mono": "npm:^5.2.8"
     "@fontsource/lora": "npm:^5.2.8"
     "@monaco-editor/react": "npm:^4.7.0"
