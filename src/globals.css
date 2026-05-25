@@ -1,7 +1,7 @@
-@import "@fontsource-variable/ibm-plex-sans";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
-@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
 @import "@fontsource/lora/400.css";
 @import "@fontsource/lora/400-italic.css";
 @import "@fontsource/lora/600.css";
@@ -62,7 +62,8 @@
     --chart-4: 277 47% 43%;
     --chart-5: 3 93% 35%;
     --radius: 0.5rem;
-    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+    --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
     --font-serif: "Lora", Georgia, serif;
     /* VSCode 2026 Light: gitDecoration tokens */
     --git-added: 88 74% 26%; /* #587c0c */
@@ -390,7 +391,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: "IBM Plex Sans Variable", "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-family: var(--font-sans);
   }
 
   #root {
