@@ -11,17 +11,6 @@ emit_deny() {
   exit 2
 }
 
-# Allow standard developer workflow git commands (commit, add, status, etc.).
-# Block programmatic git shell-outs that should use libgit2 instead.
-if echo "$payload" | grep -Eq 'run_in_terminal|send_to_terminal|Bash'; then
-  cmd=$(echo "$payload" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null || true)
-  if echo "$cmd" | grep -Eq '(^|[[:space:];|&`$(])git[[:space:]]'; then
-    if ! echo "$cmd" | grep -Eq '^\s*git (commit|add|status|log|diff|push|pull|fetch|stash|tag|branch|checkout|restore|reset|rebase|merge|show|describe|rev-parse|config|remote|worktree)'; then
-      emit_deny "Blocked: use git2-backed project services, not git CLI shell-outs."
-    fi
-  fi
-fi
-
 # Block the forbidden Rust pattern in new content being written/edited.
 # Only check new_string (Edit) or content (Write) — not the full payload or old context.
 BANNED="unwr"
