@@ -1,13 +1,13 @@
-import { useState, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { ROK_SNIPPETS } from '@/components/editor/rok-types';
+import { useCallback, useRef, useState } from 'react';
 import type {
   ScriptSnippetGroup,
-  ScriptSnippetSubGroup,
   ScriptSnippetItem,
+  ScriptSnippetSubGroup,
 } from '@/components/editor/rok-types';
+import { ROK_SNIPPETS } from '@/components/editor/rok-types';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ScriptSnippetSidebarProps {
   onInsert: (code: string) => void;
@@ -131,12 +131,17 @@ export function ScriptSnippetSidebar({ onInsert }: ScriptSnippetSidebarProps) {
   return (
     <div className='flex h-full shrink-0' style={{ width }}>
       {/* Drag handle. */}
+      {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
       <div
         onMouseDown={onMouseDown}
         className='w-1 shrink-0 cursor-col-resize hover:bg-primary/40 transition-colors bg-border'
         role='separator'
+        tabIndex={0}
         aria-orientation='vertical'
         aria-label='Resize sidebar'
+        aria-valuenow={width}
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={800}
       />
       <div className='flex flex-col flex-1 min-w-0 border-l'>
         <div className='px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide border-b shrink-0'>

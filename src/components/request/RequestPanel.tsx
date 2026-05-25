@@ -65,6 +65,7 @@ import type {
   RequestTab,
 } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
+import { AssertionsTab } from './AssertionsTab';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
 import { HeadersEditor } from './HeadersEditor';
@@ -74,10 +75,9 @@ import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
 import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { RocketTabBar } from './RocketTabBar';
-import { AssertionsTab } from './AssertionsTab';
 import { SaveRequestButton } from './SaveRequestButton';
-import { ScriptsTab } from './ScriptsTab';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
+import { ScriptsTab } from './ScriptsTab';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
@@ -776,6 +776,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       request.docs,
       settingsModified,
       request.assertions,
+      request.preRequestScript,
+      request.postResponseScript,
+      request.testsScript,
     ],
   );
 

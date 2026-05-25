@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react';
+import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -10,7 +11,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { SingleLineEditor } from '@/components/editor';
 import type { AssertionEntry } from '@/lib/tauri-api';
 
 interface AssertionsTabProps {
@@ -143,6 +143,7 @@ export function AssertionsTab({ assertions, onChange }: AssertionsTabProps) {
         {assertions.map((assertion, i) => {
           const isUnary = UNARY_OPERATORS.has(assertion.operator);
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: assertions have no stable id; index reflects insertion order
             <div key={i} className='flex items-center gap-1 border-b px-2 py-1 hover:bg-muted/20'>
               <div className='w-9 shrink-0 flex items-center'>
                 <Switch

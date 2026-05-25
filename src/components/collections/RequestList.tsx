@@ -93,17 +93,17 @@ export function RequestList({ items, collectionName }: RequestListProps) {
     <div className='flex flex-col gap-3'>
       {/* Filter input. */}
       <div className='relative'>
-        <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground' />
+        <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
         <Input
           placeholder='Filter by name or URL…'
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className='pl-8 h-8 text-sm'
+          className='pl-9 h-9 text-sm'
         />
       </div>
 
       {/* Request count summary. */}
-      <p className='text-xs text-muted-foreground'>
+      <p className='text-sm text-muted-foreground'>
         {totalCount} {totalCount === 1 ? 'request' : 'requests'}
       </p>
 
@@ -117,9 +117,9 @@ export function RequestList({ items, collectionName }: RequestListProps) {
             <div key={group.folderName ?? 'root'}>
               {/* Folder header — only shown for folder groups. */}
               {group.folderName !== null && (
-                <div className='flex items-center gap-1.5 mb-1.5 px-1'>
-                  <Folder className='h-3.5 w-3.5 text-muted-foreground' />
-                  <span className='text-xs font-medium text-muted-foreground'>
+                <div className='flex items-center gap-1.5 mb-2 px-1'>
+                  <Folder className='h-4 w-4 text-muted-foreground' />
+                  <span className='text-sm font-medium text-muted-foreground'>
                     {group.folderName}
                   </span>
                 </div>
@@ -136,7 +136,7 @@ export function RequestList({ items, collectionName }: RequestListProps) {
                       type='button'
                       onClick={() => openRequest(req, req.name)}
                       className={cn(
-                        'w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors',
+                        'w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-accent transition-colors',
                         ri > 0 && 'border-t border-border',
                       )}
                     >
@@ -152,7 +152,7 @@ export function RequestList({ items, collectionName }: RequestListProps) {
                       <span className='text-sm font-medium truncate min-w-0 flex-shrink-0 max-w-[30%]'>
                         {req.name}
                       </span>
-                      <span className='text-xs text-muted-foreground truncate min-w-0 flex-1'>
+                      <span className='text-sm text-muted-foreground truncate min-w-0 flex-1'>
                         {req.url}
                       </span>
                     </button>

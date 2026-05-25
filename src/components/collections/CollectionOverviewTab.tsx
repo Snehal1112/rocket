@@ -455,16 +455,16 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       {/* Collection header — shadow appears when overview left panel is scrolled. */}
       <div
         className={cn(
-          'shrink-0 border-b border-border/70 px-6 pt-4 pb-0 transition-shadow duration-200',
+          'shrink-0 border-b border-border/70 px-6 pt-5 pb-0 transition-shadow duration-200',
           isOverviewScrolled &&
             'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
         )}
       >
-        <div className='flex items-center gap-2 mb-1'>
+        <div className='flex items-center gap-2.5 mb-1'>
           <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
-          <h1 className='text-lg font-semibold leading-tight truncate'>{collection.name}</h1>
+          <h1 className='text-xl font-semibold leading-tight truncate'>{collection.name}</h1>
         </div>
-        <p className='text-xs text-muted-foreground pl-7 mb-3'>{statsLine}</p>
+        <p className='text-sm text-muted-foreground pl-8 mb-4'>{statsLine}</p>
 
         {/* Tab bar. */}
         <div className='flex items-center gap-0'>
@@ -473,7 +473,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               key={t.value}
               type='button'
               onClick={() => handleSectionChange(t.value)}
-              className={`h-8 px-4 text-sm font-medium transition-colors ${
+              className={`h-9 px-4 text-sm font-medium transition-colors ${
                 activeSection === t.value
                   ? 'border-b-2 border-primary text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -481,7 +481,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             >
               {t.label}
               {t.value === 'variables' && variables.length > 0 && (
-                <span className='ml-1 text-2xs text-muted-foreground'>
+                <span className='ml-1.5 text-xs text-muted-foreground'>
                   ({variables.filter((v) => v.enabled).length})
                 </span>
               )}
@@ -510,14 +510,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               ref={overviewScrollRef}
               className='flex-1 min-w-0 border-r border-border overflow-y-auto'
             >
-              <div className='p-5 flex flex-col gap-5'>
+              <div className='p-6 flex flex-col gap-6'>
                 <MethodBreakdown items={items} />
 
                 <Card>
-                  <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-medium'>Default Headers</span>
+                  <CardHeader className='pb-3 pt-5 px-5'>
+                    <span className='text-sm font-semibold'>Default Headers</span>
                   </CardHeader>
-                  <CardContent className='px-4 pb-4'>
+                  <CardContent className='px-5 pb-5'>
                     <HeadersEditor
                       headers={headers}
                       onChange={(v) => {
@@ -546,19 +546,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 </Card>
 
                 <Card>
-                  <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-medium'>Requests</span>
+                  <CardHeader className='pb-3 pt-5 px-5'>
+                    <span className='text-sm font-semibold'>Requests</span>
                   </CardHeader>
-                  <CardContent className='px-4 pb-4'>
+                  <CardContent className='px-5 pb-5'>
                     <RequestList items={items} collectionName={collectionName} />
                   </CardContent>
                 </Card>
 
                 <Card>
-                  <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-medium'>Tags</span>
+                  <CardHeader className='pb-3 pt-5 px-5'>
+                    <span className='text-sm font-semibold'>Tags</span>
                   </CardHeader>
-                  <CardContent className='px-4 pb-4'>
+                  <CardContent className='px-5 pb-5'>
                     <TagsList collection={collection} />
                   </CardContent>
                 </Card>

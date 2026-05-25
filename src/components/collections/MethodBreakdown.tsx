@@ -32,12 +32,12 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
 
   return (
     <Card>
-      <CardHeader className='pb-3'>
-        <CardTitle className='text-sm font-medium'>Method Breakdown</CardTitle>
+      <CardHeader className='pb-3 pt-5 px-5'>
+        <CardTitle className='text-sm font-semibold'>Method Breakdown</CardTitle>
       </CardHeader>
-      <CardContent className='space-y-3'>
+      <CardContent className='space-y-3.5 px-5 pb-5'>
         {rows.length === 0 ? (
-          <p className='text-xs text-muted-foreground'>No requests in this collection.</p>
+          <p className='text-sm text-muted-foreground'>No requests in this collection.</p>
         ) : (
           rows.map(([method, count]) => {
             const color = METHOD_CHART_COLOR[method] ?? {
@@ -47,14 +47,16 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
             const pct = total > 0 ? Math.round((count / total) * 100) : 0;
             return (
               <div key={method} className='flex items-center gap-3'>
-                <span className={cn('w-16 text-xs font-semibold', color.text)}>{method}</span>
+                <span className={cn('w-16 text-xs font-bold tracking-wide', color.text)}>
+                  {method}
+                </span>
                 <div className='flex-1 h-2 bg-muted rounded-full overflow-hidden'>
                   <div
                     className={cn('h-full rounded-full w-[var(--bar-w)]', color.bg)}
                     style={{ '--bar-w': `${pct}%` } as React.CSSProperties}
                   />
                 </div>
-                <span className='text-xs text-muted-foreground w-16 text-right'>
+                <span className='text-xs text-muted-foreground w-20 text-right'>
                   {count} ({pct}%)
                 </span>
               </div>

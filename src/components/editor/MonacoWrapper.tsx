@@ -7,9 +7,9 @@ import { parseTextTokens } from '@/lib/text-variables';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { EditorSkeleton } from './EditorSkeleton';
 import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
-import { useMonacoTheme } from './useMonacoTheme';
 import type { ScriptPhase } from './rok-types';
 import { ROK_TYPE_DEFS_FOR_PHASE } from './rok-types';
+import { useMonacoTheme } from './useMonacoTheme';
 
 interface MonacoWrapperProps {
   value: string;

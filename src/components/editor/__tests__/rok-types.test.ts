@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ROK_SNIPPETS, ROK_TYPE_DEFS_FOR_PHASE } from '../rok-types';
 
 describe('ROK_SNIPPETS', () => {

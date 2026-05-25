@@ -42,9 +42,9 @@ export function TestsPanel({ results }: TestsPanelProps) {
       </div>
 
       <div className='flex-1 overflow-auto'>
-        {results.map((result, i) => (
+        {results.map((result) => (
           <div
-            key={i}
+            key={result.name}
             className='flex items-start gap-2 px-3 py-2 border-b last:border-b-0 text-sm'
           >
             {result.status === 'passed' ? (
