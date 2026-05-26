@@ -1,0 +1,2862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RocketAPI — Backend Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#F7F6F2;--surface:#FFFFFF;--surface-alt:#F2F1EC;
+  --border:rgba(0,0,0,0.10);--border-strong:rgba(0,0,0,0.18);
+  --text-primary:#1A1A18;--text-secondary:#5A5956;--text-muted:#8A8884;
+
+  --c-frontend-bg:#EAF2FD;--c-frontend-bd:#2563A8;--c-frontend-txt:#0D3870;
+  --c-ipc-bg:#F3F0FD;--c-ipc-bd:#6B5ED4;--c-ipc-txt:#3D2EA0;
+  --c-src-bg:#F9F0FE;--c-src-bd:#9333EA;--c-src-txt:#5B1FA0;
+  --c-app-bg:#FAFAFA;--c-app-bd:rgba(0,0,0,0.12);
+  --c-svc-bg:#EDE8FD;--c-svc-bd:#6B5ED4;--c-svc-txt:#3D2EA0;
+  --c-svc-new-bg:#E2F5EC;--c-svc-new-bd:#16A34A;--c-svc-new-txt:#0D5C2A;
+  --c-infra-bg:#FFF4EE;--c-infra-bd:#C2460C;--c-infra-txt:#7A2A06;
+  --c-domain-bg:#FAFAFA;--c-domain-bd:rgba(0,0,0,0.12);
+  --c-crate-bg:#E4F7F2;--c-crate-bd:#0D9669;--c-crate-txt:#065038;
+  --c-crate-new-bg:#ECFDF5;--c-crate-new-bd:#16A34A;--c-crate-new-txt:#065F46;
+  --c-shared-bg:#FEF9EC;--c-shared-bd:#B97D0D;--c-shared-txt:#7A500A;
+  --c-fs-bg:#F4F3EF;--c-fs-bd:#7A7870;--c-fs-txt:#2C2C2A;
+  --new-badge-bg:#DCFCE7;--new-badge-bd:#16A34A;--new-badge-txt:#14532D;
+
+  --drawer-bg:#FFFFFF;--drawer-border:rgba(0,0,0,0.10);
+  --drawer-overlay:rgba(0,0,0,0.25);
+
+  --font-sans:'IBM Plex Sans',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',monospace;
+  --radius-sm:6px;--radius-md:10px;--radius-lg:14px;
+}
+
+
+
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 24px 64px}
+
+/* ── Header ── */
+.header{width:100%;max-width:960px;margin-bottom:32px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.header-title{font-size:22px;font-weight:600;letter-spacing:-0.4px;line-height:1.2}
+.header-sub{margin-top:5px;font-size:13px;color:var(--text-secondary);font-family:var(--font-mono)}
+.header-meta{display:flex;gap:8px;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:500;font-family:var(--font-mono);padding:3px 8px;border-radius:4px;background:var(--surface-alt);color:var(--text-secondary);border:1px solid var(--border);white-space:nowrap}
+.hint{font-size:11px;font-family:var(--font-mono);color:var(--text-muted);margin-top:6px;display:flex;align-items:center;gap:5px}
+.hint-dot{width:6px;height:6px;border-radius:50%;background:var(--text-muted);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* ── Card ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:32px 28px 36px;width:100%;max-width:960px;box-shadow:0 2px 12px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.04)}
+
+/* ── Legend ── */
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.legend-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-secondary);font-family:var(--font-mono)}
+.legend-swatch{width:12px;height:12px;border-radius:3px;flex-shrink:0}
+
+/* ── Diagram ── */
+.diagram{display:flex;flex-direction:column;gap:0}
+.layer{display:flex;align-items:stretch;gap:0}
+.layer-label{width:30px;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-right:12px}
+.layer-label span{font-size:10px;font-weight:500;font-family:var(--font-mono);color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap}
+.layer-content{flex:1}
+
+/* connectors */
+.connector{display:flex;align-items:center;gap:12px;padding:6px 0 6px 42px}
+.connector-line{width:1px;height:28px;background:var(--border-strong);position:relative;margin-left:20px;flex-shrink:0}
+.connector-line::after{content:'';position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid var(--border-strong)}
+.connector-bidir .connector-line::before{content:'';position:absolute;top:-1px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:6px solid var(--border-strong)}
+.connector-label{font-size:11px;font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
+.connector-split{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:4px 0 4px 42px}
+.connector-split .connector-col{display:flex;flex-direction:column;align-items:center;gap:3px}
+.connector-split .connector-label{font-size:10px;color:var(--text-muted)}
+.connector-split .mini-arrow{width:1px;height:20px;background:var(--border-strong);position:relative}
+.connector-split .mini-arrow::after{content:'';position:absolute;bottom:-1px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-top:5px solid var(--border-strong)}
+
+/* ── Clickable block base ── */
+.clickable{cursor:pointer;transition:transform 0.15s ease,box-shadow 0.15s ease,outline 0.1s ease;outline:2px solid transparent;outline-offset:2px;user-select:none}
+.clickable:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.10)}
+.clickable:hover .click-hint{opacity:1}
+.clickable:focus{outline:2px solid var(--text-secondary);outline-offset:3px}
+.clickable.active-block{outline:2px solid var(--text-secondary)!important;outline-offset:3px}
+.click-hint{position:absolute;top:8px;right:8px;font-size:9px;font-family:var(--font-mono);color:var(--text-muted);opacity:0;transition:opacity .15s;pointer-events:none;white-space:nowrap}
+
+/* ── Block primitives ── */
+.block{border-radius:var(--radius-md);border:1px solid;padding:14px 18px;position:relative}
+.block-title{font-size:14px;font-weight:600;line-height:1.3;letter-spacing:-0.1px}
+.block-sub{font-size:12px;font-weight:400;margin-top:3px;line-height:1.5;font-family:var(--font-mono)}
+.block-full{width:100%}
+.block-frontend{background:var(--c-frontend-bg);border-color:var(--c-frontend-bd);color:var(--c-frontend-txt)}
+.block-ipc{background:var(--c-ipc-bg);border-color:var(--c-ipc-bd);color:var(--c-ipc-txt)}
+.block-src{background:var(--c-src-bg);border-color:var(--c-src-bd);color:var(--c-src-txt)}
+.block-shared{background:var(--c-shared-bg);border-color:var(--c-shared-bd);color:var(--c-shared-txt)}
+.block-fs{background:var(--c-fs-bg);border-color:var(--c-fs-bd);color:var(--c-fs-txt)}
+
+/* ── Service container ── */
+.service-container{background:var(--c-app-bg);border:1px solid var(--c-app-bd);border-radius:var(--radius-lg);padding:16px 18px 18px}
+.service-container-label{font-size:11px;font-weight:600;font-family:var(--font-mono);color:var(--text-secondary);letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
+.service-grid{display:grid;gap:8px}
+.service-grid-2{grid-template-columns:1fr 1fr}
+.service-grid-3{grid-template-columns:1fr 1fr 1fr}
+.svc{border-radius:var(--radius-sm);border:1px solid;padding:9px 12px;position:relative}
+.svc-title{font-size:12px;font-weight:600;line-height:1.3}
+.svc-sub{font-size:11px;font-weight:400;margin-top:2px;font-family:var(--font-mono);line-height:1.4;opacity:.85}
+.svc-default{background:var(--c-svc-bg);border-color:var(--c-svc-bd);color:var(--c-svc-txt)}
+.svc-new{background:var(--c-svc-new-bg);border-color:var(--c-svc-new-bd);color:var(--c-svc-new-txt)}
+
+/* ── Service tile flow layout ── */
+.svc-tiles{display:flex;flex-wrap:wrap;gap:8px}
+.svc-tile{border-radius:var(--radius-sm);border:1px solid;padding:8px 11px;position:relative;flex:1 1 140px;min-width:130px;max-width:calc(33.33% - 6px)}
+.svc-tile .svc-title{font-size:12px;font-weight:600;line-height:1.3}
+.svc-tile .svc-sub{font-size:11px;font-weight:400;margin-top:2px;font-family:var(--font-mono);line-height:1.4;opacity:.85}
+.svc-tile.svc-default{background:var(--c-svc-bg);border-color:var(--c-svc-bd);color:var(--c-svc-txt)}
+.svc-tile.svc-new{background:var(--c-svc-new-bg);border-color:var(--c-svc-new-bd);color:var(--c-svc-new-txt)}
+.svc-tile .click-hint{position:absolute;top:6px;right:8px;font-size:9px;font-family:var(--font-mono);color:var(--text-muted);opacity:0;transition:opacity .15s;pointer-events:none}
+.svc-tile:hover .click-hint{opacity:1}
+.svc-tile:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,.10)}
+.svc-section-divider{width:100%;border:none;border-top:1px solid var(--border);margin:2px 0}
+
+/* ── Two-column layout ── */
+.two-col{display:grid;grid-template-columns:1fr 260px;gap:10px}
+
+/* ── Domain container ── */
+.domain-container{background:var(--c-domain-bg);border:1px solid var(--c-domain-bd);border-radius:var(--radius-lg);padding:16px 18px 18px}
+.crate{border-radius:var(--radius-sm);border:1px solid;padding:9px 12px;position:relative}
+.crate-title{font-size:12px;font-weight:600;line-height:1.3}
+.crate-sub{font-size:11px;font-weight:400;margin-top:2px;font-family:var(--font-mono);line-height:1.4;opacity:.85}
+.crate-default{background:var(--c-crate-bg);border-color:var(--c-crate-bd);color:var(--c-crate-txt)}
+.crate-new{background:var(--c-crate-new-bg);border-color:var(--c-crate-new-bd);color:var(--c-crate-new-txt)}
+.crate-note{font-size:11px;font-family:var(--font-mono);color:var(--text-muted);margin-top:8px;padding:8px 10px;background:var(--surface-alt);border-radius:var(--radius-sm);border:1px solid var(--border);line-height:1.6}
+
+/* ── Infra panel ── */
+.infra-panel{background:var(--c-infra-bg);border:1px solid var(--c-infra-bd);border-radius:var(--radius-lg);padding:14px 14px 14px;display:flex;flex-direction:column;gap:0;height:100%}
+.infra-section-label{font-size:10px;font-weight:600;font-family:var(--font-mono);color:var(--c-infra-txt);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;opacity:.75}
+.infra-items{display:flex;flex-direction:column;gap:2px}
+.infra-item{font-size:12px;font-family:var(--font-mono);color:var(--c-infra-txt);line-height:1.5;padding:2px 0}
+.infra-item.indent{padding-left:12px;font-style:italic;opacity:.7}
+.infra-item.highlight{font-weight:500;display:inline-flex;align-items:center;gap:6px}
+.infra-divider{height:1px;background:var(--c-infra-bd);opacity:.2}
+
+/* ── Infra tab strip ── */
+.infra-header{margin-bottom:10px}
+.infra-title{font-size:12px;font-weight:600;font-family:var(--font-mono);color:var(--c-infra-txt);margin-bottom:1px}
+.infra-subtitle{font-size:10px;font-family:var(--font-mono);color:var(--c-infra-txt);opacity:.6;margin-bottom:10px}
+.infra-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.infra-tab{font-size:10px;font-weight:600;font-family:var(--font-mono);letter-spacing:.04em;padding:3px 8px;border-radius:4px;border:1px solid;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap;user-select:none}
+.infra-tab{background:transparent;border-color:rgba(194,70,12,.25);color:var(--c-infra-txt);opacity:.65}
+.infra-tab.active{background:var(--c-infra-bd);border-color:var(--c-infra-bd);color:#fff;opacity:1}
+.infra-tab:hover:not(.active){opacity:1;background:rgba(194,70,12,.08)}
+.infra-pane{display:none;flex-direction:column;gap:0}
+.infra-pane.active{display:flex}
+
+/* ── Infra compact row — single column stack ── */
+.ir{display:flex;flex-direction:column;gap:1px;padding:5px 0;border-bottom:1px solid rgba(194,70,12,.08)}
+.ir:last-child{border-bottom:none}
+.ir-name{font-size:11px;font-weight:600;font-family:var(--font-mono);color:var(--c-infra-txt);line-height:1.4}
+.ir-desc{font-size:10.5px;font-family:var(--font-mono);color:var(--c-infra-txt);opacity:.68;line-height:1.4}
+.ir.ir-sub{padding:2px 0 2px 10px;border-bottom:none}
+.ir.ir-sub .ir-name{font-size:10px;font-weight:500;opacity:.65}
+.ir.ir-sub .ir-desc{font-size:10px;opacity:.55}
+.ir-badge{display:inline-block;font-size:8px;font-weight:700;font-family:var(--font-mono);padding:1px 4px;border-radius:3px;background:rgba(194,70,12,.12);color:var(--c-infra-txt);border:1px solid rgba(194,70,12,.25);margin-left:4px;vertical-align:middle;white-space:nowrap}
+
+/* ── New badge ── */
+.new-badge{display:inline-block;font-size:9px;font-weight:700;font-family:var(--font-mono);letter-spacing:.06em;background:var(--new-badge-bg);color:var(--new-badge-txt);border:1px solid var(--new-badge-bd);border-radius:3px;padding:1px 5px;vertical-align:middle;margin-left:4px;line-height:1.6}
+
+/* shared/fs rows */
+.shared-rows,.fs-rows{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.shared-row,.fs-row{font-size:11px;font-family:var(--font-mono);opacity:.9;line-height:1.5}
+.shared-row{color:var(--c-shared-txt)}
+.fs-row{color:var(--c-fs-txt)}
+
+/* dep rule */
+/* ── Dependency rule section ── */
+.dep-rule{margin-top:32px}
+.dep-rule-heading{font-size:11px;font-weight:700;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:#8A8884;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.dep-rule-heading::before,.dep-rule-heading::after{content:'';flex:1;height:1px;background:#E8E7E2}
+
+/* flow diagram */
+.dep-flow{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:nowrap;overflow-x:auto;padding:20px 8px;background:#F7F6F2;border:1px solid #E8E7E2;border-radius:14px;margin-bottom:16px}
+.dep-node{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0}
+.dep-node-box{padding:8px 14px;border-radius:8px;border:1.5px solid;font-size:12px;font-family:var(--font-mono);font-weight:600;white-space:nowrap;line-height:1.3;text-align:center}
+.dep-node-label{font-size:10px;font-family:var(--font-mono);color:#8A8884;white-space:nowrap;text-align:center;line-height:1.3}
+.dep-node-box.n-entry{background:#F3F0FD;border-color:#6B5ED4;color:#3D2EA0}
+.dep-node-box.n-app{background:#EDE8FD;border-color:#6B5ED4;color:#3D2EA0}
+.dep-node-box.n-infra{background:#FFF4EE;border-color:#C2460C;color:#7A2A06}
+.dep-node-box.n-domain{background:#E4F7F2;border-color:#0D9669;color:#065038}
+.dep-node-box.n-shared{background:#FEF9EC;border-color:#B97D0D;color:#7A500A}
+
+.dep-arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;flex-shrink:0;padding:0 4px}
+.dep-arrow-line{width:32px;height:1.5px;background:#C8C6BE;position:relative}
+.dep-arrow-line::after{content:'';position:absolute;right:-1px;top:50%;transform:translateY(-50%);border-left:6px solid #C8C6BE;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.dep-arrow-label{font-size:9px;font-family:var(--font-mono);color:#A8A6A0;white-space:nowrap;text-align:center}
+.dep-arrow-bidir .dep-arrow-line::before{content:'';position:absolute;left:-1px;top:50%;transform:translateY(-50%);border-right:6px solid #C8C6BE;border-top:4px solid transparent;border-bottom:4px solid transparent}
+
+/* rules grid */
+.dep-rules-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dep-rule-card{background:#FAFAF8;border:1px solid #ECEAE4;border-radius:10px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start}
+.dep-rule-card.rule-never{border-left:3px solid #DC2626}
+.dep-rule-card.rule-always{border-left:3px solid #16A34A}
+.dep-rule-card.rule-note{border-left:3px solid #6B5ED4}
+.dep-rule-icon2{font-size:14px;flex-shrink:0;margin-top:1px}
+.dep-rule-body{}
+.dep-rule-title2{font-size:12px;font-weight:600;color:#1A1A18;margin-bottom:3px}
+.dep-rule-desc{font-size:11px;font-family:var(--font-mono);color:#5A5956;line-height:1.6}
+
+.mt6{margin-top:6px}.mt8{margin-top:8px}.mt12{margin-top:12px}
+
+/* ════════════════════════════════════════
+   DRAWER
+   ════════════════════════════════════════ */
+.overlay{position:fixed;inset:0;background:var(--drawer-overlay);opacity:0;pointer-events:none;transition:opacity .25s ease;z-index:100}
+.overlay.open{opacity:1;pointer-events:all}
+
+.drawer{position:fixed;top:0;right:0;height:100vh;width:480px;max-width:95vw;background:var(--drawer-bg);border-left:1px solid var(--drawer-border);box-shadow:-8px 0 40px rgba(0,0,0,.12);transform:translateX(100%);transition:transform .3s cubic-bezier(.4,0,.2,1);z-index:101;display:flex;flex-direction:column;overflow:hidden}
+.drawer.open{transform:translateX(0)}
+
+.drawer-header{padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-shrink:0}
+.drawer-badge{font-size:10px;font-weight:600;font-family:var(--font-mono);letter-spacing:.06em;padding:3px 8px;border-radius:4px;border:1px solid;margin-bottom:6px;display:inline-block}
+.drawer-title{font-size:18px;font-weight:600;line-height:1.2;letter-spacing:-0.2px;color:var(--text-primary)}
+.drawer-layer{font-size:11px;font-family:var(--font-mono);color:var(--text-muted);margin-top:4px}
+.drawer-close{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface-alt);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-secondary);font-size:16px;transition:background .15s;margin-top:2px}
+.drawer-close:hover{background:var(--border)}
+
+.drawer-body{flex:1;overflow-y:auto;padding:20px 24px 32px;display:flex;flex-direction:column;gap:20px}
+
+/* drawer sections */
+.d-section{}
+.d-section-title{font-size:11px;font-weight:600;font-family:var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.d-desc{font-size:14px;line-height:1.7;color:var(--text-secondary)}
+
+/* responsibility list */
+.d-list{display:flex;flex-direction:column;gap:6px}
+.d-list-item{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.5;color:var(--text-secondary)}
+.d-list-bullet{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:6px;background:var(--text-muted)}
+
+/* key-value pairs */
+.d-kv{display:flex;flex-direction:column;gap:6px}
+.d-kv-row{display:grid;grid-template-columns:140px 1fr;gap:8px;font-size:12px;line-height:1.5}
+.d-kv-key{font-family:var(--font-mono);font-weight:500;color:var(--text-muted)}
+.d-kv-val{color:var(--text-secondary);font-family:var(--font-mono)}
+
+/* code snippet */
+.d-code{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);line-height:1.7;overflow-x:auto;white-space:pre}
+
+/* dependency chips */
+.d-chips{display:flex;flex-wrap:wrap;gap:6px}
+.d-chip{font-size:11px;font-family:var(--font-mono);padding:3px 9px;border-radius:20px;border:1px solid var(--border);background:var(--surface-alt);color:var(--text-secondary)}
+.d-chip.highlight{border-color:var(--c-crate-bd);background:var(--c-crate-bg);color:var(--c-crate-txt)}
+.d-chip.new{border-color:var(--new-badge-bd);background:var(--new-badge-bg);color:var(--new-badge-txt)}
+
+/* state machine badges */
+.d-states{display:flex;flex-wrap:wrap;gap:6px}
+.d-state{font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:4px;border:1px solid;font-weight:500}
+.d-state-draft{background:#F1EFF9;border-color:#9B8EF0;color:#3D2EA0}
+.d-state-active{background:#E2F5EC;border-color:#16A34A;color:#0D5C2A}
+.d-state-drift{background:#FEF9EC;border-color:#B97D0D;color:#7A500A}
+.d-state-breach{background:#FEE2E2;border-color:#DC2626;color:#7F1D1D}
+.d-state-review{background:#EDE8FD;border-color:#6B5ED4;color:#3D2EA0}
+.d-state-paused{background:#F1EFE8;border-color:#7A7870;color:#2C2C2A}
+.d-state-expiring{background:#FEF3C7;border-color:#D97706;color:#78350F}
+.d-state-expired{background:#FEE2E2;border-color:#9B1C1C;color:#7F1D1D}
+
+
+
+/* scrollbar */
+.drawer-body::-webkit-scrollbar{width:4px}
+.drawer-body::-webkit-scrollbar-track{background:transparent}
+.drawer-body::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:2px}
+
+@media(max-width:640px){
+  .two-col{grid-template-columns:1fr}
+  .service-grid-3{grid-template-columns:1fr 1fr}
+  .header{flex-direction:column;align-items:flex-start}
+  .drawer{width:100%;max-width:100vw}
+}
+
+/* ── Crate module note ── */
+.crate-module-note{margin-top:10px;padding:10px 12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);display:flex;flex-direction:column;gap:0}
+.cmn-row{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--border)}
+.cmn-row:last-child{border-bottom:none;padding-bottom:0}
+.cmn-row:first-child{padding-top:0}
+.cmn-label{font-size:11px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);display:block;margin-bottom:1px}
+.cmn-tokens{display:flex;flex-wrap:wrap;align-items:center;gap:3px 4px}
+.cmn-sep{font-size:10px;color:var(--text-muted);opacity:.35;line-height:1}
+.cmn-token{font-size:10.5px;font-family:var(--font-mono);color:var(--text-secondary);line-height:1.5}
+.cmn-token.key{font-weight:600;color:var(--text-primary)}
+.cmn-token.trait{font-style:italic}
+.cmn-token.note{font-style:italic;opacity:.65}
+
+/* ── Contract State Machine modal trigger ── */
+.csm-btn{display:inline-flex;align-items:center;gap:4px;margin-top:5px;font-size:10px;font-family:var(--font-mono);font-weight:600;padding:2px 8px;border-radius:4px;cursor:pointer;border:1px solid var(--c-svc-new-bd);background:var(--c-svc-new-bg);color:var(--c-svc-new-txt);transition:background .14s,transform .12s;letter-spacing:.04em;white-space:nowrap}
+.csm-btn:hover{background:var(--c-crate-new-bd);color:#fff;transform:translateY(-1px)}
+/* Modal backdrop */
+.csm-overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);align-items:center;justify-content:center}
+.csm-overlay.open{display:flex}
+/* Modal window */
+.csm-win{width:min(1440px,98vw);height:min(860px,95vh);border-radius:14px;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.5);position:relative;background:#181818}
+/* Close */
+.csm-controls{position:absolute;top:14px;right:14px;z-index:20;display:flex;gap:6px;align-items:center}
+.csm-x,.csm-newtab{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.4);color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .14s;text-decoration:none}
+.csm-x:hover,.csm-newtab:hover{background:rgba(0,0,0,.7)}
+/* iframe fills the window */
+.csm-frame{width:100%;height:100%;border:none;display:block}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div>
+    <div class="header-title">RocketAPI — Backend Architecture</div>
+    <div class="header-sub">v3 · Tauri v2 + Rust · DDD bounded contexts · Cargo workspace</div>
+    <div class="hint"><span class="hint-dot"></span>Click any component for details</div>
+  </div>
+  <div class="header-meta">
+    <span class="tag">Contract Governance</span>
+    <span class="tag">SSO / OIDC</span>
+    <span class="tag">OpenCollection v1.0.0</span>
+  </div>
+</header>
+
+<main class="card">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--c-svc-bg);border:1px solid var(--c-svc-bd)"></div>Existing</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--c-svc-new-bg);border:1px solid var(--c-svc-new-bd)"></div>New in v3</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--c-infra-bg);border:1px solid var(--c-infra-bd)"></div>Infrastructure</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--c-shared-bg);border:1px solid var(--c-shared-bd)"></div>Shared kernel</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--c-fs-bg);border:1px solid var(--c-fs-bd)"></div>Storage</div>
+  </div>
+
+  <div class="diagram">
+
+    <!-- Layer 1: Frontend -->
+    <div class="layer">
+      <div class="layer-label"><span>Frontend</span></div>
+      <div class="layer-content">
+        <div class="block block-full block-frontend clickable" tabindex="0" role="button" aria-label="Frontend layer details" data-id="frontend">
+          <span class="click-hint">↗ details</span>
+          <div class="block-title">Frontend — React 18 / TypeScript</div>
+          <div class="block-sub">Zustand · shadcn/ui · Lucide icons · tauri-api.ts IPC bridge · Vite · Monaco (multi-line) · CM6 (single-line)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector connector-bidir">
+      <div class="connector-line"></div>
+      <span class="connector-label">Tauri IPC — invoke() ↓ / events ↑</span>
+    </div>
+
+    <!-- Layer 2: IPC -->
+    <div class="layer">
+      <div class="layer-label"><span>IPC</span></div>
+      <div class="layer-content">
+        <div class="block block-full block-ipc clickable" tabindex="0" role="button" aria-label="IPC layer details" data-id="ipc">
+          <span class="click-hint">↗ details</span>
+          <div class="block-title">IPC Projection Types <span class="new-badge">NEW</span></div>
+          <div class="block-sub">ContractIpcView &amp; sibling DTOs — camelCase wire format · computed fields injected without polluting domain models</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector">
+      <div class="connector-line"></div>
+      <span class="connector-label">delegates to Tauri commands</span>
+    </div>
+
+    <!-- Layer 3: src-tauri -->
+    <div class="layer">
+      <div class="layer-label"><span>Entry</span></div>
+      <div class="layer-content">
+        <div class="block block-full block-src clickable" tabindex="0" role="button" aria-label="src-tauri details" data-id="src-tauri">
+          <span class="click-hint">↗ details</span>
+          <div class="block-title">src-tauri — binary entry point</div>
+          <div class="block-sub">Thin Tauri command handlers · managed state graph · TauriEventBus wiring · DI construction at startup</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector-split">
+      <div class="connector-col"><div class="mini-arrow"></div><span class="connector-label">delegates to</span></div>
+      <div class="connector-col"><div class="mini-arrow"></div><span class="connector-label">injects via Box&lt;dyn Trait&gt;</span></div>
+    </div>
+
+    <!-- Layer 4: App + Infra -->
+    <div class="layer">
+      <div class="layer-label"><span>App</span></div>
+      <div class="layer-content">
+        <div class="two-col">
+          <div class="service-container">
+            <div class="service-container-label">rocket-app — Application Services (14)</div>
+
+            <!-- Row 1 (3) -->
+            <div class="service-grid service-grid-3">
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="CollectionService"><span class="click-hint">↗</span><div class="svc-title">CollectionService</div><div class="svc-sub">CRUD · folders · reorder</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="EnvironmentService"><span class="click-hint">↗</span><div class="svc-title">EnvironmentService</div><div class="svc-sub">CRUD · 8-scope resolver</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="RequestExecutionService"><span class="click-hint">↗</span><div class="svc-title">RequestExecutionService</div><div class="svc-sub">execute · scripting</div></div>
+            </div>
+
+            <!-- Row 2 (3) -->
+            <div class="service-grid service-grid-3 mt8">
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="LoadTestService"><span class="click-hint">↗</span><div class="svc-title">LoadTestService</div><div class="svc-sub">phase-based · VUs</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="ExportService"><span class="click-hint">↗</span><div class="svc-title">ExportService</div><div class="svc-sub">HTML · CSV · JSON · PDF</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="OAuth2Service"><span class="click-hint">↗</span><div class="svc-title">OAuth2Service</div><div class="svc-sub">auth-code · PKCE · refresh</div></div>
+            </div>
+
+            <!-- Row 3 (3) -->
+            <div class="service-grid service-grid-3 mt8">
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="GitAppService"><span class="click-hint">↗</span><div class="svc-title">GitAppService</div><div class="svc-sub">commit · push · diff</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="HistoryService"><span class="click-hint">↗</span><div class="svc-title">HistoryService</div><div class="svc-sub">list · search · replay</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="WorkspaceService"><span class="click-hint">↗</span><div class="svc-title">WorkspaceService</div><div class="svc-sub">create · switch · config</div></div>
+            </div>
+
+            <!-- Row 4 (2) -->
+            <div class="service-grid service-grid-2 mt8">
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="TemplateService"><span class="click-hint">↗</span><div class="svc-title">TemplateService</div><div class="svc-sub">save · list · instantiate</div></div>
+              <div class="svc svc-default clickable" tabindex="0" role="button" data-id="CookieService"><span class="click-hint">↗</span><div class="svc-title">CookieService</div><div class="svc-sub">per-domain cookie jars</div></div>
+            </div>
+
+            <!-- Row 5 (2) -->
+            <div class="service-grid service-grid-2 mt8">
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="ContractService"><span class="click-hint">↗</span><div class="svc-title">ContractService <span class="new-badge">NEW</span></div><div class="svc-sub">drift · state machine · OpenAPI</div><button class="csm-btn" onclick="event.stopPropagation();openCSM()">⬡ View State Machine</button></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="IdentityService"><span class="click-hint">↗</span><div class="svc-title">IdentityService <span class="new-badge">NEW</span></div><div class="svc-sub">OIDC · groups · governance</div></div>
+            </div>
+
+            <!-- Row 6 (1) — full-width -->
+            <div class="service-grid mt8" style="grid-template-columns:1fr">
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="SecurityAuditService"><span class="click-hint">↗</span><div class="svc-title">SecurityAuditService <span class="new-badge">NEW</span></div><div class="svc-sub">tamper-evident audit log · SHA-256 hash chain · SOC 2 / ISO 27001 / HIPAA compliance enforcement</div></div>
+            </div>
+          </div>
+
+                    <div class="infra-panel clickable" tabindex="0" role="button" data-id="rocket-infra">
+            <span class="click-hint">↗ details</span>
+
+            <div class="infra-header">
+              <div class="infra-title">rocket-infra</div>
+              <div class="infra-subtitle">FS · Network · Scripting</div>
+            </div>
+
+            <div class="infra-tabs" id="infra-tabs">
+              <div class="infra-tab active" data-tab="repos">Repos</div>
+              <div class="infra-tab" data-tab="security">Security</div>
+              <div class="infra-tab" data-tab="scripting">Script</div>
+              <div class="infra-tab" data-tab="network">Network</div>
+              <div class="infra-tab" data-tab="internals">Utils</div>
+            </div>
+
+            <!-- Repos pane -->
+            <div class="infra-pane active" id="infra-pane-repos">
+              <div class="ir">
+                <div class="ir-name">SharedPathCollectionRepo</div>
+                <div class="ir-desc">Arc&lt;RwLock&lt;PathBuf&gt;&gt; hot-swap</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsCollectionRepo <span class="ir-badge">19 methods</span></div>
+                <div class="ir-desc">folders · requests · variables · settings</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">folders.rs (10)</div>
+                <div class="ir-desc">list · get · create · delete · rename · create_folder · delete_folder · move_item · reorder_items · get_summaries</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">requests.rs (4)</div>
+                <div class="ir-desc">get · save → path · rename · delete</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">variables.rs (5)</div>
+                <div class="ir-desc">get/save folder chain · get/save folder · get/save request vars</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">settings.rs (2)</div>
+                <div class="ir-desc">get_settings · save_settings</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsEnvironmentRepo</div>
+                <div class="ir-desc">list · get · save · delete</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsWorkspaceRepo</div>
+                <div class="ir-desc">list · get · save · delete · set_active</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsWorkspaceConfigRepo</div>
+                <div class="ir-desc">load · save (workspace.yml)</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsHistoryRepo</div>
+                <div class="ir-desc">list · get · save · delete · clear</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsTemplateRepo</div>
+                <div class="ir-desc">list · get · save · delete</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsCookieRepo</div>
+                <div class="ir-desc">list · get_by_domain · save · clear</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsContractRepo</div>
+                <div class="ir-desc">list · get · save · delete</div>
+              </div>
+            </div>
+
+            <!-- Security pane -->
+            <div class="infra-pane" id="infra-pane-security">
+              <div class="ir">
+                <div class="ir-name">FsAuditLogRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">append · list · list_range · latest · verify_chain</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">SHA-256 hash chain</div>
+                <div class="ir-desc">hash = SHA-256(data + prev_hash) per entry</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">latest() O(1)</div>
+                <div class="ir-desc">backward byte-scan from EOF</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsComplianceProfileRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">load_profile · save_profile</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Frameworks</div>
+                <div class="ir-desc">SOC 2 · ISO 27001 · HIPAA</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">EnforcementLevel</div>
+                <div class="ir-desc">Warn (log only) | Block (reject op)</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">keyring-rs <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">OS keychain — tokens + git creds</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Stores</div>
+                <div class="ir-desc">macOS Keychain · Win Credential Mgr · Linux Secret Service</div>
+              </div>
+            </div>
+
+            <!-- Scripting pane -->
+            <div class="infra-pane" id="infra-pane-scripting">
+              <div class="ir">
+                <div class="ir-name">DenoScriptEngine <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">ScriptEngine trait · deno_core / V8</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Isolation</div>
+                <div class="ir-desc">1 JsRuntime per call — no shared state</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">rok ops</div>
+                <div class="ir-desc">getVar/setVar · getEnvVar/setEnvVar · interpolate · setNextRequest · skipRequest</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">req ops</div>
+                <div class="ir-desc">setUrl · setMethod · setHeader · setBody · setQueryParam</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">res ops</div>
+                <div class="ir-desc">getStatus · getHeader · getBody · getResponseTime · getSize</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">require() — 9 libs</div>
+                <div class="ir-desc">chai · crypto-js · jwt · uuid · moment · axios · atob/btoa · nanoid · tv4</div>
+              </div>
+            </div>
+
+            <!-- Network pane -->
+            <div class="infra-pane" id="infra-pane-network">
+              <div class="ir">
+                <div class="ir-name">ReqwestExecutor</div>
+                <div class="ir-desc">HttpExecutor trait · async · tokio</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Config</div>
+                <div class="ir-desc">timeout · redirects · SSL verify · proxy</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">NotifyFileWatcher</div>
+                <div class="ir-desc">watches collection dirs · 300 ms debounce</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">TauriEventBus</div>
+                <div class="ir-desc">EventPublisher → Tauri events → Zustand</div>
+              </div>
+            </div>
+
+            <!-- Internals pane -->
+            <div class="infra-pane" id="infra-pane-internals">
+              <div class="ir">
+                <div class="ir-name">atomic_write / bulk</div>
+                <div class="ir-desc">write .tmp → rename (POSIX atomic)</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">yaml_io</div>
+                <div class="ir-desc">read_dir_yaml · read_dir_by_mtime · delete_if_exists</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">migration.rs</div>
+                <div class="ir-desc">detect_format · migrate_collection · sentinel guard</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">oc/ module</div>
+                <div class="ir-desc">OcCollection · OcRequest · OcFolderInfo · on-disk types only</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">conversions/ (9)</div>
+                <div class="ir-desc">auth · body · env · folder · header · param · request · settings · variables</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">contract_records/ (3)</div>
+                <div class="ir-desc">types · snapshot · changelog YAML r/w</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="connector-line"></div><span class="connector-label">Box&lt;dyn Trait&gt; — infra implements domain repository traits</span></div>
+
+    <!-- Layer 5: Domain crates -->
+    <div class="layer">
+      <div class="layer-label"><span>Domain</span></div>
+      <div class="layer-content">
+        <div class="domain-container">
+          <div class="service-container-label">Domain crates — pure Rust, zero I/O</div>
+
+          <!-- Row 1 (3) -->
+          <div class="service-grid service-grid-3">
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-collection"><span class="click-hint">↗</span><div class="crate-title">rocket-collection</div><div class="crate-sub">Collection · Request · Folder</div></div>
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-environment"><span class="click-hint">↗</span><div class="crate-title">rocket-environment</div><div class="crate-sub">Env · 8-scope var resolver</div></div>
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-http"><span class="click-hint">↗</span><div class="crate-title">rocket-http</div><div class="crate-sub">HTTP · Auth · Executor trait</div></div>
+          </div>
+
+          <!-- Row 2 (3) -->
+          <div class="service-grid service-grid-3 mt8">
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-history"><span class="click-hint">↗</span><div class="crate-title">rocket-history</div><div class="crate-sub">HistoryEntry · Template</div></div>
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-git"><span class="click-hint">↗</span><div class="crate-title">rocket-git</div><div class="crate-sub">Status · Branch · GitSvc</div></div>
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-workspace"><span class="click-hint">↗</span><div class="crate-title">rocket-workspace</div><div class="crate-sub">Workspace · Registry</div></div>
+          </div>
+
+          <!-- Row 3 (2) -->
+          <div class="service-grid service-grid-2 mt8">
+            <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-import"><span class="click-hint">↗</span><div class="crate-title">rocket-import</div><div class="crate-sub">Bruno .bru / .yml → OpenCollection</div></div>
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-identity"><span class="click-hint">↗</span><div class="crate-title">rocket-identity <span class="new-badge">NEW</span></div><div class="crate-sub">OIDC · PKCE · opaque group IDs</div></div>
+          </div>
+
+          <!-- Row 4 (2) -->
+          <div class="service-grid service-grid-2 mt8">
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-scripting"><span class="click-hint">↗</span><div class="crate-title">rocket-scripting <span class="new-badge">NEW</span></div><div class="crate-sub">ScriptEngine · ScriptContext · ScriptResult</div></div>
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-audit"><span class="click-hint">↗</span><div class="crate-title">rocket-audit <span class="new-badge">NEW</span></div><div class="crate-sub">AuditLogRepository · SecurityAuditEvent · AuditEventKind (9 variants)</div></div>
+          </div>
+          <div class="crate-module-note">
+
+            <div class="cmn-row">
+              <span class="cmn-label">rocket-collection / contract module</span>
+              <div class="cmn-tokens">
+                <span class="cmn-token key">ContractParty</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">PartyKind</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ContractPolicy</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">BreakingChangePolicy</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ContractStatus</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Draft</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Active</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Drift</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Breach</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">InReview</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Paused</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ExpiringIn30Days</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">Expired</span><span class="cmn-sep">·</span>
+                <span class="cmn-token note">state_machine.rs — pure fn, no I/O</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ChangelogEntry</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">SnapshotRecord</span><span class="cmn-sep">·</span>
+                <span class="cmn-token note">drift/breach detection wired to request saves</span>
+              </div>
+            </div>
+
+            <div class="cmn-row">
+              <span class="cmn-label">rocket-scripting</span>
+              <div class="cmn-tokens">
+                <span class="cmn-token key trait">ScriptEngine</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ScriptContext</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ScriptResult</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ScriptPhase</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">BeforeRequest</span><span class="cmn-sep">·</span><span class="cmn-token">AfterResponse</span><span class="cmn-sep">·</span><span class="cmn-token">Tests</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">RequestMutations</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">EnvVarWrite</span><span class="cmn-sep">·</span><span class="cmn-token">CollectionVarWrite</span><span class="cmn-sep">·</span><span class="cmn-token">NextRequest</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">TestResult</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">TestStatus</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ConsoleEntry</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ConsoleLevel</span>
+              </div>
+            </div>
+
+            <div class="cmn-row">
+              <span class="cmn-label">rocket-audit</span>
+              <div class="cmn-tokens">
+                <span class="cmn-token key trait">AuditLogRepository</span><span class="cmn-sep">·</span>
+                <span class="cmn-token trait">ProfileRepository</span><span class="cmn-sep">·</span><span class="cmn-token trait">SecurityAuditPublisher</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">SecurityAuditEvent</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">AuditEventKind</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ContractAttached</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ContractDeleted</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">ContractViolation</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">CollectionDeleted</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">CollectionExported</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">SecretVariableWritten</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">SensitiveAuthUsed</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">AuditEvidenceExported</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">AuditChainBroken</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">ComplianceProfile</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">SOC 2</span><span class="cmn-sep">·</span><span class="cmn-token">ISO 27001</span><span class="cmn-sep">·</span><span class="cmn-token">HIPAA</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">CONTROL_CATALOG</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">EnforcementLevel</span><span class="cmn-sep">·</span><span class="cmn-token">ChainVerification</span><span class="cmn-sep">·</span><span class="cmn-token">SHA-256 hash chain</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="connector-line"></div><span class="connector-label">all crates depend on shared kernel</span></div>
+
+    <!-- Layer 6: Shared kernel -->
+    <div class="layer">
+      <div class="layer-label"><span>Shared</span></div>
+      <div class="layer-content">
+        <div class="block block-full block-shared clickable" tabindex="0" role="button" data-id="rocket-shared">
+          <span class="click-hint">↗ details</span>
+          <div class="block-title">rocket-shared — shared kernel (zero external dependencies)</div>
+          <div class="shared-rows">
+            <div class="shared-row">DomainError · DomainResult&lt;T&gt; · DomainEvent enum · EventPublisher trait</div>
+            <div class="shared-row">HttpMethod · Header · Body · Auth · VariableValue · Assertion</div>
+            <div class="shared-row">Description · RequestSettings · Tag · Sequence · Serialization helpers</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="connector-line"></div><span class="connector-label">serialized to disk via serde_yaml (.yml only — never .json)</span></div>
+
+    <!-- Layer 7: Filesystem -->
+    <div class="layer">
+      <div class="layer-label"><span>Storage</span></div>
+      <div class="layer-content">
+        <div class="block block-full block-fs clickable" tabindex="0" role="button" data-id="filesystem">
+          <span class="click-hint">↗ details</span>
+          <div class="block-title">Filesystem — OpenCollection v1.0.0</div>
+          <div class="fs-rows">
+            <div class="fs-row">workspace.yml · workspaces.yml · collections/ · environments/ · history/ · cookies/</div>
+            <div class="fs-row">.rocket/contracts/ &nbsp;·&nbsp; .rocket/identity/groups.yml <span class="new-badge">NEW</span></div>
+            <div class="fs-row">app_data_dir/notifications.enc (AES-256-GCM, keychain-derived key) <span class="new-badge">NEW</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /diagram -->
+
+  <div class="dep-rule">
+    <div class="dep-rule-heading">Strict Dependency Rule — Never Violated</div>
+
+    <!-- Flow diagram -->
+    <div class="dep-flow">
+      <div class="dep-node">
+        <div class="dep-node-box n-entry">src-tauri</div>
+        <div class="dep-node-label">binary entry<br/>DI wiring only</div>
+      </div>
+      <div class="dep-arrow">
+        <div class="dep-arrow-line"></div>
+        <div class="dep-arrow-label">delegates</div>
+      </div>
+      <div class="dep-node">
+        <div class="dep-node-box n-app">rocket-app</div>
+        <div class="dep-node-label">application<br/>services</div>
+      </div>
+      <div class="dep-arrow dep-arrow-bidir">
+        <div class="dep-arrow-line"></div>
+        <div class="dep-arrow-label">traits ↔ impl</div>
+      </div>
+      <div class="dep-node">
+        <div class="dep-node-box n-infra">rocket-infra</div>
+        <div class="dep-node-label">implements<br/>all traits</div>
+      </div>
+      <div class="dep-arrow">
+        <div class="dep-arrow-line"></div>
+        <div class="dep-arrow-label">depends on</div>
+      </div>
+      <div class="dep-node">
+        <div class="dep-node-box n-domain">domain crates</div>
+        <div class="dep-node-label">10 bounded<br/>contexts</div>
+      </div>
+      <div class="dep-arrow">
+        <div class="dep-arrow-line"></div>
+        <div class="dep-arrow-label">depends on</div>
+      </div>
+      <div class="dep-node">
+        <div class="dep-node-box n-shared">rocket-shared</div>
+        <div class="dep-node-label">shared kernel<br/>zero ext. deps</div>
+      </div>
+    </div>
+
+    <!-- Rules grid -->
+    <div class="dep-rules-grid">
+      <div class="dep-rule-card rule-never">
+        <div class="dep-rule-icon2">🚫</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">Domain crates never import upward</div>
+          <div class="dep-rule-desc">rocket-collection, rocket-environment, rocket-http etc. never import from rocket-infra, rocket-app, or src-tauri. Arrows only point down.</div>
+        </div>
+      </div>
+      <div class="dep-rule-card rule-never">
+        <div class="dep-rule-icon2">🚫</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">rocket-app never constructs infra types</div>
+          <div class="dep-rule-desc">All repos and executors arrive via Box&lt;dyn Trait&gt; constructor injection. rocket-app never instantiates FsCollectionRepo or ReqwestExecutor directly.</div>
+        </div>
+      </div>
+      <div class="dep-rule-card rule-always">
+        <div class="dep-rule-icon2">✅</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">src-tauri is the only wiring point</div>
+          <div class="dep-rule-desc">lib.rs is the single place where concrete infra types are instantiated and passed into services. No other file may construct them.</div>
+        </div>
+      </div>
+      <div class="dep-rule-card rule-always">
+        <div class="dep-rule-icon2">✅</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">Traits defined in domain, implemented in infra</div>
+          <div class="dep-rule-desc">CollectionRepository, ScriptEngine, AuditLogRepository — every trait lives in a domain crate. The infra crate only provides concrete implementations.</div>
+        </div>
+      </div>
+      <div class="dep-rule-card rule-note">
+        <div class="dep-rule-icon2">📋</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">Tauri commands are thin delegates</div>
+          <div class="dep-rule-desc">Command handlers in src-tauri/commands/ contain zero business logic. One line: delegate to the injected service and return the result.</div>
+        </div>
+      </div>
+      <div class="dep-rule-card rule-note">
+        <div class="dep-rule-icon2">📋</div>
+        <div class="dep-rule-body">
+          <div class="dep-rule-title2">IPC DTOs and disk structs are always separate</div>
+          <div class="dep-rule-desc">#[serde(rename_all = "camelCase")] only on IPC types. Types serialized to .yml never carry this annotation — they are always distinct structs.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ── Overlay ── -->
+<div class="overlay" id="overlay" role="presentation"></div>
+
+<!-- ── Drawer ── -->
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Component details">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-badge" id="d-badge"></div>
+      <div class="drawer-title" id="d-title"></div>
+      <div class="drawer-layer" id="d-layer"></div>
+    </div>
+    <button class="drawer-close" id="drawer-close" aria-label="Close details">✕</button>
+  </div>
+  <div class="drawer-body" id="d-body"></div>
+</aside>
+
+<script>
+const DATA = {
+  frontend: {
+    badge:'Frontend Layer', badgeColor:'#2563A8',
+    title:'Frontend — React 18 / TypeScript',
+    layer:'Layer 1 of 7',
+    desc:'The complete client-side application. Communicates with the Rust backend exclusively through tauri-api.ts — no component ever calls invoke() directly. All global state lives in Zustand stores.',
+    sections:[
+      { title:'Tech stack', type:'kv', rows:[
+        ['Framework','React 18 + TypeScript (strict mode)'],
+        ['Build tool','Vite'],
+        ['State','Zustand stores — one per bounded context'],
+        ['UI system','shadcn/ui primitives only (no raw HTML elements)'],
+        ['Icons','lucide-react exclusively — no inline SVGs'],
+        ['IPC bridge','src/lib/tauri-api.ts — all invoke() calls'],
+      ]},
+      { title:'Editor strategy', type:'kv', rows:[
+        ['Multi-line (body, response, git diff)','Monaco Editor'],
+        ['Single-line variable-aware fields','CodeMirror 6 (SingleLineEditor)'],
+        ['Rule','Never Monaco for single-line; never CM6 for multi-line'],
+      ]},
+      { title:'Hard constraints', type:'list', items:[
+        'No raw <button>, <input>, <select>, <form>, or <dialog> in UI components',
+        'No inline SVGs — Lucide icons only',
+        'No invoke() calls directly from components — always through tauri-api.ts',
+        'No any types without an explanatory comment',
+      ]},
+    ]
+  },
+
+  ipc: {
+    badge:'IPC Layer', badgeColor:'#6B5ED4',
+    title:'IPC Projection Types',
+    layer:'Layer 2 of 7 · New in v3',
+    desc:'A thin DTO layer that sits between the Tauri command handlers and the frontend. Projection types like ContractIpcView inject computed fields (e.g. current user\'s permission level, avatar URLs, formatted dates) without polluting domain models with UI concerns.',
+    sections:[
+      { title:'Design rules', type:'list', items:[
+        'IPC DTOs carry #[serde(rename_all = "camelCase")] — never put this on disk structs',
+        'Computed fields (permissions, avatars, formatted timestamps) are injected here',
+        'Domain model and IPC model are always separate types — never shared',
+        'TypeScript types in tauri-api.ts must match Rust IPC structs exactly',
+      ]},
+      { title:'Key types', type:'kv', rows:[
+        ['ContractIpcView','Contract + computed permission flags + party avatars'],
+        ['CollectionIpcView','Collection + active workspace context'],
+        ['EnvironmentIpcView','Environment + resolved variable count'],
+      ]},
+      { title:'Serde rules', type:'code',
+        code:'// IPC only — camelCase on the wire\n#[derive(Serialize)]\n#[serde(rename_all = "camelCase")]\npub struct ContractIpcView {\n    pub id: String,\n    pub can_mutate: bool,      // computed\n    pub provider_avatar: String, // computed\n    // ...domain fields\n}' },
+    ]
+  },
+
+  'src-tauri': {
+    badge:'Entry Point', badgeColor:'#9333EA',
+    title:'src-tauri — Binary Entry Point',
+    layer:'Layer 3 of 7',
+    desc:'The Tauri application binary. Contains two responsibilities only: thin command handler functions that delegate immediately to application services, and the DI wiring in lib.rs that constructs and connects all concrete types at startup.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Registers all Tauri command handlers via invoke_handler! macro',
+        'Constructs concrete infra types (FsCollectionRepo, ReqwestExecutor, etc.)',
+        'Wires everything into application services via Box<dyn Trait>',
+        'Registers Tauri plugins (keyring, file watcher, etc.)',
+        'Manages Arc<Mutex<T>> shared mutable state across async boundaries',
+      ]},
+      { title:'Command rule', type:'code',
+        code:'// CORRECT — thin delegate only\n#[tauri::command]\npub fn create_collection(\n    name: String,\n    svc: State<\'_, CollectionService>,\n) -> Result<CollectionDto, DomainError> {\n    svc.create(&name)  // all logic in rocket-app\n}' },
+      { title:'What MUST NOT be here', type:'list', items:[
+        'Business logic of any kind',
+        'Direct filesystem I/O',
+        'Validation beyond type checking',
+        'Any construction of domain objects',
+      ]},
+    ]
+  },
+
+  CollectionService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'CollectionService',
+    layer:'rocket-app · Application layer',
+    desc:'Orchestrates all collection lifecycle operations. Receives CollectionRepository and EventPublisher via constructor injection — never constructs repos directly. Emits DomainEvents after mutations so the frontend stays in sync.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'CRUD: create, get, list, rename, delete collections',
+        'Folder operations: create, rename, move, delete folders',
+        'Request operations: create, save, move, reorder, copy requests',
+        'Emits CollectionUpdated, RequestSaved, FolderCreated domain events',
+        'Triggers contract drift check on every request save (wired to ContractService)',
+      ]},
+      { title:'Dependencies (injected)', type:'chips',
+        chips:[{l:'CollectionRepository',h:true},{l:'EventPublisher',h:true},{l:'ContractService',h:false}]},
+      { title:'Key rule', type:'list', items:[
+        'Returns DomainResult<T> on all fallible methods — never unwrap()',
+        'Never constructs FsCollectionRepo directly — receives Box<dyn CollectionRepository>',
+      ]},
+    ]
+  },
+
+  EnvironmentService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'EnvironmentService',
+    layer:'rocket-app · Application layer',
+    desc:'Manages environments and drives the 8-scope variable resolution pipeline. The resolver evaluates: Process env → Global → Collection → Folder → Environment → Request → Runtime → Inline, innermost scope wins.',
+    sections:[
+      { title:'Variable resolution scopes', type:'list', items:[
+        '① Process environment variables (lowest precedence)',
+        '② Global environment',
+        '③ Collection-level variables',
+        '④ Folder-level variables (full parent-chain walk, innermost wins)',
+        '⑤ Active environment variables',
+        '⑥ Request-level variables',
+        '⑦ Runtime variables (set programmatically)',
+        '⑧ Inline values (highest precedence)',
+      ]},
+      { title:'Important detail', type:'list', items:[
+        'Folder resolution requires walking the full parent-directory chain — not a single lookup',
+        'Collection/folder variables use value || initialValue fallback',
+        'Dynamic variables (~118 total, Bruno parity) generated via @faker-js/faker on frontend and fake crate on Rust side',
+      ]},
+    ]
+  },
+
+
+  GitAppService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'GitAppService',
+    layer:'rocket-app · Application layer',
+    desc:'Full Git integration using the git2 crate (libgit2 bindings). Never shells out to the git CLI. Credentials stored in OS keychain via keyring-rs — never written to disk.',
+    sections:[
+      { title:'Capabilities', type:'list', items:[
+        'Stage, unstage, commit with message and author',
+        'Push, pull, fetch with credential support (HTTPS + SSH key)',
+        'Branch: create, checkout, merge, delete',
+        'Stash: push, pop, drop, list',
+        'Diff: file-level and hunk-level (feeds Monaco diff viewer)',
+        'Conflict resolution (3-pane Monaco editor)',
+        'Clone repository from remote URL',
+        'Commit log with pagination',
+        'Remote management: add, remove, set-url',
+      ]},
+      { title:'Credential handling', type:'kv', rows:[
+        ['Storage','OS keychain via keyring-rs'],
+        ['SSH','Key path auto-detected from ~/.ssh/; passphrase in keychain'],
+        ['HTTPS','Username + token stored encrypted in keychain'],
+        ['Rule','Never persisted to any file on disk'],
+      ]},
+      { title:'UI', type:'list', items:[
+        'Two-panel Bruno-style layout with back-navigation breadcrumb',
+        'Connect Remote dialog and Clone Repository dialog',
+        'Monaco Editor for diff viewing (side-by-side) and conflict resolution (3-pane)',
+      ]},
+    ]
+  },
+
+  HistoryService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'HistoryService',
+    layer:'rocket-app · Application layer',
+    desc:'Persists and retrieves request execution history. Each entry captures the full request (method, URL, headers, body, auth) and response (status, headers, body, timing) as a snapshot.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Save HistoryEntry after each HTTP execution',
+        'List entries with pagination, filtering by collection/method/status',
+        'Full-text search across URL, headers, and body',
+        'Clear history (all or by collection)',
+        'Replay: restore a history entry as a new request tab',
+      ]},
+      { title:'Storage', type:'kv', rows:[
+        ['Location','~/.rocket-api/history/'],
+        ['Format','.yml per entry (OpenCollection format)'],
+        ['Repo','FsHistoryRepo in rocket-infra'],
+      ]},
+    ]
+  },
+
+  WorkspaceService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'WorkspaceService',
+    layer:'rocket-app · Application layer',
+    desc:'Manages the workspace registry — the top-level organizational unit in RocketAPI. Each workspace is a directory on disk containing one or more collections. Workspaces persist across app restarts.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Create workspace at given path (default: ~/Documents/RocketAPI/)',
+        'Switch active workspace — hot-swaps SharedPathCollectionRepo path without rebuilding service graph',
+        'Rename and delete workspaces',
+        'Persist registry to .rocket/workspaces.yml',
+        'Bruno-style auto-create at first launch',
+      ]},
+      { title:'Hot-swap mechanism', type:'list', items:[
+        'SharedPathCollectionRepo holds Arc<RwLock<PathBuf>> for the workspace root',
+        'Switching workspace updates the Arc in-place — no service reconstruction',
+        'All in-flight requests complete against the old path before the switch takes effect',
+      ]},
+    ]
+  },
+
+  TemplateService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'TemplateService',
+    layer:'rocket-app · Application layer',
+    desc:'Manages saved request templates — reusable request skeletons that users can instantiate into new tabs without belonging to a specific collection.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Save current request as a named template',
+        'List, search, and delete templates',
+        'Instantiate template into a new ephemeral request tab',
+        'Templates stored per-workspace in FsTemplateRepo',
+      ]},
+    ]
+  },
+
+  CookieService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'CookieService',
+    layer:'rocket-app · Application layer',
+    desc:'Manages per-domain cookie jars so session cookies persist across requests within a collection, mirroring browser cookie behaviour.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Maintain per-domain cookie jars (Set-Cookie → store; Cookie → inject)',
+        'List, edit, and delete cookies by domain',
+        'Clear all cookies or by domain',
+        'Cookies stored in FsCookieRepo (~/.rocket-api/cookies/)',
+      ]},
+      { title:'Scoping rules', type:'list', items:[
+        'Cookie jars are workspace-scoped — switching workspace switches jars',
+        'Secure cookies never serialized with their Secure flag stripped',
+        'HttpOnly cookies visible in UI but not scriptable',
+      ]},
+    ]
+  },
+
+  ContractService: {
+    badge:'Application Service · New in v3', badgeColor:'#16A34A',
+    title:'ContractService',
+    layer:'rocket-app · Application layer',
+    desc:'Implements API contract governance. A contract locks the shape of a provider\'s API endpoints. The service drives the full lifecycle: snapshot signing, drift detection, state machine transitions, and changelog recording.',
+    sections:[
+      { title:'Contract status lifecycle', type:'states',
+        states:[
+          {label:'Draft',cls:'d-state-draft'},{label:'Active',cls:'d-state-active'},
+          {label:'Drift',cls:'d-state-drift'},{label:'Breach',cls:'d-state-breach'},
+          {label:'InReview',cls:'d-state-review'},{label:'Paused',cls:'d-state-paused'},
+          {label:'Expiring',cls:'d-state-expiring'},{label:'Expired',cls:'d-state-expired'},
+        ]},
+      { title:'Responsibilities', type:'list', items:[
+        'Attach contract to a collection with provider + consumer parties',
+        'Sign snapshot: capture current request signatures as the baseline',
+        'Drift detection: diff current shape vs signed snapshot on every request save',
+        'Drive state machine: DriftDetected → Drift, BreachDetected → Breach',
+        'Record changelog entries with is_breaking flag',
+        'Governance enforcement: reject mutations from non-provider-group users at command layer',
+        'Manage contract expiry: ExpiringIn30Days computed in-memory, Expired on lapse',
+      ]},
+      { title:'Key design decisions', type:'list', items:[
+        'ContractStatus is stored in YAML — never computed from dates at read time',
+        'state_machine.rs is a pure function (no I/O) — transition(current, event) → Result<Status>',
+        'Breaking change policy configurable: Strict | Lenient | AdditiveOk',
+        'ContractParty replaces bare String — typed with PartyKind (Team | Company | Service)',
+        'Old YAML with bare provider string automatically migrated via custom Deserialize',
+      ]},
+    ]
+  },
+
+  IdentityService: {
+    badge:'Application Service · New in v3', badgeColor:'#16A34A',
+    title:'IdentityService',
+    layer:'rocket-app · Application layer',
+    desc:'Handles SSO/OIDC authentication and runtime group membership resolution. Enforces contract governance by matching OIDC token claims against opaque group identifiers stored in groups.yml.',
+    sections:[
+      { title:'Auth flow', type:'list', items:[
+        'Initiates PKCE authorization code flow via system browser',
+        'TCP callback server receives authorization code',
+        'Exchanges code for tokens at OIDC token endpoint',
+        'Stores access + refresh tokens exclusively in OS keychain via keyring-rs',
+        'Tokens never written to disk in any form',
+      ]},
+      { title:'Group resolution', type:'list', items:[
+        'groups.yml stores opaque SSO group identifiers — no emails or PII',
+        'At runtime: decode ID token → extract group claims → match against groups.yml',
+        'Result: Set<GroupId> for the authenticated user',
+        'ContractService uses this set to evaluate can_mutate on IPC projections',
+      ]},
+      { title:'Security rules', type:'kv', rows:[
+        ['Token storage','OS keychain only (keyring-rs)'],
+        ['PII in git files','Never — opaque group IDs only'],
+        ['SSO config','issuer URL + client ID in .rocket/identity/config.yml (non-sensitive per RFC 8252)'],
+        ['Force re-auth','prompt=login appended on Clear Cache for OIDC providers'],
+      ]},
+    ]
+  },
+
+  'rocket-infra': {
+    badge:'Infrastructure Crate', badgeColor:'#C2460C',
+    title:'rocket-infra',
+    layer:'Infrastructure layer — implements all domain repository + executor traits',
+    desc:'The only crate allowed to touch the filesystem, network, OS keychain, or a JS runtime. Every other crate defines traits; rocket-infra provides the concrete implementations. Wired exclusively by src-tauri/lib.rs — domain crates never import it.',
+    sections:[
+      { title:'Architecture rule', type:'kv', rows:[
+        ['Who instantiates','src-tauri/lib.rs only'],
+        ['How consumed','Box<dyn Trait> passed into app services — never used directly'],
+        ['Must never do','Import rocket-app, any domain crate, or reference Tauri types'],
+        ['Why','Keeps domain logic pure and independently testable without a real filesystem'],
+      ]},
+      { title:'FsCollectionRepo — all 19 CollectionRepository methods', type:'kv', rows:[
+        ['folders.rs (10)','list() · get(name) · get_summaries(name) · create(name) · delete(name) · rename(old, new) · create_folder(col, path) · delete_folder(col, path) · move_item(src_col, src_path, dst_col, dst_path) · reorder_items(col, folder_path, ordered_names)'],
+        ['requests.rs (4)','get_request(col, path) · save_request(col, path, req) → new_path · rename_request(col, old_path, new_name) · delete_request(col, path)'],
+        ['variables.rs (5)','get_folder_chain_variables(col, req_path) · get_folder_variables(col, folder_path) · save_folder_variables(col, folder_path, vars) · get_request_variables(col, req_path) · save_request_variables(col, req_path, vars)'],
+        ['settings.rs (2)','get_settings(name) → CollectionSettings · save_settings(name, settings)'],
+        ['paths.rs (utils)','validate_path(base, path) — path traversal guard via canonicalize() · reject_symlink(path) · count_request_files(dir) · read_uid_from_yaml(dir)'],
+        ['locking','Per-collection Arc<Mutex<()>> in DashMap — prevents concurrent writes to the same collection'],
+        ['migration','detect_format() checks for opencollection.yml vs legacy JSON; migrate_collection() rewrites to OC YAML; is_migration_interrupted() detects .migration_in_progress sentinel'],
+      ]},
+      { title:'Other file repositories', type:'kv', rows:[
+        ['SharedPathCollectionRepo','Wraps FsCollectionRepo; Arc<RwLock<PathBuf>> hot-swaps workspace root; delegates all 19 methods to inner repo()'],
+        ['FsEnvironmentRepo','list() · get(name) · save(env) · delete(name) — OC format, legacy key/value fallback on read'],
+        ['FsWorkspaceRepo','list() · get(id) · save(ws) · delete(id) · set_active(id) — reads/writes .rocket/workspaces.yml'],
+        ['FsWorkspaceConfigRepo','load(ws_root) · save(ws_root, config) — reads/writes workspace.yml inside workspace root'],
+        ['FsHistoryRepo','list(limit) · get(id) · save(entry) · delete(id) · clear() — mtime sort, timestamp tie-break'],
+        ['FsTemplateRepo','list() · get(id) · save(tmpl) · delete(id) — workspace/templates/*.yml'],
+        ['FsCookieRepo','list() · get_by_domain(domain) · save(jar) · clear() — domain sanitized to safe filename'],
+        ['FsContractRepo','list(root) · get(root,id) · save(root,contract) · delete(root,id) — delegates to contract_records/ adapter'],
+      ]},
+      { title:'FsAuditLogRepo — methods', type:'kv', rows:[
+        ['append(event)','Serialize event to JSON line, compute SHA-256 chain hash, append + fsync'],
+        ['list()','Load all events from JSONL in insertion order; skips corrupt lines with tracing::warn'],
+        ['list_range(start, end)','Filter by occurred_at — full scan but only parses events in range'],
+        ['latest()','Backward byte-scan from EOF to find last newline — O(1) regardless of file size'],
+        ['verify_chain(events)','Recompute hash chain top-to-bottom → ChainVerification::Ok | Broken{index, expected, actual}'],
+      ]},
+      { title:'DenoScriptEngine — execution flow', type:'kv', rows:[
+        ['execute(ctx)','Create JsRuntime with custom extension → inject context via serde_json → execute ctx.code → extract ScriptResult from OpState'],
+        ['rok ops','getVar/setVar (runtime) · getEnvVar/setEnvVar (env, persist: bool) · interpolate() · runner.setNextRequest(name) · runner.skipRequest()'],
+        ['req ops','setUrl · setMethod · setHeader · removeHeader · setBody · setQueryParam — only effective in BeforeRequest phase; mutations captured in RequestMutations'],
+        ['res ops','getStatus · getHeader(name) · getBody · getResponseTime · getSize — read-only after response arrives'],
+        ['console ops','log/warn/error appended to Vec<ConsoleEntry> in OpState; level mapped to ConsoleLevel enum'],
+        ['require() bundle','9 libs via include_str!() at compile time: chai · crypto-js · jsonwebtoken · uuid · moment · axios · atob/btoa · nanoid · tv4'],
+      ]},
+      { title:'Internal utilities', type:'kv', rows:[
+        ['atomic_write(path, bytes)','write(path.tmp) → fs::rename(tmp, path) — POSIX atomic rename prevents partial writes on crash'],
+        ['atomic_write_bulk(pairs)','Write all to .tmp first → rename all; on any rename failure the operation is aborted'],
+        ['read_dir_yaml(dir)','Read all .yml files in dir as Vec<T: Deserialize>; skips files that fail to parse (warns)'],
+        ['read_dir_by_mtime(dir)','Same as read_dir_yaml but sorts entries newest-first using fs::metadata().modified()'],
+        ['delete_if_exists(path)','fs::remove_file(); swallows io::ErrorKind::NotFound — safe idempotent delete'],
+        ['migration.rs','detect_format · is_migration_interrupted · migrate_collection — rewrites legacy JSON to OpenCollection YAML with .migration_in_progress sentinel and .legacy_backup/ rollback copy'],
+        ['oc/ module','OcCollection · OcRequest · OcFolderInfo · OcInfo · OcConfig — on-disk serde types only; never exposed outside rocket-infra'],
+        ['conversions/ (9)','auth · body · environment · folder · header · param · request · request_settings · variables — From<OcX>/From<DomainX> impl pairs'],
+        ['contract_records/','types.rs: ContractRecord · SnapshotRecord · ChangelogRecord · snapshot.rs: YAML r/w · changelog.rs: YAML r/w'],
+      ]},
+    ]
+  },
+
+
+  SecurityAuditService: {
+    badge:'Application Service · New', badgeColor:'#16A34A',
+    title:'SecurityAuditService',
+    layer:'rocket-app · Application layer',
+    desc:'Maintains a tamper-evident security audit log and enforces compliance policies. Every significant action (collection delete, contract state change, workspace switch, auth token use) is appended as a SecurityAuditEvent with a SHA-256 hash chained to the previous entry — any modification to past events is detectable via verify_chain().',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'append(event) — write audit event with hash chain to FsAuditLogRepo',
+        'list() — return all events in chronological order',
+        'list_range(start, end) — time-window query',
+        'load_profile() / save_profile() — read/write compliance policy via FsComplianceProfileRepo',
+        'Enforce BlockLevel policy: if EnforcementLevel::Block, reject the triggering operation and return DomainError',
+      ]},
+      { title:'Hash chain guarantee', type:'list', items:[
+        'Each SecurityAuditEvent stores hash = SHA-256(event_data + prev_hash)',
+        'verify_chain(events) → ChainVerification::Ok | Tampered { at_index }',
+        'Stored as append-only JSONL — one JSON object per line, fsync after each write',
+        'load_all() skips corrupt lines with a tracing::warn (resilient to partial writes)',
+        'latest() implemented via backward byte-scan — O(1) for the common case',
+      ]},
+      { title:'Compliance frameworks', type:'chips',
+        chips:[{l:'SOC 2',h:true},{l:'ISO 27001',h:true},{l:'HIPAA',h:false},{l:'EnforcementLevel::Warn'},{l:'EnforcementLevel::Block'}]},
+      { title:'Storage', type:'kv', rows:[
+        ['Audit log','app_data_dir/audit/events.jsonl (never in workspace — persists across switches)'],
+        ['Profile','app_data_dir/audit/profile.yml'],
+        ['Format','JSONL for log (not YAML — append-friendly); YAML for profile'],
+      ]},
+    ]
+  },
+
+
+  LoadTestService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'LoadTestService',
+    layer:'rocket-app · Application layer',
+    desc:'Orchestrates phase-based load testing with full variable resolution. Accepts the same ExecuteRequestInput as RequestExecutionService so collection auth, environment variables, and OAuth2 tokens are all resolved before a single byte hits the network.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'Resolve variables via RequestExecutionService.resolve_request() before test starts',
+        'Delegate resolved request + LoadTestConfigV2 to run_load_test_v2() in rocket-http',
+        'Stream LoadTestProgress events to frontend every 250ms via Tauri AppHandle',
+        'Emit load_test_complete event with final LoadTestResult on finish',
+        'Support phase timeline: Ramp-up → Sustained → Ramp-down with per-phase VU counts',
+      ]},
+      { title:'LoadTestConfigV2 phases', type:'kv', rows:[
+        ['PhaseKind::RampUp','Linearly increase VUs from 0 to target over duration'],
+        ['PhaseKind::Sustained','Hold fixed VU count for duration'],
+        ['PhaseKind::RampDown','Linearly decrease VUs to 0 over duration'],
+        ['SuccessRule','HTTP status range that counts as a success (default: 200–299)'],
+      ]},
+      { title:'LoadTestResult fields', type:'list', items:[
+        'total_requests, succeeded, failed, failed_status, failed_transport',
+        'min / avg / p50 / p95 / p99 / max latency in ms',
+        'requests_per_second, total_duration_ms',
+        'phase_timeline: Vec<PhaseMarker> — timestamps for each phase boundary',
+        'time_series: Vec<TimeSeriesPoint> — RPS + latency sampled every 250ms',
+        'request_log: Vec<RequestLogEntry> — per-request status, latency, bytes, error',
+      ]},
+      { title:'Export formats (via ExportService)', type:'chips',
+        chips:[{l:'HTML (Chart.js report)',h:true},{l:'CSV'},{l:'JSON'},{l:'PDF (via webview print)'}]},
+    ]
+  },
+
+  ExportService: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'ExportService',
+    layer:'rocket-app · Application layer',
+    desc:'Pure stateless service (no injected dependencies) that serialises a LoadTestResult into one of four export formats. Returns raw bytes + file extension — the Tauri command layer writes the file via the dialog plugin.',
+    sections:[
+      { title:'Export formats', type:'list', items:[
+        'HTML — self-contained report with Chart.js charts (time-series RPS + latency), KPI summary cards, and a full request log table. No external CDN — Chart.js embedded inline.',
+        'CSV — header row + one row per RequestLogEntry: seq, status, latency_ms, response_bytes, error',
+        'JSON — serde_json::to_string_pretty(result) — full LoadTestResult structure',
+        'PDF — returns the HTML report bytes; Tauri command layer triggers webview print-to-PDF',
+      ]},
+      { title:'Design', type:'list', items:[
+        'No struct state — all methods are pure functions on &LoadTestResult',
+        'Returns (Vec<u8>, &static str) — bytes and file extension',
+        'No I/O — caller (Tauri command) handles file writing via dialog plugin',
+        'HTML report embeds Chart.js UMD bundle via include_str!() — zero CDN dependency',
+      ]},
+    ]
+  },
+
+  OAuth2Service: {
+    badge:'Application Service', badgeColor:'#6B5ED4',
+    title:'OAuth2Service',
+    layer:'rocket-app · Application layer',
+    desc:'Handles OAuth2 token acquisition and refresh for all grant types. Variable resolution runs first so client IDs, secrets, and URLs from environment variables are fully interpolated before any HTTP call. Browser orchestration for Auth Code / Implicit flows is handled at the Tauri command layer.',
+    sections:[
+      { title:'Grant types', type:'list', items:[
+        'client_credentials — direct token request; no browser needed',
+        'password (Resource Owner) — username + password posted to token endpoint',
+        'authorization_code — builds auth URL; browser/webview orchestration in Tauri command',
+        'authorization_code + PKCE — generates code_verifier + S256 challenge; standard PKCE flow',
+        'implicit — browser/webview opens auth URL; token extracted from redirect fragment',
+        'refresh_token — exchanges refresh token for new access token',
+      ]},
+      { title:'Client authentication modes', type:'kv', rows:[
+        ['body','client_id + client_secret posted as form fields (default)'],
+        ['header','Basic Auth header: base64(client_id:client_secret)'],
+      ]},
+      { title:'Key methods', type:'list', items:[
+        'build_token_request_parts(config) → (form_fields, headers) — pure, testable',
+        'build_code_exchange_form(config, code, redirect_uri, verifier) → form_fields',
+        'get_token_direct(config) — client_credentials and password grants',
+        'refresh_token(request) — refreshes using stored refresh token',
+        'resolve_get_token_request(input) — resolves all variable placeholders in OAuth2 config',
+      ]},
+      { title:'Additional params support', type:'list', items:[
+        'auth_params — appended to the authorization URL query string',
+        'token_params — appended to the token request body or URL depending on send_in',
+        'refresh_params — appended to the refresh token request',
+        'force_reauth — clears cached token and forces full re-authentication',
+      ]},
+    ]
+  },
+
+  AssertionEvaluator: {
+    badge:'Application Module', badgeColor:'#6B5ED4',
+    title:'AssertionEvaluator',
+    layer:'rocket-app · Application layer',
+    desc:'Pure stateless module (no service struct) that evaluates a list of Assertion rules against an HttpResponse. Each assertion checks a specific property of the response and returns a pass/fail result with an error message.',
+    sections:[
+      { title:'Assertion targets', type:'list', items:[
+        'Status code — equals, not-equals, in-range (e.g. 200–299)',
+        'Response body — contains, not-contains, equals, JSON path expression',
+        'Response header — exists, equals, contains (by header name + value)',
+        'Response time — less-than, greater-than in milliseconds',
+        'Response size — less-than, greater-than in bytes',
+      ]},
+      { title:'Design', type:'list', items:[
+        'No struct state — evaluate(assertions, response) → Vec<AssertionResult>',
+        'AssertionResult carries: passed: bool, message: String, assertion ref',
+        'Results fed to TestsPanel in the response view and to HistoryEntry for persistence',
+        'Used by both RequestExecutionService (per-request) and LoadTestService (aggregate)',
+      ]},
+    ]
+  },
+
+  RequestExecutionService: {
+    badge:'Application Service · New', badgeColor:'#16A34A',
+    title:'RequestExecutionService',
+    layer:'rocket-app · Application layer',
+    desc:'Orchestrates the full request execution pipeline including JS pre/post-request scripting. Replaces the older HttpService as the primary execution entry point when scripting is involved.',
+    sections:[
+      { title:'Execution pipeline', type:'list', items:[
+        '① Resolve all variables across 8 scopes via EnvironmentService',
+        '② Run pre-request script via DenoScriptEngine (if present)',
+        '   → Apply rok mutations: URL overrides, header additions, env var writes',
+        '   → Handle runner.skipRequest() — abort if flagged',
+        '   → Handle runner.setNextRequest() — reorder runner queue',
+        '③ Resolve auth (all types including OAuth2 + PKCE, AWS SigV4)',
+        '④ Execute HTTP request via ReqwestExecutor',
+        '⑤ Run post-response script via DenoScriptEngine (if present)',
+        '   → Capture test results (chai-style assertions)',
+        '   → Capture console entries for Console Panel',
+        '⑥ Apply env var writes back to environment store',
+        '⑦ Save to history via HistoryService',
+        '⑧ Emit RequestExecuted + ScriptExecuted domain events',
+      ]},
+      { title:'Script isolation', type:'list', items:[
+        'One JsRuntime instance per execution — no shared V8 heap between requests',
+        'ScriptResult carries: runtime_vars, env_var_writes, console_entries, test_results, skip_request, next_request, request_mutations',
+        'Script errors captured in ScriptResult.error — never crash the executor',
+      ]},
+    ]
+  },
+
+  'rocket-collection': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-collection',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'The core domain model for API collections. Contains the Collection aggregate, folder and request types, and — since v3 — the full contract governance module including the 8-state machine.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'Collection',h:true},{l:'CollectionSummary',h:true},{l:'Folder'},{l:'HttpRequest'},{l:'ContractParty',h:false},{l:'ContractStatus',h:false},{l:'ContractPolicy'},{l:'ChangelogEntry'},{l:'CollectionRepository (trait)',h:true}]},
+      { title:'Contract module (upgraded in v3)', type:'list', items:[
+        'ContractParty — typed provider/consumer with PartyKind (Team | Company | Service)',
+        'ContractStatus — 8 variants: Draft, Active, Drift, Breach, InReview, Paused, ExpiringIn30Days, Expired',
+        'state_machine.rs — pure transition(current, event) → Result<ContractStatus>',
+        'ContractPolicy — breaking_change_policy (Strict | Lenient | AdditiveOk), notice_days, uptime_sla',
+        'ChangelogEntry — is_breaking: bool, defaults false for backward compat',
+        'Custom Deserialize: accepts old "provider: string" YAML without migration scripts',
+      ]},
+      { title:'Dependency rule', type:'list', items:[
+        'Depends only on rocket-shared',
+        'Never imports rocket-infra, rocket-app, or src-tauri',
+        'CollectionRepository trait defined here; FsCollectionRepo in rocket-infra implements it',
+      ]},
+    ]
+  },
+
+  'rocket-environment': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-environment',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Owns environment aggregates and the variable resolution engine. The resolver evaluates variables across 8 ordered scopes without any I/O — it receives pre-loaded scope data and returns a resolved string.',
+    sections:[
+      { title:'Resolution scope order', type:'list', items:[
+        '① Process environment (lowest precedence)',
+        '② Global environment variables',
+        '③ Collection-level variables (value || initialValue)',
+        '④ Folder-level variables — full parent-chain walk, innermost wins',
+        '⑤ Active environment variables',
+        '⑥ Request-level variables',
+        '⑦ Runtime variables (script-set)',
+        '⑧ Inline literal values (highest precedence)',
+      ]},
+      { title:'Dynamic variables', type:'list', items:[
+        '~118 dynamic variables with Bruno parity (e.g. {{$randomEmail}}, {{$timestamp}})',
+        'TypeScript side: @faker-js/faker for browser/Tauri webview context',
+        'Rust side: fake crate for server-side generation',
+      ]},
+    ]
+  },
+
+  'rocket-http': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-http',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Defines the HTTP domain types and the HttpExecutor trait. Contains all authentication logic, JWT decoding, and load testing primitives. The executor itself is injected — this crate defines only the contract.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'HttpRequest',h:true},{l:'HttpResponse',h:true},{l:'Auth (enum)',h:true},{l:'OAuth2Settings'},{l:'OAuth2TokenConfig'},{l:'JwtClaims',h:false},{l:'LoadTestConfig'},{l:'LoadTestResult'},{l:'HttpExecutor (trait)',h:true}]},
+      { title:'Auth types supported', type:'list', items:[
+        'None, Basic, Bearer, API Key (header/query)',
+        'OAuth2: Authorization Code + PKCE, Client Credentials, Resource Owner Password',
+        'AWS Signature v4 (full canonical request signing)',
+        'Digest, NTLM, WSSE',
+        'Inherit (from parent folder/collection)',
+      ]},
+      { title:'Load testing (differentiator)', type:'list', items:[
+        'Configurable virtual users (VUs) and test duration',
+        'Async concurrent execution via tokio',
+        'Aggregated P50/P95/P99 latency, error rate, requests/sec',
+        'Unique vs Bruno, Postman, Insomnia — none support load testing natively',
+      ]},
+    ]
+  },
+
+  'rocket-history': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-history',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Defines the history and template domain types. HistoryEntry is a complete snapshot of a request execution. Template is a saved request skeleton for reuse.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'HistoryEntry',h:true},{l:'HistoryEntryMeta'},{l:'Template',h:true},{l:'HistoryRepository (trait)',h:true},{l:'TemplateRepository (trait)',h:true}]},
+      { title:'HistoryEntry captures', type:'list', items:[
+        'Request: method, URL, headers, body, auth config, variables snapshot',
+        'Response: status code, headers, body, response time, size',
+        'Metadata: timestamp, collection reference, environment used',
+      ]},
+    ]
+  },
+
+  'rocket-git': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-git',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Git domain types and the GitService trait. The concrete implementation (using git2 crate) lives in rocket-infra; this crate only defines the contract.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'GitStatus',h:true},{l:'GitStatusEntry'},{l:'Branch',h:true},{l:'CommitInfo'},{l:'DiffHunk'},{l:'StashEntry'},{l:'ConflictFile'},{l:'GitIdentity'},{l:'GitService (trait)',h:true}]},
+      { title:'GitService trait operations', type:'list', items:[
+        'status() — working tree + index changes',
+        'commit(message, files) — stage and commit',
+        'push/pull/fetch — with credential callback',
+        'branch_list, branch_create, branch_checkout, branch_merge',
+        'stash_push, stash_pop, stash_drop',
+        'diff_file(path) — hunk-level diff',
+        'conflict_list, conflict_resolve',
+        'clone(url, path, credentials)',
+        'log(pagination) — commit history',
+      ]},
+    ]
+  },
+
+  'rocket-workspace': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-workspace',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Workspace aggregate and registry types. A workspace is a named path on disk that serves as the root for one or more collections.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'Workspace',h:true},{l:'WorkspaceRegistry',h:true},{l:'WorkspaceSummary'},{l:'WorkspaceRepository (trait)',h:true}]},
+      { title:'Workspace fields', type:'kv', rows:[
+        ['id','ULID — stable identifier'],
+        ['name','Display name'],
+        ['path','Absolute filesystem path'],
+        ['is_active','Tracks current workspace across sessions'],
+        ['created_at','ISO 8601 timestamp'],
+      ]},
+      { title:'Default location', type:'list', items:[
+        'Auto-created at ~/Documents/RocketAPI/ on first launch (Bruno-style UX)',
+        'Registry persisted to .rocket/workspaces.yml',
+      ]},
+    ]
+  },
+
+  'rocket-import': {
+    badge:'Domain Crate', badgeColor:'#0D9669',
+    title:'rocket-import',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'Bruno import pipeline. Parses both .bru (Bruno native format) and Bruno .yml collection exports and converts them to OpenCollection v1.0.0 format.',
+    sections:[
+      { title:'Supported formats', type:'chips',
+        chips:[{l:'.bru (Bruno native)',h:true},{l:'Bruno .yml collections',h:true},{l:'OpenCollection .yml output',h:false}]},
+      { title:'Design rule', type:'list', items:[
+        'Import crate never writes to disk directly',
+        'All disk writes delegated to existing repo types (FsCollectionRepo, FsEnvironmentRepo)',
+        'Conversion is pure: Bruno types → Collection types → write via repo',
+        'Auth types fully mapped including OAuth2, AWS SigV4, and all Bruno auth variants',
+      ]},
+    ]
+  },
+
+  'rocket-identity': {
+    badge:'Domain Crate · New in v3', badgeColor:'#16A34A',
+    title:'rocket-identity',
+    layer:'Domain layer — pure Rust, zero I/O',
+    desc:'OIDC/SSO identity domain. Defines the identity types, PKCE flow, and group management model. Works with any OIDC-compliant provider: Azure AD, Google, Keycloak, Auth0, Okta.',
+    sections:[
+      { title:'Key types', type:'chips',
+        chips:[{l:'OidcConfig',h:true},{l:'OidcTokens',h:true},{l:'GroupAssignment',h:true},{l:'GroupId (opaque)',h:false},{l:'IdentityRepository (trait)',h:true}]},
+      { title:'PKCE flow', type:'list', items:[
+        'Generates code_verifier and code_challenge (S256)',
+        'Opens system browser to authorization URL with challenge',
+        'TCP localhost callback server receives authorization code',
+        'Exchanges code + verifier for access/refresh/ID tokens',
+        'Stores tokens in OS keychain — never on disk',
+      ]},
+      { title:'Group management', type:'list', items:[
+        'groups.yml stores opaque SSO group identifiers only — no emails, no PII',
+        'Group IDs matched against ID token claims at runtime',
+        'Contract governance: provider group membership checked before allowing mutations',
+        'SSO config (issuer URL, client ID) is non-sensitive per RFC 8252 for native PKCE apps',
+      ]},
+      { title:'Security properties', type:'kv', rows:[
+        ['Tokens','OS keychain only — survives app restart'],
+        ['PII in git','Zero — opaque group identifiers only'],
+        ['Force re-auth','prompt=login on Clear Cache (OIDC providers)'],
+        ['Webview re-auth','Session data cleared before opening for non-OIDC providers'],
+      ]},
+    ]
+  },
+
+
+  'rocket-scripting': {
+    badge:'Domain Crate · New', badgeColor:'#16A34A',
+    title:'rocket-scripting',
+    layer:'Domain layer — pure Rust, zero I/O · New crate',
+    desc:'Defines the JS scripting contract for RocketAPI. Owns the ScriptEngine trait, all input/output types, and lifecycle phases. Contains no JS engine code — the engine (DenoScriptEngine via deno_core/V8) lives in rocket-infra and implements ScriptEngine.',
+    sections:[
+      { title:'Public API (lib.rs)', type:'code',
+        code:'pub mod context;   // ScriptContext — immutable input snapshot\npub mod engine;    // ScriptEngine trait (async)\npub mod phase;     // ScriptPhase enum\npub mod result;    // ScriptResult + all output types\n\npub use engine::ScriptEngine;\npub use context::ScriptContext;\npub use phase::ScriptPhase;\npub use result::{\n    ScriptResult, RequestMutations, EnvVarWrite,\n    CollectionVarWrite, NextRequest, TestResult,\n    TestStatus, ConsoleEntry, ConsoleLevel,\n};' },
+      { title:'ScriptPhase lifecycle', type:'list', items:[
+        'BeforeRequest — runs before the HTTP request is sent; may mutate URL/headers/body via req.set*',
+        'AfterResponse — runs after the response arrives; may write env/collection vars',
+        'Tests — runs assertion scripts; collects TestResult entries for the Tests panel',
+      ]},
+      { title:'ScriptContext (input)', type:'kv', rows:[
+        ['code','JS source string to execute'],
+        ['phase','Which ScriptPhase this execution belongs to'],
+        ['variables','VariableContext — resolved 8-scope snapshot (read-only)'],
+        ['request','HttpRequest snapshot — mutable via req.set* ops in BeforeRequest only'],
+        ['response','Option<HttpResponse> — None in BeforeRequest phase'],
+        ['env_name','Active environment name for rok.getEnvName()'],
+        ['execution_mode','"runner" | "standalone"'],
+      ]},
+      { title:'ScriptResult (output)', type:'list', items:[
+        'request_mutations: Option<RequestMutations> — URL, header, body, param overrides from req.set*',
+        'runtime_vars: HashMap<String, Value> — rok.setVar() writes (in-memory only)',
+        'env_var_writes: Vec<EnvVarWrite> — rok.setEnvVar() with persist flag',
+        'collection_var_writes: Vec<CollectionVarWrite> — rok.setCollectionVar()',
+        'global_env_var_writes: Vec<EnvVarWrite> — rok.setGlobalEnvVar()',
+        'next_request: Option<NextRequest> — runner.setNextRequest() target',
+        'skip_request: bool — runner.skipRequest() flag',
+        'test_results: Vec<TestResult> — rok.test() outcomes (Passed/Failed + error message)',
+        'console_entries: Vec<ConsoleEntry> — console.log/warn/error captures (Log/Warn/Error level)',
+        'error: Option<String> — uncaught JS exception; never panics the Rust caller',
+      ]},
+      { title:'Dependency rule', type:'list', items:[
+        'Depends on: rocket-shared, rocket-environment (VariableContext), rocket-http (HttpRequest, HttpResponse)',
+        'Never imports rocket-infra, rocket-app, or src-tauri',
+        'ScriptEngine trait defined here; DenoScriptEngine in rocket-infra implements it',
+      ]},
+    ]
+  },
+
+  'rocket-audit': {
+    badge:'Domain Crate · New', badgeColor:'#16A34A',
+    title:'rocket-audit',
+    layer:'Domain layer — pure Rust, zero I/O · New crate',
+    desc:'Security audit domain. Defines the AuditLogRepository trait, all audit event types, the SHA-256 hash chain algorithm, and the compliance profile model. Contains no filesystem code — FsAuditLogRepo in rocket-infra implements the repository trait.',
+    sections:[
+      { title:'Public API (lib.rs)', type:'code',
+        code:'pub mod chain;      // hash_event, verify_chain, ChainVerification\npub mod control;    // ControlId, Framework, CONTROL_CATALOG\npub mod event;      // SecurityAuditEvent, AuditEventKind (9 variants)\npub mod profile;    // ComplianceProfile, EnforcementLevel, ProfileRepository\npub mod publisher;  // SecurityAuditPublisher trait, NullSecurityAuditPublisher\npub mod repository; // AuditLogRepository trait' },
+      { title:'AuditEventKind — 9 variants', type:'list', items:[
+        'ContractAttached { contract_id, collection, scope }',
+        'ContractDeleted { contract_id, collection }',
+        'ContractViolation { contract_id, request_path, field }',
+        'CollectionDeleted { collection }',
+        'CollectionExported { collection, destination }',
+        'SecretVariableWritten { environment, variable_key }',
+        'SensitiveAuthUsed { auth_type, collection, request_path }',
+        'AuditEvidenceExported { range_start, range_end, count }',
+        'AuditChainBroken { at_event_id, expected_hash, actual_hash }',
+      ]},
+      { title:'Hash chain guarantee', type:'list', items:[
+        'Each event stores hash = SHA-256(canonical_json_without_hash_field + prev_hash)',
+        'verify_chain(events) → ChainVerification::Ok | Broken { index, expected, actual }',
+        'hash_event() is deterministic — same input always produces same hash',
+        'Any tampering with past events is detectable by recomputing the chain',
+      ]},
+      { title:'Compliance control catalog', type:'chips',
+        chips:[{l:'SOC 2',h:true},{l:'ISO 27001',h:true},{l:'HIPAA',h:false},{l:'CC6.1'},{l:'CC6.3'},{l:'IAM-09'},{l:'CONTROL_CATALOG (static)'}]},
+      { title:'EnforcementLevel', type:'kv', rows:[
+        ['Warn','Record event; allow the triggering operation to proceed'],
+        ['Block','Record event; return DomainError::InvalidInput to abort the operation'],
+      ]},
+      { title:'SecurityAuditEvent fields', type:'kv', rows:[
+        ['id','AuditEventId (ULID)'],
+        ['occurred_at','DateTime<Utc>'],
+        ['actor','String — user identifier performing the action'],
+        ['workspace_id','Option<String> — which workspace the event occurred in'],
+        ['event','AuditEventKind — the tagged union variant'],
+        ['controls','Vec<ControlId> — auto-populated from CONTROL_CATALOG by kind.tag()'],
+        ['prev_hash + hash','SHA-256 chain fields'],
+      ]},
+      { title:'Dependency rule', type:'list', items:[
+        'Depends on: rocket-shared only (DomainError, DomainResult)',
+        'Never imports rocket-infra, rocket-app, or src-tauri',
+        'AuditLogRepository trait defined here; FsAuditLogRepo in rocket-infra implements it',
+        'ProfileRepository trait defined here; FsComplianceProfileRepo in rocket-infra implements it',
+      ]},
+    ]
+  },
+
+  'rocket-shared': {
+    badge:'Shared Kernel', badgeColor:'#B97D0D',
+    title:'rocket-shared — Shared Kernel',
+    layer:'Foundation — all crates depend on this',
+    desc:'The foundation of the entire crate graph. Zero external dependencies. Contains only types and traits that are genuinely shared across bounded contexts. Nothing domain-specific belongs here.',
+    sections:[
+      { title:'Error handling', type:'code',
+        code:'// Every fallible domain method returns this\npub type DomainResult<T> = Result<T, DomainError>;\n\n#[derive(thiserror::Error, Serialize)]\npub enum DomainError {\n    NotFound(String),\n    ValidationError(String),\n    IoError(String),\n    GitError(String),\n    InvalidStatusTransition { from: String, event: String },\n    Internal(String),\n    // ...\n}' },
+      { title:'Event system', type:'list', items:[
+        'DomainEvent enum — all significant backend events in one place',
+        'EventPublisher trait — implemented by TauriEventBus in rocket-infra',
+        'Application services receive Box<dyn EventPublisher> via constructor injection',
+        'Events forwarded to frontend via Tauri\'s event system',
+      ]},
+      { title:'HTTP primitives', type:'chips',
+        chips:[{l:'HttpMethod'},{l:'Header'},{l:'Body'},{l:'Auth'},{l:'VariableValue'},{l:'Assertion'},{l:'RequestSettings'},{l:'Description'},{l:'Tag'},{l:'Sequence'}]},
+      { title:'Rules', type:'list', items:[
+        'No external crate dependencies (beyond serde, thiserror)',
+        'Never put domain-specific types here — only genuinely shared primitives',
+        'DomainError implements Serialize for clean Tauri IPC error propagation',
+      ]},
+    ]
+  },
+
+  filesystem: {
+    badge:'Storage Layer', badgeColor:'#7A7870',
+    title:'Filesystem — OpenCollection v1.0.0',
+    layer:'Layer 7 of 7 · Persistence',
+    desc:'All on-disk state. The OpenCollection v1.0.0 format uses .yml files exclusively — never .json, never .yaml. The directory structure is designed to be git-friendly: each request is a separate file, environments are separate files, and the whole collection can be committed and diffed meaningfully.',
+    sections:[
+      { title:'Directory structure', type:'code',
+        code:'~/Documents/RocketAPI/\n├── .rocket/\n│   ├── workspaces.yml          # workspace registry\n│   ├── contracts/\n│   │   └── <contract-id>.yml   # per-contract (v3)\n│   └── identity/\n│       ├── config.yml          # OIDC issuer + client ID (v3)\n│       └── groups.yml          # opaque group IDs (v3)\n├── <collection-name>/\n│   ├── opencollection.yml      # collection root\n│   ├── environments/\n│   │   └── <env>.yml\n│   ├── <folder>/\n│   │   ├── folder.yml\n│   │   └── <request>.yml\n│   └── <request>.yml\napp_data_dir/\n└── notifications.enc           # AES-256-GCM (v3)' },
+      { title:'File format rules', type:'list', items:[
+        '.yml extension only — never .yaml or .json',
+        'opencollection.yml header: opencollection: "1.0.0"',
+        'All items discriminated by info.type: "http" | "graphql" | "grpc" | "websocket" | "folder"',
+        'Optional fields use #[serde(default, skip_serializing_if = "Option::is_none")]',
+        'IPC camelCase DTOs and on-disk structs are always separate types',
+      ]},
+      { title:'New in v3', type:'list', items:[
+        '.rocket/contracts/ — one .yml per contract, stores ContractStatus (not computed)',
+        '.rocket/identity/groups.yml — opaque SSO group IDs, safe to commit',
+        '.rocket/identity/config.yml — OIDC issuer URL + client ID (non-sensitive)',
+        'app_data_dir/notifications.enc — encrypted, never committed to git',
+      ]},
+    ]
+  },
+};
+
+// ── Drawer logic ──────────────────────────────────────────────
+const overlay = document.getElementById('overlay');
+const drawer  = document.getElementById('drawer');
+const dBadge  = document.getElementById('d-badge');
+const dTitle  = document.getElementById('d-title');
+const dLayer  = document.getElementById('d-layer');
+const dBody   = document.getElementById('d-body');
+let activeEl  = null;
+
+function openDrawer(id, el) {
+  const d = DATA[id];
+  if (!d) return;
+
+  // Header
+  dBadge.textContent = d.badge;
+  dBadge.style.background = d.badgeColor + '18';
+  dBadge.style.borderColor = d.badgeColor + '60';
+  dBadge.style.color = d.badgeColor;
+  dTitle.textContent = d.title;
+  dLayer.textContent = d.layer;
+
+  // Body
+  let html = '';
+  if (d.desc) html += `<div class="d-section"><p class="d-desc">${d.desc}</p></div>`;
+
+  (d.sections || []).forEach(s => {
+    html += `<div class="d-section"><div class="d-section-title">${s.title}</div>`;
+    if (s.type === 'list') {
+      html += '<div class="d-list">' + s.items.map(i => `<div class="d-list-item"><div class="d-list-bullet"></div><span>${i}</span></div>`).join('') + '</div>';
+    } else if (s.type === 'kv') {
+      html += '<div class="d-kv">' + s.rows.map(r => `<div class="d-kv-row"><span class="d-kv-key">${r[0]}</span><span class="d-kv-val">${r[1]}</span></div>`).join('') + '</div>';
+    } else if (s.type === 'code') {
+      html += `<pre class="d-code">${s.code}</pre>`;
+    } else if (s.type === 'chips') {
+      html += '<div class="d-chips">' + s.chips.map(c => `<span class="d-chip${c.h?' highlight':''}${c.n?' new':''}">${c.l}</span>`).join('') + '</div>';
+    } else if (s.type === 'states') {
+      html += '<div class="d-states">' + s.states.map(st => `<span class="d-state ${st.cls}">${st.label}</span>`).join('') + '</div>';
+    }
+    html += '</div>';
+  });
+
+  dBody.innerHTML = html;
+  dBody.scrollTop = 0;
+
+  // Active highlight
+  if (activeEl) activeEl.classList.remove('active-block');
+  activeEl = el;
+  el.classList.add('active-block');
+
+  overlay.classList.add('open');
+  drawer.classList.add('open');
+  document.getElementById('drawer-close').focus();
+}
+
+// ── Infra tab switching ─────────────────────────────────────────────────────
+function initInfraTabs() {
+  const tabs = document.querySelectorAll('.infra-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't open drawer when clicking tabs
+      const target = tab.dataset.tab;
+      // Deactivate all
+      document.querySelectorAll('.infra-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.infra-pane').forEach(p => p.classList.remove('active'));
+      // Activate selected
+      tab.classList.add('active');
+      const pane = document.getElementById('infra-pane-' + target);
+      if (pane) pane.classList.add('active');
+    });
+  });
+}
+// Init after DOM ready
+document.addEventListener('DOMContentLoaded', initInfraTabs);
+// Also init immediately in case DOMContentLoaded already fired
+if (document.readyState !== 'loading') initInfraTabs();
+
+function closeDrawer() {
+  overlay.classList.remove('open');
+  drawer.classList.remove('open');
+  if (activeEl) { activeEl.classList.remove('active-block'); activeEl.focus(); activeEl = null; }
+}
+
+// Wire all clickable elements
+document.querySelectorAll('[data-id]').forEach(el => {
+  el.addEventListener('click', () => openDrawer(el.dataset.id, el));
+  el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer(el.dataset.id, el); } });
+});
+
+document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+overlay.addEventListener('click', closeDrawer);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+</script>
+
+<!-- ══ CONTRACT STATE MACHINE MODAL ══ -->
+<div class="csm-overlay" id="csmOverlay">
+  <div class="csm-win">
+    <div class="csm-controls">
+      <a class="csm-newtab" id="csmNewTab" href="contract_state_machine.html" target="_blank" rel="noopener" title="Open in new tab">&#x2197;</a>
+      <button class="csm-x" id="csmClose" aria-label="Close" title="Close">&#x2715;</button>
+    </div>
+    <iframe
+      class="csm-frame"
+      id="csmFrame"
+      title="Contract State Machine"
+      srcdoc="<!DOCTYPE html>
+<html lang=&quot;en&quot;>
+<head>
+<meta charset=&quot;UTF-8&quot;>
+<title>Contract State Machine — Interactive Diagram</title>
+<link href=&quot;https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap&quot; rel=&quot;stylesheet&quot;>
+<style>
+  :root {
+    --bg: hsl(0 0% 9%);
+    --bg-2: hsl(0 0% 12%);
+    --card: hsl(0 0% 14%);
+    --card-2: hsl(0 0% 17%);
+    --fg: hsl(0 0% 92%);
+    --muted: hsl(0 0% 60%);
+    --muted-2: hsl(0 0% 42%);
+    --border: hsl(0 0% 22%);
+    --border-2: hsl(0 0% 30%);
+
+    --primary: hsl(207 100% 60%);
+    --primary-soft: hsl(207 100% 18%);
+    --success: hsl(160 63% 52%);
+    --success-soft: hsl(160 50% 16%);
+    --warning: hsl(38 92% 58%);
+    --warning-soft: hsl(38 60% 18%);
+    --destructive: hsl(0 72% 60%);
+    --destructive-soft: hsl(0 50% 18%);
+    --review: hsl(283 60% 64%);
+    --review-soft: hsl(283 40% 20%);
+    --muted-state: hsl(0 0% 50%);
+    --muted-state-soft: hsl(0 0% 20%);
+
+    --radius: 12px;
+  }
+  html.light {
+    --bg: hsl(214 44% 98%);
+    --bg-2: hsl(214 35% 96%);
+    --card: hsl(0 0% 100%);
+    --card-2: hsl(214 35% 96%);
+    --fg: hsl(222 47% 11%);
+    --muted: hsl(215 17% 40%);
+    --muted-2: hsl(215 15% 55%);
+    --border: hsl(214 31% 88%);
+    --border-2: hsl(214 25% 80%);
+    --primary: hsl(213 88% 42%);
+    --primary-soft: hsl(212 86% 94%);
+    --success: hsl(171 65% 35%);
+    --success-soft: hsl(171 45% 92%);
+    --warning: hsl(38 92% 48%);
+    --warning-soft: hsl(38 92% 93%);
+    --destructive: hsl(0 74% 52%);
+    --destructive-soft: hsl(0 74% 94%);
+    --review: hsl(283 60% 50%);
+    --review-soft: hsl(283 60% 94%);
+    --muted-state: hsl(215 17% 50%);
+    --muted-state-soft: hsl(213 35% 94%);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 14px; line-height: 1.45;
+    overflow: hidden;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+
+  /* Header */
+  .head {
+    padding: 18px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    background: var(--bg-2);
+  }
+  .head h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .head .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .head-actions { display: flex; gap: 8px; }
+  .btn {
+    background: var(--card); border: 1px solid var(--border-2); color: var(--fg);
+    padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 12px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--card-2); }
+  .btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+
+  .body { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+
+  /* Canvas */
+  .canvas-wrap { position: relative; overflow: hidden; background: var(--bg); }
+  .canvas-bg {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle at 1px 1px, hsl(0 0% 100% / 0.04) 1px, transparent 0);
+    background-size: 24px 24px;
+    pointer-events: none;
+  }
+  html.light .canvas-bg {
+    background-image: radial-gradient(circle at 1px 1px, hsl(0 0% 0% / 0.06) 1px, transparent 0);
+  }
+
+  svg.diagram {
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  /* Nodes */
+  .node-bg {
+    transition: filter 180ms, stroke-width 180ms;
+    cursor: pointer;
+  }
+  .node-group:hover .node-bg { filter: brightness(1.15); }
+  .node-group.dim { opacity: 0.28; }
+  .node-group.active .node-bg {
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 12px currentColor);
+  }
+  .node-label {
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px;
+    text-anchor: middle; dominant-baseline: middle; pointer-events: none;
+    fill: var(--fg);
+  }
+  .node-tag {
+    font-family: 'JetBrains Mono', monospace; font-size: 9px;
+    text-anchor: middle; dominant-baseline: middle; pointer-events: none;
+    text-transform: uppercase; letter-spacing: 0.08em; fill: var(--muted);
+  }
+
+  /* Edges */
+  .edge {
+    stroke-width: 1.6; fill: none; stroke: var(--border-2);
+    transition: stroke 180ms, stroke-width 180ms, opacity 180ms;
+  }
+  .edge-hit {
+    stroke: transparent; stroke-width: 16; fill: none; cursor: pointer;
+  }
+  .edge-label-bg {
+    fill: var(--bg); stroke: var(--border); stroke-width: 1;
+    transition: fill 180ms, stroke 180ms;
+    rx: 4;
+  }
+  .edge-label-text {
+    font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    text-anchor: middle; dominant-baseline: middle;
+    fill: var(--muted); pointer-events: none;
+    transition: fill 180ms;
+  }
+  .edge-group:hover .edge { stroke: var(--primary); stroke-width: 2.4; }
+  .edge-group:hover .edge-label-bg { fill: var(--primary-soft); stroke: var(--primary); }
+  .edge-group:hover .edge-label-text { fill: var(--primary); font-weight: 600; }
+  .edge-group.active .edge {
+    stroke: var(--primary); stroke-width: 2.6;
+    stroke-dasharray: 6 4; animation: flow 1.2s linear infinite;
+  }
+  .edge-group.active .edge-label-bg { fill: var(--primary-soft); stroke: var(--primary); }
+  .edge-group.active .edge-label-text { fill: var(--primary); font-weight: 700; }
+  .edge-group.dim { opacity: 0.18; }
+
+  .edge[data-trigger=&quot;auto&quot;] { stroke-dasharray: 5 3; }
+
+  @keyframes flow {
+    to { stroke-dashoffset: -20; }
+  }
+
+  /* Arrow marker styling via CSS — handled in markers below */
+
+  /* Detail panel */
+  .panel {
+    background: var(--bg-2); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-head {
+    padding: 16px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .panel-head .swatch {
+    width: 12px; height: 12px; border-radius: 4px; flex-shrink: 0;
+    border: 1.5px solid currentColor; background: color-mix(in oklab, currentColor 28%, transparent);
+  }
+  .panel-head h2 { font-size: 15px; font-weight: 600; }
+  .panel-head .panel-tag {
+    margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+    padding: 2px 7px; border-radius: 8px;
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 16px 18px 28px; }
+
+  .panel-section { margin-bottom: 18px; }
+  .panel-section h3 {
+    font-size: 10.5px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+  }
+  .panel-section p { font-size: 12.5px; color: var(--fg); line-height: 1.55; }
+  .panel-section .desc { color: var(--muted); }
+
+  .tran-list { display: flex; flex-direction: column; gap: 4px; }
+  .tran-row {
+    padding: 8px 10px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+    transition: border-color 140ms, background 140ms;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .tran-row:hover { border-color: var(--primary); background: var(--card-2); }
+  .tran-row .tran-head {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500;
+  }
+  .tran-row .tran-event {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    background: var(--primary-soft); color: var(--primary);
+    padding: 1px 5px; border-radius: 3px; font-weight: 600;
+  }
+  .tran-row[data-trigger=&quot;auto&quot;] .tran-event { background: var(--warning-soft); color: var(--warning); }
+  .tran-row[data-trigger=&quot;schedule&quot;] .tran-event { background: var(--review-soft); color: var(--review); }
+  .tran-row .tran-arrow { color: var(--muted-2); margin: 0 2px; }
+  .tran-row .tran-to { font-weight: 600; }
+  .tran-row .tran-meta { font-size: 10.5px; color: var(--muted); padding-left: 0; }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: color-mix(in oklab, var(--bg-2) 88%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; backdrop-filter: blur(6px);
+    display: flex; flex-direction: column; gap: 8px;
+    font-size: 11px; color: var(--muted);
+    max-width: 260px;
+  }
+  .legend h4 {
+    font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted-2); margin-bottom: 2px;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .legend-dot {
+    width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0;
+    border: 1.5px solid currentColor;
+    background: color-mix(in oklab, currentColor 28%, transparent);
+  }
+  .legend-line {
+    width: 22px; height: 0; border-top: 1.6px solid var(--border-2);
+    flex-shrink: 0;
+  }
+  .legend-line.auto { border-top-style: dashed; }
+
+  /* Controls */
+  .controls {
+    position: absolute; top: 16px; right: 16px;
+    background: color-mix(in oklab, var(--bg-2) 90%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px; backdrop-filter: blur(6px);
+    display: flex; gap: 4px;
+  }
+  .ctrl-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: transparent; color: var(--fg); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font: inherit; font-size: 13px;
+  }
+  .ctrl-btn:hover { background: var(--card-2); }
+
+  /* Search / play row */
+  .toolbar {
+    position: absolute; top: 16px; left: 16px;
+    background: color-mix(in oklab, var(--bg-2) 90%, transparent);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px; backdrop-filter: blur(6px);
+    display: flex; gap: 4px; align-items: center;
+  }
+  .toolbar select {
+    background: transparent; border: none; color: var(--fg); font: inherit;
+    font-size: 12px; padding: 4px 8px; cursor: pointer; outline: none;
+  }
+  .toolbar select option { background: var(--card); color: var(--fg); }
+  .toolbar .sep { width: 1px; height: 18px; background: var(--border); }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 100;
+    background: var(--card); border: 1px solid var(--border-2); border-radius: 6px;
+    padding: 6px 9px; font-size: 11px; color: var(--fg);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    opacity: 0; transition: opacity 120ms;
+    max-width: 240px;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-event {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--primary); font-weight: 600;
+  }
+  .tooltip .tt-desc {
+    color: var(--muted); margin-top: 3px;
+  }
+
+  *::-webkit-scrollbar { width: 7px; }
+  *::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body data-screen-label=&quot;Contract State Machine — Interactive Diagram&quot;>
+
+<div class=&quot;app&quot;>
+  <header class=&quot;head&quot;>
+    <div>
+      <h1>Contract lifecycle — state machine</h1>
+      <p class=&quot;sub&quot;>Click any state or transition to inspect. Hover for tooltips. Use the simulator to trace flows.</p>
+    </div>
+    <div class=&quot;head-actions&quot;>
+      <button class=&quot;btn&quot; id=&quot;resetBtn&quot;>↺ Reset view</button>
+      <button class=&quot;btn&quot; id=&quot;themeBtn&quot;>◐ Theme</button>
+      <button class=&quot;btn primary&quot; id=&quot;exportSvg&quot;>Download SVG</button>
+    </div>
+  </header>
+
+  <div class=&quot;body&quot;>
+    <div class=&quot;canvas-wrap&quot; id=&quot;canvasWrap&quot;>
+      <div class=&quot;canvas-bg&quot;></div>
+
+      <div class=&quot;toolbar&quot;>
+        <select id=&quot;simSelect&quot; title=&quot;Simulate a common flow&quot;>
+          <option value=&quot;&quot;>⏵ Simulate flow…</option>
+          <option value=&quot;happy&quot;>Happy path: Draft → Active</option>
+          <option value=&quot;drift_resign&quot;>Drift → Re-sign</option>
+          <option value=&quot;breach&quot;>Drift → Breach → Re-sign</option>
+          <option value=&quot;review&quot;>Send for review → Approve</option>
+          <option value=&quot;reject&quot;>Send for review → Reject</option>
+          <option value=&quot;expire&quot;>Expire → Renew</option>
+          <option value=&quot;archive&quot;>Expire → Archive → Unarchive</option>
+          <option value=&quot;pause&quot;>Pause → Resume</option>
+        </select>
+        <div class=&quot;sep&quot;></div>
+        <button class=&quot;ctrl-btn&quot; id=&quot;simPlay&quot; title=&quot;Play simulation&quot;>▶</button>
+        <button class=&quot;ctrl-btn&quot; id=&quot;simStep&quot; title=&quot;Step forward&quot;>▶|</button>
+      </div>
+
+      <div class=&quot;controls&quot;>
+        <button class=&quot;ctrl-btn&quot; id=&quot;zoomIn&quot; title=&quot;Zoom in&quot;>+</button>
+        <button class=&quot;ctrl-btn&quot; id=&quot;zoomOut&quot; title=&quot;Zoom out&quot;>−</button>
+        <button class=&quot;ctrl-btn&quot; id=&quot;zoomFit&quot; title=&quot;Fit&quot;>⬚</button>
+      </div>
+
+      <svg class=&quot;diagram&quot; id=&quot;diagram&quot; viewBox=&quot;0 0 1120 720&quot; preserveAspectRatio=&quot;xMidYMid meet&quot;>
+        <defs>
+          <!-- Arrow markers -->
+          <marker id=&quot;arrow&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;9&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;>
+            <path d=&quot;M 0 0 L 10 5 L 0 10 z&quot; fill=&quot;var(--border-2)&quot;/>
+          </marker>
+          <marker id=&quot;arrow-active&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;9&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;>
+            <path d=&quot;M 0 0 L 10 5 L 0 10 z&quot; fill=&quot;var(--primary)&quot;/>
+          </marker>
+        </defs>
+
+        <g id=&quot;edgeLayer&quot;></g>
+        <g id=&quot;nodeLayer&quot;></g>
+      </svg>
+
+      <div class=&quot;legend&quot;>
+        <div>
+          <h4>States</h4>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--muted-state);&quot;><span class=&quot;legend-dot&quot;></span>Draft</div>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--success);&quot;><span class=&quot;legend-dot&quot;></span>Active / Healthy</div>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--warning);&quot;><span class=&quot;legend-dot&quot;></span>Drift / ExpiringSoon</div>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--destructive);&quot;><span class=&quot;legend-dot&quot;></span>Breach / Expired</div>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--review);&quot;><span class=&quot;legend-dot&quot;></span>InReview</div>
+          <div class=&quot;legend-row&quot; style=&quot;color: var(--muted-state);&quot;><span class=&quot;legend-dot&quot;></span>Paused / Archived</div>
+        </div>
+        <div style=&quot;border-top: 1px solid var(--border); padding-top: 8px;&quot;>
+          <h4>Transitions</h4>
+          <div class=&quot;legend-row&quot;><span class=&quot;legend-line&quot;></span>User action</div>
+          <div class=&quot;legend-row&quot;><span class=&quot;legend-line auto&quot;></span>System (auto)</div>
+        </div>
+      </div>
+    </div>
+
+    <aside class=&quot;panel&quot; id=&quot;panel&quot;>
+      <div class=&quot;panel-head&quot; id=&quot;panelHead&quot;>
+        <span class=&quot;swatch&quot;></span>
+        <h2 id=&quot;panelTitle&quot;>Select a state</h2>
+        <span class=&quot;panel-tag&quot; id=&quot;panelTag&quot;>STATE</span>
+      </div>
+      <div class=&quot;panel-body&quot; id=&quot;panelBody&quot;>
+        <div class=&quot;panel-section&quot;>
+          <p class=&quot;desc&quot;>Click any node in the diagram to see its incoming and outgoing transitions, semantics, and UI mapping.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class=&quot;tooltip&quot; id=&quot;tooltip&quot;></div>
+
+<script>
+  // ─── State machine model ────────────────────────────────────
+  const STATES = {
+    Draft: {
+      x: 90, y: 360,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Contract is being defined but not yet enforced. No drift detection, no consumer notification.',
+      ui: 'Card: muted chip &quot;Draft&quot;. No changelog tracking.',
+    },
+    Active: {
+      x: 320, y: 360,
+      color: 'var(--success)',
+      tone: 'success',
+      desc: 'Contract is published and being monitored. API shape matches the signed snapshot.',
+      ui: 'Card: green &quot;Active&quot; chip with pulse glow. Right rail shows recent changes.',
+    },
+    Drift: {
+      x: 600, y: 220,
+      color: 'var(--warning)',
+      tone: 'warning',
+      desc: 'Non-breaking changes detected against the signed snapshot. Consumer code still works, but contract is out of sync.',
+      ui: 'Card: amber left border + &quot;⚠ Drift · N&quot; chip. Sidebar shows amber dots.',
+    },
+    Breach: {
+      x: 880, y: 220,
+      color: 'var(--destructive)',
+      tone: 'destructive',
+      desc: 'Breaking changes detected. Consumer build will fail. Provider must re-sign or roll back.',
+      ui: 'Card: red bg + pulsing dot + &quot;Breaching&quot; chip. Sidebar shows pulsing red dot.',
+    },
+    Paused: {
+      x: 320, y: 555,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Monitoring suspended. Drift detection runs but does not change status or notify.',
+      ui: 'Card: muted gray bg + &quot;Paused&quot; chip. Mini-changelog dimmed.',
+    },
+    InReview: {
+      x: 600, y: 555,
+      color: 'var(--review)',
+      tone: 'review',
+      desc: 'Draft sent to consumer for sign-off. No monitoring until approved.',
+      ui: 'Card: purple &quot;In review&quot; chip + reviewer avatars in right rail.',
+    },
+    ExpiringIn30Days: {
+      x: 320, y: 80,
+      color: 'var(--warning)',
+      tone: 'warning',
+      desc: 'Behaves like Active but expiresAt is within 30 days. Surfaces a warning chip and a renew CTA.',
+      ui: 'Card: amber expiry text + &quot;Renew&quot; suggestion. All drift/breach paths still active.',
+    },
+    Expired: {
+      x: 600, y: 80,
+      color: 'var(--destructive)',
+      tone: 'destructive',
+      desc: 'expiresAt has lapsed. Contract no longer enforced. Consumer should renew or archive.',
+      ui: 'Card: 75% opacity + &quot;Expired&quot; chip + Renew / Clone / Archive actions.',
+    },
+    Archived: {
+      x: 880, y: 555,
+      color: 'var(--muted-state)',
+      tone: 'muted-state',
+      desc: 'Soft-deleted. Hidden from default list. Can be restored as a Draft.',
+      ui: 'Hidden from main list. Shown only in &quot;View archived&quot; filter.',
+    },
+  };
+
+  // Transitions: { id, from, to, event, trigger, desc, anchor: 'top|bottom|left|right', curve: 0..1 }
+  // trigger: 'user' | 'auto' | 'schedule'
+  const TRANSITIONS = [
+    { id: 't_publish',       from: 'Draft',    to: 'Active',   event: 'Publish',         trigger: 'user', desc: 'Provider signs the snapshot, contract becomes enforceable.' },
+    { id: 't_resign',        from: 'Drift',    to: 'Active',   event: 'Resign',          trigger: 'user', desc: 'Provider accepts current shape as the new signed snapshot.' },
+    { id: 't_resign_breach', from: 'Breach',   to: 'Active',   event: 'Resign',          trigger: 'user', desc: 'Provider accepts breaking changes after negotiating with consumer.' },
+    { id: 't_drift',         from: 'Active',   to: 'Drift',    event: 'DriftDetected',   trigger: 'auto', desc: 'System detected non-breaking changes against signed snapshot.' },
+    { id: 't_breach_active', from: 'Active',   to: 'Breach',   event: 'BreachDetected',  trigger: 'auto', desc: 'System detected a breaking change (method, path, required param removed).' },
+    { id: 't_breach_drift',  from: 'Drift',    to: 'Breach',   event: 'BreachDetected',  trigger: 'auto', desc: 'A drifted contract escalated to breach.' },
+    { id: 't_mark_breaking', from: 'Drift',    to: 'Breach',   event: 'MarkBreaking',    trigger: 'user', desc: 'Provider manually marks a drift as breaking.' },
+    { id: 't_pause',         from: 'Active',   to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Provider suspends monitoring.' },
+    { id: 't_pause_drift',   from: 'Drift',    to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Pause from a drifted contract.' },
+    { id: 't_pause_breach',  from: 'Breach',   to: 'Paused',   event: 'Pause',           trigger: 'user', desc: 'Pause from a breaching contract — silences alerts.' },
+    { id: 't_resume',        from: 'Paused',   to: 'Active',   event: 'Resume',          trigger: 'user', desc: 'Resume monitoring; status re-computed.' },
+    { id: 't_review_active', from: 'Active',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send proposed changes to consumer for sign-off.' },
+    { id: 't_review_drift',  from: 'Drift',    to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send drift diff to consumer for review.' },
+    { id: 't_review_breach', from: 'Breach',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send breaking changes to consumer for sign-off.' },
+    { id: 't_review_paused', from: 'Paused',   to: 'InReview', event: 'SendForReview',   trigger: 'user', desc: 'Send paused snapshot to consumer for sign-off.' },
+    { id: 't_approve',       from: 'InReview', to: 'Active',   event: 'Approve',         trigger: 'user', desc: 'Consumer signs off — new snapshot becomes signed.' },
+    { id: 't_reject',        from: 'InReview', to: 'Draft',    event: 'Reject',          trigger: 'user', desc: 'Consumer rejects — contract drops back to Draft.' },
+    { id: 't_expiring',      from: 'Active',   to: 'ExpiringIn30Days', event: 'ExpiringSoon', trigger: 'schedule', desc: 'expiresAt within 30 days — system flags the contract.' },
+    { id: 't_expired',       from: 'ExpiringIn30Days', to: 'Expired', event: 'ExpiryLapsed', trigger: 'schedule', desc: 'expiresAt elapsed.' },
+    { id: 't_expired_drift', from: 'Drift',    to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Drifted contract reached expiry.' },
+    { id: 't_expired_breach',from: 'Breach',   to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Breaching contract reached expiry.' },
+    { id: 't_renew',         from: 'Expired',  to: 'Active',   event: 'Renew',           trigger: 'user', desc: 'Provider extends expiresAt — contract resumes.' },
+    { id: 't_archive_exp',   from: 'Expired',  to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete an expired contract.' },
+    { id: 't_archive_paused',from: 'Paused',   to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete a paused contract.' },
+    { id: 't_unarchive',     from: 'Archived', to: 'Draft',    event: 'Unarchive',       trigger: 'user', desc: 'Restore an archived contract as a fresh Draft.' },
+  ];
+
+  // ─── SVG render ─────────────────────────────────────────────
+  const NODE_W = 132, NODE_H = 56;
+  const svg = document.getElementById('diagram');
+  const nodeLayer = document.getElementById('nodeLayer');
+  const edgeLayer = document.getElementById('edgeLayer');
+  const tooltip = document.getElementById('tooltip');
+
+  // Get rect side anchor point
+  function anchor(state, side) {
+    const s = STATES[state];
+    const cx = s.x, cy = s.y;
+    const hw = NODE_W / 2, hh = NODE_H / 2;
+    switch (side) {
+      case 'top':    return { x: cx, y: cy - hh };
+      case 'bottom': return { x: cx, y: cy + hh };
+      case 'left':   return { x: cx - hw, y: cy };
+      case 'right':  return { x: cx + hw, y: cy };
+    }
+  }
+
+  // Compute the best anchor pair for an edge based on relative position
+  function autoAnchors(from, to) {
+    const a = STATES[from], b = STATES[to];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0
+        ? [anchor(from, 'right'), anchor(to, 'left')]
+        : [anchor(from, 'left'),  anchor(to, 'right')];
+    } else {
+      return dy > 0
+        ? [anchor(from, 'bottom'), anchor(to, 'top')]
+        : [anchor(from, 'top'),    anchor(to, 'bottom')];
+    }
+  }
+
+  // Per-transition routing overrides for clarity
+  const ROUTE = {
+    t_resign:        { from: 'top', to: 'top', offset: -60 },
+    t_resign_breach: { from: 'bottom', to: 'bottom', offset: 50 },
+    t_drift:         { from: 'right', to: 'left', sameAxisOffset: -8 },
+    t_breach_active: { from: 'right', to: 'left', sameAxisOffset: 14, viaY: 280 },
+    t_breach_drift:  { from: 'right', to: 'left' },
+    t_mark_breaking: { from: 'top', to: 'top', offset: -40 },
+    t_pause:         { from: 'bottom', to: 'top', sameAxisOffset: -10 },
+    t_pause_drift:   { from: 'bottom', to: 'right' },
+    t_pause_breach:  { from: 'bottom', to: 'right' },
+    t_resume:        { from: 'top', to: 'bottom', sameAxisOffset: 10 },
+    t_review_active: { from: 'bottom', to: 'top', sameAxisOffset: 26 },
+    t_review_drift:  { from: 'bottom', to: 'top' },
+    t_review_breach: { from: 'bottom', to: 'top' },
+    t_review_paused: { from: 'right', to: 'left' },
+    t_approve:       { from: 'left', to: 'bottom', sameAxisOffset: 28 },
+    t_reject:        { from: 'left', to: 'bottom' },
+    t_expiring:      { from: 'top', to: 'bottom', sameAxisOffset: -8 },
+    t_expired:       { from: 'right', to: 'left' },
+    t_expired_drift: { from: 'top', to: 'bottom', sameAxisOffset: 8 },
+    t_expired_breach:{ from: 'top', to: 'right' },
+    t_renew:         { from: 'bottom', to: 'top', sameAxisOffset: 8 },
+    t_archive_exp:   { from: 'bottom', to: 'top' },
+    t_archive_paused:{ from: 'right', to: 'left' },
+    t_unarchive:     { from: 'left', to: 'right' },
+  };
+
+  function pathFor(tran) {
+    const r = ROUTE[tran.id];
+    let a, b;
+    if (r &amp;&amp; r.from) {
+      a = anchor(tran.from, r.from);
+      b = anchor(tran.to, r.to);
+    } else {
+      [a, b] = autoAnchors(tran.from, tran.to);
+    }
+    // sameAxisOffset: add slight perpendicular offset to avoid overlap when from/to share an axis
+    if (r &amp;&amp; r.sameAxisOffset) {
+      if (r.from === 'left' || r.from === 'right') {
+        a = { x: a.x, y: a.y + r.sameAxisOffset };
+        b = { x: b.x, y: b.y + r.sameAxisOffset };
+      } else {
+        a = { x: a.x + r.sameAxisOffset, y: a.y };
+        b = { x: b.x + r.sameAxisOffset, y: b.y };
+      }
+    }
+
+    // Build curve
+    let path;
+    if (r &amp;&amp; r.offset !== undefined) {
+      // Loop over top/bottom — wide arc
+      const midY = (a.y + b.y) / 2 + r.offset;
+      path = `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`;
+    } else if (r &amp;&amp; r.viaY !== undefined) {
+      path = `M ${a.x} ${a.y} C ${(a.x+b.x)/2} ${r.viaY}, ${(a.x+b.x)/2} ${r.viaY}, ${b.x} ${b.y}`;
+    } else {
+      // Smooth cubic with perpendicular control points
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const horiz = Math.abs(dx) > Math.abs(dy);
+      const c1 = horiz ? { x: a.x + dx * 0.5, y: a.y } : { x: a.x, y: a.y + dy * 0.5 };
+      const c2 = horiz ? { x: b.x - dx * 0.5, y: b.y } : { x: b.x, y: b.y - dy * 0.5 };
+      path = `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
+    }
+
+    // Label midpoint — approx
+    let labelX = (a.x + b.x) / 2;
+    let labelY = (a.y + b.y) / 2;
+    if (r &amp;&amp; r.offset !== undefined) labelY = (a.y + b.y) / 2 + r.offset * 0.7;
+    if (r &amp;&amp; r.viaY !== undefined) labelY = r.viaY;
+
+    return { path, labelX, labelY };
+  }
+
+  // Render edges
+  TRANSITIONS.forEach(tran => {
+    const { path, labelX, labelY } = pathFor(tran);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'edge-group');
+    g.setAttribute('data-id', tran.id);
+
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('class', 'edge-hit');
+    hit.setAttribute('d', path);
+    g.appendChild(hit);
+
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', 'edge');
+    p.setAttribute('d', path);
+    p.setAttribute('marker-end', 'url(#arrow)');
+    p.setAttribute('data-trigger', tran.trigger);
+    if (tran.trigger === 'auto' || tran.trigger === 'schedule') {
+      p.setAttribute('stroke-dasharray', '5 3');
+    }
+    g.appendChild(p);
+
+    // Label
+    const labelW = Math.max(48, tran.event.length * 6.2 + 12);
+    const lblBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    lblBg.setAttribute('class', 'edge-label-bg');
+    lblBg.setAttribute('x', labelX - labelW / 2);
+    lblBg.setAttribute('y', labelY - 9);
+    lblBg.setAttribute('width', labelW);
+    lblBg.setAttribute('height', 18);
+    g.appendChild(lblBg);
+
+    const lblTxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lblTxt.setAttribute('class', 'edge-label-text');
+    lblTxt.setAttribute('x', labelX);
+    lblTxt.setAttribute('y', labelY + 1);
+    lblTxt.textContent = tran.event;
+    g.appendChild(lblTxt);
+
+    g.addEventListener('mouseenter', (e) => showTooltip(e, `<span class=&quot;tt-event&quot;>${tran.event}</span><div class=&quot;tt-desc&quot;>${tran.from} → ${tran.to}<br>${tran.desc}</div>`));
+    g.addEventListener('mousemove', moveTooltip);
+    g.addEventListener('mouseleave', hideTooltip);
+    g.addEventListener('click', () => selectTransition(tran.id));
+
+    edgeLayer.appendChild(g);
+  });
+
+  // Render nodes
+  Object.entries(STATES).forEach(([name, s]) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'node-group');
+    g.setAttribute('data-id', name);
+    g.setAttribute('transform', `translate(${s.x - NODE_W/2}, ${s.y - NODE_H/2})`);
+    g.style.color = s.color;
+
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('class', 'node-bg');
+    bg.setAttribute('x', 0); bg.setAttribute('y', 0);
+    bg.setAttribute('width', NODE_W); bg.setAttribute('height', NODE_H);
+    bg.setAttribute('rx', 10);
+    bg.setAttribute('fill', `color-mix(in oklab, ${s.color} 14%, var(--card))`);
+    bg.setAttribute('stroke', s.color);
+    bg.setAttribute('stroke-width', '1.6');
+    g.appendChild(bg);
+
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lbl.setAttribute('class', 'node-label');
+    lbl.setAttribute('x', NODE_W / 2);
+    lbl.setAttribute('y', NODE_H / 2 - 4);
+    lbl.textContent = name;
+    g.appendChild(lbl);
+
+    const tag = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tag.setAttribute('class', 'node-tag');
+    tag.setAttribute('x', NODE_W / 2);
+    tag.setAttribute('y', NODE_H / 2 + 12);
+    tag.textContent = s.tone.replace('-state','').replace('-soft','');
+    g.appendChild(tag);
+
+    g.addEventListener('mouseenter', (e) => showTooltip(e, `<span class=&quot;tt-event&quot;>${name}</span><div class=&quot;tt-desc&quot;>${s.desc}</div>`));
+    g.addEventListener('mousemove', moveTooltip);
+    g.addEventListener('mouseleave', hideTooltip);
+    g.addEventListener('click', () => selectState(name));
+
+    nodeLayer.appendChild(g);
+  });
+
+  // ─── Tooltip ────────────────────────────────────────────────
+  function showTooltip(e, html) {
+    tooltip.innerHTML = html;
+    tooltip.classList.add('show');
+    moveTooltip(e);
+  }
+  function moveTooltip(e) {
+    const pad = 14;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    if (x + tw > window.innerWidth - 8) x = e.clientX - tw - pad;
+    if (y + th > window.innerHeight - 8) y = e.clientY - th - pad;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  }
+  function hideTooltip() { tooltip.classList.remove('show'); }
+
+  // ─── Selection / detail panel ───────────────────────────────
+  function clearActive() {
+    document.querySelectorAll('.node-group, .edge-group').forEach(g => {
+      g.classList.remove('active', 'dim');
+    });
+  }
+
+  function dimAllExcept(stateName, relatedTranIds) {
+    document.querySelectorAll('.node-group').forEach(g => {
+      const id = g.getAttribute('data-id');
+      const isRelated = id === stateName || TRANSITIONS.some(t =>
+        relatedTranIds.includes(t.id) &amp;&amp; (t.from === id || t.to === id));
+      if (!isRelated) g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      const id = g.getAttribute('data-id');
+      if (!relatedTranIds.includes(id)) g.classList.add('dim');
+    });
+  }
+
+  function selectState(name) {
+    clearActive();
+    const node = document.querySelector(`.node-group[data-id=&quot;${name}&quot;]`);
+    if (node) node.classList.add('active');
+
+    const incoming = TRANSITIONS.filter(t => t.to === name);
+    const outgoing = TRANSITIONS.filter(t => t.from === name);
+    const relIds = [...incoming, ...outgoing].map(t => t.id);
+    dimAllExcept(name, relIds);
+
+    relIds.forEach(id => {
+      const e = document.querySelector(`.edge-group[data-id=&quot;${id}&quot;]`);
+      if (e) e.classList.add('active');
+    });
+
+    renderStatePanel(name, incoming, outgoing);
+  }
+
+  function selectTransition(id) {
+    clearActive();
+    const tran = TRANSITIONS.find(t => t.id === id);
+    if (!tran) return;
+
+    document.querySelectorAll('.node-group').forEach(g => {
+      const nid = g.getAttribute('data-id');
+      if (nid === tran.from || nid === tran.to) g.classList.add('active');
+      else g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      if (g.getAttribute('data-id') !== id) g.classList.add('dim');
+    });
+    document.querySelector(`.edge-group[data-id=&quot;${id}&quot;]`).classList.add('active');
+
+    renderTransitionPanel(tran);
+  }
+
+  function renderStatePanel(name, incoming, outgoing) {
+    const s = STATES[name];
+    document.getElementById('panelHead').style.color = s.color;
+    document.querySelector('.panel-head .swatch').style.color = s.color;
+    document.getElementById('panelTitle').textContent = name;
+    document.getElementById('panelTag').textContent = 'STATE';
+
+    const tranRow = (t) => `
+      <div class=&quot;tran-row&quot; data-trigger=&quot;${t.trigger}&quot; data-tran=&quot;${t.id}&quot;>
+        <div class=&quot;tran-head&quot;>
+          <span class=&quot;tran-event&quot;>${t.event}</span>
+          <span class=&quot;tran-arrow&quot;>→</span>
+          <span class=&quot;tran-to&quot;>${t.from === name ? t.to : t.from}</span>
+        </div>
+        <span class=&quot;tran-meta&quot;>${t.desc}</span>
+      </div>`;
+
+    document.getElementById('panelBody').innerHTML = `
+      <div class=&quot;panel-section&quot;>
+        <h3>Meaning</h3>
+        <p class=&quot;desc&quot;>${s.desc}</p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>UI mapping</h3>
+        <p class=&quot;desc&quot;>${s.ui}</p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Outgoing — ${outgoing.length}</h3>
+        <div class=&quot;tran-list&quot;>${outgoing.map(tranRow).join('') || '<p class=&quot;desc&quot; style=&quot;font-size: 11.5px;&quot;>Terminal state — no outgoing transitions.</p>'}</div>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Incoming — ${incoming.length}</h3>
+        <div class=&quot;tran-list&quot;>${incoming.map(tranRow).join('') || '<p class=&quot;desc&quot; style=&quot;font-size: 11.5px;&quot;>Initial state — no incoming transitions.</p>'}</div>
+      </div>
+    `;
+    bindTranRowClicks();
+  }
+
+  function renderTransitionPanel(tran) {
+    const fromColor = STATES[tran.from].color;
+    document.getElementById('panelHead').style.color = 'var(--primary)';
+    document.querySelector('.panel-head .swatch').style.color = 'var(--primary)';
+    document.getElementById('panelTitle').textContent = tran.event;
+    document.getElementById('panelTag').textContent = tran.trigger.toUpperCase();
+
+    document.getElementById('panelBody').innerHTML = `
+      <div class=&quot;panel-section&quot;>
+        <h3>Transition</h3>
+        <p style=&quot;display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600;&quot;>
+          <span style=&quot;color: ${fromColor};&quot;>${tran.from}</span>
+          <span style=&quot;color: var(--muted-2);&quot;>→</span>
+          <span style=&quot;color: ${STATES[tran.to].color};&quot;>${tran.to}</span>
+        </p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Description</h3>
+        <p class=&quot;desc&quot;>${tran.desc}</p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Trigger</h3>
+        <p class=&quot;desc&quot;>
+          ${tran.trigger === 'user' ? '👤 User action — provider or consumer initiates this from UI.' :
+            tran.trigger === 'auto' ? '⚙ System — emitted automatically when drift engine detects a change.' :
+            '⏱ Schedule — fires on time-based check (expiry).'}
+        </p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Implementation</h3>
+        <p class=&quot;desc mono&quot; style=&quot;font-family: 'JetBrains Mono', monospace; font-size: 11px; background: var(--card); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);&quot;>
+          dispatch({ type: '${tran.event}', contractId })
+        </p>
+      </div>
+    `;
+  }
+
+  function bindTranRowClicks() {
+    document.querySelectorAll('.tran-row').forEach(row => {
+      row.addEventListener('click', () => selectTransition(row.dataset.tran));
+    });
+  }
+
+  // ─── Simulator ──────────────────────────────────────────────
+  const SIMS = {
+    happy:        ['Draft', 't_publish', 'Active'],
+    drift_resign: ['Active', 't_drift', 'Drift', 't_resign', 'Active'],
+    breach:       ['Active', 't_drift', 'Drift', 't_breach_drift', 'Breach', 't_resign_breach', 'Active'],
+    review:       ['Active', 't_review_active', 'InReview', 't_approve', 'Active'],
+    reject:       ['Active', 't_review_active', 'InReview', 't_reject', 'Draft'],
+    expire:       ['Active', 't_expiring', 'ExpiringIn30Days', 't_expired', 'Expired', 't_renew', 'Active'],
+    archive:      ['Active', 't_expiring', 'ExpiringIn30Days', 't_expired', 'Expired', 't_archive_exp', 'Archived', 't_unarchive', 'Draft'],
+    pause:        ['Active', 't_pause', 'Paused', 't_resume', 'Active'],
+  };
+
+  let simSteps = [], simIdx = 0, simTimer = null;
+
+  function loadSim(key) {
+    stopSim();
+    simSteps = SIMS[key] || [];
+    simIdx = 0;
+    clearActive();
+    if (simSteps.length) highlightSimStep();
+  }
+
+  function highlightSimStep() {
+    clearActive();
+    // Highlight all steps up to current
+    for (let i = 0; i <= simIdx; i++) {
+      const step = simSteps[i];
+      if (STATES[step]) {
+        const node = document.querySelector(`.node-group[data-id=&quot;${step}&quot;]`);
+        if (node) node.classList.add('active');
+      } else {
+        const edge = document.querySelector(`.edge-group[data-id=&quot;${step}&quot;]`);
+        if (edge) edge.classList.add('active');
+      }
+    }
+    // Dim everything else
+    document.querySelectorAll('.node-group').forEach(g => {
+      if (!g.classList.contains('active')) g.classList.add('dim');
+    });
+    document.querySelectorAll('.edge-group').forEach(g => {
+      if (!g.classList.contains('active')) g.classList.add('dim');
+    });
+    // Open detail of last step
+    const last = simSteps[simIdx];
+    if (STATES[last]) {
+      const inc = TRANSITIONS.filter(t => t.to === last);
+      const out = TRANSITIONS.filter(t => t.from === last);
+      renderStatePanel(last, inc, out);
+    } else {
+      renderTransitionPanel(TRANSITIONS.find(t => t.id === last));
+    }
+  }
+
+  function stepSim() {
+    if (simIdx < simSteps.length - 1) {
+      simIdx++;
+      highlightSimStep();
+    } else {
+      stopSim();
+    }
+  }
+
+  function playSim() {
+    stopSim();
+    simTimer = setInterval(() => {
+      if (simIdx < simSteps.length - 1) { simIdx++; highlightSimStep(); }
+      else stopSim();
+    }, 900);
+  }
+
+  function stopSim() {
+    if (simTimer) clearInterval(simTimer);
+    simTimer = null;
+  }
+
+  document.getElementById('simSelect').addEventListener('change', (e) => {
+    if (e.target.value) loadSim(e.target.value);
+    else { clearActive(); renderEmpty(); }
+  });
+  document.getElementById('simPlay').addEventListener('click', () => {
+    if (simSteps.length) playSim();
+  });
+  document.getElementById('simStep').addEventListener('click', () => {
+    if (simSteps.length) stepSim();
+  });
+
+  // ─── Zoom / pan ─────────────────────────────────────────────
+  let zoom = 1, panX = 0, panY = 0;
+  const baseW = 1120, baseH = 720;
+
+  function applyZoom() {
+    const vbW = baseW / zoom;
+    const vbH = baseH / zoom;
+    const vbX = panX - (vbW - baseW) / 2;
+    const vbY = panY - (vbH - baseH) / 2;
+    svg.setAttribute('viewBox', `${vbX} ${vbY} ${vbW} ${vbH}`);
+  }
+  document.getElementById('zoomIn').onclick = () => { zoom = Math.min(2.5, zoom + 0.2); applyZoom(); };
+  document.getElementById('zoomOut').onclick = () => { zoom = Math.max(0.5, zoom - 0.2); applyZoom(); };
+  document.getElementById('zoomFit').onclick = () => { zoom = 1; panX = 0; panY = 0; applyZoom(); };
+
+  let isPanning = false, panStart = null;
+  const canvasWrap = document.getElementById('canvasWrap');
+  canvasWrap.addEventListener('mousedown', (e) => {
+    if (e.target === svg || e.target.classList.contains('canvas-bg')) {
+      isPanning = true; panStart = { x: e.clientX, y: e.clientY, px: panX, py: panY };
+      canvasWrap.style.cursor = 'grabbing';
+    }
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    panX = panStart.px - (e.clientX - panStart.x) / zoom;
+    panY = panStart.py - (e.clientY - panStart.y) / zoom;
+    applyZoom();
+  });
+  window.addEventListener('mouseup', () => { isPanning = false; canvasWrap.style.cursor = ''; });
+
+  canvasWrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    zoom = Math.max(0.5, Math.min(2.5, zoom + delta));
+    applyZoom();
+  }, { passive: false });
+
+  // Click on empty canvas → clear
+  svg.addEventListener('click', (e) => {
+    if (e.target === svg) {
+      clearActive();
+      renderEmpty();
+      document.getElementById('simSelect').value = '';
+      simSteps = []; simIdx = 0;
+    }
+  });
+
+  function renderEmpty() {
+    document.getElementById('panelHead').style.color = 'var(--fg)';
+    document.querySelector('.panel-head .swatch').style.color = 'var(--muted-2)';
+    document.getElementById('panelTitle').textContent = 'Select a state or transition';
+    document.getElementById('panelTag').textContent = '—';
+    document.getElementById('panelBody').innerHTML = `
+      <div class=&quot;panel-section&quot;>
+        <p class=&quot;desc&quot;>Click any node or arrow in the diagram to see its details, semantics, and UI mapping. Or pick a flow from the Simulate dropdown to trace common paths.</p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Quick stats</h3>
+        <p class=&quot;desc&quot;>${Object.keys(STATES).length} states · ${TRANSITIONS.length} transitions</p>
+        <p class=&quot;desc&quot; style=&quot;margin-top: 4px;&quot;>${TRANSITIONS.filter(t=>t.trigger==='user').length} user-driven · ${TRANSITIONS.filter(t=>t.trigger==='auto').length} system · ${TRANSITIONS.filter(t=>t.trigger==='schedule').length} scheduled</p>
+      </div>
+      <div class=&quot;panel-section&quot;>
+        <h3>Tip</h3>
+        <p class=&quot;desc&quot;>Drag the background to pan. Scroll to zoom. Press Esc to deselect.</p>
+      </div>
+    `;
+  }
+
+  // ─── Header buttons ─────────────────────────────────────────
+  document.getElementById('resetBtn').onclick = () => {
+    clearActive(); renderEmpty(); document.getElementById('simSelect').value = '';
+    zoom = 1; panX = 0; panY = 0; applyZoom(); stopSim();
+  };
+  document.getElementById('themeBtn').onclick = () => {
+    document.documentElement.classList.toggle('light');
+  };
+  document.getElementById('exportSvg').onclick = () => {
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'contract-state-machine.svg';
+    a.click();
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { clearActive(); renderEmpty(); stopSim(); document.getElementById('simSelect').value = ''; }
+  });
+
+  // Initial state
+  renderEmpty();
+</script>
+</body>
+</html>
+"
+    ></iframe>
+  </div>
+</div>
+
+<script>
+function openCSM() {
+  document.getElementById('csmOverlay').classList.add('open');
+}
+function closeCSM() {
+  document.getElementById('csmOverlay').classList.remove('open');
+}
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('csmClose').onclick = closeCSM;
+  document.getElementById('csmOverlay').addEventListener('click', function (e) {
+    if (e.target === this) closeCSM();
+  });
+});
+document.addEventListener('keydown', function (e) {
+  var ov = document.getElementById('csmOverlay');
+  if (e.key === 'Escape' && ov && ov.classList.contains('open')) closeCSM();
+});
+</script>
+
+</body>
+</html>
