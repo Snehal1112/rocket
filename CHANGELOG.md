@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.8.0](https://github.com/Snehal1112/rocket/compare/v0.7.0...v0.8.0) (2026-05-26)
+
+### Features
+
+* apply Lora serif font to markdown documentation preview ([a2a3885](https://github.com/Snehal1112/rocket/commit/a2a3885266293977fb56cf49c1b13a88c9844278))
+* **body:** add Form URL Encoded option to body mode selector ([d2d9e34](https://github.com/Snehal1112/rocket/commit/d2d9e3465264d6f9e94cafb7e3474cea2831c79c))
+* **body:** add formurlencoded to BodyMode and BodyState types ([29826ac](https://github.com/Snehal1112/rocket/commit/29826ac2ad6af578cf88eb3fdfdae8544ed075a7))
+* **body:** render KeyValueEditor for formurlencoded body mode ([21ddaae](https://github.com/Snehal1112/rocket/commit/21ddaae19779356ab77769525a91732a7c17fb4a))
+* **frontend:** implement Scripts and Vars tabs with Monaco editors, add Tests panel and console wiring ([1d8d100](https://github.com/Snehal1112/rocket/commit/1d8d100c17b2e7e9239688fc47db82903f283bea))
+* replace IBM Plex Sans/Mono with Plus Jakarta Sans and JetBrains Mono ([6199be0](https://github.com/Snehal1112/rocket/commit/6199be0941767d6466d2b685d8f5fc46b8dae0a2))
+* **scripts:** add phase and onEditorReady props to MonacoWrapper ([dc495ae](https://github.com/Snehal1112/rocket/commit/dc495aecbc1915361a85fe63e743101b503bb947))
+* **scripts:** add rok-types snippet data and phase-scoped type definitions ([a93cc27](https://github.com/Snehal1112/rocket/commit/a93cc275afdf38319f7fea02252b6633d25f8025))
+* **scripts:** add ScriptSnippetSidebar component ([1019bd9](https://github.com/Snehal1112/rocket/commit/1019bd96311c76094ea96368a772f66e306c0880))
+* **scripts:** delegate expect() to bundled Chai for full API parity ([7f29524](https://github.com/Snehal1112/rocket/commit/7f29524d12006189143bfdcded30cc925f008d56))
+* **scripts:** expand snippets sidebar with full Chai matcher set ([9c99f1b](https://github.com/Snehal1112/rocket/commit/9c99f1ba3e2e6c861a4587d64597e206f988b8c3))
+* **scripts:** replace ChaiAssertion stub with full @types/chai ([75a9252](https://github.com/Snehal1112/rocket/commit/75a92526089da03eac067ec11f5f2cfd7182d2c6))
+* **scripts:** wire ScriptSnippetSidebar into ScriptsTab ([741c15e](https://github.com/Snehal1112/rocket/commit/741c15eb5cdfb94d3ca302048b968d8d57b8f683))
+
+### Bug Fixes
+
+* **body:** send formData instead of content for formurlencoded mode ([6ddb4d2](https://github.com/Snehal1112/rocket/commit/6ddb4d2ed13762d737af61b87f9b0dc4ce04d02c))
+* **body:** use toApiBody in auto-save to persist formData fields ([0280d48](https://github.com/Snehal1112/rocket/commit/0280d489c3945f74faad4756b0c0701a80472e75))
+* **body:** use toApiBody in save button and save-to-collection dialog ([5899885](https://github.com/Snehal1112/rocket/commit/5899885fb50e9daaf6b1dee622bd9b81c580c1d9))
+* explicitly set font-mono on prose-doc pre to prevent Lora inheritance ([af70c06](https://github.com/Snehal1112/rocket/commit/af70c069eb24a70e014c5b499eed7edcb541590c))
+* **scripts:** add below, above, within, an to expect().to.be chain in bootstrap ([9a7b5f6](https://github.com/Snehal1112/rocket/commit/9a7b5f6974ae4401ec6500be215a109f12b4687d))
+* **scripts:** extract handleEditorReady, fix null guard in handleInsert ([6afb019](https://github.com/Snehal1112/rocket/commit/6afb019fc09ff41e0650f9376885aad72ac66e63))
+* **scripts:** focus editor after no-cursor snippet insert ([a701689](https://github.com/Snehal1112/rocket/commit/a701689b21382e91e1821e232600314a8fba8e19))
+* **scripts:** move require() definition before expect() Chai delegation ([a55c3ec](https://github.com/Snehal1112/rocket/commit/a55c3ece5e5cd7a794aaa25c539391137cd12c3f))
+* **scripts:** replace dynamic monaco import with static to eliminate stale-closure race ([86fefef](https://github.com/Snehal1112/rocket/commit/86fefef340bd7a5b003d02f366675ccdfb290ab8))
+* **scripts:** use per-phase addExtraLib key to prevent global IntelliSense conflicts ([369dfb9](https://github.com/Snehal1112/rocket/commit/369dfb9f06fe3b79aac87da2c64b9f3d675c52f5))
+
 ## [0.7.0](https://github.com/Snehal1112/rocket/compare/v0.6.10...v0.7.0) (2026-05-21)
 
 ### Features
