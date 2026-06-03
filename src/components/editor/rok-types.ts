@@ -277,6 +277,11 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'rok.setEnvVar("key", value)',
           },
           {
+            label: 'rok.setCollectionVar("key", value)',
+            kind: 'expression',
+            code: 'rok.setCollectionVar("key", value)',
+          },
+          {
             label: 'rok.getCollectionVar("key")',
             kind: 'expression',
             code: 'rok.getCollectionVar("key")',
