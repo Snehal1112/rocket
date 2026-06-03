@@ -226,7 +226,7 @@ impl RequestExecutionService {
 
     /// Applies the persistent and in-memory side effects from a `ScriptResult`.
     ///
-    /// - `env_var_writes` with `persist: true` → read-modify-write via `env_repo`
+    /// - `env_var_writes` → always read-modify-write via `env_repo` (always persisted)
     /// - `collection_var_writes` → read-modify-write via `collection_repo.save_settings`
     /// - `global_env_var_writes` → same repo, keyed by `global_env_name`
     /// - `runtime_vars` → merged into `var_ctx.runtime` for the next script phase
@@ -240,10 +240,10 @@ impl RequestExecutionService {
         collection: Option<&str>,
         var_ctx: &mut rocket_environment::VariableContext,
     ) {
-        // Apply active-environment writes.
+        // Apply active-environment writes (always persisted).
         if !result.env_var_writes.is_empty() {
             if let Some(name) = env_name {
-                self.apply_env_writes(name, &result.env_var_writes, false);
+                self.apply_env_writes(name, &result.env_var_writes, true);
             }
         }
 

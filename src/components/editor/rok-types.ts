@@ -306,8 +306,8 @@ declare const rok: {
   setVar(key: string, value: unknown): void;
   /** Read an environment variable. */
   getEnvVar(key: string): unknown;
-  /** Write an environment variable. Pass { persist: true } to save to disk. */
-  setEnvVar(key: string, value: unknown, opts?: { persist?: boolean }): void;
+  /** Write an environment variable (persisted to the active environment file). */
+  setEnvVar(key: string, value: unknown): void;
   /** Returns true if the environment variable exists. */
   hasEnvVar(key: string): boolean;
   /** Delete an environment variable. */

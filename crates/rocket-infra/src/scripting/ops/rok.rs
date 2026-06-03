@@ -88,7 +88,7 @@ pub fn op_rok_delete_env_var(state: &mut OpState, #[string] key: String) {
     state.borrow_mut::<ScriptOutputState>().env_var_writes.push(EnvVarWrite {
         key,
         value: serde_json::Value::Null,
-        persist: false,
+        persist: true,
     });
 }
 
