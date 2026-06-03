@@ -1,5 +1,8 @@
+import { PanelRight } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
-import { lazy, Suspense, useCallback, useRef } from 'react';
+import { lazy, Suspense, useCallback, useRef, useState } from 'react';
+import { POST_RESPONSE_SNIPPETS } from '@/components/editor/rok-types';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
 
@@ -72,8 +75,11 @@ export function ScriptsTab({
     editor.focus();
   }, []);
 
+  const [activeTab, setActiveTab] = useState('pre-request');
+  const [showPostResponseSidebar, setShowPostResponseSidebar] = useState(false);
+
   return (
-    <Tabs defaultValue='pre-request' className='flex flex-col h-full'>
+    <Tabs value={activeTab} onValueChange={setActiveTab} className='flex flex-col h-full'>
       <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
         <TabsTrigger value='pre-request' className='text-xs'>
           Pre Request
@@ -84,6 +90,17 @@ export function ScriptsTab({
         <TabsTrigger value='tests' className='text-xs'>
           Tests
         </TabsTrigger>
+        {activeTab === 'post-response' && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='ml-auto h-7 gap-1 text-xs'
+            onClick={() => setShowPostResponseSidebar((v) => !v)}
+          >
+            <PanelRight className='h-3.5 w-3.5' />
+            Snippets
+          </Button>
+        )}
       </TabsList>
 
       <TabsContent value='pre-request' className='flex-1 m-0 p-0'>
@@ -99,17 +116,23 @@ export function ScriptsTab({
         </Suspense>
       </TabsContent>
 
-      <TabsContent value='post-response' className='flex-1 m-0 p-0'>
-        <Suspense fallback={null}>
-          <MonacoWrapper
-            language='javascript'
-            value={postResponseScript}
-            onChange={readOnly ? undefined : onChangePostResponse}
-            readOnly={readOnly}
-            height='100%'
-            phase='post-response'
-          />
-        </Suspense>
+      <TabsContent value='post-response' className='flex-1 m-0 p-0 flex overflow-hidden'>
+        <div className='flex-1 min-w-0'>
+          <Suspense fallback={null}>
+            <MonacoWrapper
+              language='javascript'
+              value={postResponseScript}
+              onChange={readOnly ? undefined : onChangePostResponse}
+              readOnly={readOnly}
+              height='100%'
+              phase='post-response'
+              onEditorReady={handleEditorReady}
+            />
+          </Suspense>
+        </div>
+        {!readOnly && showPostResponseSidebar && (
+          <ScriptSnippetSidebar snippets={POST_RESPONSE_SNIPPETS} onInsert={handleInsert} />
+        )}
       </TabsContent>
 
       <TabsContent value='tests' className='flex-1 m-0 p-0 flex overflow-hidden'>
