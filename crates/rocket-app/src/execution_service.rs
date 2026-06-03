@@ -1602,7 +1602,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_response_script_env_var_no_persist_skips_env_repo_save() {
+    async fn post_response_script_env_var_write_always_calls_env_repo_save() {
+        // All active-env writes persist regardless of the per-write persist flag.
         let mut env = Environment::new("dev");
         env.set_variable(Variable::new("TOKEN", "old"));
         let env_repo = RecordingEnvRepo::with_env(env);
@@ -1610,7 +1611,7 @@ mod tests {
         let result = ScriptResult {
             env_var_writes: vec![EnvVarWrite {
                 key: "TOKEN".into(),
-                value: serde_json::json!("runtime-only"),
+                value: serde_json::json!("new-value"),
                 persist: false,
             }],
             ..Default::default()
@@ -1626,10 +1627,9 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        assert!(
-            env_repo.last_saved().is_none(),
-            "env_repo.save() must NOT be called for non-persist writes"
-        );
+        let saved = env_repo.last_saved()
+            .expect("env_repo.save() must be called for all active-env writes");
+        assert_eq!(saved.get_value("TOKEN"), Some("new-value"));
     }
 
     #[tokio::test]
