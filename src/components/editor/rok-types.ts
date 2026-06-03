@@ -207,6 +207,92 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
   },
 ];
 
+export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
+  {
+    id: 'common-patterns',
+    label: 'Common Patterns',
+    items: [
+      {
+        label: 'Save body field to env var',
+        kind: 'template',
+        code: `const value = res.getBody().field;\nrok.setEnvVar("key", value);`,
+      },
+      {
+        label: 'Save header to env var',
+        kind: 'template',
+        code: `const value = res.getHeader("header-name");\nrok.setEnvVar("key", value);`,
+      },
+      {
+        label: 'Log response body',
+        kind: 'template',
+        code: `console.log(res.getBody());`,
+      },
+      {
+        label: 'Set collection var from body',
+        kind: 'template',
+        code: `const value = res.getBody().field;\nrok.setCollectionVar("key", value);`,
+      },
+      {
+        label: 'Set var only if 2xx',
+        kind: 'template',
+        code: `if (res.getStatus() >= 200 && res.getStatus() < 300) {\n  rok.setEnvVar("key", res.getBody().field);\n}`,
+      },
+    ],
+  },
+  {
+    id: 'api-reference',
+    label: 'API Reference',
+    subGroups: [
+      {
+        id: 'res',
+        label: 'res.*',
+        items: [
+          { label: 'res.getStatus()', kind: 'expression', code: 'res.getStatus()' },
+          { label: 'res.getStatusText()', kind: 'expression', code: 'res.getStatusText()' },
+          { label: 'res.getHeader("name")', kind: 'expression', code: 'res.getHeader("name")' },
+          { label: 'res.getHeaders()', kind: 'expression', code: 'res.getHeaders()' },
+          { label: 'res.getBody()', kind: 'expression', code: 'res.getBody()' },
+          {
+            label: 'res.getBody({ raw: true })',
+            kind: 'expression',
+            code: 'res.getBody({ raw: true })',
+          },
+          { label: 'res.getResponseTime()', kind: 'expression', code: 'res.getResponseTime()' },
+        ],
+      },
+      {
+        id: 'rok',
+        label: 'rok.*',
+        items: [
+          { label: 'rok.getVar("key")', kind: 'expression', code: 'rok.getVar("key")' },
+          {
+            label: 'rok.setVar("key", value)',
+            kind: 'expression',
+            code: 'rok.setVar("key", value)',
+          },
+          { label: 'rok.getEnvVar("key")', kind: 'expression', code: 'rok.getEnvVar("key")' },
+          {
+            label: 'rok.setEnvVar("key", value)',
+            kind: 'expression',
+            code: 'rok.setEnvVar("key", value)',
+          },
+          {
+            label: 'rok.getCollectionVar("key")',
+            kind: 'expression',
+            code: 'rok.getCollectionVar("key")',
+          },
+          { label: 'rok.getEnvName()', kind: 'expression', code: 'rok.getEnvName()' },
+          {
+            label: 'rok.interpolate("{{template}}")',
+            kind: 'expression',
+            code: 'rok.interpolate("{{template}}")',
+          },
+        ],
+      },
+    ],
+  },
+];
+
 const ROK_DEFS = `
 declare const rok: {
   /** Read a runtime variable set in a previous script. */
