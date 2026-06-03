@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ScriptSnippetSidebarProps {
   onInsert: (code: string) => void;
+  snippets?: ScriptSnippetGroup[];
 }
 
 const MIN_WIDTH = 120;
@@ -95,7 +96,10 @@ function GroupSection({
   );
 }
 
-export function ScriptSnippetSidebar({ onInsert }: ScriptSnippetSidebarProps) {
+export function ScriptSnippetSidebar({
+  onInsert,
+  snippets = ROK_SNIPPETS,
+}: ScriptSnippetSidebarProps) {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const dragging = useRef(false);
   const startX = useRef(0);
@@ -149,7 +153,7 @@ export function ScriptSnippetSidebar({ onInsert }: ScriptSnippetSidebarProps) {
         </div>
         <ScrollArea className='flex-1'>
           <div className='py-1'>
-            {ROK_SNIPPETS.map((group) => (
+            {snippets.map((group) => (
               <GroupSection key={group.id} group={group} onInsert={onInsert} />
             ))}
           </div>
