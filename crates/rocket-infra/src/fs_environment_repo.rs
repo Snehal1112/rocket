@@ -185,7 +185,20 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn delete(&self, name: &str) -> DomainResult<()> {
-        delete_if_exists(&self.file_path(name), &format!("Environment '{}'", name))
+        // Read the secret key list while the file still exists.
+        let scope = Self::scope_id(&self.dir, name);
+        let secret_keys = self.persisted_secret_keys(name);
+
+        delete_if_exists(&self.file_path(name), &format!("Environment '{}'", name))?;
+
+        // Best-effort: the environment is already gone, so a store failure here
+        // must not surface as a failed delete.
+        for key in secret_keys {
+            if let Err(e) = self.secret_store.delete(&scope, &key) {
+                tracing::warn!(key = %key, error = %e, "failed to remove secret for deleted environment");
+            }
+        }
+        Ok(())
     }
 }
 
@@ -599,5 +612,31 @@ mod tests {
 
         assert_eq!(store.len(), 1);
         assert_eq!(repo.get("prod").expect("get").get_value("API_KEY"), Some("sk-live-123"));
+    }
+
+    #[test]
+    fn deleting_an_environment_removes_its_secrets() {
+        let (_dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        repo.save(&env).expect("save");
+        assert_eq!(store.len(), 1);
+
+        repo.delete("prod").expect("delete");
+
+        assert_eq!(store.len(), 0, "a deleted environment must not leave secrets behind");
+        assert!(repo.list().expect("list").is_empty());
+    }
+
+    #[test]
+    fn deleting_an_environment_with_no_secrets_still_succeeds() {
+        let (_dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        repo.save(&env).expect("save");
+
+        repo.delete("prod").expect("delete");
+        assert_eq!(store.len(), 0);
     }
 }
