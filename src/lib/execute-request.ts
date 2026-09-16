@@ -524,23 +524,34 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
       responseBody: result.body,
     });
-    // Forward script console.log/warn/error entries to the Console panel.
-    for (const entry of result.consoleEntries) {
-      useConsoleStore.getState().addScriptEntry({
+    // Forward script console.log/warn/error entries to the Console panel, in
+    // one update so they keep their original chronological order (a per-entry
+    // prepend loop would reverse them).
+    useConsoleStore.getState().addScriptEntries(
+      result.consoleEntries.map((entry) => ({
         level: entry.level,
         message: entry.message,
+        requestName,
+      })),
+    );
+    // A thrown script error is otherwise invisible — surface it in the Console
+    // panel too, alongside any console.log/warn/error output from the same run.
+    if (result.scriptError) {
+      useConsoleStore.getState().addScriptEntry({
+        level: 'error',
+        message: result.scriptError,
         requestName,
       });
     }
     // Forward rok.test() results to the Console panel.
-    for (const t of result.testResults) {
-      useConsoleStore.getState().addTestEntry({
+    useConsoleStore.getState().addTestEntries(
+      result.testResults.map((t) => ({
         name: t.name,
         status: t.status,
         error: t.error,
         requestName,
-      });
-    }
+      })),
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     usePaneStore.getState().setResponse(tabId, {

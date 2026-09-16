@@ -298,6 +298,97 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
   },
 ];
 
+export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
+  {
+    id: 'common-patterns',
+    label: 'Common Patterns',
+    items: [
+      {
+        label: 'Set Authorization header from env var',
+        kind: 'template',
+        code: `req.setHeader("Authorization", "Bearer " + rok.getEnvVar("token"));`,
+      },
+      {
+        label: 'Set a request header',
+        kind: 'template',
+        code: `req.setHeader("X-Custom-Header", "value");`,
+      },
+      {
+        label: 'Override the request body',
+        kind: 'template',
+        code: `req.setBody({ key: "value" });`,
+      },
+      {
+        label: 'Override the request URL',
+        kind: 'template',
+        code: `req.setUrl("https://example.com/api");`,
+      },
+      {
+        label: 'Log request details',
+        kind: 'template',
+        code: `console.log(req.getMethod(), req.getUrl());`,
+      },
+    ],
+  },
+  {
+    id: 'api-reference',
+    label: 'API Reference',
+    subGroups: [
+      {
+        id: 'req',
+        label: 'req.*',
+        items: [
+          { label: 'req.getUrl()', kind: 'expression', code: 'req.getUrl()' },
+          { label: 'req.setUrl(url)', kind: 'expression', code: 'req.setUrl("url")' },
+          { label: 'req.getMethod()', kind: 'expression', code: 'req.getMethod()' },
+          { label: 'req.setMethod(method)', kind: 'expression', code: 'req.setMethod("GET")' },
+          {
+            label: 'req.getHeader("name")',
+            kind: 'expression',
+            code: 'req.getHeader("name")',
+          },
+          {
+            label: 'req.setHeader("name", value)',
+            kind: 'expression',
+            code: 'req.setHeader("name", "value")',
+          },
+          {
+            label: 'req.deleteHeader("name")',
+            kind: 'expression',
+            code: 'req.deleteHeader("name")',
+          },
+          { label: 'req.getBody()', kind: 'expression', code: 'req.getBody()' },
+          { label: 'req.setBody(body)', kind: 'expression', code: 'req.setBody({})' },
+          { label: 'req.setTimeout(ms)', kind: 'expression', code: 'req.setTimeout(5000)' },
+        ],
+      },
+      {
+        id: 'rok',
+        label: 'rok.*',
+        items: [
+          { label: 'rok.getVar("key")', kind: 'expression', code: 'rok.getVar("key")' },
+          {
+            label: 'rok.setVar("key", value)',
+            kind: 'expression',
+            code: 'rok.setVar("key", value)',
+          },
+          { label: 'rok.getEnvVar("key")', kind: 'expression', code: 'rok.getEnvVar("key")' },
+          {
+            label: 'rok.getCollectionVar("key")',
+            kind: 'expression',
+            code: 'rok.getCollectionVar("key")',
+          },
+          {
+            label: 'rok.interpolate("{{template}}")',
+            kind: 'expression',
+            code: 'rok.interpolate("{{template}}")',
+          },
+        ],
+      },
+    ],
+  },
+];
+
 const ROK_DEFS = `
 declare const rok: {
   /** Read a runtime variable set in a previous script. */
@@ -324,10 +415,15 @@ declare const rok: {
   setGlobalEnvVar(key: string, value: unknown, opts?: { persist?: boolean }): void;
   /** Resolve {{var}} tokens using the current variable context. */
   interpolate(template: string): string;
+  /**
+   * Reserved for the Collection Runner (see docs/superpowers/specs/2026-09-16-collection-runner-design.md).
+   * RocketAPI has no Collection Runner yet — calling these has no effect
+   * outside a single request send.
+   */
   runner: {
-    /** Jump to the named request in the runner, or pass null to stop. */
+    /** No-op until the Collection Runner ships. Jump to the named request, or pass null to stop. */
     setNextRequest(name: string | null): void;
-    /** Skip this request in the runner. */
+    /** No-op until the Collection Runner ships. Skip this request in the runner. */
     skipRequest(): void;
   };
 };
@@ -357,9 +453,13 @@ declare const req: {
   getHost(): string;
   getPath(): string;
   getQueryString(): string;
+  /** Path params extracted from the URL (e.g. :id in /users/:id). */
+  getPathParams(): { name: string; value: string; type: string }[];
   getMethod(): string;
   setMethod(method: string): void;
   getName(): string;
+  /** Tags configured on this request. */
+  getTags(): string[];
   getAuthMode(): string;
   getHeader(name: string): string | undefined;
   getHeaders(): Record<string, string>;
@@ -374,6 +474,8 @@ declare const req: {
   setMaxRedirects(n: number): void;
   getExecutionMode(): "runner" | "standalone";
   getExecutionPlatform(): "app";
+  /** Reserved — always a no-op today, does not register a handler of any kind. */
+  onFail(callback: (error: unknown) => void): void;
 };
 `;
 

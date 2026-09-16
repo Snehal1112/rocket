@@ -1,7 +1,11 @@
 import { PanelRight } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
-import { lazy, Suspense, useCallback, useRef, useState } from 'react';
-import { POST_RESPONSE_SNIPPETS } from '@/components/editor/rok-types';
+import { lazy, Suspense, useRef, useState } from 'react';
+import {
+  POST_RESPONSE_SNIPPETS,
+  PRE_REQUEST_SNIPPETS,
+  type ScriptPhase,
+} from '@/components/editor/rok-types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
@@ -17,7 +21,35 @@ interface ScriptsTabProps {
   onChangePreRequest: (value: string) => void;
   onChangePostResponse: (value: string) => void;
   onChangeTests: (value: string) => void;
-  readOnly?: boolean;
+}
+
+// Inserts a snippet at the cursor (or appends at the end with no cursor).
+// A no-op when `editor` is undefined — e.g. the target tab's Monaco instance
+// hasn't finished mounting yet after a fast tab switch.
+function insertSnippet(editor: monacoNs.editor.IStandaloneCodeEditor | undefined, code: string) {
+  if (!editor) return;
+  const model = editor.getModel();
+  if (!model) return;
+  const position = editor.getPosition();
+  const range = position
+    ? {
+        startLineNumber: position.lineNumber,
+        startColumn: position.column,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      }
+    : (() => {
+        const lastLine = model.getLineCount();
+        const lastCol = model.getLineMaxColumn(lastLine);
+        return {
+          startLineNumber: lastLine,
+          startColumn: lastCol,
+          endLineNumber: lastLine,
+          endColumn: lastCol,
+        };
+      })();
+  editor.executeEdits('snippet-insert', [{ range, text: `\n${code}\n`, forceMoveMarkers: true }]);
+  editor.focus();
 }
 
 export function ScriptsTab({
@@ -27,59 +59,24 @@ export function ScriptsTab({
   onChangePreRequest,
   onChangePostResponse,
   onChangeTests,
-  readOnly = false,
 }: ScriptsTabProps) {
-  const editorRef = useRef<monacoNs.editor.IStandaloneCodeEditor | null>(null);
+  // Keyed per phase (not a single shared ref) — each tab's Monaco instance is
+  // unmounted when its TabsContent goes inactive, so a shared ref could point
+  // at a disposed editor from a different tab right after switching.
+  const editorRefs = useRef<Partial<Record<ScriptPhase, monacoNs.editor.IStandaloneCodeEditor>>>(
+    {},
+  );
 
-  const handleEditorReady = useCallback((editor: monacoNs.editor.IStandaloneCodeEditor) => {
-    editorRef.current = editor;
-  }, []);
-
-  const handleInsert = useCallback((code: string) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const model = editor.getModel();
-    if (!model) return;
-    const position = editor.getPosition();
-    if (!position) {
-      // No cursor — append at end with leading and trailing newlines.
-      const lastLine = model.getLineCount();
-      const lastCol = model.getLineMaxColumn(lastLine);
-      editor.executeEdits('snippet-insert', [
-        {
-          range: {
-            startLineNumber: lastLine,
-            startColumn: lastCol,
-            endLineNumber: lastLine,
-            endColumn: lastCol,
-          },
-          text: `\n${code}\n`,
-          forceMoveMarkers: true,
-        },
-      ]);
-      editor.focus();
-      return;
-    }
-    editor.executeEdits('snippet-insert', [
-      {
-        range: {
-          startLineNumber: position.lineNumber,
-          startColumn: position.column,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        },
-        text: `\n${code}\n`,
-        forceMoveMarkers: true,
-      },
-    ]);
-    editor.focus();
-  }, []);
-
-  const [activeTab, setActiveTab] = useState('pre-request');
+  const [activeTab, setActiveTab] = useState<ScriptPhase>('pre-request');
+  const [showPreRequestSidebar, setShowPreRequestSidebar] = useState(false);
   const [showPostResponseSidebar, setShowPostResponseSidebar] = useState(false);
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className='flex flex-col h-full'>
+    <Tabs
+      value={activeTab}
+      onValueChange={(v) => setActiveTab(v as ScriptPhase)}
+      className='flex flex-col h-full'
+    >
       <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
         <TabsTrigger value='pre-request' className='text-xs'>
           Pre Request
@@ -90,6 +87,17 @@ export function ScriptsTab({
         <TabsTrigger value='tests' className='text-xs'>
           Tests
         </TabsTrigger>
+        {activeTab === 'pre-request' && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='ml-auto h-7 gap-1 text-xs'
+            onClick={() => setShowPreRequestSidebar((v) => !v)}
+          >
+            <PanelRight className='h-3.5 w-3.5' />
+            Snippets
+          </Button>
+        )}
         {activeTab === 'post-response' && (
           <Button
             variant='ghost'
@@ -103,17 +111,27 @@ export function ScriptsTab({
         )}
       </TabsList>
 
-      <TabsContent value='pre-request' className='flex-1 m-0 p-0'>
-        <Suspense fallback={null}>
-          <MonacoWrapper
-            language='javascript'
-            value={preRequestScript}
-            onChange={readOnly ? undefined : onChangePreRequest}
-            readOnly={readOnly}
-            height='100%'
-            phase='pre-request'
+      <TabsContent value='pre-request' className='flex-1 m-0 p-0 flex overflow-hidden'>
+        <div className='flex-1 min-w-0'>
+          <Suspense fallback={null}>
+            <MonacoWrapper
+              language='javascript'
+              value={preRequestScript}
+              onChange={onChangePreRequest}
+              height='100%'
+              phase='pre-request'
+              onEditorReady={(editor) => {
+                editorRefs.current['pre-request'] = editor;
+              }}
+            />
+          </Suspense>
+        </div>
+        {showPreRequestSidebar && (
+          <ScriptSnippetSidebar
+            snippets={PRE_REQUEST_SNIPPETS}
+            onInsert={(code) => insertSnippet(editorRefs.current['pre-request'], code)}
           />
-        </Suspense>
+        )}
       </TabsContent>
 
       <TabsContent value='post-response' className='flex-1 m-0 p-0 flex overflow-hidden'>
@@ -122,16 +140,20 @@ export function ScriptsTab({
             <MonacoWrapper
               language='javascript'
               value={postResponseScript}
-              onChange={readOnly ? undefined : onChangePostResponse}
-              readOnly={readOnly}
+              onChange={onChangePostResponse}
               height='100%'
               phase='post-response'
-              onEditorReady={handleEditorReady}
+              onEditorReady={(editor) => {
+                editorRefs.current['post-response'] = editor;
+              }}
             />
           </Suspense>
         </div>
-        {!readOnly && showPostResponseSidebar && (
-          <ScriptSnippetSidebar snippets={POST_RESPONSE_SNIPPETS} onInsert={handleInsert} />
+        {showPostResponseSidebar && (
+          <ScriptSnippetSidebar
+            snippets={POST_RESPONSE_SNIPPETS}
+            onInsert={(code) => insertSnippet(editorRefs.current['post-response'], code)}
+          />
         )}
       </TabsContent>
 
@@ -141,15 +163,16 @@ export function ScriptsTab({
             <MonacoWrapper
               language='javascript'
               value={testsScript}
-              onChange={readOnly ? undefined : onChangeTests}
-              readOnly={readOnly}
+              onChange={onChangeTests}
               height='100%'
               phase='tests'
-              onEditorReady={handleEditorReady}
+              onEditorReady={(editor) => {
+                editorRefs.current.tests = editor;
+              }}
             />
           </Suspense>
         </div>
-        {!readOnly && <ScriptSnippetSidebar onInsert={handleInsert} />}
+        <ScriptSnippetSidebar onInsert={(code) => insertSnippet(editorRefs.current.tests, code)} />
       </TabsContent>
     </Tabs>
   );

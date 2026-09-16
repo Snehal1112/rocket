@@ -44,6 +44,10 @@ interface ConsoleState {
   addHttpEntry: (entry: Omit<HttpConsoleEntry, 'id' | 'timestamp' | 'kind'>) => void;
   addScriptEntry: (entry: Omit<ScriptLogEntry, 'id' | 'timestamp' | 'kind'>) => void;
   addTestEntry: (entry: Omit<TestResultEntry, 'id' | 'timestamp' | 'kind'>) => void;
+  /** Adds all entries in one update, preserving their given order (earliest first). */
+  addScriptEntries: (entries: Omit<ScriptLogEntry, 'id' | 'timestamp' | 'kind'>[]) => void;
+  /** Adds all entries in one update, preserving their given order (earliest first). */
+  addTestEntries: (entries: Omit<TestResultEntry, 'id' | 'timestamp' | 'kind'>[]) => void;
   clearEntries: () => void;
 }
 
@@ -83,6 +87,32 @@ export const useConsoleStore = create<ConsoleState>((set) => ({
     };
     set((state) => ({
       entries: [full, ...state.entries].slice(0, MAX_ENTRIES),
+    }));
+  },
+
+  addScriptEntries: (entries) => {
+    if (entries.length === 0) return;
+    const full: ScriptLogEntry[] = entries.map((entry) => ({
+      ...entry,
+      kind: 'script',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    }));
+    set((state) => ({
+      entries: [...full, ...state.entries].slice(0, MAX_ENTRIES),
+    }));
+  },
+
+  addTestEntries: (entries) => {
+    if (entries.length === 0) return;
+    const full: TestResultEntry[] = entries.map((entry) => ({
+      ...entry,
+      kind: 'test',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    }));
+    set((state) => ({
+      entries: [...full, ...state.entries].slice(0, MAX_ENTRIES),
     }));
   },
 

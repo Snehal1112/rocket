@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Check,
   Clock,
   Copy,
@@ -389,6 +390,17 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           </div>
         )}
       </div>
+
+      {/* ── Script error banner ── */}
+      {response.scriptError && (
+        <div
+          role='alert'
+          className='flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 shrink-0 text-xs text-destructive'
+        >
+          <AlertTriangle className='h-3.5 w-3.5 mt-0.5 shrink-0' />
+          <span className='break-all font-mono'>{response.scriptError}</span>
+        </div>
+      )}
 
       {/* ── Optional search bar (raw tab) ── */}
       {searchOpen && activeView === 'raw' && (
