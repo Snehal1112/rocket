@@ -152,6 +152,10 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         fs::create_dir_all(&self.dir)?;
         let scope = Self::scope_id(&self.dir, &env.name);
 
+        // Snapshot which keys were secret before this save, so entries left
+        // behind by an un-secreted or removed variable can be cleaned up.
+        let previous_secret_keys = self.persisted_secret_keys(&env.name);
+
         // Every secret value goes to the store before any YAML is written. A
         // store failure aborts the whole save: the file must never claim a
         // variable is secret when its value did not reach secure storage.
@@ -165,6 +169,18 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize environment: {e}")))?;
         atomic_write(&self.file_path(&env.name), yaml.as_bytes())?;
+
+        // Best-effort cleanup. A stale entry leaks nothing new, so a failure
+        // here must not fail the save the user just asked for.
+        for key in previous_secret_keys {
+            if env.variables.iter().any(|v| v.secret && v.key == key) {
+                continue;
+            }
+            if let Err(e) = self.secret_store.delete(&scope, &key) {
+                tracing::warn!(key = %key, error = %e, "failed to remove stale environment secret");
+            }
+        }
+
         Ok(())
     }
 
@@ -537,5 +553,51 @@ mod tests {
         assert_eq!(store.len(), 2, "same env name in different directories must not collide");
         assert_eq!(repo_a.get("prod").expect("get a").get_value("API_KEY"), Some("value-a"));
         assert_eq!(repo_b.get("prod").expect("get b").get_value("API_KEY"), Some("value-b"));
+    }
+
+    #[test]
+    fn unsetting_the_secret_flag_removes_the_stored_secret() {
+        let (dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        repo.save(&env).expect("first save");
+        assert_eq!(store.len(), 1);
+
+        env.set_variable(Variable::new("API_KEY", "not-a-secret-anymore"));
+        repo.save(&env).expect("second save");
+
+        assert_eq!(store.len(), 0, "a stale keychain entry must be removed");
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        assert!(raw.contains("value: not-a-secret-anymore"), "got:\n{raw}");
+        assert!(!raw.contains("secret: true"), "got:\n{raw}");
+    }
+
+    #[test]
+    fn removing_a_secret_variable_removes_the_stored_secret() {
+        let (_dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        env.set_variable(Variable::secret("TOKEN", "tok-456"));
+        repo.save(&env).expect("first save");
+        assert_eq!(store.len(), 2);
+
+        env.remove_variable("API_KEY");
+        repo.save(&env).expect("second save");
+
+        assert_eq!(store.len(), 1);
+        assert!(store.contains_value("tok-456"), "the surviving secret must be untouched");
+        assert!(!store.contains_value("sk-live-123"));
+    }
+
+    #[test]
+    fn resaving_an_unchanged_secret_keeps_it() {
+        let (_dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        repo.save(&env).expect("first save");
+        repo.save(&env).expect("second save");
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(repo.get("prod").expect("get").get_value("API_KEY"), Some("sk-live-123"));
     }
 }
