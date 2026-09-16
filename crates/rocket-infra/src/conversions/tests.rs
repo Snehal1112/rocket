@@ -362,7 +362,7 @@ fn environment_oc_to_domain() {
         color: Some("#FF0000".into()),
         description: Some(Description::text("Prod env")),
         variables: vec![
-            OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), initial: None, description: None, disabled: None },
+            OcEnvVariableEntry::Plain(OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), initial: None, description: None, disabled: None }),
         ],
         client_certificates: Vec::new(),
         extends: Some("base".into()),
@@ -393,6 +393,98 @@ fn environment_roundtrip() {
     assert_eq!(original.color, back.color);
     assert_eq!(original.variables.len(), back.variables.len());
     assert_eq!(original.variables[0].key, back.variables[0].key);
+}
+
+#[test]
+fn environment_secret_variable_to_oc_drops_the_value() {
+    let mut env = Environment::new("prod");
+    let mut secret = Variable::secret("API_KEY", "sk-live-123");
+    secret.secret_type = Some("string".into());
+    env.set_variable(secret);
+
+    let oc: OcEnvironment = env.into();
+    assert_eq!(oc.variables.len(), 1);
+    match &oc.variables[0] {
+        OcEnvVariableEntry::Secret(s) => {
+            assert!(s.secret);
+            assert_eq!(s.name, "API_KEY");
+            assert_eq!(s.secret_type, Some("string".into()));
+            assert_eq!(s.disabled, None);
+        }
+        OcEnvVariableEntry::Plain(_) => {
+            panic!("a secret Variable must convert to the Secret variant")
+        }
+    }
+
+    let yaml = serde_yaml::to_string(&oc).expect("serialize environment");
+    assert!(!yaml.contains("sk-live-123"), "secret value leaked into YAML:\n{yaml}");
+}
+
+#[test]
+fn environment_disabled_secret_variable_keeps_disabled_flag() {
+    let mut env = Environment::new("prod");
+    let mut secret = Variable::secret("API_KEY", "sk-live-123");
+    secret.enabled = false;
+    env.set_variable(secret);
+
+    let oc: OcEnvironment = env.into();
+    match &oc.variables[0] {
+        OcEnvVariableEntry::Secret(s) => assert_eq!(s.disabled, Some(true)),
+        OcEnvVariableEntry::Plain(_) => panic!("expected the Secret variant"),
+    }
+}
+
+#[test]
+fn environment_oc_secret_entry_converts_back_with_secret_flag_set() {
+    let oc = OcEnvironment {
+        name: "prod".into(),
+        color: None,
+        description: None,
+        variables: vec![OcEnvVariableEntry::Secret(OcSecretVariable {
+            secret: true,
+            name: "API_KEY".into(),
+            description: None,
+            disabled: None,
+            secret_type: Some("string".into()),
+        })],
+        client_certificates: Vec::new(),
+        extends: None,
+        dot_env_file_path: None,
+    };
+
+    let env: Environment = oc.into();
+    assert_eq!(env.variables.len(), 1);
+    assert!(env.variables[0].secret);
+    assert_eq!(env.variables[0].key, "API_KEY");
+    assert_eq!(env.variables[0].value, "", "YAML must not be a source of secret values");
+    assert_eq!(env.variables[0].secret_type, Some("string".into()));
+    assert!(env.variables[0].enabled);
+}
+
+#[test]
+fn environment_secret_flag_survives_a_yaml_roundtrip() {
+    let mut env = Environment::new("prod");
+    env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+    env.set_variable(Variable::new("HOST", "api.example.com"));
+
+    let oc: OcEnvironment = env.into();
+    let yaml = serde_yaml::to_string(&oc).expect("serialize environment");
+    let parsed: OcEnvironment = serde_yaml::from_str(&yaml).expect("parse environment");
+    let back: Environment = parsed.into();
+
+    let api_key = back
+        .variables
+        .iter()
+        .find(|v| v.key == "API_KEY")
+        .expect("API_KEY entry");
+    assert!(api_key.secret, "the secret flag must survive save -> load");
+    let host = back
+        .variables
+        .iter()
+        .find(|v| v.key == "HOST")
+        .expect("HOST entry");
+    assert!(!host.secret);
+    assert_eq!(host.value, "api.example.com");
 }
 
 // ---- OcHttpRequest ↔ Request tests ----
