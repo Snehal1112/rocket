@@ -736,7 +736,7 @@ dotEnvFilePath: .env.prod
     #[test]
     fn env_variable_entry_prefers_secret_variant() {
         let yaml = "secret: true\nname: API_KEY\ntype: string\n";
-        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).unwrap();
+        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).expect("parse secret entry");
         match entry {
             OcEnvVariableEntry::Secret(s) => {
                 assert!(s.secret);
@@ -752,7 +752,7 @@ dotEnvFilePath: .env.prod
     #[test]
     fn env_variable_entry_falls_back_to_plain_variant() {
         let yaml = "name: HOST\nvalue: api.example.com\n";
-        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).unwrap();
+        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).expect("parse plain entry");
         match entry {
             OcEnvVariableEntry::Plain(v) => {
                 assert_eq!(v.name, "HOST");
@@ -776,7 +776,7 @@ dotEnvFilePath: .env.prod
             description: None,
             disabled: None,
         });
-        let yaml = serde_yaml::to_string(&plain).unwrap();
+        let yaml = serde_yaml::to_string(&plain).expect("serialize plain entry");
         assert!(yaml.contains("name: HOST"), "got:\n{yaml}");
         assert!(yaml.contains("value: api.example.com"), "got:\n{yaml}");
         assert!(!yaml.contains("Plain"), "untagged enum must not emit a variant key:\n{yaml}");
@@ -788,7 +788,7 @@ dotEnvFilePath: .env.prod
             disabled: None,
             secret_type: Some("string".into()),
         });
-        let yaml = serde_yaml::to_string(&secret).unwrap();
+        let yaml = serde_yaml::to_string(&secret).expect("serialize secret entry");
         assert!(yaml.contains("secret: true"), "got:\n{yaml}");
         assert!(yaml.contains("name: API_KEY"), "got:\n{yaml}");
         assert!(!yaml.contains("value:"), "a secret entry must never carry a value:\n{yaml}");
