@@ -72,6 +72,31 @@ impl FsEnvironmentRepo {
             })
             .collect()
     }
+
+    /// Fill in real values for secret variables from the secret store.
+    ///
+    /// A store failure must never fail an environment load — that would brick
+    /// app startup on a locked keychain — so it is logged and the variable keeps
+    /// whatever value the YAML produced (empty for a spec SecretVariable entry).
+    fn hydrate_secrets(&self, env: &mut Environment) {
+        if !env.variables.iter().any(|v| v.secret) {
+            return;
+        }
+        let scope = Self::scope_id(&self.dir, &env.name);
+        for var in env.variables.iter_mut().filter(|v| v.secret) {
+            match self.secret_store.get(&scope, &var.key) {
+                Ok(Some(value)) => var.value = value,
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        key = %var.key,
+                        error = %e,
+                        "secret store unavailable, environment secret left unresolved"
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl EnvironmentRepository for FsEnvironmentRepo {
@@ -87,12 +112,17 @@ impl EnvironmentRepository for FsEnvironmentRepo {
                 continue;
             }
             let content = fs::read_to_string(&path)?;
-            if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
-                result.push(Environment::from(oc));
+            let parsed = if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
+                Some(Environment::from(oc))
             } else if let Ok(env) = serde_yaml::from_str::<Environment>(&content) {
-                result.push(env);
+                Some(env)
             } else {
                 tracing::warn!(path = %path.display(), "skipping corrupt environment YAML file");
+                None
+            };
+            if let Some(mut env) = parsed {
+                self.hydrate_secrets(&mut env);
+                result.push(env);
             }
         }
         result.sort_by(|a, b| a.name.cmp(&b.name));
@@ -105,11 +135,15 @@ impl EnvironmentRepository for FsEnvironmentRepo {
             return Err(DomainError::NotFound(format!("Environment '{}'", name)));
         }
         let content = fs::read_to_string(&path)?;
-        if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
-            return Ok(Environment::from(oc));
-        }
-        serde_yaml::from_str::<Environment>(&content)
-            .map_err(|e| DomainError::Internal(format!("Failed to parse environment YAML: {e}")))
+        let mut env = if let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) {
+            Environment::from(oc)
+        } else {
+            serde_yaml::from_str::<Environment>(&content).map_err(|e| {
+                DomainError::Internal(format!("Failed to parse environment YAML: {e}"))
+            })?
+        };
+        self.hydrate_secrets(&mut env);
+        Ok(env)
     }
 
     fn save(&self, env: &Environment) -> DomainResult<()> {
@@ -384,5 +418,124 @@ mod tests {
         assert!(raw.contains("name: HOST"), "got:\n{raw}");
         assert!(raw.contains("value: api.example.com"), "got:\n{raw}");
         assert_eq!(store.len(), 0, "a non-secret variable must not touch the secret store");
+    }
+
+    #[test]
+    fn secret_value_roundtrips_through_save_and_get() {
+        let (_dir, repo, _store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        let mut secret = Variable::secret("API_KEY", "sk-live-123");
+        secret.secret_type = Some("string".into());
+        env.set_variable(secret);
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        repo.save(&env).expect("save");
+
+        let loaded = repo.get("prod").expect("get");
+        let api_key = loaded
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY entry");
+        assert!(api_key.secret, "the secret flag must survive a roundtrip");
+        assert_eq!(api_key.value, "sk-live-123");
+        assert_eq!(api_key.secret_type, Some("string".into()));
+        assert_eq!(loaded.get_value("HOST"), Some("api.example.com"));
+    }
+
+    #[test]
+    fn secret_value_roundtrips_through_save_and_list() {
+        let (_dir, repo, _store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        repo.save(&env).expect("save");
+
+        let list = repo.list().expect("list");
+        assert_eq!(list.len(), 1);
+        let api_key = list[0]
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY entry");
+        assert!(api_key.secret);
+        assert_eq!(api_key.value, "sk-live-123");
+    }
+
+    #[test]
+    fn get_soft_fails_when_the_secret_store_is_unavailable() {
+        let (_dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        repo.save(&env).expect("save");
+
+        store.fail_get.store(true, Ordering::SeqCst);
+        // A locked keychain must never fail an environment load.
+        let loaded = repo.get("prod").expect("get must not fail on a store error");
+        let api_key = loaded
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY entry");
+        assert!(api_key.secret);
+        assert_eq!(api_key.value, "");
+        assert_eq!(loaded.get_value("HOST"), Some("api.example.com"));
+    }
+
+    #[test]
+    fn get_returns_an_empty_secret_when_the_store_has_no_entry() {
+        let (dir, repo, _store) = setup_with_store();
+        let yaml = "name: prod\nvariables:\n- secret: true\n  name: API_KEY\n";
+        std::fs::write(dir.path().join("prod.yml"), yaml).expect("write prod.yml");
+
+        let loaded = repo.get("prod").expect("get");
+        let api_key = loaded
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY entry");
+        assert!(api_key.secret);
+        assert_eq!(api_key.value, "");
+    }
+
+    #[test]
+    fn legacy_plaintext_secret_value_is_not_blanked_on_load() {
+        let (dir, repo, _store) = setup_with_store();
+        // Legacy `Environment`-format file: `key:` instead of `name:`, so the
+        // OcEnvironment parse fails and the fallback parser handles it.
+        let legacy = "name: legacy\nvariables:\n- key: API_KEY\n  value: plaintext-token\n  enabled: true\n  secret: true\n";
+        std::fs::write(dir.path().join("legacy.yml"), legacy).expect("write legacy.yml");
+
+        let loaded = repo.get("legacy").expect("get");
+        let api_key = loaded
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY entry");
+        assert!(api_key.secret);
+        assert_eq!(
+            api_key.value, "plaintext-token",
+            "a store miss must not destroy existing data"
+        );
+    }
+
+    #[test]
+    fn two_directories_do_not_share_secret_entries() {
+        let store = Arc::new(InMemorySecretStore::default());
+        let dir_a = TempDir::new().expect("temp dir a");
+        let dir_b = TempDir::new().expect("temp dir b");
+        let repo_a = FsEnvironmentRepo::with_secret_store(dir_a.path().to_path_buf(), store.clone());
+        let repo_b = FsEnvironmentRepo::with_secret_store(dir_b.path().to_path_buf(), store.clone());
+
+        let mut env_a = Environment::new("prod");
+        env_a.set_variable(Variable::secret("API_KEY", "value-a"));
+        repo_a.save(&env_a).expect("save a");
+
+        let mut env_b = Environment::new("prod");
+        env_b.set_variable(Variable::secret("API_KEY", "value-b"));
+        repo_b.save(&env_b).expect("save b");
+
+        assert_eq!(store.len(), 2, "same env name in different directories must not collide");
+        assert_eq!(repo_a.get("prod").expect("get a").get_value("API_KEY"), Some("value-a"));
+        assert_eq!(repo_b.get("prod").expect("get b").get_value("API_KEY"), Some("value-b"));
     }
 }
