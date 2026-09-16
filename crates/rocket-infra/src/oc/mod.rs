@@ -734,6 +734,68 @@ dotEnvFilePath: .env.prod
     }
 
     #[test]
+    fn env_variable_entry_prefers_secret_variant() {
+        let yaml = "secret: true\nname: API_KEY\ntype: string\n";
+        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).unwrap();
+        match entry {
+            OcEnvVariableEntry::Secret(s) => {
+                assert!(s.secret);
+                assert_eq!(s.name, "API_KEY");
+                assert_eq!(s.secret_type, Some("string".into()));
+            }
+            OcEnvVariableEntry::Plain(_) => {
+                panic!("an entry with `secret: true` must not deserialize as Plain")
+            }
+        }
+    }
+
+    #[test]
+    fn env_variable_entry_falls_back_to_plain_variant() {
+        let yaml = "name: HOST\nvalue: api.example.com\n";
+        let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).unwrap();
+        match entry {
+            OcEnvVariableEntry::Plain(v) => {
+                assert_eq!(v.name, "HOST");
+                assert_eq!(
+                    v.value.as_ref().map(|x| x.data().to_string()),
+                    Some("api.example.com".to_string())
+                );
+            }
+            OcEnvVariableEntry::Secret(_) => {
+                panic!("an entry without `secret` must not deserialize as Secret")
+            }
+        }
+    }
+
+    #[test]
+    fn env_variable_entry_serializes_without_a_variant_wrapper() {
+        let plain = OcEnvVariableEntry::Plain(OcVariable {
+            name: "HOST".into(),
+            value: Some(VariableValue::simple("api.example.com")),
+            initial: None,
+            description: None,
+            disabled: None,
+        });
+        let yaml = serde_yaml::to_string(&plain).unwrap();
+        assert!(yaml.contains("name: HOST"), "got:\n{yaml}");
+        assert!(yaml.contains("value: api.example.com"), "got:\n{yaml}");
+        assert!(!yaml.contains("Plain"), "untagged enum must not emit a variant key:\n{yaml}");
+
+        let secret = OcEnvVariableEntry::Secret(OcSecretVariable {
+            secret: true,
+            name: "API_KEY".into(),
+            description: None,
+            disabled: None,
+            secret_type: Some("string".into()),
+        });
+        let yaml = serde_yaml::to_string(&secret).unwrap();
+        assert!(yaml.contains("secret: true"), "got:\n{yaml}");
+        assert!(yaml.contains("name: API_KEY"), "got:\n{yaml}");
+        assert!(!yaml.contains("value:"), "a secret entry must never carry a value:\n{yaml}");
+        assert!(!yaml.contains("Secret"), "untagged enum must not emit a variant key:\n{yaml}");
+    }
+
+    #[test]
     fn oc_collection_with_uid_yaml() {
         let yaml = "opencollection: \"0.1\"\nuid: \"550e8400-e29b-41d4-a716-446655440000\"\ninfo:\n  name: My API";
         let col: OcCollection = serde_yaml::from_str(yaml).unwrap();
