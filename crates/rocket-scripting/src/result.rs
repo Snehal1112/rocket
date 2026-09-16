@@ -30,10 +30,17 @@ pub struct ScriptResult {
     pub global_env_var_writes: Vec<EnvVarWrite>,
 
     /// Next request to run in a collection runner. `None` = no override.
+    ///
+    /// Reserved for the Collection Runner feature (see
+    /// `docs/superpowers/specs/2026-09-16-collection-runner-design.md`) — no
+    /// caller currently reads this field. `rok.runner.setNextRequest()` is a
+    /// no-op until that feature ships.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_request: Option<NextRequest>,
 
     /// When `true`, the runner skips this request entirely.
+    ///
+    /// Reserved for the Collection Runner feature — see `next_request` above.
     #[serde(default)]
     pub skip_request: bool,
 
@@ -59,13 +66,11 @@ pub struct RequestMutations {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
 
-    /// Headers to add or overwrite (key = name, value = value).
+    /// Header set/delete mutations, in the order the script issued them —
+    /// order matters (e.g. `deleteHeader` then `setHeader` on the same name
+    /// must not be collapsed into "delete wins").
     #[serde(default)]
-    pub headers_set: HashMap<String, String>,
-
-    /// Header names to remove.
-    #[serde(default)]
-    pub headers_deleted: Vec<String>,
+    pub headers: Vec<HeaderMutation>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
@@ -75,6 +80,14 @@ pub struct RequestMutations {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<u32>,
+}
+
+/// A single header mutation from `req.setHeader`/`setHeaders`/`deleteHeader`/`deleteHeaders`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum HeaderMutation {
+    Set { name: String, value: String },
+    Delete { name: String },
 }
 
 /// A single variable write to an environment scope.

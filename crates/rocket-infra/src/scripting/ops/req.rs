@@ -2,7 +2,7 @@ use deno_core::{op2, OpState};
 use url::Url;
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use crate::scripting::ops::ScriptOpError;
-use rocket_scripting::ScriptPhase;
+use rocket_scripting::{HeaderMutation, ScriptPhase};
 
 fn guard_before_request(state: &OpState) -> Result<(), ScriptOpError> {
     let phase = &state.borrow::<ScriptInputState>().phase;
@@ -199,7 +199,7 @@ pub fn op_req_set_header(
 ) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers_set.insert(name, value);
+    out.request_mutations.headers.push(HeaderMutation::Set { name, value });
     out.any_request_mutation = true;
     Ok(())
 }
@@ -211,10 +211,12 @@ pub fn op_req_set_headers(
     #[string] headers_json: String,
 ) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
-    let map: std::collections::HashMap<String, String> =
+    let map: std::collections::BTreeMap<String, String> =
         serde_json::from_str(&headers_json).unwrap_or_default();
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers_set.extend(map);
+    out.request_mutations.headers.extend(
+        map.into_iter().map(|(name, value)| HeaderMutation::Set { name, value }),
+    );
     out.any_request_mutation = true;
     Ok(())
 }
@@ -226,7 +228,7 @@ pub fn op_req_delete_header(
 ) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers_deleted.push(name);
+    out.request_mutations.headers.push(HeaderMutation::Delete { name });
     out.any_request_mutation = true;
     Ok(())
 }
@@ -240,7 +242,9 @@ pub fn op_req_delete_headers(
     guard_before_request(state)?;
     let names: Vec<String> = serde_json::from_str(&names_json).unwrap_or_default();
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers_deleted.extend(names);
+    out.request_mutations.headers.extend(
+        names.into_iter().map(|name| HeaderMutation::Delete { name }),
+    );
     out.any_request_mutation = true;
     Ok(())
 }

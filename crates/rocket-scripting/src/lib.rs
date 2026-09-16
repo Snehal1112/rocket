@@ -7,6 +7,6 @@ pub use context::ScriptContext;
 pub use engine::ScriptEngine;
 pub use phase::ScriptPhase;
 pub use result::{
-    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest,
+    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, HeaderMutation, NextRequest,
     RequestMutations, ScriptResult, TestResult, TestStatus,
 };

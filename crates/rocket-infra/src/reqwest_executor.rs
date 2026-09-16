@@ -110,6 +110,7 @@ impl ReqwestExecutor {
         &self,
         mut builder: reqwest::RequestBuilder,
         body: &Option<Body>,
+        has_explicit_content_type: bool,
     ) -> DomainResult<reqwest::RequestBuilder> {
         let Some(body) = body else {
             return Ok(builder);
@@ -119,27 +120,31 @@ impl ReqwestExecutor {
             BodyMode::None => {}
             BodyMode::Json => {
                 let content = body.content.as_deref().unwrap_or("");
-                builder = builder
-                    .header("Content-Type", "application/json")
-                    .body(content.to_string());
+                if !has_explicit_content_type {
+                    builder = builder.header("Content-Type", "application/json");
+                }
+                builder = builder.body(content.to_string());
             }
             BodyMode::Xml => {
                 let content = body.content.as_deref().unwrap_or("");
-                builder = builder
-                    .header("Content-Type", "text/xml")
-                    .body(content.to_string());
+                if !has_explicit_content_type {
+                    builder = builder.header("Content-Type", "text/xml");
+                }
+                builder = builder.body(content.to_string());
             }
             BodyMode::Text => {
                 let content = body.content.as_deref().unwrap_or("");
-                builder = builder
-                    .header("Content-Type", "text/plain")
-                    .body(content.to_string());
+                if !has_explicit_content_type {
+                    builder = builder.header("Content-Type", "text/plain");
+                }
+                builder = builder.body(content.to_string());
             }
             BodyMode::Sparql => {
                 let content = body.content.as_deref().unwrap_or("");
-                builder = builder
-                    .header("Content-Type", "application/sparql-query")
-                    .body(content.to_string());
+                if !has_explicit_content_type {
+                    builder = builder.header("Content-Type", "application/sparql-query");
+                }
+                builder = builder.body(content.to_string());
             }
             BodyMode::Binary => {
                 if let Some(file_path) = &body.file_path {
@@ -148,21 +153,21 @@ impl ReqwestExecutor {
                     let data = std::fs::read(path)
                         .map_err(|e| DomainError::Internal(format!("Failed to read file: {e}")))?;
 
-                    // Detect content type from the file extension.
-                    let content_type = match path.extension().and_then(|e| e.to_str()) {
-                        Some("json") => "application/json",
-                        Some("xml") => "application/xml",
-                        Some("png") => "image/png",
-                        Some("jpg" | "jpeg") => "image/jpeg",
-                        Some("gif") => "image/gif",
-                        Some("pdf") => "application/pdf",
-                        Some("zip") => "application/zip",
-                        _ => "application/octet-stream",
-                    };
-
-                    builder = builder
-                        .header("Content-Type", content_type)
-                        .body(data);
+                    if !has_explicit_content_type {
+                        // Detect content type from the file extension.
+                        let content_type = match path.extension().and_then(|e| e.to_str()) {
+                            Some("json") => "application/json",
+                            Some("xml") => "application/xml",
+                            Some("png") => "image/png",
+                            Some("jpg" | "jpeg") => "image/jpeg",
+                            Some("gif") => "image/gif",
+                            Some("pdf") => "application/pdf",
+                            Some("zip") => "application/zip",
+                            _ => "application/octet-stream",
+                        };
+                        builder = builder.header("Content-Type", content_type);
+                    }
+                    builder = builder.body(data);
                 }
             }
             BodyMode::FormUrlEncoded => {
@@ -251,12 +256,16 @@ impl HttpExecutor for ReqwestExecutor {
         for header in request.headers.iter().filter(|h| h.enabled) {
             builder = builder.header(&header.key, &header.value);
         }
+        let has_explicit_content_type = request
+            .headers
+            .iter()
+            .any(|h| h.enabled && h.key.eq_ignore_ascii_case("content-type"));
 
         // Apply authentication.
         builder = apply_auth(builder, &request.auth, &request.method).await?;
 
         // Apply request body.
-        builder = self.apply_body(builder, &request.body)?;
+        builder = self.apply_body(builder, &request.body, has_explicit_content_type)?;
 
         // Per-request timeout: 0 means no timeout (unlimited).
         if request.options.timeout_ms > 0 {
@@ -558,8 +567,37 @@ mod tests {
         let req = HttpRequest::new(HttpMethod::Get, "https://example.com");
         let client = Client::new();
         let builder = client.get("https://example.com");
-        let result = exec.apply_body(builder, &req.body);
+        let result = exec.apply_body(builder, &req.body, false);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn apply_body_skips_content_type_when_already_explicit() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let exec = ReqwestExecutor::new();
+        let client = Client::new();
+        let builder = client
+            .post("https://example.com")
+            .header("Content-Type", "application/xml");
+        let body = Body {
+            mode: BodyMode::Json,
+            content: Some("<a/>".into()),
+            form_data: None,
+            file_path: None,
+        };
+        let built = exec
+            .apply_body(builder, &Some(body), true)
+            .expect("apply_body")
+            .build()
+            .expect("build request");
+        let content_types: Vec<_> = built.headers().get_all("content-type").iter().collect();
+        assert_eq!(
+            content_types.len(),
+            1,
+            "must not add a second Content-Type header when one is already explicit"
+        );
+        assert_eq!(content_types[0], "application/xml");
     }
 
     #[test]
@@ -599,7 +637,7 @@ mod tests {
         let exec = ReqwestExecutor::new();
         let client = Client::new();
         let builder = client.post("https://example.com");
-        let result = exec.apply_body(builder, &Some(body));
+        let result = exec.apply_body(builder, &Some(body), false);
         assert!(result.is_ok());
     }
 
@@ -617,7 +655,7 @@ mod tests {
         let exec = ReqwestExecutor::new();
         let client = Client::new();
         let builder = client.post("https://example.com");
-        let result = exec.apply_body(builder, &Some(body));
+        let result = exec.apply_body(builder, &Some(body), false);
         assert!(result.is_err());
     }
 

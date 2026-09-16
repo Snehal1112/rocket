@@ -60,6 +60,7 @@ fn op_require_module(#[string] name: String) -> String {
         "chai"          => include_str!("modules/chai.js").to_string(),
         "crypto-js"     => include_str!("modules/crypto-js.js").to_string(),
         "jsonwebtoken"  => include_str!("modules/jsonwebtoken.js").to_string(),
+        "jsrsasign"     => include_str!("modules/jsrsasign.js").to_string(),
         "uuid"          => include_str!("modules/uuid.js").to_string(),
         "moment"        => include_str!("modules/moment.js").to_string(),
         "nanoid"        => include_str!("modules/nanoid.js").to_string(),
@@ -357,6 +358,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn require_axios_loads_but_calling_it_throws_clear_error() {
+        let engine = DenoScriptEngine::new();
+        // require() itself must succeed (there's no wiring gap like the old
+        // jsrsasign bug), but calling it must fail immediately and clearly —
+        // there is no outbound-HTTP bridge from inside the script sandbox.
+        let ctx = minimal_ctx(r#"
+            const axios = require('axios');
+            axios.get('https://example.com');
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("axios.get() must throw, not silently succeed");
+        assert!(
+            err.contains("not supported in RocketAPI scripts"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn unknown_require_returns_error() {
         let engine = DenoScriptEngine::new();
         let ctx = minimal_ctx("require('not-a-real-module')");
@@ -434,7 +453,26 @@ mod tests {
         let ctx = minimal_ctx("req.setHeader('x-custom', 'my-value')");
         let result = engine.execute(ctx).await.expect("execute");
         let mutations = result.request_mutations.expect("mutations present");
-        assert_eq!(mutations.headers_set.get("x-custom").expect("header"), "my-value");
+        assert!(matches!(
+            mutations.headers.as_slice(),
+            [rocket_scripting::HeaderMutation::Set { name, value }]
+                if name == "x-custom" && value == "my-value"
+        ));
+    }
+
+    #[tokio::test]
+    async fn req_delete_then_set_header_preserves_order() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("req.deleteHeader('Authorization'); req.setHeader('Authorization', 'Bearer tok')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let mutations = result.request_mutations.expect("mutations present");
+        assert!(matches!(
+            mutations.headers.as_slice(),
+            [
+                rocket_scripting::HeaderMutation::Delete { name: d },
+                rocket_scripting::HeaderMutation::Set { name: s, value }
+            ] if d == "Authorization" && s == "Authorization" && value == "Bearer tok"
+        ));
     }
 
     #[tokio::test]
