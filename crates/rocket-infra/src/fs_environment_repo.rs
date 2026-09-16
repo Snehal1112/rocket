@@ -1,24 +1,76 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use rocket_environment::secret_store::{NullSecretStore, SecretStore};
 use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::oc::OcEnvironment;
+use crate::oc::{OcEnvVariableEntry, OcEnvironment};
 use crate::yaml_io::delete_if_exists;
 
 pub struct FsEnvironmentRepo {
     dir: PathBuf,
+    secret_store: Arc<dyn SecretStore>,
 }
 
 impl FsEnvironmentRepo {
+    /// Environments with no secure backend — secret values are dropped on save
+    /// and come back empty on load. Used by tests and by the Bruno importer.
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        Self::with_secret_store(dir, Arc::new(NullSecretStore))
+    }
+
+    /// Environments backed by a real secret store. Production callers in
+    /// `src-tauri` use this with `KeyringSecretStore`.
+    pub fn with_secret_store(dir: PathBuf, secret_store: Arc<dyn SecretStore>) -> Self {
+        Self { dir, secret_store }
     }
 
     fn file_path(&self, name: &str) -> PathBuf {
         self.dir.join(format!("{}.yml", name))
+    }
+
+    /// Stable keychain namespace for one environment file.
+    ///
+    /// Derived from the canonical environments directory, so the workspace-level
+    /// `<workspace>/environments/` and a collection's
+    /// `<collection>/environments/` never share an entry even when both hold an
+    /// environment called "prod".
+    ///
+    /// SHA-256 rather than `DefaultHasher`: `DefaultHasher`'s output is not
+    /// stable across Rust releases, and this value is the lookup key for every
+    /// stored secret — an unstable hash would orphan them on a toolchain bump.
+    fn scope_id(dir: &Path, env_name: &str) -> String {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write;
+
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
+        let prefix = digest[..8].iter().fold(String::with_capacity(16), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        });
+        format!("{prefix}:{env_name}")
+    }
+
+    /// Keys stored as SecretVariable entries in the file as it exists on disk
+    /// right now. Empty when the file is missing or unparseable.
+    fn persisted_secret_keys(&self, name: &str) -> Vec<String> {
+        let Ok(content) = fs::read_to_string(self.file_path(name)) else {
+            return Vec::new();
+        };
+        let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) else {
+            return Vec::new();
+        };
+        oc.variables
+            .into_iter()
+            .filter_map(|entry| match entry {
+                OcEnvVariableEntry::Secret(s) => Some(s.name),
+                OcEnvVariableEntry::Plain(_) => None,
+            })
+            .collect()
     }
 }
 
@@ -61,6 +113,20 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn save(&self, env: &Environment) -> DomainResult<()> {
+        // Create the directory up front so scope_id() canonicalizes the same
+        // path on a first save as on every later read.
+        fs::create_dir_all(&self.dir)?;
+        let scope = Self::scope_id(&self.dir, &env.name);
+
+        // Every secret value goes to the store before any YAML is written. A
+        // store failure aborts the whole save: the file must never claim a
+        // variable is secret when its value did not reach secure storage.
+        for var in env.variables.iter().filter(|v| v.secret) {
+            self.secret_store.set(&scope, &var.key, &var.value)?;
+        }
+
+        // The conversion drops secret values by construction — see
+        // conversions/environment.rs.
         let oc: OcEnvironment = env.clone().into();
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize environment: {e}")))?;
@@ -76,13 +142,81 @@ impl EnvironmentRepository for FsEnvironmentRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_environment::secret_store::SecretStore;
     use rocket_environment::Variable;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
     use tempfile::TempDir;
 
+    /// In-memory SecretStore double. Tests must never touch a real OS keychain:
+    /// CI has no Secret Service / Keychain daemon, so such a test would fail for
+    /// environmental reasons unrelated to the code under test.
+    #[derive(Default)]
+    struct InMemorySecretStore {
+        entries: Mutex<HashMap<String, String>>,
+        fail_set: AtomicBool,
+        fail_get: AtomicBool,
+    }
+
+    impl InMemorySecretStore {
+        fn entry_key(scope_id: &str, key: &str) -> String {
+            format!("{scope_id}:{key}")
+        }
+
+        fn len(&self) -> usize {
+            self.entries.lock().expect("store lock").len()
+        }
+
+        fn contains_value(&self, value: &str) -> bool {
+            self.entries.lock().expect("store lock").values().any(|v| v == value)
+        }
+    }
+
+    impl SecretStore for InMemorySecretStore {
+        fn get(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
+            if self.fail_get.load(Ordering::SeqCst) {
+                return Err(DomainError::Internal("keychain locked".into()));
+            }
+            Ok(self
+                .entries
+                .lock()
+                .expect("store lock")
+                .get(&Self::entry_key(scope_id, key))
+                .cloned())
+        }
+
+        fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()> {
+            if self.fail_set.load(Ordering::SeqCst) {
+                return Err(DomainError::Internal("keychain locked".into()));
+            }
+            self.entries
+                .lock()
+                .expect("store lock")
+                .insert(Self::entry_key(scope_id, key), value.to_string());
+            Ok(())
+        }
+
+        fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()> {
+            self.entries
+                .lock()
+                .expect("store lock")
+                .remove(&Self::entry_key(scope_id, key));
+            Ok(())
+        }
+    }
+
     fn setup() -> (TempDir, FsEnvironmentRepo) {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("temp dir");
         let repo = FsEnvironmentRepo::new(dir.path().to_path_buf());
         (dir, repo)
+    }
+
+    fn setup_with_store() -> (TempDir, FsEnvironmentRepo, Arc<InMemorySecretStore>) {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Arc::new(InMemorySecretStore::default());
+        let repo = FsEnvironmentRepo::with_secret_store(dir.path().to_path_buf(), store.clone());
+        (dir, repo, store)
     }
 
     #[test]
@@ -177,5 +311,78 @@ mod tests {
         let list = repo.list().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].get_value("OLD_VAR"), Some("hello"));
+    }
+
+    #[test]
+    fn save_keeps_the_secret_value_out_of_the_yaml_file() {
+        let (dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        repo.save(&env).expect("save");
+
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        assert!(!raw.contains("sk-live-123"), "secret value leaked to disk:\n{raw}");
+        assert!(store.contains_value("sk-live-123"), "secret value never reached the store");
+    }
+
+    #[test]
+    fn save_writes_a_spec_secret_variable_entry() {
+        let (dir, repo, _store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        let mut secret = Variable::secret("API_KEY", "sk-live-123");
+        secret.secret_type = Some("string".into());
+        env.set_variable(secret);
+        repo.save(&env).expect("save");
+
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        assert!(raw.contains("secret: true"), "expected 'secret: true':\n{raw}");
+        assert!(raw.contains("name: API_KEY"), "expected 'name: API_KEY':\n{raw}");
+        assert!(raw.contains("type: string"), "expected the secret type hint:\n{raw}");
+        assert!(!raw.contains("value:"), "a secret entry must carry no value field:\n{raw}");
+    }
+
+    #[test]
+    fn save_aborts_when_the_secret_store_rejects_the_value() {
+        let (dir, repo, store) = setup_with_store();
+        store.fail_set.store(true, Ordering::SeqCst);
+
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        let err = repo.save(&env).expect_err("save must fail when the store rejects the value");
+
+        assert!(matches!(err, DomainError::Internal(_)), "got {err:?}");
+        assert!(
+            !dir.path().join("prod.yml").exists(),
+            "YAML must not claim a secret is protected when the store rejected it"
+        );
+    }
+
+    #[test]
+    fn secret_survives_a_first_save_into_a_missing_directory() {
+        let parent = TempDir::new().expect("temp dir");
+        let env_dir = parent.path().join("environments");
+        assert!(!env_dir.exists());
+        let store = Arc::new(InMemorySecretStore::default());
+        let repo = FsEnvironmentRepo::with_secret_store(env_dir, store.clone());
+
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
+        repo.save(&env).expect("save");
+
+        assert_eq!(store.len(), 1);
+        assert!(store.contains_value("sk-live-123"));
+    }
+
+    #[test]
+    fn non_secret_variables_still_write_their_value_to_yaml() {
+        let (dir, repo, store) = setup_with_store();
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        repo.save(&env).expect("save");
+
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        assert!(raw.contains("name: HOST"), "got:\n{raw}");
+        assert!(raw.contains("value: api.example.com"), "got:\n{raw}");
+        assert_eq!(store.len(), 0, "a non-secret variable must not touch the secret store");
     }
 }
