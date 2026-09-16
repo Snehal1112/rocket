@@ -78,6 +78,7 @@ import { RocketTabBar } from './RocketTabBar';
 import { SaveRequestButton } from './SaveRequestButton';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
 import { ScriptsTab } from './ScriptsTab';
+import { VarsTab } from './VarsTab';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
@@ -115,7 +116,8 @@ type SectionTab =
   | 'settings'
   | 'load-test'
   | 'scripts'
-  | 'assertions';
+  | 'assertions'
+  | 'vars';
 
 interface RequestPanelProps {
   tab: RequestTab;
@@ -390,7 +392,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     activeSection === 'settings' ||
     activeSection === 'load-test' ||
     activeSection === 'scripts' ||
-    activeSection === 'assertions';
+    activeSection === 'assertions' ||
+    activeSection === 'vars';
   // Use safe access in case settings is absent on a request loaded from an older saved state.
   const settings = request.settings ?? {
     verifySsl: true,
@@ -734,6 +737,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         onClick: () => setActiveSection('assertions'),
       },
       {
+        value: 'vars',
+        label: (
+          <>
+            Vars
+            {request.actions.some((a) => !a.disabled) && (
+              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+            )}
+          </>
+        ),
+        isActive: activeSection === 'vars',
+        onClick: () => setActiveSection('vars'),
+      },
+      {
         value: 'load-test',
         label: 'Load test',
         isActive: activeSection === 'load-test',
@@ -776,6 +792,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       request.docs,
       settingsModified,
       request.assertions,
+      request.actions,
       request.preRequestScript,
       request.postResponseScript,
       request.testsScript,
@@ -1005,12 +1022,23 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           />
         </div>
       ) : null}
+      {activeSection === 'vars' ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <VarsTab
+            actions={request.actions}
+            onChange={(newActions) => updateRequest(tab.id, { actions: newActions })}
+            collectionRoot={tab.source?.collection}
+            responseJson={tab.response ? JSON.stringify(tab.response) : undefined}
+          />
+        </div>
+      ) : null}
       <div
         className={
           activeSection === 'docs' ||
           activeSection === 'load-test' ||
           activeSection === 'scripts' ||
-          activeSection === 'assertions'
+          activeSection === 'assertions' ||
+          activeSection === 'vars'
             ? 'hidden'
             : 'flex-1 overflow-auto p-3'
         }

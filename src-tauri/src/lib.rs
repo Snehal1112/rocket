@@ -15,7 +15,7 @@ use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_infra::{
     FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo, FsContractRepo, FsCookieRepo,
     FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo,
-    NotifyFileWatcher, ReqwestExecutor, SharedPathCollectionRepo,
+    NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
     scripting::DenoScriptEngine,
 };
 use rocket_workspace::WorkspaceConfigRepository;
@@ -198,9 +198,13 @@ pub fn run() {
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
                 Box::new(FsCookieRepo::new(cookies_dir)),
-                Box::new(NullEventPublisher),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
-            ).with_script_engine(Box::new(DenoScriptEngine::new()));
+            )
+            .with_script_engine(Box::new(DenoScriptEngine::new()))
+            .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
+                Arc::clone(&active_workspace_path),
+            )));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Uses its own repo instances pointed at the same paths as the exec service.
@@ -294,6 +298,7 @@ pub fn run() {
             commands::environments::save_global_environment,
             commands::environments::delete_global_environment,
             commands::execution::execute_request,
+            commands::execution::evaluate_var_expression,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,

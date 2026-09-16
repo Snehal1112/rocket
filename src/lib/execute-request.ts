@@ -452,6 +452,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     (getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? undefined) ||
     undefined;
 
+  const requestName = found?.tab.title ?? resolvedUrl;
+
   try {
     const result = await executeRequest({
       method: effectiveRequest.method,
@@ -472,7 +474,13 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       postResponseScript: effectiveRequest.postResponseScript ?? undefined,
       testsScript: effectiveRequest.testsScript ?? undefined,
       assertions: effectiveRequest.assertions ?? [],
+      actions: effectiveRequest.actions ?? [],
       globalEnvName,
+      requestName,
+      tags: effectiveRequest.tags ?? [],
+      pathParams: effectiveRequest.pathParams
+        .filter((p) => p.enabled && p.key)
+        .map((p) => ({ name: p.key, value: p.value })),
     });
 
     const responseState: ResponseState = {
@@ -517,7 +525,6 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       responseBody: result.body,
     });
     // Forward script console.log/warn/error entries to the Console panel.
-    const requestName = found?.tab.title ?? resolvedUrl;
     for (const entry of result.consoleEntries) {
       useConsoleStore.getState().addScriptEntry({
         level: entry.level,

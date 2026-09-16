@@ -80,6 +80,61 @@ globalThis.res = {
   getResponseTime:  ()      => Deno.core.ops.op_res_get_response_time(),
 };
 
+// ── navigator polyfill ───────────────────────────────────────────────────────────
+// jsrsasign's legacy PRNG-seeding code (from jsbn) reads navigator.appName /
+// navigator.appVersion unconditionally at module load, with no typeof guard.
+if (typeof globalThis.navigator === 'undefined') {
+  globalThis.navigator = { appName: 'Netscape', appVersion: '5.0', userAgent: 'RocketAPI' };
+}
+
+// ── atob/btoa polyfill ──────────────────────────────────────────────────────────
+// Bare deno_core has no deno_web extension, so these globals don't exist by
+// default. Guarded so a future deno_web addition would take precedence.
+if (typeof globalThis.btoa === 'undefined') {
+  const _B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  globalThis.btoa = function(input) {
+    const str = String(input);
+    let output = '';
+    for (let i = 0; i < str.length; i += 3) {
+      const a = str.charCodeAt(i);
+      const b = i + 1 < str.length ? str.charCodeAt(i + 1) : NaN;
+      const c = i + 2 < str.length ? str.charCodeAt(i + 2) : NaN;
+      if (a > 255 || (!Number.isNaN(b) && b > 255) || (!Number.isNaN(c) && c > 255)) {
+        throw new Error('InvalidCharacterError: btoa input contains characters outside of the Latin1 range');
+      }
+      const triplet = (a << 16) | ((Number.isNaN(b) ? 0 : b) << 8) | (Number.isNaN(c) ? 0 : c);
+      output += _B64_CHARS[(triplet >> 18) & 0x3f];
+      output += _B64_CHARS[(triplet >> 12) & 0x3f];
+      output += Number.isNaN(b) ? '=' : _B64_CHARS[(triplet >> 6) & 0x3f];
+      output += Number.isNaN(c) ? '=' : _B64_CHARS[triplet & 0x3f];
+    }
+    return output;
+  };
+}
+if (typeof globalThis.atob === 'undefined') {
+  const _B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  globalThis.atob = function(input) {
+    const str = String(input).replace(/=+$/, '');
+    if (str.length % 4 === 1) {
+      throw new Error('InvalidCharacterError: atob input is not correctly encoded');
+    }
+    let output = '';
+    let buffer = 0;
+    let bits = 0;
+    for (let i = 0; i < str.length; i++) {
+      const idx = _B64_CHARS.indexOf(str[i]);
+      if (idx === -1) throw new Error('InvalidCharacterError: atob input is not correctly encoded');
+      buffer = (buffer << 6) | idx;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        output += String.fromCharCode((buffer >> bits) & 0xff);
+      }
+    }
+    return output;
+  };
+}
+
 // ── require() module loader ───────────────────────────────────────────────────
 globalThis.require = function(name) {
   const src = Deno.core.ops.op_require_module(name);

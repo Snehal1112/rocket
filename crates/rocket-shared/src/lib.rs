@@ -9,6 +9,7 @@ pub mod proxy;
 pub mod types;
 pub mod variable_value;
 
+pub use action::{ActionSelector, ActionSetVariable, ActionVariable};
 pub use assertion::Assertion;
 pub use description::{Description, Documentation};
 pub use oauth2::OAuth2Flow;

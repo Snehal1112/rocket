@@ -3,7 +3,9 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::CollectionRepository;
-use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
+use rocket_environment::{
+    resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
+};
 use rocket_history::{HistoryEntry, HistoryRepository};
 use rocket_http::{
     run_load_test as http_run_load_test, CookieRepository, HttpExecutor, HttpRequest, HttpResponse,
@@ -35,6 +37,12 @@ pub struct ExecuteRequestInput {
     /// Used to load folder-chain and request-level variables.
     #[serde(default)]
     pub request_path: Option<String>,
+    /// Tags on the request, exposed to scripts via `req.getTags()`.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Path parameters on the request, exposed to scripts via `req.getPathParams()`.
+    #[serde(default)]
+    pub path_params: Vec<rocket_shared::types::PathParam>,
 
     /// JS script to run before the request is sent.
     #[serde(default)]
@@ -53,6 +61,35 @@ pub struct ExecuteRequestInput {
     /// Declarative assertions to evaluate after the tests-script phase.
     #[serde(default)]
     pub assertions: Vec<rocket_shared::Assertion>,
+
+    /// Declarative `set-variable` actions, evaluated (via jsonq) at the
+    /// `before-request`/`after-response` phase they declare.
+    #[serde(default)]
+    pub actions: Vec<rocket_shared::ActionSetVariable>,
+}
+
+/// Borrows an `EnvironmentRepository` instead of owning it, so
+/// `regular_env_repo()` can hand back the shared `env_repo` field (a fallback
+/// for tests/mocks) with the same `Box<dyn EnvironmentRepository>` shape as a
+/// freshly built collection-scoped repo.
+struct RefEnvRepo<'a>(&'a dyn EnvironmentRepository);
+
+impl<'a> EnvironmentRepository for RefEnvRepo<'a> {
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        self.0.list()
+    }
+
+    fn get(&self, name: &str) -> DomainResult<Environment> {
+        self.0.get(name)
+    }
+
+    fn save(&self, env: &Environment) -> DomainResult<()> {
+        self.0.save(env)
+    }
+
+    fn delete(&self, name: &str) -> DomainResult<()> {
+        self.0.delete(name)
+    }
 }
 
 /// Extended response from `execute()` that includes HTTP response plus script outputs.
@@ -65,7 +102,14 @@ pub struct ExecuteRequestOutput {
 }
 
 pub struct RequestExecutionService {
+    /// Correct only for the workspace-level GLOBAL environment (`global_env_name`).
+    /// REGULAR (per-collection) environment lookups must go through
+    /// `regular_env_repo()`, which prefers `collection_env_repo_factory` below.
     env_repo: Box<dyn EnvironmentRepository>,
+    /// Resolves the REGULAR environment repo for a given collection. `None`
+    /// falls back to `env_repo` (used by tests/mocks that don't care about
+    /// per-collection scoping).
+    collection_env_repo_factory: Option<Box<dyn EnvironmentRepositoryFactory>>,
     executor: Arc<dyn HttpExecutor>,
     history_repo: Box<dyn HistoryRepository>,
     collection_repo: Box<dyn CollectionRepository>,
@@ -88,6 +132,7 @@ impl RequestExecutionService {
     ) -> Self {
         Self {
             env_repo,
+            collection_env_repo_factory: None,
             executor,
             history_repo,
             collection_repo,
@@ -109,6 +154,7 @@ impl RequestExecutionService {
     ) -> Self {
         Self {
             env_repo,
+            collection_env_repo_factory: None,
             executor,
             history_repo,
             collection_repo,
@@ -119,22 +165,47 @@ impl RequestExecutionService {
         }
     }
 
+    /// Attach a factory that resolves the REGULAR (per-collection) environment
+    /// repo per call, instead of the single workspace-level `env_repo`. Call
+    /// this after construction in the DI layer.
+    pub fn with_collection_env_repo_factory(
+        mut self,
+        factory: Box<dyn EnvironmentRepositoryFactory>,
+    ) -> Self {
+        self.collection_env_repo_factory = Some(factory);
+        self
+    }
+
+    /// Resolves the `EnvironmentRepository` to use for a REGULAR
+    /// (per-collection) environment lookup — anywhere `environment_name` (not
+    /// `global_env_name`) is involved. Falls back to `env_repo` when no
+    /// factory or no collection is available, so existing tests/mocks that
+    /// construct the service directly keep working unchanged.
+    fn regular_env_repo<'a>(&'a self, collection: Option<&str>) -> Box<dyn EnvironmentRepository + 'a> {
+        match (&self.collection_env_repo_factory, collection) {
+            (Some(factory), Some(col)) => factory.for_collection(col),
+            _ => Box::new(RefEnvRepo(self.env_repo.as_ref())),
+        }
+    }
+
     /// Attach a script engine. Call this after construction in the DI layer.
     pub fn with_script_engine(mut self, engine: Box<dyn ScriptEngine>) -> Self {
         self.script_engine = Some(engine);
         self
     }
 
-    /// Builds a flattened variable map from all backend-accessible scopes
-    /// (collection, environment, folder-chain, request-level).
+    /// Builds a scope-separated `VariableContext` from all backend-accessible
+    /// scopes (collection, environment, folder-chain, request-level). Does NOT
+    /// populate `global_env` — callers that need it (script execution) load it
+    /// separately via `global_env_name`, since it's a different named environment.
     ///
-    /// Reused by `resolve_request()`, `run_load_test()`, and OAuth2 commands.
-    pub fn build_variable_context(
+    /// Reused by `build_variable_context()` and `execute()`.
+    fn build_variable_scopes(
         &self,
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
-    ) -> std::collections::HashMap<String, String> {
+    ) -> VariableContext {
         // Precedence (lowest → highest): collection < env < folder < request.
         let mut ctx = VariableContext::default();
 
@@ -154,7 +225,7 @@ impl RequestExecutionService {
         }
 
         if let Some(name) = environment_name {
-            if let Ok(env) = self.env_repo.get(name) {
+            if let Ok(env) = self.regular_env_repo(collection).get(name) {
                 for (k, v) in env.enabled_variables() {
                     ctx.env.insert(k.to_string(), v.to_string());
                 }
@@ -177,7 +248,20 @@ impl RequestExecutionService {
             }
         }
 
-        ctx.flatten()
+        ctx
+    }
+
+    /// Builds a flattened variable map from all backend-accessible scopes
+    /// (collection, environment, folder-chain, request-level).
+    ///
+    /// Reused by `resolve_request()`, `run_load_test()`, and OAuth2 commands.
+    pub fn build_variable_context(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+    ) -> std::collections::HashMap<String, String> {
+        self.build_variable_scopes(collection, environment_name, request_path).flatten()
     }
 
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
@@ -243,40 +327,40 @@ impl RequestExecutionService {
         // Apply active-environment writes (always persisted).
         if !result.env_var_writes.is_empty() {
             if let Some(name) = env_name {
-                self.apply_env_writes(name, &result.env_var_writes, true);
+                let repo = self.regular_env_repo(collection);
+                if self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true) {
+                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
+                }
+            } else {
+                tracing::warn!(
+                    "rok.setEnvVar write(s) queued but no active environment is selected — write(s) dropped"
+                );
             }
         }
 
         // Apply global-environment writes (always persisted — modifying a shared env).
         if !result.global_env_var_writes.is_empty() {
             if let Some(name) = global_env_name {
-                self.apply_env_writes(name, &result.global_env_var_writes, true);
+                if self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true) {
+                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
+                }
+            } else {
+                tracing::warn!(
+                    "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
+                );
             }
         }
 
         // Apply collection variable writes.
         if !result.collection_var_writes.is_empty() {
             if let Some(col) = collection {
-                if let Ok(mut settings) = self.collection_repo.get_settings(col) {
-                    for write in &result.collection_var_writes {
-                        let str_val = write.value.as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| write.value.to_string());
-                        if let Some(existing) = settings.variables.iter_mut()
-                            .find(|v| v.key == write.key)
-                        {
-                            existing.value = str_val;
-                        } else {
-                            settings.variables.push(rocket_collection::CollectionVariable {
-                                key: write.key.clone(),
-                                value: str_val,
-                                initial_value: String::new(),
-                                enabled: true,
-                                secret: false,
-                            });
-                        }
+                for write in &result.collection_var_writes {
+                    let str_val = write.value.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| write.value.to_string());
+                    if let Err(e) = self.apply_collection_var_write(col, &write.key, &str_val) {
+                        tracing::warn!(error = %e, key = %write.key, "failed to persist collection var write");
                     }
-                    let _ = self.collection_repo.save_settings(col, &settings);
                 }
             }
         }
@@ -289,39 +373,73 @@ impl RequestExecutionService {
         }
     }
 
+    /// Read-modify-write helper for a single collection variable.
+    ///
+    /// Shared by script-side-effect application (`rok.setCollectionVar`) and
+    /// the `runtime.actions` set-variable pipeline.
+    fn apply_collection_var_write(&self, collection: &str, key: &str, value: &str) -> DomainResult<()> {
+        let mut settings = self.collection_repo.get_settings(collection)?;
+        upsert_variable(&mut settings.variables, key, value);
+        self.collection_repo.save_settings(collection, &settings)
+    }
+
     /// Read-modify-write helper for env var writes against a named environment.
     ///
     /// When `force_persist` is true (used for global env writes), all writes go
     /// to disk regardless of the individual `persist` flag. For active-environment
     /// writes, only entries with `persist: true` are saved.
+    ///
+    /// Returns `true` when the environment was actually saved, so callers can
+    /// decide whether to publish `DomainEvent::EnvironmentSaved`.
     fn apply_env_writes(
         &self,
+        repo: &dyn EnvironmentRepository,
         env_name: &str,
         writes: &[rocket_scripting::EnvVarWrite],
         force_persist: bool,
-    ) {
+    ) -> bool {
         let persist_writes: Vec<_> = writes
             .iter()
             .filter(|w| force_persist || w.persist)
             .collect();
         if persist_writes.is_empty() {
-            return;
+            return false;
         }
-        if let Ok(mut env) = self.env_repo.get(env_name) {
-            for write in persist_writes {
-                if write.value.is_null() {
-                    env.remove_variable(&write.key);
-                } else {
-                    let str_val = write.value.as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| write.value.to_string());
-                    env.set_variable(rocket_environment::Variable::new(
-                        write.key.clone(),
-                        str_val,
-                    ));
+        match repo.get(env_name) {
+            Ok(mut env) => {
+                for write in persist_writes {
+                    if write.value.is_null() {
+                        env.remove_variable(&write.key);
+                    } else {
+                        let str_val = write.value.as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| write.value.to_string());
+                        env.set_variable(rocket_environment::Variable::new(
+                            write.key.clone(),
+                            str_val,
+                        ));
+                    }
+                }
+                match repo.save(&env) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            environment = %env_name,
+                            "failed to persist script env var write"
+                        );
+                        false
+                    }
                 }
             }
-            let _ = self.env_repo.save(&env);
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    environment = %env_name,
+                    "rok.setEnvVar/setGlobalEnvVar: environment not found, write dropped"
+                );
+                false
+            }
         }
     }
 
@@ -360,6 +478,159 @@ impl RequestExecutionService {
         }
     }
 
+    /// Applies `Request.actions` (`set-variable`) for the given phase.
+    ///
+    /// Each enabled action whose `phase` matches `phase_str` evaluates its
+    /// `selector.expression` as a JS snippet via the script engine — this is
+    /// what "jsonq" means in this codebase (see `apply_actions` in the SP3
+    /// completion plan). The result is written to the scope named by
+    /// `action.variable.scope`. A bad expression, a missing target scope, or
+    /// a repo write failure is logged and the action is skipped — it never
+    /// aborts the rest of the request.
+    #[allow(clippy::too_many_arguments)]
+    async fn apply_actions(
+        &self,
+        actions: &[rocket_shared::ActionSetVariable],
+        phase_str: &str,
+        request_name: &str,
+        http_request: &HttpRequest,
+        response: Option<&HttpResponse>,
+        env_name: Option<&str>,
+        collection: Option<&str>,
+        request_path: Option<&str>,
+        var_ctx: &mut VariableContext,
+        tags: &[String],
+        path_params: &[rocket_shared::types::PathParam],
+    ) {
+        let Some(engine) = self.script_engine.as_ref() else {
+            return;
+        };
+
+        for action in actions {
+            if action.disabled == Some(true) || action.phase != phase_str {
+                continue;
+            }
+
+            let code = format!(
+                "rok.setVar('__jsonq_result__', (function(){{ return ({}); }})());",
+                action.selector.expression
+            );
+            let ctx = match response {
+                Some(res) => ScriptContext::after_response(
+                    code,
+                    var_ctx.clone(),
+                    http_request.clone(),
+                    res.clone(),
+                    env_name.map(str::to_string),
+                    request_name.to_string(),
+                    tags.to_vec(),
+                    path_params.to_vec(),
+                ),
+                None => ScriptContext::before_request(
+                    code,
+                    var_ctx.clone(),
+                    http_request.clone(),
+                    env_name.map(str::to_string),
+                    request_name.to_string(),
+                    tags.to_vec(),
+                    path_params.to_vec(),
+                ),
+            };
+
+            let result = match engine.execute(ctx).await {
+                Ok(r) => r,
+                Err(e) => {
+                    self.events.publish(DomainEvent::ScriptError {
+                        request_name: request_name.to_string(),
+                        phase: format!("action:{phase_str}"),
+                        message: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+            if let Some(err) = result.error {
+                self.events.publish(DomainEvent::ScriptError {
+                    request_name: request_name.to_string(),
+                    phase: format!("action:{phase_str}"),
+                    message: err,
+                });
+                continue;
+            }
+
+            let Some(value) = result.runtime_vars.get("__jsonq_result__") else {
+                continue;
+            };
+            let str_val = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+            let var_name = &action.variable.name;
+
+            match action.variable.scope.as_str() {
+                "runtime" => {
+                    var_ctx.runtime.insert(var_name.clone(), str_val);
+                }
+                "environment" => {
+                    if let Some(name) = env_name {
+                        let repo = self.regular_env_repo(collection);
+                        let saved = self.apply_env_writes(
+                            repo.as_ref(),
+                            name,
+                            &[rocket_scripting::EnvVarWrite {
+                                key: var_name.clone(),
+                                value: serde_json::Value::String(str_val),
+                                persist: true,
+                            }],
+                            true,
+                        );
+                        if saved {
+                            self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
+                        }
+                    } else {
+                        tracing::warn!(variable = %var_name, "action scope 'environment' but no active environment");
+                    }
+                }
+                "collection" => {
+                    if let Some(col) = collection {
+                        if let Err(e) = self.apply_collection_var_write(col, var_name, &str_val) {
+                            tracing::warn!(error = %e, variable = %var_name, "failed to persist collection var from action");
+                        }
+                    }
+                }
+                "folder" => {
+                    if let (Some(col), Some(path)) = (collection, request_path) {
+                        let folder_path = std::path::Path::new(path)
+                            .parent()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("");
+                        match self.collection_repo.get_folder_variables(col, folder_path) {
+                            Ok(mut vars) => {
+                                upsert_variable(&mut vars, var_name, &str_val);
+                                if let Err(e) = self.collection_repo.save_folder_variables(col, folder_path, vars) {
+                                    tracing::warn!(error = %e, variable = %var_name, "failed to persist folder var from action");
+                                }
+                            }
+                            Err(e) => tracing::warn!(error = %e, variable = %var_name, "failed to read folder vars for action"),
+                        }
+                    }
+                }
+                "request" => {
+                    if let (Some(col), Some(path)) = (collection, request_path) {
+                        match self.collection_repo.get_request_variables(col, path) {
+                            Ok(mut vars) => {
+                                upsert_variable(&mut vars, var_name, &str_val);
+                                if let Err(e) = self.collection_repo.save_request_variables(col, path, vars) {
+                                    tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
+                                }
+                            }
+                            Err(e) => tracing::warn!(error = %e, variable = %var_name, "failed to read request vars for action"),
+                        }
+                    }
+                }
+                other => {
+                    tracing::warn!(scope = %other, variable = %var_name, "unknown action variable scope, skipping");
+                }
+            }
+        }
+    }
+
     #[tracing::instrument(
         name = "http_request",
         skip(self, input),
@@ -392,16 +663,20 @@ impl RequestExecutionService {
         let mut all_test_results: Vec<TestResult> = Vec::new();
         let mut script_error: Option<String> = None;
 
-        // Build variable context for script phases.
-        let var_flat = self.build_variable_context(
+        // Build scope-separated variable context for script phases. Scripts read
+        // individual scopes via rok.getCollectionVar/getEnvVar/getGlobalEnvVar, so
+        // each scope must stay distinct rather than being pre-flattened into one.
+        let mut var_ctx = self.build_variable_scopes(
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
         );
-        let mut var_ctx = VariableContext::default();
-        // Populate env scope from flattened map (best-effort; full scope separation not needed here).
-        for (k, v) in &var_flat {
-            var_ctx.env.insert(k.clone(), v.clone());
+        if let Some(name) = input.global_env_name.as_deref() {
+            if let Ok(global_env) = self.env_repo.get(name) {
+                for (k, v) in global_env.enabled_variables() {
+                    var_ctx.global_env.insert(k.to_string(), v.to_string());
+                }
+            }
         }
 
         // ── Before-request script ─────────────────────────────────────────────
@@ -412,6 +687,9 @@ impl RequestExecutionService {
                     var_ctx.clone(),
                     http_request.clone(),
                     env_name.clone(),
+                    request_name.clone(),
+                    input.tags.clone(),
+                    input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "before-request", &mut all_console,
@@ -425,29 +703,53 @@ impl RequestExecutionService {
                     if let Some(ref method_str) = mutations.method {
                         if let Ok(m) = method_str.parse() {
                             http_request.method = m;
-                        }
-                    }
-                    for (name, value) in &mutations.headers_set {
-                        if let Some(h) = http_request.headers.iter_mut()
-                            .find(|h| h.key.eq_ignore_ascii_case(name))
-                        {
-                            h.value = value.clone();
                         } else {
-                            http_request.headers.push(Header::new(name, value));
+                            tracing::warn!(
+                                method = %method_str,
+                                "req.setMethod() called with an unrecognized HTTP method, ignored"
+                            );
+                            script_error.get_or_insert_with(|| format!(
+                                "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
+                            ));
                         }
                     }
-                    http_request.headers.retain(|h| {
-                        !mutations.headers_deleted.iter().any(|d| d.eq_ignore_ascii_case(&h.key))
-                    });
+                    // Apply header mutations in the order the script issued them —
+                    // e.g. deleteHeader() then setHeader() on the same name must
+                    // result in the header being present, not dropped.
+                    for mutation in &mutations.headers {
+                        match mutation {
+                            rocket_scripting::HeaderMutation::Set { name, value } => {
+                                if let Some(h) = http_request.headers.iter_mut()
+                                    .find(|h| h.key.eq_ignore_ascii_case(name))
+                                {
+                                    h.value = value.clone();
+                                } else {
+                                    http_request.headers.push(Header::new(name, value));
+                                }
+                            }
+                            rocket_scripting::HeaderMutation::Delete { name } => {
+                                http_request.headers.retain(|h| !h.key.eq_ignore_ascii_case(name));
+                            }
+                        }
+                    }
                     if let Some(ms) = mutations.timeout_ms {
                         http_request.options.timeout_ms = ms;
                     }
                     if let Some(ref body_val) = mutations.body {
+                        // A JS object/array is unambiguously meant as JSON. A string
+                        // may be non-JSON text (XML, plain text, etc) — respect an
+                        // explicit Content-Type header the script already set instead
+                        // of forcing JSON, which would mislabel the body on the wire.
+                        let mode = if body_val.is_object() || body_val.is_array() {
+                            rocket_shared::types::BodyMode::Json
+                        } else {
+                            body_mode_from_content_type(&http_request.headers)
+                        };
                         let content = body_val.as_str()
                             .map(str::to_owned)
                             .unwrap_or_else(|| body_val.to_string());
                         http_request.body = Some(rocket_shared::types::Body {
-                            mode: rocket_shared::types::BodyMode::Json,
+                            mode,
                             content: Some(content),
                             form_data: None,
                             file_path: None,
@@ -472,6 +774,21 @@ impl RequestExecutionService {
             }
         }
 
+        // ── Before-request actions (runtime.actions, set-variable) ─────────────
+        self.apply_actions(
+            &input.actions,
+            "before-request",
+            &request_name,
+            &http_request,
+            None,
+            input.environment_name.as_deref(),
+            input.collection.as_deref(),
+            input.request_path.as_deref(),
+            &mut var_ctx,
+            &input.tags,
+            &input.path_params,
+        ).await;
+
         // ── HTTP execution ────────────────────────────────────────────────────
         let response = self.executor.execute(&http_request).await?;
 
@@ -491,6 +808,9 @@ impl RequestExecutionService {
                     http_request.clone(),
                     response.clone(),
                     env_name.clone(),
+                    request_name.clone(),
+                    input.tags.clone(),
+                    input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "after-response", &mut all_console,
@@ -517,6 +837,9 @@ impl RequestExecutionService {
                     http_request.clone(),
                     response.clone(),
                     env_name.clone(),
+                    request_name.clone(),
+                    input.tags.clone(),
+                    input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "tests", &mut all_console,
@@ -534,6 +857,21 @@ impl RequestExecutionService {
                 }
             }
         }
+
+        // ── After-response actions (runtime.actions, set-variable) ─────────────
+        self.apply_actions(
+            &input.actions,
+            "after-response",
+            &request_name,
+            &http_request,
+            Some(&response),
+            input.environment_name.as_deref(),
+            input.collection.as_deref(),
+            input.request_path.as_deref(),
+            &mut var_ctx,
+            &input.tags,
+            &input.path_params,
+        ).await;
 
         // ── Declarative assertions ────────────────────────────────────────────
         // Run after tests script so JS test results appear first in TestsPanel.
@@ -612,6 +950,57 @@ impl RequestExecutionService {
         Ok(http_run_load_test(executor, &resolved, &config).await)
     }
 
+    /// Preview-evaluates a jsonq expression against a captured response, for the
+    /// Vars tab's "Test" affordance. Only collection-scope variables are available
+    /// (no environment/folder/request scope) — this is a preview tool, separate
+    /// from the real `apply_actions` execution pipeline.
+    pub async fn evaluate_var_expression(
+        &self,
+        collection_root: &str,
+        expression: &str,
+        response_json: &str,
+    ) -> DomainResult<serde_json::Value> {
+        let engine = self.script_engine.as_ref().ok_or_else(|| {
+            rocket_shared::error::DomainError::Internal("script engine not configured".into())
+        })?;
+
+        let response: HttpResponse = serde_json::from_str(response_json).map_err(|e| {
+            rocket_shared::error::DomainError::InvalidInput(format!("invalid response JSON: {e}"))
+        })?;
+
+        let mut var_ctx = VariableContext::default();
+        if let Ok(settings) = self.collection_repo.get_settings(collection_root) {
+            for cv in settings.variables.iter().filter(|v| v.enabled) {
+                let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                var_ctx.collection.insert(cv.key.clone(), val);
+            }
+        }
+
+        let code = format!(
+            "rok.setVar('__jsonq_result__', (function(){{ return ({expression}); }})());"
+        );
+        let ctx = ScriptContext::after_response(
+            code,
+            var_ctx,
+            HttpRequest::new(HttpMethod::Get, ""),
+            response,
+            None,
+            String::new(),
+            vec![],
+            vec![],
+        );
+
+        let result = engine.execute(ctx).await?;
+        if let Some(err) = result.error {
+            return Err(rocket_shared::error::DomainError::InvalidInput(err));
+        }
+        Ok(result
+            .runtime_vars
+            .get("__jsonq_result__")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null))
+    }
+
 }
 
 /// Map an `Auth` variant to a short kebab-case label for audit events.
@@ -628,6 +1017,46 @@ fn sensitive_auth_label(auth: &Auth) -> Option<&'static str> {
         Auth::Wsse { .. } => Some("wsse"),
         Auth::Digest { .. } => Some("digest"),
         Auth::Ntlm { .. } => Some("ntlm"),
+    }
+}
+
+/// Upserts a single key/value into a `CollectionVariable` list by key,
+/// appending a new enabled, non-secret entry if the key isn't already present.
+fn upsert_variable(vars: &mut Vec<rocket_collection::CollectionVariable>, key: &str, value: &str) {
+    if let Some(existing) = vars.iter_mut().find(|v| v.key == key) {
+        existing.value = value.to_string();
+    } else {
+        vars.push(rocket_collection::CollectionVariable {
+            key: key.to_string(),
+            value: value.to_string(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        });
+    }
+}
+
+/// Infers a `BodyMode` for a script-set string body from an explicit
+/// `Content-Type` header on the request, if the script set one. Falls back to
+/// `Json` (the historical default for `req.setBody()`) when no explicit
+/// Content-Type is present or it doesn't map to a known text-ish mode.
+fn body_mode_from_content_type(headers: &[Header]) -> rocket_shared::types::BodyMode {
+    use rocket_shared::types::BodyMode;
+    let Some(content_type) = headers
+        .iter()
+        .find(|h| h.enabled && h.key.eq_ignore_ascii_case("content-type"))
+        .map(|h| h.value.to_ascii_lowercase())
+    else {
+        return BodyMode::Json;
+    };
+    if content_type.contains("xml") {
+        BodyMode::Xml
+    } else if content_type.contains("sparql") {
+        BodyMode::Sparql
+    } else if content_type.contains("text/plain") {
+        BodyMode::Text
+    } else {
+        BodyMode::Json
     }
 }
 
@@ -870,6 +1299,9 @@ mod tests {
             request_path: None,
             global_env_name: None,
             assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
         }
     }
 
@@ -1703,6 +2135,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn before_request_script_invalid_method_is_surfaced_as_script_error() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_shared::types::HttpMethod;
+
+        // req.setMethod('PACTH') — a typo that doesn't parse as a valid method.
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                method: Some("PACTH".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.method = HttpMethod::Get;
+        input.pre_request_script = Some("// pre".into());
+        let output = svc.execute(input).await.expect("execute failed");
+
+        assert_eq!(output.response.status, 200, "the original method must still be used, unmodified");
+        let err = output.script_error.expect("an invalid setMethod() must surface a script_error");
+        assert!(err.contains("PACTH"), "error should name the invalid method: {err}");
+    }
+
+    #[tokio::test]
     async fn before_request_script_body_mutation_reaches_executor() {
         use rocket_scripting::{RequestMutations, ScriptResult};
         use rocket_shared::types::BodyMode;
@@ -1735,6 +2201,50 @@ mod tests {
         let body = body_capturing.last_body().expect("executor should have received a body");
         assert_eq!(body.mode, BodyMode::Json);
         assert_eq!(body.content.as_deref(), Some(r#"{"injected":true}"#));
+    }
+
+    #[tokio::test]
+    async fn before_request_script_string_body_respects_explicit_content_type() {
+        use rocket_scripting::{HeaderMutation, RequestMutations, ScriptResult};
+        use rocket_shared::types::BodyMode;
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        // req.setHeader('Content-Type', 'application/xml'); req.setBody('<a/>');
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                headers: vec![HeaderMutation::Set {
+                    name: "Content-Type".into(),
+                    value: "application/xml".into(),
+                }],
+                body: Some(serde_json::json!("<a/>")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let body = body_capturing.last_body().expect("executor should have received a body");
+        assert_eq!(
+            body.mode,
+            BodyMode::Xml,
+            "a string body should respect the script's explicit Content-Type instead of being forced to JSON"
+        );
+        assert_eq!(body.content.as_deref(), Some("<a/>"));
     }
 
     /// Executor that captures the RequestOptions it received.
@@ -1825,5 +2335,293 @@ mod tests {
 
         let opts = options_capturing.last_options().expect("executor should have received options");
         assert_eq!(opts.max_redirects, Some(3));
+    }
+
+    // -------------------------------------------------------------------------
+    // apply_actions (runtime.actions set-variable pipeline) tests
+    // -------------------------------------------------------------------------
+
+    /// Script engine stub for `apply_actions` tests — always resolves the jsonq
+    /// snippet to a fixed value, regardless of what the expression text says.
+    struct FixedJsonqEngine {
+        value: serde_json::Value,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for FixedJsonqEngine {
+        async fn execute(&self, _ctx: ScriptContext) -> rocket_shared::error::DomainResult<ScriptResult> {
+            let mut vars = std::collections::HashMap::new();
+            vars.insert("__jsonq_result__".to_string(), self.value.clone());
+            Ok(ScriptResult { runtime_vars: vars, ..Default::default() })
+        }
+    }
+
+    /// Script engine stub that simulates a jsonq expression throwing.
+    struct ErrorJsonqEngine;
+
+    #[async_trait]
+    impl ScriptEngine for ErrorJsonqEngine {
+        async fn execute(&self, _ctx: ScriptContext) -> rocket_shared::error::DomainResult<ScriptResult> {
+            Ok(ScriptResult { error: Some("ReferenceError: nope".into()), ..Default::default() })
+        }
+    }
+
+    fn stub_action(scope: &str, phase: &str, disabled: bool) -> rocket_shared::ActionSetVariable {
+        rocket_shared::ActionSetVariable {
+            phase: phase.into(),
+            selector: rocket_shared::ActionSelector {
+                expression: "res.body".into(),
+                method: "jsonq".into(),
+            },
+            variable: rocket_shared::ActionVariable {
+                name: "extracted".into(),
+                scope: scope.into(),
+            },
+            disabled: if disabled { Some(true) } else { None },
+            description: None,
+        }
+    }
+
+    fn stub_action_response() -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            status_text: "OK".into(),
+            headers: vec![],
+            body: "{}".into(),
+            duration_ms: 1,
+            ttfb_ms: 1,
+            size_bytes: 2,
+        }
+    }
+
+    #[tokio::test]
+    async fn after_response_action_writes_collection_variable() {
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(FixedJsonqEngine { value: serde_json::json!("extracted-value") }),
+        );
+
+        let actions = vec![stub_action("collection", "after-response", false)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+
+        svc.apply_actions(
+            &actions, "after-response", "Get User", &http_request, Some(&response),
+            None, Some("my-api"), None, &mut var_ctx, &[], &[],
+        ).await;
+
+        let saved = col_repo.last_saved_settings().expect("save_settings should have been called");
+        let written = saved.variables.iter().find(|v| v.key == "extracted");
+        assert_eq!(written.map(|v| v.value.as_str()), Some("extracted-value"));
+    }
+
+    #[tokio::test]
+    async fn after_response_action_writes_environment_variable_when_scope_environment() {
+        let env = Environment::new("dev");
+        let env_repo = RecordingEnvRepo::with_env(env);
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(FixedJsonqEngine { value: serde_json::json!("token-123") }),
+        );
+
+        let actions = vec![stub_action("environment", "after-response", false)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+
+        svc.apply_actions(
+            &actions, "after-response", "Get User", &http_request, Some(&response),
+            Some("dev"), None, None, &mut var_ctx, &[], &[],
+        ).await;
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        assert_eq!(saved.get_value("extracted"), Some("token-123"));
+    }
+
+    #[tokio::test]
+    async fn after_response_action_writes_runtime_variable_without_persisting() {
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(FixedJsonqEngine { value: serde_json::json!("in-memory-value") }),
+        );
+
+        let actions = vec![stub_action("runtime", "after-response", false)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+
+        svc.apply_actions(
+            &actions, "after-response", "Get User", &http_request, Some(&response),
+            None, None, None, &mut var_ctx, &[], &[],
+        ).await;
+
+        assert_eq!(var_ctx.runtime.get("extracted"), Some(&"in-memory-value".to_string()));
+        assert!(col_repo.last_saved_settings().is_none(), "runtime scope must never persist");
+    }
+
+    #[tokio::test]
+    async fn disabled_action_is_skipped() {
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(FixedJsonqEngine { value: serde_json::json!("should-not-be-written") }),
+        );
+
+        let actions = vec![stub_action("collection", "after-response", true)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+
+        svc.apply_actions(
+            &actions, "after-response", "Get User", &http_request, Some(&response),
+            None, Some("my-api"), None, &mut var_ctx, &[], &[],
+        ).await;
+
+        assert!(col_repo.last_saved_settings().is_none(), "disabled action must not run");
+    }
+
+    #[tokio::test]
+    async fn action_wrong_phase_is_skipped() {
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(FixedJsonqEngine { value: serde_json::json!("should-not-be-written") }),
+        );
+
+        // A before-request action must not fire during the after-response pass.
+        let actions = vec![stub_action("collection", "before-request", false)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+
+        svc.apply_actions(
+            &actions, "after-response", "Get User", &http_request, Some(&response),
+            None, Some("my-api"), None, &mut var_ctx, &[], &[],
+        ).await;
+
+        assert!(col_repo.last_saved_settings().is_none(), "wrong-phase action must not run");
+    }
+
+    // Environment repo backed by a map, so a test can look up both the active
+    // and global environments by name.
+    struct MultiEnvRepo {
+        envs: std::collections::HashMap<String, Environment>,
+    }
+
+    impl MultiEnvRepo {
+        fn new(envs: Vec<Environment>) -> Self {
+            Self { envs: envs.into_iter().map(|e| (e.name.clone(), e)).collect() }
+        }
+    }
+
+    impl rocket_environment::EnvironmentRepository for MultiEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(self.envs.values().cloned().collect())
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.envs.get(name).cloned().ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn save(&self, _: &Environment) -> DomainResult<()> { Ok(()) }
+        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+    }
+
+    // Script engine that records the VariableContext it was invoked with.
+    struct CapturingEngine {
+        captured: Mutex<Option<VariableContext>>,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for CapturingEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            *self.captured.lock().expect("lock") = Some(ctx.variables);
+            Ok(ScriptResult::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn before_request_script_sees_scope_separated_variables() {
+        let settings = CollectionSettings {
+            variables: vec![cv("API_KEY", "col-secret")],
+            ..Default::default()
+        };
+        let collection_repo = StubCollectionRepo::with_settings(settings);
+
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::new("BASE_URL", "https://dev.local"));
+        let mut global_env = Environment::new("shared-global");
+        global_env.set_variable(Variable::new("ORG_ID", "acme"));
+        let env_repo = MultiEnvRepo::new(vec![active_env, global_env]);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngine(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngine {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(collection_repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngine(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.global_env_name = Some("shared-global".into());
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc
+            .captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("engine was called");
+        assert_eq!(
+            captured.collection.get("API_KEY"),
+            Some(&"col-secret".to_string()),
+            "collection scope must stay separate, not be flattened into env"
+        );
+        assert_eq!(captured.env.get("BASE_URL"), Some(&"https://dev.local".to_string()));
+        assert_eq!(
+            captured.global_env.get("ORG_ID"),
+            Some(&"acme".to_string()),
+            "global env scope must be populated from global_env_name"
+        );
+        assert!(
+            !captured.env.contains_key("API_KEY"),
+            "env scope must not contain the collection variable (would indicate the old flattening bug)"
+        );
+    }
+
+    #[tokio::test]
+    async fn action_jsonq_error_does_not_abort_request() {
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(ErrorJsonqEngine),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.actions = vec![stub_action("runtime", "after-response", false)];
+
+        let output = svc.execute(input).await.expect("execute must succeed despite a bad jsonq expression");
+        assert_eq!(output.response.status, 200);
     }
 }

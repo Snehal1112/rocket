@@ -101,6 +101,9 @@ extension!(
         req::op_req_get_timeout,
         req::op_req_get_execution_mode,
         req::op_req_get_execution_platform,
+        req::op_req_get_name,
+        req::op_req_get_tags,
+        req::op_req_get_path_params,
         // req write ops
         req::op_req_set_url,
         req::op_req_set_method,
@@ -150,6 +153,9 @@ fn run_script(ctx: ScriptContext) -> DomainResult<ScriptResult> {
             env_name: ctx.env_name,
             execution_mode: ctx.execution_mode,
             execution_platform: ctx.execution_platform,
+            request_name: ctx.request_name,
+            request_tags: ctx.request_tags,
+            path_params: ctx.path_params,
         });
         state.put(ScriptOutputState::default());
     }
@@ -209,6 +215,9 @@ mod tests {
             env_name: None,
             execution_mode: "standalone".into(),
             execution_platform: "app".into(),
+            request_name: String::new(),
+            request_tags: vec![],
+            path_params: vec![],
         }
     }
 
@@ -356,6 +365,57 @@ mod tests {
         assert!(result.error.as_ref().expect("error").contains("Module not found"));
     }
 
+    #[tokio::test]
+    async fn atob_btoa_polyfill_roundtrip() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('r', atob(btoa('hello world!')))");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("r").expect("r"), "hello world!");
+    }
+
+    #[tokio::test]
+    async fn require_jsonwebtoken_sign_and_verify_roundtrip() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"
+            const jwt = require('jsonwebtoken');
+            const token = jwt.sign({ sub: '123' }, 'my-secret');
+            rok.setVar('ok', jwt.verify(token, 'my-secret'));
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("ok").expect("ok"), true);
+    }
+
+    #[tokio::test]
+    async fn require_jsonwebtoken_verify_rejects_tampered_token() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"
+            const jwt = require('jsonwebtoken');
+            const token = jwt.sign({ sub: '123' }, 'my-secret');
+            rok.setVar('wrongSecret', jwt.verify(token, 'not-the-secret'));
+            rok.setVar('tampered', jwt.verify(token + 'x', 'my-secret'));
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("wrongSecret").expect("wrongSecret"), false);
+        assert_eq!(result.runtime_vars.get("tampered").expect("tampered"), false);
+    }
+
+    #[tokio::test]
+    async fn require_jsonwebtoken_decode_reads_claims_without_verifying() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"
+            const jwt = require('jsonwebtoken');
+            const token = jwt.sign({ sub: 'abc123' }, 'my-secret');
+            const claims = jwt.decode(token);
+            rok.setVar('sub', claims.sub);
+        "#);
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("sub").expect("sub"), "abc123");
+    }
+
     fn stub_response(status: u16) -> rocket_http::HttpResponse {
         rocket_http::HttpResponse {
             status,
@@ -413,5 +473,41 @@ mod tests {
         let ctx = minimal_ctx("res.getStatus()");
         let result = engine.execute(ctx).await.expect("execute");
         assert!(result.error.is_some(), "expected res unavailable error");
+    }
+
+    #[tokio::test]
+    async fn req_get_name_returns_context_name() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("rok.setVar('name', req.getName())");
+        ctx.request_name = "Get User".into();
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("name").expect("name"), "Get User");
+    }
+
+    #[tokio::test]
+    async fn req_get_tags_returns_json_array() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("rok.setVar('tags', JSON.stringify(req.getTags()))");
+        ctx.request_tags = vec!["smoke".into(), "auth".into()];
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("tags").expect("tags"),
+            r#"["smoke","auth"]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn req_get_path_params_returns_json_array() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx(
+            "rok.setVar('id', req.getPathParams()[0].name + '=' + req.getPathParams()[0].value)",
+        );
+        ctx.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: "123".into(),
+            description: None,
+        }];
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("id").expect("id"), "id=123");
     }
 }

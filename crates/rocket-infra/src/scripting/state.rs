@@ -5,6 +5,7 @@ use rocket_scripting::{
     NextRequest, RequestMutations, ScriptPhase, TestResult, TestStatus,
 };
 use rocket_environment::VariableContext;
+use rocket_shared::types::PathParam;
 
 /// Holds everything ops need to read from the `ScriptContext`.
 /// Stored in `deno_core::OpState` as a read-only snapshot.
@@ -16,6 +17,9 @@ pub struct ScriptInputState {
     pub env_name: Option<String>,
     pub execution_mode: String,
     pub execution_platform: String,
+    pub request_name: String,
+    pub request_tags: Vec<String>,
+    pub path_params: Vec<PathParam>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

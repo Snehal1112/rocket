@@ -313,6 +313,9 @@ mod tests {
             tests_script: None,
             global_env_name: None,
             assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
         };
 
         // One short Hold phase to keep the test fast.

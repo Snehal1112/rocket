@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/Snehal1112/rocket/compare/v0.8.0...v0.9.0) (2026-08-06)
+
+### Features
+
+* accept optional snippets prop in ScriptSnippetSidebar ([4b9c33a](https://github.com/Snehal1112/rocket/commit/4b9c33a9b3271398d169e51a49faa65baeeaa009))
+* add POST_RESPONSE_SNIPPETS to rok-types ([80f8e18](https://github.com/Snehal1112/rocket/commit/80f8e18745f412b3d048bc31675e6e911a56e56a))
+* add snippet sidebar toggle to Post Response tab ([6cb0b0e](https://github.com/Snehal1112/rocket/commit/6cb0b0ecb2b509c398b8e63ab19cf38b107722be))
+
+### Bug Fixes
+
+* add rok.setCollectionVar to POST_RESPONSE_SNIPPETS api reference ([99229e4](https://github.com/Snehal1112/rocket/commit/99229e4f409c5423378b95793ce021579f87dde5))
+* persist env var writes by default in rok.setEnvVar and deleteEnvVar ([3e116d6](https://github.com/Snehal1112/rocket/commit/3e116d6cdae22247a8c1ac96aa195c429dc5abd9))
+* **test:** update env var write test to reflect always-persist behaviour ([1d67d3d](https://github.com/Snehal1112/rocket/commit/1d67d3dd1baca89a75534f4ba72aa56689aa4894))
+
 ## [0.8.0](https://github.com/Snehal1112/rocket/compare/v0.7.0...v0.8.0) (2026-05-26)
 
 ### Features

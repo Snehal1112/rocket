@@ -1,5 +1,6 @@
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
+use rocket_shared::types::PathParam;
 use crate::ScriptPhase;
 
 /// Everything the JS sandbox needs to read at execution time.
@@ -34,15 +35,28 @@ pub struct ScriptContext {
 
     /// Always `"app"` for the desktop app.
     pub execution_platform: String,
+
+    /// The collection-level name of the request being executed, for `req.getName()`.
+    pub request_name: String,
+
+    /// Tags on the request being executed, for `req.getTags()`.
+    pub request_tags: Vec<String>,
+
+    /// Path parameters on the request being executed, for `req.getPathParams()`.
+    pub path_params: Vec<PathParam>,
 }
 
 impl ScriptContext {
     /// Convenience constructor for a `BeforeRequest` context.
+    #[allow(clippy::too_many_arguments)]
     pub fn before_request(
         code: String,
         variables: VariableContext,
         request: HttpRequest,
         env_name: Option<String>,
+        request_name: String,
+        request_tags: Vec<String>,
+        path_params: Vec<PathParam>,
     ) -> Self {
         Self {
             code,
@@ -53,16 +67,23 @@ impl ScriptContext {
             env_name,
             execution_mode: "standalone".into(),
             execution_platform: "app".into(),
+            request_name,
+            request_tags,
+            path_params,
         }
     }
 
     /// Convenience constructor for an `AfterResponse` context.
+    #[allow(clippy::too_many_arguments)]
     pub fn after_response(
         code: String,
         variables: VariableContext,
         request: HttpRequest,
         response: HttpResponse,
         env_name: Option<String>,
+        request_name: String,
+        request_tags: Vec<String>,
+        path_params: Vec<PathParam>,
     ) -> Self {
         Self {
             code,
@@ -73,16 +94,23 @@ impl ScriptContext {
             env_name,
             execution_mode: "standalone".into(),
             execution_platform: "app".into(),
+            request_name,
+            request_tags,
+            path_params,
         }
     }
 
     /// Convenience constructor for a `Tests` context.
+    #[allow(clippy::too_many_arguments)]
     pub fn tests(
         code: String,
         variables: VariableContext,
         request: HttpRequest,
         response: HttpResponse,
         env_name: Option<String>,
+        request_name: String,
+        request_tags: Vec<String>,
+        path_params: Vec<PathParam>,
     ) -> Self {
         Self {
             code,
@@ -93,6 +121,9 @@ impl ScriptContext {
             env_name,
             execution_mode: "standalone".into(),
             execution_platform: "app".into(),
+            request_name,
+            request_tags,
+            path_params,
         }
     }
 }
@@ -127,6 +158,9 @@ mod tests {
             VariableContext::default(),
             stub_request(),
             None,
+            String::new(),
+            vec![],
+            vec![],
         );
         assert_eq!(ctx.phase, ScriptPhase::BeforeRequest);
         assert!(ctx.response.is_none());
@@ -142,6 +176,9 @@ mod tests {
             stub_request(),
             stub_response(),
             Some("dev".into()),
+            String::new(),
+            vec![],
+            vec![],
         );
         assert_eq!(ctx.phase, ScriptPhase::AfterResponse);
         assert!(ctx.response.is_some());
@@ -156,8 +193,32 @@ mod tests {
             stub_request(),
             stub_response(),
             None,
+            String::new(),
+            vec![],
+            vec![],
         );
         assert_eq!(ctx.phase, ScriptPhase::Tests);
         assert!(ctx.response.is_some());
+    }
+
+    #[test]
+    fn carries_name_tags_and_path_params() {
+        let ctx = ScriptContext::before_request(
+            String::new(),
+            VariableContext::default(),
+            stub_request(),
+            None,
+            "Get User".into(),
+            vec!["smoke".into()],
+            vec![PathParam {
+                name: "id".into(),
+                value: "123".into(),
+                description: None,
+            }],
+        );
+        assert_eq!(ctx.request_name, "Get User");
+        assert_eq!(ctx.request_tags, vec!["smoke".to_string()]);
+        assert_eq!(ctx.path_params.len(), 1);
+        assert_eq!(ctx.path_params[0].name, "id");
     }
 }

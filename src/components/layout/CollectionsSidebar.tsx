@@ -300,6 +300,22 @@ export function CollectionsSidebar() {
       else unlisteners.push(fn);
     });
 
+    // Reload environments when a script (rok.setEnvVar/setGlobalEnvVar) or a
+    // set-variable action persists a write directly via env_repo — this path
+    // bypasses the file watcher (environments/ isn't inside the watched
+    // collections tree), so it needs its own event. The payload only carries
+    // the environment's own name, not which scope/collection it belongs to,
+    // so invalidate every environment query rather than guessing.
+    listen('environment-changed', () => {
+      if (envDebounce.current) clearTimeout(envDebounce.current);
+      envDebounce.current = setTimeout(() => {
+        getQueryClient().invalidateQueries({ queryKey: ['environments'] });
+      }, 300);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    });
+
     return () => {
       cancelled = true;
       if (listDebounce.current) clearTimeout(listDebounce.current);

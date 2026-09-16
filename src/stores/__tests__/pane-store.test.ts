@@ -94,6 +94,7 @@ describe('pane-store', () => {
         tags: [],
         docs: null,
         assertions: [],
+        actions: [],
       },
       response: null,
       isDirty: false,

@@ -104,6 +104,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     postResponseScript: req.postResponseScript ?? undefined,
     testsScript: req.tests ?? undefined,
     assertions: req.assertions ?? [],
+    actions: req.actions ?? [],
   };
 }
 
@@ -134,6 +135,7 @@ export function createDefaultRequest(): RequestState {
     tags: [],
     docs: null,
     assertions: [],
+    actions: [],
   };
 }
 

@@ -90,6 +90,26 @@ export interface AssertionEntry {
   disabled?: boolean;
 }
 
+/** Selector for extracting a value from a request/response (`Action`, OC spec). */
+export interface ActionSelector {
+  expression: string;
+  /** Only "jsonq" is valid per the OpenCollection spec. */
+  method: 'jsonq';
+}
+
+export interface ActionVariable {
+  name: string;
+  scope: 'runtime' | 'request' | 'folder' | 'collection' | 'environment';
+}
+
+/** Declarative `set-variable` action (OC spec `Action`), edited via the Vars tab. */
+export interface ActionEntry {
+  phase: 'before-request' | 'after-response';
+  selector: ActionSelector;
+  variable: ActionVariable;
+  disabled?: boolean;
+}
+
 export interface Request {
   uid: string;
   name: string;
@@ -106,6 +126,7 @@ export interface Request {
   postResponseScript?: string | null;
   tests?: string | null;
   assertions?: AssertionEntry[];
+  actions?: ActionEntry[];
 }
 
 export interface Folder {
@@ -223,6 +244,12 @@ export interface QueryParam {
   enabled: boolean;
 }
 
+export interface PathParam {
+  name: string;
+  value: string;
+  description?: string;
+}
+
 export interface ExecuteRequestInput {
   method: HttpMethod;
   url: string;
@@ -241,6 +268,12 @@ export interface ExecuteRequestInput {
   testsScript?: string;
   assertions?: AssertionEntry[];
   globalEnvName?: string;
+  /** Tags on the request, exposed to scripts via `req.getTags()`. */
+  tags?: string[];
+  /** Path parameters on the request, exposed to scripts via `req.getPathParams()`. */
+  pathParams?: PathParam[];
+  /** Declarative `set-variable` actions, evaluated at the phase they declare. */
+  actions?: ActionEntry[];
 }
 
 export interface FileChangedEvent {

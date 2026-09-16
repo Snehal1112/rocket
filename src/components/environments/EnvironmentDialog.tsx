@@ -1,7 +1,7 @@
 // src/components/environments/EnvironmentDialog.tsx
 
 import { Check, Eye, EyeOff, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RocketIdle } from '@/components/illustrations';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,28 @@ interface EnvironmentDialogProps {
 
 const EMPTY_ENVS: Environment[] = [];
 
+// Collapses variables sharing a key, keeping the last-edited row's value and
+// its original position. Backstop for Save: even if a duplicate ever makes
+// it into local state, the file on disk never gets two rows for one key.
+function dedupeVariables(variables: Variable[]): Variable[] {
+  const indexByKey = new Map<string, number>();
+  const result: Variable[] = [];
+  for (const variable of variables) {
+    if (variable.key === '') {
+      result.push(variable);
+      continue;
+    }
+    const existingIdx = indexByKey.get(variable.key);
+    if (existingIdx !== undefined) {
+      result[existingIdx] = variable;
+    } else {
+      indexByKey.set(variable.key, result.length);
+      result.push(variable);
+    }
+  }
+  return result;
+}
+
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
@@ -59,11 +81,30 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     if (!isDirty) setLocalEnvs(environments);
   }, [environments, isDirty]);
 
+  // The dialog stays mounted between opens (only `open` toggles visibility),
+  // so a stale `isDirty`/`localEnvs` from an abandoned edit could otherwise
+  // survive indefinitely and mask writes made elsewhere (e.g. a script's
+  // rok.setEnvVar) while the dialog was closed. Force a fresh copy of the
+  // live data every time it's (re)opened.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setLocalEnvs(environments);
+      setIsDirty(false);
+    }
+    wasOpen.current = open;
+  }, [open, environments]);
+
   const selectedEnv = localEnvs.find((e) => e.name === selectedName) ?? null;
 
   const saveSettings = useCallback(async () => {
     if (!selectedEnv || !activeCollection) return;
-    await saveMutation.mutateAsync(selectedEnv);
+    // Backstop: collapse same-keyed rows before persisting, so a duplicate
+    // that slipped into local state can never be written to disk.
+    await saveMutation.mutateAsync({
+      ...selectedEnv,
+      variables: dedupeVariables(selectedEnv.variables),
+    });
     setIsDirty(false);
   }, [selectedEnv, activeCollection, saveMutation]);
 
@@ -121,6 +162,15 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   const updateVariable = useCallback(
     (idx: number, patch: Partial<Variable>) => {
       if (!selectedEnv) return;
+      if (patch.key !== undefined) {
+        const nextKey = patch.key.trim();
+        const isDuplicate =
+          nextKey !== '' && selectedEnv.variables.some((v, i) => i !== idx && v.key === nextKey);
+        if (isDuplicate) {
+          toast.error(`A variable named "${nextKey}" already exists`);
+          return;
+        }
+      }
       setLocalEnvs((prev) =>
         prev.map((e) => {
           if (e.name !== selectedEnv.name) return e;

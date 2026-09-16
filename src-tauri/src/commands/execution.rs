@@ -75,3 +75,16 @@ pub async fn execute_request(
 ) -> Result<ExecuteRequestResponse, DomainError> {
     svc.execute(input).await.map(ExecuteRequestResponse::from)
 }
+
+/// Preview-evaluates a jsonq expression against a captured response, for the
+/// Vars tab's "Test" affordance.
+#[tauri::command]
+pub async fn evaluate_var_expression(
+    collection_root: String,
+    expression: String,
+    response_json: String,
+    svc: State<'_, RequestExecutionService>,
+) -> Result<serde_json::Value, DomainError> {
+    svc.evaluate_var_expression(&collection_root, &expression, &response_json)
+        .await
+}

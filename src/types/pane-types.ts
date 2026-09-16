@@ -159,6 +159,7 @@ export interface RequestState {
   postResponseScript?: string;
   testsScript?: string;
   assertions: import('@/lib/tauri-api').AssertionEntry[];
+  actions: import('@/lib/tauri-api').ActionEntry[];
 }
 
 export interface KeyValueEntry {

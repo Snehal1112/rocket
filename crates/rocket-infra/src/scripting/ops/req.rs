@@ -143,6 +143,28 @@ pub fn op_req_get_execution_platform(state: &OpState) -> String {
         .clone()
 }
 
+#[op2]
+#[string]
+pub fn op_req_get_name(state: &OpState) -> String {
+    state.borrow::<ScriptInputState>().request_name.clone()
+}
+
+/// Returns JSON array of tag strings.
+#[op2]
+#[string]
+pub fn op_req_get_tags(state: &OpState) -> String {
+    serde_json::to_string(&state.borrow::<ScriptInputState>().request_tags)
+        .unwrap_or_else(|_| "[]".into())
+}
+
+/// Returns JSON array of `{ name, value, description }` path param objects.
+#[op2]
+#[string]
+pub fn op_req_get_path_params(state: &OpState) -> String {
+    serde_json::to_string(&state.borrow::<ScriptInputState>().path_params)
+        .unwrap_or_else(|_| "[]".into())
+}
+
 // ── req write ops (BeforeRequest only) ───────────────────────────────────────
 
 #[op2(fast)]
