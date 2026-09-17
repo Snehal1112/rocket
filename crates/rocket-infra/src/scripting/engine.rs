@@ -437,9 +437,11 @@ mod tests {
 
     #[tokio::test]
     async fn overlapping_secret_substrings_do_not_panic() {
-        // One secret's value is a substring of another's. Whichever order
-        // redact()'s HashSet iteration replaces them in, this must not
-        // panic, and the longer secret's full raw value must not survive.
+        // SHORT's value is a prefix of LONG's value. redact() must not panic,
+        // must fully redact LONG's raw value, and — the sharper assertion —
+        // must not leave any fragment of LONG's suffix in plaintext either
+        // (a naive replace-in-arbitrary-order can consume SHORT first,
+        // breaking LONG's exact-substring match and leaking its tail).
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
         vars.env.insert("SHORT".into(), "abcdef1".into());
@@ -449,7 +451,10 @@ mod tests {
         let mut ctx = minimal_ctx("console.log(rok.getEnvVar('LONG'))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(!result.console_entries[0].message.contains("abcdef123456"));
+        let message = &result.console_entries[0].message;
+        assert!(!message.contains("abcdef123456"));
+        assert!(!message.contains("23456"), "a fragment of the longer secret must not survive: {message}");
+        assert_eq!(message, "••••••");
     }
 
     #[tokio::test]
