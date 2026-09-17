@@ -244,6 +244,22 @@ export async function resolveRequestFields(
   };
 }
 
+// Returns the React Query keys to invalidate after a script-driven variable
+// write (rok.setEnvVar / rok.setGlobalEnvVar), so the environment editor and
+// any open request tabs stop showing a stale value. `collection` is the
+// collection whose per-collection environments should be re-fetched (env
+// data is keyed by collection name, not environment name — see
+// `environmentKeys.collection` in `@/lib/queries/environment-queries`).
+export function getEnvInvalidationKeys(
+  collection: string | undefined,
+  globalEnvName: string | undefined,
+): readonly (readonly unknown[])[] {
+  const keys: (readonly unknown[])[] = [];
+  if (collection) keys.push(environmentKeys.collection(collection));
+  if (globalEnvName) keys.push(environmentKeys.global(globalEnvName));
+  return keys;
+}
+
 // Non-interactive grants — safe to silently fetch on send. Authorization Code
 // and Implicit pop a browser window, which would be surprising as a side effect
 // of hitting Send, so they're excluded from auto-fetch.
@@ -502,6 +518,22 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       scriptError: result.scriptError,
     };
     usePaneStore.getState().setResponse(tabId, responseState);
+
+    // A pre/post-response or tests script may have written env or collection
+    // variables via rok.setEnvVar/setGlobalEnvVar/setCollectionVar. Refresh the
+    // relevant caches so the environment editor and this tab's variable context
+    // don't keep showing the stale pre-write value. Cheap even when nothing
+    // changed — React Query dedupes a no-op invalidate against unchanged data.
+    const qc = getQueryClient();
+    for (const key of getEnvInvalidationKeys(collection, globalEnvName)) {
+      qc.invalidateQueries({ queryKey: key });
+    }
+    if (collection) {
+      window.dispatchEvent(
+        new CustomEvent('rocket:collection-vars-written', { detail: { collection } }),
+      );
+    }
+
     // Merge auth-synthesized headers with explicit headers for the console.
     // Auth headers (Bearer, Basic, API Key) are injected by reqwest at the Rust
     // level and never appear in effectiveHeaders — add them here so the console

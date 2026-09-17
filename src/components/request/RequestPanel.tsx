@@ -169,7 +169,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   }, [tab.id]);
 
   // Fetch collection variables for the scoped variable context.
-  useEffect(() => {
+  const refetchCollectionVariables = useCallback(() => {
     if (!tab.source?.collection) {
       setCollectionVariables([]);
       return;
@@ -182,6 +182,24 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         setCollectionVariables([]);
       });
   }, [tab.source?.collection]);
+
+  useEffect(() => {
+    refetchCollectionVariables();
+  }, [refetchCollectionVariables]);
+
+  // A script-driven rok.setCollectionVar write (execute-request.ts) dispatches
+  // this event after a successful execute() call — refresh so the Vars tab and
+  // variable-resolution context for this tab don't show a stale value.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ collection: string }>).detail;
+      if (detail?.collection === tab.source?.collection) {
+        refetchCollectionVariables();
+      }
+    };
+    window.addEventListener('rocket:collection-vars-written', handler);
+    return () => window.removeEventListener('rocket:collection-vars-written', handler);
+  }, [tab.source?.collection, refetchCollectionVariables]);
 
   // Fetch request-scoped and folder-scoped variables for the variable context.
   useEffect(() => {
