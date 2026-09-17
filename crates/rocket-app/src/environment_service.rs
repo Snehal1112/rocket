@@ -42,33 +42,18 @@ impl EnvironmentService {
         // Snapshot previous state so we can detect which secret values actually changed.
         let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;
-        self.events.publish(DomainEvent::EnvironmentSaved { name: env.name.clone() });
 
-        // Emit one SecretVariableWritten per secret whose value changed (or is new).
-        for var in &env.variables {
-            if !var.secret || var.value.is_empty() {
-                continue;
-            }
-            let changed = match &previous {
-                Some(prev) => prev
-                    .variables
-                    .iter()
-                    .find(|v| v.key == var.key)
-                    .map(|v| v.value != var.value || !v.secret)
-                    .unwrap_or(true),
-                None => true,
-            };
-            if changed {
-                self.audit.publish(
-                    "system".into(),
-                    None,
-                    AuditEventKind::SecretVariableWritten {
-                        environment: env.name.clone(),
-                        variable_key: var.key.clone(),
-                    },
-                );
-            }
-        }
+        // `before` is an empty environment of the same name when there was no prior
+        // save — `publish_env_write_events` treats every secret in `after` as "changed"
+        // in that case, matching the pre-refactor behavior (`previous: None` branch).
+        let before = previous.unwrap_or_else(|| Environment::new(env.name.as_str()));
+        crate::env_audit::publish_env_write_events(
+            self.events.as_ref(),
+            self.audit.as_ref(),
+            &env.name,
+            &before,
+            env,
+        );
 
         Ok(())
     }
