@@ -45,13 +45,15 @@ fn op_test_run(#[string] _name: String) {
 
 #[op2(fast)]
 fn op_test_pass(state: &mut OpState, #[string] name: String) {
-    state.borrow_mut::<ScriptOutputState>().add_test_result(name, true, None);
+    let redacted_name = redact(state, name);
+    state.borrow_mut::<ScriptOutputState>().add_test_result(redacted_name, true, None);
 }
 
 #[op2(fast)]
 fn op_test_fail(state: &mut OpState, #[string] name: String, #[string] error: String) {
-    let redacted = redact(state, error);
-    state.borrow_mut::<ScriptOutputState>().add_test_result(name, false, Some(redacted));
+    let redacted_name = redact(state, name);
+    let redacted_error = redact(state, error);
+    state.borrow_mut::<ScriptOutputState>().add_test_result(redacted_name, false, Some(redacted_error));
 }
 
 #[op2]
@@ -514,6 +516,39 @@ mod tests {
             [rocket_scripting::HeaderMutation::Set { name, value }]
                 if name == "Authorization" && value == "Bearer sk-live-abcdef123"
         ));
+    }
+
+    #[tokio::test]
+    async fn rok_test_passing_name_redacts_secret_value() {
+        // A test name is display text on the same observability surface as
+        // console output and failure messages — a secret embedded in the
+        // name (e.g. rok.test(apiKey, () => {...})) must be redacted too.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("rok.test(rok.getEnvVar('API_KEY'), () => {})");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.test_results.len(), 1);
+        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Passed);
+        assert_eq!(result.test_results[0].name, "••••••");
+    }
+
+    #[tokio::test]
+    async fn rok_test_failing_name_redacts_secret_value() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx(
+            "rok.test(rok.getEnvVar('API_KEY'), () => { throw new Error('boom') })",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.test_results.len(), 1);
+        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Failed);
+        assert_eq!(result.test_results[0].name, "••••••");
     }
 
     #[tokio::test]

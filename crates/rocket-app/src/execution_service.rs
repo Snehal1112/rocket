@@ -2723,6 +2723,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn secret_value_exactly_at_min_redaction_len_is_added_to_secret_values() {
+        // MIN_REDACTION_LEN = 6 is an inclusive floor ("len >= MIN_REDACTION_LEN"):
+        // a secret exactly 6 characters long must still be added and redacted,
+        // not excluded. Complements short_secret_value_is_not_added_to_secret_values,
+        // which only covers the too-short (3-char) side of the boundary.
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("EXACT", "abcdef")); // 6 chars == MIN_REDACTION_LEN
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineExact(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineExact {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineExact(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("abcdef"), "a secret exactly MIN_REDACTION_LEN characters long must be added to secret_values");
+    }
+
+    #[tokio::test]
     async fn global_env_secret_populates_secret_values() {
         let mut active_env = Environment::new("dev");
         active_env.set_variable(Variable::new("BASE_URL", "https://dev.local"));

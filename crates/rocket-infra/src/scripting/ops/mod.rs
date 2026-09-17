@@ -26,7 +26,7 @@ pub struct ScriptOpError(pub String);
 /// match — its own replace then becomes a no-op and a fragment of it survives
 /// in plaintext. Sorting by descending length before replacing guarantees the
 /// longest, most-specific match always consumes first, closing that leak.
-pub fn redact(state: &OpState, msg: String) -> String {
+pub(crate) fn redact(state: &OpState, msg: String) -> String {
     let secrets = &state.borrow::<ScriptInputState>().secret_values;
     if secrets.is_empty() {
         return msg;
