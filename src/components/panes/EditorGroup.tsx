@@ -17,6 +17,7 @@ import { MousePointer2 } from 'lucide-react';
 import { GitPanel } from '@/components/git/GitPanel';
 import { RocketLaunch } from '@/components/illustrations';
 import { RequestPanel } from '@/components/request/RequestPanel';
+import { RunnerPane } from '@/components/request/runner/RunnerPane';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -208,7 +209,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               <AuditLogTab />
             ) : null
           ) : isRunnerTab(activeTab) ? (
-            <EmptyState variant={emptyStateVariant} />
+            <RunnerPane tab={activeTab} groupId={node.groupId} />
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )

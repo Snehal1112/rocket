@@ -4,6 +4,7 @@ import {
   Columns2,
   Globe,
   LayoutPanelLeft,
+  ListChecks,
   PanelBottom,
   PanelRight,
   Pencil,
@@ -52,6 +53,7 @@ export function TabBar({
   const root = usePaneStore((s) => s.root);
   const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
   const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
+  const openRunnerTab = usePaneStore((s) => s.openRunnerTab);
 
   // Other panes available for moving tabs into.
   const otherGroupIds = collectLeafGroupIds(root).filter((id) => id !== node.groupId);
@@ -257,6 +259,9 @@ export function TabBar({
           </ContextMenuItem>
           <ContextMenuItem onClick={() => openEphemeralTab('websocket')}>
             <Radio className='h-3.5 w-3.5 mr-2' /> WebSocket
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void openRunnerTab(null)}>
+            <ListChecks className='h-3.5 w-3.5 mr-2' /> Runner
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
