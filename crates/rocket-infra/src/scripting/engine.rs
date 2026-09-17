@@ -146,6 +146,7 @@ fn run_script(ctx: ScriptContext) -> DomainResult<ScriptResult> {
     {
         let op_state = runtime.op_state();
         let mut state = op_state.borrow_mut();
+        let secret_values = ctx.variables.secret_values.clone();
         state.put(ScriptInputState {
             phase: ctx.phase,
             variables: ctx.variables,
@@ -157,6 +158,7 @@ fn run_script(ctx: ScriptContext) -> DomainResult<ScriptResult> {
             request_name: ctx.request_name,
             request_tags: ctx.request_tags,
             path_params: ctx.path_params,
+            secret_values,
         });
         state.put(ScriptOutputState::default());
     }
@@ -326,6 +328,146 @@ mod tests {
         assert_eq!(result.console_entries.len(), 2);
         assert_eq!(result.console_entries[0].level, rocket_scripting::ConsoleLevel::Warn);
         assert_eq!(result.console_entries[1].level, rocket_scripting::ConsoleLevel::Error);
+    }
+
+    #[tokio::test]
+    async fn console_log_redacts_secret_env_var() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("console.log(rok.getEnvVar('API_KEY'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries.len(), 1);
+        assert_eq!(result.console_entries[0].message, "••••••");
+    }
+
+    #[tokio::test]
+    async fn console_log_redacts_secret_substring_in_larger_string() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("console.log('token=' + rok.getEnvVar('API_KEY'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries[0].message, "token=••••••");
+    }
+
+    #[tokio::test]
+    async fn console_log_redacts_value_copied_to_different_scope_key() {
+        // Redaction is content-based, not name/scope-based: a secret value
+        // placed in the runtime scope under a *different* key from where it
+        // was originally read is still caught.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("copy".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("console.log(rok.getVar('copy'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries[0].message, "••••••");
+    }
+
+    #[tokio::test]
+    async fn two_phase_set_var_then_get_var_redacts_copied_secret() {
+        // Reproduces the real production flow: a before-request script
+        // copies a secret into a runtime var with rok.setVar, the host
+        // (RequestExecutionService::apply_script_side_effects, rocket-app)
+        // merges that write into VariableContext.runtime for the next
+        // phase, and a later phase's console.log of the copy is still
+        // redacted — even though op_rok_get_var only ever reads the
+        // *input* snapshot, never the current phase's own writes.
+        let engine = DenoScriptEngine::new();
+
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+
+        let mut ctx1 = minimal_ctx("rok.setVar('copy', rok.getEnvVar('API_KEY'))");
+        ctx1.variables = vars.clone();
+        let result1 = engine.execute(ctx1).await.expect("execute phase 1");
+        let copied = result1
+            .runtime_vars
+            .get("copy")
+            .and_then(|v| v.as_str())
+            .expect("copy runtime var present")
+            .to_string();
+        assert_eq!(copied, "sk-live-abcdef123");
+
+        // Simulate apply_script_side_effects merging runtime_vars into the
+        // context carried forward to the next phase.
+        vars.runtime.insert("copy".into(), copied);
+
+        let mut ctx2 = minimal_ctx("console.log(rok.getVar('copy'))");
+        ctx2.variables = vars;
+        let result2 = engine.execute(ctx2).await.expect("execute phase 2");
+        assert_eq!(result2.console_entries[0].message, "••••••");
+    }
+
+    #[tokio::test]
+    async fn console_warn_and_error_redact_secret_values() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx(
+            "console.warn(rok.getEnvVar('API_KEY')); console.error('key: ' + rok.getEnvVar('API_KEY'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries.len(), 2);
+        assert_eq!(result.console_entries[0].message, "••••••");
+        assert_eq!(result.console_entries[1].message, "key: ••••••");
+    }
+
+    #[tokio::test]
+    async fn non_secret_variable_value_is_not_redacted() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("PLAIN".into(), "plain-value-123".into());
+        // secret_values intentionally left empty.
+        let mut ctx = minimal_ctx("console.log(rok.getEnvVar('PLAIN'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries[0].message, "plain-value-123");
+    }
+
+    #[tokio::test]
+    async fn overlapping_secret_substrings_do_not_panic() {
+        // One secret's value is a substring of another's. Whichever order
+        // redact()'s HashSet iteration replaces them in, this must not
+        // panic, and the longer secret's full raw value must not survive.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("SHORT".into(), "abcdef1".into());
+        vars.env.insert("LONG".into(), "abcdef123456".into());
+        vars.secret_values.insert("abcdef1".into());
+        vars.secret_values.insert("abcdef123456".into());
+        let mut ctx = minimal_ctx("console.log(rok.getEnvVar('LONG'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(!result.console_entries[0].message.contains("abcdef123456"));
+    }
+
+    #[tokio::test]
+    async fn short_secret_not_in_secret_values_is_not_redacted() {
+        // Documents the MIN_REDACTION_LEN trade-off (enforced upstream in
+        // RequestExecutionService::build_variable_scopes, rocket-app, Task
+        // 2 of this plan): a secret this short is never added to
+        // secret_values, so redact() has nothing to match and the raw
+        // value passes through unchanged. This is the deliberate,
+        // documented limitation from spec §3.4.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("SHORT".into(), "abc".into());
+        // secret_values intentionally does NOT contain "abc" — mirrors
+        // what rocket-app does for a value under MIN_REDACTION_LEN.
+        let mut ctx = minimal_ctx("console.log(rok.getEnvVar('SHORT'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries[0].message, "abc");
     }
 
     #[tokio::test]
