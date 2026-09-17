@@ -287,24 +287,42 @@ Expected: FAIL — no "Runner" item in the context menu yet.
 
 - [ ] **Step 3: Wire `EditorGroup.tsx`**
 
-Add `isRunnerTab` to the import at `src/components/panes/EditorGroup.tsx:38`
-(same import statement that already lists `isContractTab`), and add
-`import { RunnerPane } from '@/components/request/runner/RunnerPane';`
-to the file's import block.
+> Note: Plan A Task 1 already had to touch this file — adding `RunnerTab`
+> to the `Tab` union broke this file's exhaustive ternary chain, so that
+> task's implementer added a minimal placeholder branch to keep
+> `tsc --noEmit` clean (see that plan's ledger for the ruling). Check the
+> current state of the file first:
+> ```bash
+> grep -n "isRunnerTab" src/components/panes/EditorGroup.tsx
+> ```
+> `isRunnerTab` is already imported, and there is already a branch
+> `) : isRunnerTab(activeTab) ? (<EmptyState variant={emptyStateVariant} />` —
+> positioned after the `isWorkspaceTab` block's closing `: null` and
+> right before the final `CollectionOverviewTab` fallback (NOT after
+> `isContractDiffTab` as originally planned below). **Replace** that
+> existing branch's body in place — do not insert a second
+> `isRunnerTab` branch elsewhere in the chain, and do not duplicate the
+> `isRunnerTab` import.
 
-In the ternary chain at `src/components/panes/EditorGroup.tsx:189`,
-add a branch right after `isContractDiffTab` and before
-`isWorkspaceTab`:
+Add `import { RunnerPane } from '@/components/request/runner/RunnerPane';`
+to the file's import block (this part of the original plan still
+applies — only `isRunnerTab` itself was already imported by Task 1's
+follow-on edit).
+
+Replace the existing placeholder branch:
 
 ```tsx
-          ) : isContractDiffTab(activeTab) ? (
-            <ContractDiffPane
-              collectionId={activeTab.collectionId}
-              contractId={activeTab.contractId}
-            />
+          ) : isRunnerTab(activeTab) ? (
+            <EmptyState variant={emptyStateVariant} />
+          ) : (
+```
+
+with:
+
+```tsx
           ) : isRunnerTab(activeTab) ? (
             <RunnerPane tab={activeTab} groupId={node.groupId} />
-          ) : isWorkspaceTab(activeTab) ? (
+          ) : (
 ```
 
 - [ ] **Step 4: Wire `TabBar.tsx`**
