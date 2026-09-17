@@ -116,7 +116,12 @@ describe('RunnerPane', () => {
       root: { ...s.root, type: 'leaf', tabs: [tab], activeTabId: tab.id } as typeof s.root,
     }));
     render(<RunnerPane tab={tab} groupId='g1' />);
-    expect(screen.getByText(/no requests/i)).toBeInTheDocument(); // RunnerRequestList empty state
+    // Exact text, not /no requests/i — RunnerSummaryHeader also renders the
+    // text "No requests" for a zero-total tab, and a broad regex matches
+    // both simultaneously since RunnerPane renders header + list together.
+    expect(
+      screen.getByText('No requests found in this collection/folder.'),
+    ).toBeInTheDocument(); // RunnerRequestList empty state
   });
 
   it('shows RunnerResultsList once the run is done', () => {
@@ -125,7 +130,9 @@ describe('RunnerPane', () => {
       root: { ...s.root, type: 'leaf', tabs: [tab], activeTabId: tab.id } as typeof s.root,
     }));
     render(<RunnerPane tab={tab} groupId='g1' />);
-    expect(screen.getByText(/no requests/i)).toBeInTheDocument(); // RunnerResultsList empty state
+    expect(
+      screen.getByText('No requests found in this collection/folder.'),
+    ).toBeInTheDocument(); // RunnerResultsList empty state
   });
 });
 ```
