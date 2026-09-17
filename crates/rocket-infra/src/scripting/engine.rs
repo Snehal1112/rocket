@@ -4,7 +4,7 @@ use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
-use crate::scripting::ops::{console, req, res, rok};
+use crate::scripting::ops::{console, redact, req, res, rok};
 
 /// JS scripting engine backed by `deno_core` (V8).
 ///
@@ -50,7 +50,8 @@ fn op_test_pass(state: &mut OpState, #[string] name: String) {
 
 #[op2(fast)]
 fn op_test_fail(state: &mut OpState, #[string] name: String, #[string] error: String) {
-    state.borrow_mut::<ScriptOutputState>().add_test_result(name, false, Some(error));
+    let redacted = redact(state, error);
+    state.borrow_mut::<ScriptOutputState>().add_test_result(name, false, Some(redacted));
 }
 
 #[op2]
@@ -468,6 +469,46 @@ mod tests {
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.console_entries[0].message, "abc");
+    }
+
+    #[tokio::test]
+    async fn rok_test_failure_message_redacts_secret_value() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx(
+            "rok.test('leaks secret', () => { throw new Error(rok.getEnvVar('API_KEY')) })",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.test_results.len(), 1);
+        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Failed);
+        let err = result.test_results[0].error.as_ref().expect("error message present");
+        // JS `String(new Error(msg))` formats as "Error: <msg>".
+        assert_eq!(err, "Error: ••••••");
+    }
+
+    #[tokio::test]
+    async fn req_set_header_with_secret_value_is_not_redacted() {
+        // Redaction is an observability-surface-only concern (console/test
+        // output). req.setHeader must still carry the real secret so the
+        // actual outgoing HTTP request functions correctly.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx(
+            "req.setHeader('Authorization', 'Bearer ' + rok.getEnvVar('API_KEY'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let mutations = result.request_mutations.expect("mutations present");
+        assert!(matches!(
+            mutations.headers.as_slice(),
+            [rocket_scripting::HeaderMutation::Set { name, value }]
+                if name == "Authorization" && value == "Bearer sk-live-abcdef123"
+        ));
     }
 
     #[tokio::test]
