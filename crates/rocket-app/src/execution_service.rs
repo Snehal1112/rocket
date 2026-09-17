@@ -688,8 +688,11 @@ impl RequestExecutionService {
         );
         if let Some(name) = input.global_env_name.as_deref() {
             if let Ok(global_env) = self.env_repo.get(name) {
-                for (k, v) in global_env.enabled_variables() {
-                    var_ctx.global_env.insert(k.to_string(), v.to_string());
+                for var in global_env.variables.iter().filter(|v| v.enabled) {
+                    var_ctx.global_env.insert(var.key.clone(), var.value.clone());
+                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
+                        var_ctx.secret_values.insert(var.value.clone());
+                    }
                 }
             }
         }
@@ -2717,6 +2720,46 @@ mod tests {
 
         let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
         assert!(!captured.secret_values.contains("abc"), "secrets shorter than MIN_REDACTION_LEN must not be added to secret_values");
+    }
+
+    #[tokio::test]
+    async fn global_env_secret_populates_secret_values() {
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::new("BASE_URL", "https://dev.local"));
+        let mut global_env = Environment::new("shared-global");
+        global_env.set_variable(Variable::secret("GLOBAL_TOKEN", "glbl-secret-999"));
+        global_env.set_variable(Variable::new("GLOBAL_PLAIN", "glbl-plain-val"));
+        let env_repo = MultiEnvRepo::new(vec![active_env, global_env]);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineGlobal(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineGlobal {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineGlobal(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.global_env_name = Some("shared-global".into());
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("glbl-secret-999"), "secret global env var value must be in secret_values");
+        assert!(!captured.secret_values.contains("glbl-plain-val"), "non-secret global env var value must not be in secret_values");
     }
 
     #[tokio::test]
