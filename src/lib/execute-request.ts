@@ -250,13 +250,23 @@ export async function resolveRequestFields(
 // collection whose per-collection environments should be re-fetched (env
 // data is keyed by collection name, not environment name — see
 // `environmentKeys.collection` in `@/lib/queries/environment-queries`).
+// When globalEnvName is set, both `global(name)` and `globalList` are
+// invalidated — the Global Environments editor (WorkspaceEnvironmentsTab)
+// reads its variable list from `globalList` (via useGlobalEnvironments()),
+// not from `global(name)`, so invalidating only the latter would leave that
+// editor showing a stale value and risk a later manual save there silently
+// reverting the script's write. This matches the pair `useSaveGlobalEnvironment`
+// already invalidates on a manual save.
 export function getEnvInvalidationKeys(
   collection: string | undefined,
   globalEnvName: string | undefined,
 ): readonly (readonly unknown[])[] {
   const keys: (readonly unknown[])[] = [];
   if (collection) keys.push(environmentKeys.collection(collection));
-  if (globalEnvName) keys.push(environmentKeys.global(globalEnvName));
+  if (globalEnvName) {
+    keys.push(environmentKeys.global(globalEnvName));
+    keys.push(environmentKeys.globalList);
+  }
   return keys;
 }
 

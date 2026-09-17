@@ -408,16 +408,20 @@ impl RequestExecutionService {
 
     /// Read-modify-write helper for env var writes against a named environment.
     ///
-    /// When `force_persist` is true (used for global env writes), all writes go
-    /// to disk regardless of the individual `persist` flag. For active-environment
-    /// writes, only entries with `persist: true` are saved. `EnvVarWrite.persist`
-    /// is preserved for wire/API compatibility but currently has no effect — both
-    /// call sites in `apply_script_side_effects` and the `runtime.actions`
-    /// "environment" scope branch always pass `force_persist: true`.
+    /// `EnvVarWrite.persist` is preserved for wire/API compatibility but
+    /// currently has no effect — both call sites in `apply_script_side_effects`
+    /// and the `runtime.actions` "environment" scope branch always pass
+    /// `force_persist: true`, so every write here is unconditionally persisted.
     ///
     /// Existing variable metadata (`enabled`, `secret`, `description`, `secret_type`)
     /// is preserved across a script-driven write — only `value` (and, for a
-    /// brand-new key, `enabled: true`) is set by the script. A script can never
+    /// brand-new key, `enabled: true`) is set by the script. `value_variants`
+    /// is the one field NOT preserved — it is always cleared to `None` on a
+    /// script write, matching this method's pre-existing behavior before this
+    /// plan and the spec's explicit choice not to extend preservation to it.
+    /// Metadata is looked up against the pre-batch snapshot (`before`), not the
+    /// progressively-mutated `env`, so a delete-then-recreate of the same key
+    /// within one script still finds the original metadata. A script can never
     /// promote a variable to `secret: true`; only the user can do that via the
     /// environment editor UI. On a successful save, publishes the same
     /// `DomainEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
@@ -460,7 +464,16 @@ impl RequestExecutionService {
                 .as_str()
                 .map(str::to_owned)
                 .unwrap_or_else(|| write.value.to_string());
-            let existing = env.variables.iter().find(|v| v.key == write.key);
+            // Look up metadata from the pre-batch snapshot, not the
+            // progressively-mutated `env` — otherwise a delete followed by a
+            // re-set of the same key within one script (e.g.
+            // rok.deleteEnvVar('K'); rok.setEnvVar('K', v)) would find no
+            // "existing" entry in the already-mutated `env`, silently
+            // stripping the secret flag (and other metadata) with no audit
+            // trail. `before` is the metadata the user actually established
+            // before this script ran, which is also the semantically correct
+            // source regardless of same-batch reordering.
+            let existing = before.variables.iter().find(|v| v.key == write.key);
             let updated = rocket_environment::Variable {
                 key: write.key.clone(),
                 value: str_val,
@@ -2151,6 +2164,67 @@ mod tests {
         let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
         assert_eq!(var.value, "sk-new");
         assert!(var.secret, "secret flag must be preserved across a script write");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_delete_then_set_preserves_secret_flag_and_publishes_audit() {
+        // rok.deleteEnvVar('K') followed by rok.setEnvVar('K', v) in the same
+        // script queues a Null write then a value write for the same key in
+        // one env_var_writes batch. Metadata lookup must use the pre-batch
+        // snapshot, not the progressively-mutated env, or the delete erases
+        // "existing" before the re-set can find it — silently downgrading the
+        // secret flag to false with no SecretVariableWritten audit event.
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![
+                EnvVarWrite {
+                    key: "API_KEY".into(),
+                    value: serde_json::Value::Null,
+                    persist: true,
+                },
+                EnvVarWrite {
+                    key: "API_KEY".into(),
+                    value: serde_json::json!("sk-new"),
+                    persist: true,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        assert_eq!(var.value, "sk-new");
+        assert!(var.secret, "secret flag must survive a delete-then-recreate within one script");
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SecretVariableWritten { environment, variable_key }
+                    if environment == "prod" && variable_key == "API_KEY"
+            )),
+            "expected SecretVariableWritten even after a delete-then-recreate, got {:?}",
+            *captured
+        );
     }
 
     #[tokio::test]
