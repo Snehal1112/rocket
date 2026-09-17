@@ -18,6 +18,7 @@ vi.mock('@/lib/execute-request', () => ({
   })),
 }));
 
+import { resolveRequestFieldsForPath } from '@/lib/execute-request';
 import { executeRunnerEntry } from '@/lib/runner-execute';
 import { executeRequest } from '@/lib/tauri-api';
 
@@ -30,6 +31,7 @@ function baseRequest(): Request {
     headers: [],
     auth: { authType: 'none' },
     fileName: 'ping.yml',
+    tests: 'pm.test("ok", () => {})',
   };
 }
 
@@ -52,6 +54,18 @@ describe('executeRunnerEntry', () => {
     const outcome = await executeRunnerEntry('demo', 'ping.yml', baseRequest(), undefined);
     expect(outcome.status).toBe('passed');
     expect(outcome.result?.status).toBe(200);
+
+    // Regression: assert testsScript field mapping (request.tests → ExecuteRequestInput.testsScript)
+    expect(executeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ testsScript: 'pm.test("ok", () => {})' }),
+    );
+
+    // Regression: assert auth inheritance (mapApiRequestToState with fromCollection=true)
+    expect(resolveRequestFieldsForPath).toHaveBeenCalledWith(
+      'demo',
+      'ping.yml',
+      expect.objectContaining({ auth: { authType: 'inherit' } }),
+    );
   });
 
   it('reports failed for a non-2xx response', async () => {
