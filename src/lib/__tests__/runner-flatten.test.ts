@@ -65,8 +65,8 @@ describe('flattenRunnerEntries', () => {
   it('flattens the whole collection in tree order, folders first', () => {
     const entries = flattenRunnerEntries(makeCollection());
     expect(entries.map((e) => e.requestPath)).toEqual([
-      'auth/login.yml',
       'auth/nested/refresh.yml',
+      'auth/login.yml',
       'root-request.yml',
     ]);
   });
@@ -82,8 +82,8 @@ describe('flattenRunnerEntries', () => {
   it('scopes to a folder when folderPath is given', () => {
     const entries = flattenRunnerEntries(makeCollection(), 'auth');
     expect(entries.map((e) => e.requestPath)).toEqual([
-      'auth/login.yml',
       'auth/nested/refresh.yml',
+      'auth/login.yml',
     ]);
   });
 
@@ -106,6 +106,6 @@ describe('flattenRunnerEntries', () => {
 
   it('carries the full request object onto each entry', () => {
     const entries = flattenRunnerEntries(makeCollection());
-    expect(entries[0].request).toMatchObject({ name: 'Login', method: 'POST', uid: 'r2' });
+    expect(entries[0].request).toMatchObject({ name: 'Refresh', method: 'POST', uid: 'r3' });
   });
 });

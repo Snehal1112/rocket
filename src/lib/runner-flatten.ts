@@ -1,3 +1,4 @@
+import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import type { Collection, CollectionItem, Folder } from '@/lib/tauri-api';
 import type { RunnerRequestEntry } from '@/types/pane-types';
 
@@ -20,7 +21,7 @@ function findFolder(folder: Folder, basePath: string, targetPath: string): Folde
 // Recursively collects every request under `folder` into `out`, in the
 // same folders-first, alphabetical order the sidebar tree renders.
 function collect(folder: Folder, basePath: string, out: RunnerRequestEntry[]): void {
-  const items: CollectionItem[] = folder.items;
+  const items: CollectionItem[] = sortItemsFoldersFirst(folder.items);
   for (const item of items) {
     if (item.type === 'folder') {
       const childPath = basePath ? `${basePath}/${item.dirName ?? item.name}` : (item.dirName ?? item.name);
@@ -50,29 +51,6 @@ export function flattenRunnerEntries(
   const startFolder = folderPath ? findFolder(collection.root, '', folderPath) : collection.root;
   if (!startFolder) return [];
   const out: RunnerRequestEntry[] = [];
-  const basePath = folderPath ?? '';
-  // Apply folders-first only when starting from the root (no folderPath).
-  if (!folderPath) {
-    // Folders first: collect from folders first, then requests.
-    for (const item of startFolder.items) {
-      if (item.type === 'folder') {
-        const childPath = item.dirName ?? item.name;
-        collect(item, childPath, out);
-      }
-    }
-    for (const item of startFolder.items) {
-      if (item.type === 'request') {
-        out.push({
-          requestPath: item.fileName ?? item.name,
-          request: item,
-          included: true,
-          status: 'pending',
-        });
-      }
-    }
-  } else {
-    // For scoped folders, use normal in-order traversal.
-    collect(startFolder, basePath, out);
-  }
+  collect(startFolder, folderPath ?? '', out);
   return out;
 }
