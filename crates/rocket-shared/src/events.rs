@@ -69,6 +69,23 @@ pub enum DomainEvent {
         phase: String,
         message: String,
     },
+    /// Emitted when a script (`rok.setEnvVar`/`setGlobalEnvVar`/`setCollectionVar`)
+    /// or a declarative `runtime.actions` set-variable write persists a variable.
+    /// Distinct from `EnvironmentSaved`/`CollectionVariableWritten`, which fire
+    /// alongside it — this variant exists so the frontend can distinguish an
+    /// automated script write from a manual user edit without correlating
+    /// timestamps.
+    ScriptVariableWritten {
+        /// "environment" | "collection"
+        scope: String,
+        environment: Option<String>,
+        collection: Option<String>,
+        key: String,
+    },
+    /// Emitted when a collection-scoped variable is written (currently only via
+    /// `rok.setCollectionVar` / `runtime.actions` collection-scope writes; manual
+    /// collection-settings saves do not yet publish any event).
+    CollectionVariableWritten { collection: String, key: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,5 +209,31 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("ws-123"));
         assert!(json.contains("New desc"));
+    }
+
+    #[test]
+    fn script_variable_written_serializes() {
+        let event = DomainEvent::ScriptVariableWritten {
+            scope: "environment".into(),
+            environment: Some("staging".into()),
+            collection: None,
+            key: "API_KEY".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("scriptVariableWritten") || json.contains("ScriptVariableWritten"));
+        assert!(json.contains("staging"));
+        assert!(json.contains("API_KEY"));
+    }
+
+    #[test]
+    fn collection_variable_written_serializes() {
+        let event = DomainEvent::CollectionVariableWritten {
+            collection: "my-api".into(),
+            key: "BASE_URL".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains("collectionVariableWritten") || json.contains("CollectionVariableWritten"));
+        assert!(json.contains("my-api"));
+        assert!(json.contains("BASE_URL"));
     }
 }
