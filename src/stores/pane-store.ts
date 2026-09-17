@@ -9,6 +9,7 @@ import {
   splitLeaf,
   updateLeaf,
 } from '@/lib/pane-utils';
+import { executeRunnerEntry } from '@/lib/runner-execute';
 import { flattenRunnerEntries } from '@/lib/runner-flatten';
 import { getCollection, renameRequest } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
@@ -32,7 +33,7 @@ import type {
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import { isRequestTab, isRunnerTab } from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -130,6 +131,10 @@ export interface PaneState {
 
   // Runner tab.
   openRunnerTab: (collectionName: string | null, folderPath?: string) => Promise<void>;
+  toggleRunnerEntry: (tabId: string, requestPath: string) => void;
+  startRun: (tabId: string) => Promise<void>;
+  stopRun: (tabId: string) => void;
+  rerunAll: (tabId: string) => Promise<void>;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -408,6 +413,111 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       requests,
     };
     get().openTab(tab);
+  },
+
+  toggleRunnerEntry(tabId, requestPath) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab) || tab.runState === 'running') return tab;
+        return {
+          ...tab,
+          requests: tab.requests.map((e) =>
+            e.requestPath === requestPath ? { ...e, included: !e.included } : e,
+          ),
+        };
+      }),
+    });
+  },
+
+  async startRun(tabId) {
+    const found = findTabInTree(get().root, tabId);
+    if (!found || !isRunnerTab(found.tab) || !found.tab.collectionName) return;
+    const collectionName = found.tab.collectionName;
+    const entries = found.tab.requests;
+
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isRunnerTab(tab) ? { ...tab, runState: 'running' } : tab,
+      ),
+    });
+
+    const environmentName = useEnvStore.getState().activeEnvId ?? undefined;
+
+    for (const entry of entries) {
+      const live = findTabInTree(get().root, tabId);
+      if (!live || !isRunnerTab(live.tab) || live.tab.runState !== 'running') break;
+      if (!entry.included) continue;
+
+      set({
+        root: updateTabInTree(get().root, tabId, (tab) => {
+          if (!isRunnerTab(tab)) return tab;
+          return {
+            ...tab,
+            requests: tab.requests.map((e) =>
+              e.requestPath === entry.requestPath ? { ...e, status: 'running' } : e,
+            ),
+          };
+        }),
+      });
+
+      const outcome = await executeRunnerEntry(
+        collectionName,
+        entry.requestPath,
+        entry.request,
+        environmentName,
+      );
+
+      set({
+        root: updateTabInTree(get().root, tabId, (tab) => {
+          if (!isRunnerTab(tab)) return tab;
+          return {
+            ...tab,
+            requests: tab.requests.map((e) =>
+              e.requestPath === entry.requestPath
+                ? { ...e, status: outcome.status, result: outcome.result, error: outcome.error }
+                : e,
+            ),
+          };
+        }),
+      });
+    }
+
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab)) return tab;
+        const requests = tab.requests.map((e) =>
+          e.status === 'pending' ? { ...e, status: 'skipped' as const } : e,
+        );
+        return { ...tab, runState: tab.runState === 'stopped' ? 'stopped' : 'done', requests };
+      }),
+    });
+  },
+
+  stopRun(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isRunnerTab(tab) && tab.runState === 'running' ? { ...tab, runState: 'stopped' } : tab,
+      ),
+    });
+  },
+
+  async rerunAll(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab)) return tab;
+        return {
+          ...tab,
+          runState: 'idle',
+          requests: tab.requests.map((e) => ({
+            ...e,
+            status: 'pending' as const,
+            result: undefined,
+            error: undefined,
+          })),
+        };
+      }),
+    });
+    await get().startRun(tabId);
   },
 
   setActiveCollection(name) {

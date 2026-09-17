@@ -20,6 +20,10 @@ vi.mock('@/lib/tauri-api', async () => {
   return { ...actual, getCollection: vi.fn() };
 });
 
+vi.mock('@/lib/runner-execute', () => ({
+  executeRunnerEntry: vi.fn(),
+}));
+
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
   const { root } = usePaneStore.getState();
@@ -554,5 +558,126 @@ describe('Runner tab actions', () => {
     if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
     expect(tab.collectionName).toBeNull();
     expect(tab.requests).toEqual([]);
+  });
+
+  async function openTwoRequestRunnerTab(): Promise<string> {
+    const { getCollection } = await import('@/lib/tauri-api');
+    vi.mocked(getCollection).mockResolvedValue({
+      name: 'demo',
+      settings: { headers: [], variables: [] } as never,
+      root: {
+        uid: 'root',
+        name: 'demo',
+        items: [
+          {
+            type: 'request',
+            uid: 'r1',
+            name: 'First',
+            method: 'GET',
+            url: 'https://example.com/1',
+            headers: [],
+            auth: { authType: 'none' },
+            fileName: 'first.yml',
+          },
+          {
+            type: 'request',
+            uid: 'r2',
+            name: 'Second',
+            method: 'GET',
+            url: 'https://example.com/2',
+            headers: [],
+            auth: { authType: 'none' },
+            fileName: 'second.yml',
+          },
+        ],
+      },
+    });
+    await usePaneStore.getState().openRunnerTab('demo');
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    return tab.id;
+  }
+
+  it('toggleRunnerEntry flips included for one entry', async () => {
+    const tabId = await openTwoRequestRunnerTab();
+    usePaneStore.getState().toggleRunnerEntry(tabId, 'first.yml');
+
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.requests.find((e) => e.requestPath === 'first.yml')?.included).toBe(false);
+    expect(tab.requests.find((e) => e.requestPath === 'second.yml')?.included).toBe(true);
+  });
+
+  it('startRun executes every included entry in order and marks the tab done', async () => {
+    const { executeRunnerEntry } = await import('@/lib/runner-execute');
+    vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+
+    const tabId = await openTwoRequestRunnerTab();
+    await usePaneStore.getState().startRun(tabId);
+
+    expect(executeRunnerEntry).toHaveBeenCalledTimes(2);
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.runState).toBe('done');
+    expect(tab.requests.every((e) => e.status === 'passed')).toBe(true);
+  });
+
+  it('startRun skips excluded entries', async () => {
+    const { executeRunnerEntry } = await import('@/lib/runner-execute');
+    vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+
+    const tabId = await openTwoRequestRunnerTab();
+    usePaneStore.getState().toggleRunnerEntry(tabId, 'first.yml');
+    await usePaneStore.getState().startRun(tabId);
+
+    expect(executeRunnerEntry).toHaveBeenCalledTimes(1);
+    expect(executeRunnerEntry).toHaveBeenCalledWith(
+      'demo',
+      'second.yml',
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('stopRun halts the run and marks remaining entries skipped', async () => {
+    const { executeRunnerEntry } = await import('@/lib/runner-execute');
+    let resolveFirst: (() => void) | undefined;
+    vi.mocked(executeRunnerEntry).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = () => resolve({ status: 'passed', result: undefined });
+        }),
+    );
+
+    const tabId = await openTwoRequestRunnerTab();
+    const runPromise = usePaneStore.getState().startRun(tabId);
+
+    usePaneStore.getState().stopRun(tabId);
+    resolveFirst?.();
+    await runPromise;
+
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.runState).toBe('stopped');
+    expect(tab.requests.find((e) => e.requestPath === 'first.yml')?.status).toBe('passed');
+    expect(tab.requests.find((e) => e.requestPath === 'second.yml')?.status).toBe('skipped');
+    expect(executeRunnerEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('rerunAll resets every entry to pending and runs again', async () => {
+    const { executeRunnerEntry } = await import('@/lib/runner-execute');
+    vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'failed', error: 'boom' });
+
+    const tabId = await openTwoRequestRunnerTab();
+    await usePaneStore.getState().startRun(tabId);
+    vi.mocked(executeRunnerEntry).mockClear();
+    vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+
+    await usePaneStore.getState().rerunAll(tabId);
+
+    expect(executeRunnerEntry).toHaveBeenCalledTimes(2);
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.requests.every((e) => e.status === 'passed')).toBe(true);
   });
 });
