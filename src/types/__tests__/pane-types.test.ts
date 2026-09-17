@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isRunnerTab } from '@/types/pane-types';
 import type { RequestTab, RunnerTab } from '@/types/pane-types';
+import { isRunnerTab } from '@/types/pane-types';
 
 describe('isRunnerTab', () => {
   it('returns true for a runner tab', () => {

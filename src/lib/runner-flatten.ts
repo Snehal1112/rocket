@@ -9,7 +9,9 @@ function findFolder(folder: Folder, basePath: string, targetPath: string): Folde
   if (basePath === targetPath) return folder;
   for (const item of folder.items) {
     if (item.type !== 'folder') continue;
-    const childPath = basePath ? `${basePath}/${item.dirName ?? item.name}` : (item.dirName ?? item.name);
+    const childPath = basePath
+      ? `${basePath}/${item.dirName ?? item.name}`
+      : (item.dirName ?? item.name);
     if (targetPath === childPath || targetPath.startsWith(`${childPath}/`)) {
       const found = findFolder(item, childPath, targetPath);
       if (found) return found;
@@ -24,10 +26,14 @@ function collect(folder: Folder, basePath: string, out: RunnerRequestEntry[]): v
   const items: CollectionItem[] = sortItemsFoldersFirst(folder.items);
   for (const item of items) {
     if (item.type === 'folder') {
-      const childPath = basePath ? `${basePath}/${item.dirName ?? item.name}` : (item.dirName ?? item.name);
+      const childPath = basePath
+        ? `${basePath}/${item.dirName ?? item.name}`
+        : (item.dirName ?? item.name);
       collect(item, childPath, out);
     } else if (item.type === 'request') {
-      const requestPath = basePath ? `${basePath}/${item.fileName ?? item.name}` : (item.fileName ?? item.name);
+      const requestPath = basePath
+        ? `${basePath}/${item.fileName ?? item.name}`
+        : (item.fileName ?? item.name);
       out.push({
         requestPath,
         request: item,
