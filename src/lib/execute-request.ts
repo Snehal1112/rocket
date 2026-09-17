@@ -142,21 +142,20 @@ export interface ResolvedRequestFields {
   requestPath: string | undefined;
 }
 
-// Builds the fully-resolved request fields for a given tab and request state.
-// Applies the same 7-scope variable resolution as sendRequest() so that callers
-// (e.g. the load test dialog) get consistent env var substitution.
-export async function resolveRequestFields(
-  tabId: string,
+// Builds the fully-resolved request fields for a given collection +
+// request path. Applies the same 7-scope variable resolution as
+// sendRequest() so that every caller (single-request send, the load
+// test dialog, the collection runner) gets consistent {{var}}
+// substitution, regardless of whether the request came from an open
+// tab or a tree walk over getCollection().
+export async function resolveRequestFieldsForPath(
+  collection: string | undefined,
+  requestPath: string | undefined,
   request: RequestState,
 ): Promise<ResolvedRequestFields> {
   const envVars = getActiveVariables();
   const globalVars = getGlobalVariables();
   const processEnvVars = getProcessEnvVars();
-
-  const { root } = usePaneStore.getState();
-  const found = findTabInTree(root, tabId);
-  const collection = found?.tab.source?.collection;
-  const requestPath = found?.tab.source?.path;
 
   let collectionVars: CollectionVariable[] = [];
   let collectionHeaders: { key: string; value: string; enabled: boolean }[] = [];
@@ -242,6 +241,22 @@ export async function resolveRequestFields(
     environmentName: useEnvStore.getState().activeEnvId ?? undefined,
     requestPath,
   };
+}
+
+// Builds the fully-resolved request fields for a given tab and request state.
+// Thin wrapper: looks up the tab's collection/path, then delegates to
+// resolveRequestFieldsForPath.
+export async function resolveRequestFields(
+  tabId: string,
+  request: RequestState,
+): Promise<ResolvedRequestFields> {
+  const { root } = usePaneStore.getState();
+  const found = findTabInTree(root, tabId);
+  return resolveRequestFieldsForPath(
+    found?.tab.source?.collection,
+    found?.tab.source?.path,
+    request,
+  );
 }
 
 // Non-interactive grants — safe to silently fetch on send. Authorization Code
