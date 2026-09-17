@@ -188,4 +188,12 @@
   // KEEP THIS LAST. Anything added below it would still resolve the Deno global
   // and would silently reintroduce the call-time lookup bug this file exists to fix.
   delete globalThis.Deno;
+
+  // deno_core's own setup (00_primordials.js, 00_infra.js, 01_core.js) also
+  // parks the same `core` object -- and therefore the same ops table -- on
+  // globalThis.__bootstrap.core, via ObjectAssign(globalThis.Deno.core, {...}),
+  // which returns its target. deno_core never deletes that handle itself, so
+  // without this line globalThis.__bootstrap.core.ops.op_print/op_panic would
+  // still reach the same ops table Deno.core.ops did.
+  delete globalThis.__bootstrap;
 })();

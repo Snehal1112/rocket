@@ -12,10 +12,13 @@ use crate::scripting::ops::{console, redact, req, res, rok};
 /// No Deno standard library, no file system, no network — only the `rok`, `req`,
 /// `res`, `console`, `test`, `expect`, and `require` globals defined in `bootstrap.js`.
 ///
-/// `bootstrap.js` deletes the `Deno` global as its last act, so a user script sees
-/// `typeof Deno === 'undefined'` and cannot reach `deno_core`'s built-in ops such as
-/// `op_print` or `op_panic` directly. The wrappers keep working because they call
-/// through an ops reference captured in a closure before that deletion.
+/// `bootstrap.js` deletes both the `Deno` global and the `__bootstrap` global
+/// deno_core parks the same ops table on, as its last two acts, so a user
+/// script sees `typeof Deno === 'undefined'` and `typeof __bootstrap ===
+/// 'undefined'` and cannot reach `deno_core`'s built-in ops such as
+/// `op_print` or `op_panic` directly through either handle. The wrappers
+/// keep working because they call through an ops reference captured in a
+/// closure before those deletions.
 pub struct DenoScriptEngine;
 
 impl DenoScriptEngine {
@@ -810,6 +813,44 @@ mod tests {
         assert!(
             err.contains("Deno is not defined"),
             "expected a ReferenceError for the deleted Deno global, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bootstrap_ops_table_unreachable_from_user_scripts() {
+        // deno_core's own setup also parks the *same* core object (and therefore
+        // the same ops table) on globalThis.__bootstrap.core, via
+        // ObjectAssign(globalThis.Deno.core, {...}) returning its target. Deleting
+        // only `Deno` leaves this handle standing, so op_print/op_panic would
+        // still be reachable through it. bootstrap.js must delete this handle too.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"globalThis.__bootstrap.core.ops.op_print("pwned\n", false)"#);
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result
+            .error
+            .expect("reaching __bootstrap.core.ops must be a script error, not a silent success");
+        assert!(
+            err.contains("Cannot read properties of undefined"),
+            "expected a TypeError for the deleted __bootstrap global, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_internal_globals_are_reachable_from_user_scripts() {
+        // Encodes the lockdown as an invariant over globalThis itself, rather
+        // than as the spelling of one specific exploit, so a future deno_core
+        // upgrade that adds or renames an internal handle fails this test
+        // instead of silently reopening the ops table.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "rok.setVar('leaks', Reflect.ownKeys(globalThis).filter(k => \
+             typeof k === 'string' && (k === 'Deno' || k.startsWith('__'))))",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("leaks").expect("leaks present").to_string(),
+            "[]"
         );
     }
 }
