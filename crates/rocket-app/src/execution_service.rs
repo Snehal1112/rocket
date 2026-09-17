@@ -121,6 +121,14 @@ pub struct RequestExecutionService {
     script_engine: Option<Box<dyn ScriptEngine>>,
 }
 
+/// Secrets shorter than this are not added to `VariableContext.secret_values`
+/// and are therefore never redacted in console/test-failure output. A
+/// documented, deliberate trade-off (see
+/// docs/superpowers/specs/2026-09-16-secret-aware-variable-context-spec.md
+/// §3.4) — redacting every occurrence of a very short string risks
+/// over-redacting unrelated output.
+const MIN_REDACTION_LEN: usize = 6;
+
 impl RequestExecutionService {
     pub fn new(
         env_repo: Box<dyn EnvironmentRepository>,
@@ -220,14 +228,21 @@ impl RequestExecutionService {
         if let Some(col) = collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
-                ctx.collection.insert(cv.key.clone(), effective_val(cv));
+                let val = effective_val(cv);
+                ctx.collection.insert(cv.key.clone(), val.clone());
+                if cv.secret && val.len() >= MIN_REDACTION_LEN {
+                    ctx.secret_values.insert(val);
+                }
             }
         }
 
         if let Some(name) = environment_name {
             if let Ok(env) = self.regular_env_repo(collection).get(name) {
-                for (k, v) in env.enabled_variables() {
-                    ctx.env.insert(k.to_string(), v.to_string());
+                for var in env.variables.iter().filter(|v| v.enabled) {
+                    ctx.env.insert(var.key.clone(), var.value.clone());
+                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
+                        ctx.secret_values.insert(var.value.clone());
+                    }
                 }
             }
         }
@@ -2608,6 +2623,100 @@ mod tests {
             !captured.env.contains_key("API_KEY"),
             "env scope must not contain the collection variable (would indicate the old flattening bug)"
         );
+    }
+
+    #[tokio::test]
+    async fn secret_env_and_collection_vars_populate_secret_values() {
+        let settings = CollectionSettings {
+            variables: vec![
+                CollectionVariable {
+                    key: "COL_SECRET".into(),
+                    value: "col-secret-val".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: true,
+                },
+                cv("COL_PLAIN", "col-plain-val"),
+            ],
+            ..Default::default()
+        };
+        let collection_repo = StubCollectionRepo::with_settings(settings);
+
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("API_KEY", "sk-live-abcdef123"));
+        active_env.set_variable(Variable::new("PLAIN", "plain-not-secret"));
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineSecrets(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineSecrets {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(collection_repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineSecrets(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("sk-live-abcdef123"), "secret env var value must be in secret_values");
+        assert!(captured.secret_values.contains("col-secret-val"), "secret collection var value must be in secret_values");
+        assert!(!captured.secret_values.contains("plain-not-secret"), "non-secret env var value must not be in secret_values");
+        assert!(!captured.secret_values.contains("col-plain-val"), "non-secret collection var value must not be in secret_values");
+    }
+
+    #[tokio::test]
+    async fn short_secret_value_is_not_added_to_secret_values() {
+        // Documented limitation (MIN_REDACTION_LEN = 6): secrets shorter
+        // than this are not added to secret_values, so they are never
+        // redacted. Asserted explicitly so this doesn't get "fixed"
+        // accidentally later without revisiting the trade-off.
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("SHORT", "abc")); // 3 chars < MIN_REDACTION_LEN
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineShort(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineShort {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineShort(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(!captured.secret_values.contains("abc"), "secrets shorter than MIN_REDACTION_LEN must not be added to secret_values");
     }
 
     #[tokio::test]
