@@ -138,7 +138,7 @@ import { flattenRunnerEntries } from '@/lib/runner-flatten';
 import { getCollection } from '@/lib/tauri-api';
 ```
 
-and add `RunnerRequestEntry`, `RunnerTab` to the existing `import type { ... } from '@/types/pane-types'` block, and `isRunnerTab` to the existing `import { isRequestTab } from '@/types/pane-types'` line (making it `import { isRequestTab, isRunnerTab } from '@/types/pane-types';`).
+and add `RunnerRequestEntry`, `RunnerTab` to the existing `import type { ... } from '@/types/pane-types'` block. Do NOT import `isRunnerTab` in this task — `openRunnerTab`'s own code never calls it (it only constructs a `RunnerTab` object and calls `get().openTab(tab)`), so importing it here would be an unused import and fail both `tsc --noEmit` (`noUnusedLocals`) and `yarn check` (`noUnusedImports`). `isRunnerTab` is added by Task 2, which is the first task that actually uses it.
 
 Add to the `PaneState` interface (near `openCollectionTab`):
 
@@ -353,6 +353,8 @@ Add to the imports in `src/stores/pane-store.ts`:
 ```ts
 import { executeRunnerEntry } from '@/lib/runner-execute';
 ```
+
+Also add `isRunnerTab` to the existing `import { isRequestTab } from '@/types/pane-types'` line (making it `import { isRequestTab, isRunnerTab } from '@/types/pane-types';`) — this task is the first to actually call `isRunnerTab` in `pane-store.ts` (Task 1's `openRunnerTab` doesn't need it).
 
 Add to the `PaneState` interface:
 
