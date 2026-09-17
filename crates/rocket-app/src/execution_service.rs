@@ -1,3 +1,4 @@
+use crate::env_audit;
 use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
@@ -343,9 +344,7 @@ impl RequestExecutionService {
         if !result.env_var_writes.is_empty() {
             if let Some(name) = env_name {
                 let repo = self.regular_env_repo(collection);
-                if self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true) {
-                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                }
+                self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true);
             } else {
                 tracing::warn!(
                     "rok.setEnvVar write(s) queued but no active environment is selected — write(s) dropped"
@@ -356,9 +355,7 @@ impl RequestExecutionService {
         // Apply global-environment writes (always persisted — modifying a shared env).
         if !result.global_env_var_writes.is_empty() {
             if let Some(name) = global_env_name {
-                if self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true) {
-                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                }
+                self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true);
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -402,58 +399,93 @@ impl RequestExecutionService {
     ///
     /// When `force_persist` is true (used for global env writes), all writes go
     /// to disk regardless of the individual `persist` flag. For active-environment
-    /// writes, only entries with `persist: true` are saved.
+    /// writes, only entries with `persist: true` are saved. `EnvVarWrite.persist`
+    /// is preserved for wire/API compatibility but currently has no effect — both
+    /// call sites in `apply_script_side_effects` and the `runtime.actions`
+    /// "environment" scope branch always pass `force_persist: true`.
     ///
-    /// Returns `true` when the environment was actually saved, so callers can
-    /// decide whether to publish `DomainEvent::EnvironmentSaved`.
+    /// Existing variable metadata (`enabled`, `secret`, `description`, `secret_type`)
+    /// is preserved across a script-driven write — only `value` (and, for a
+    /// brand-new key, `enabled: true`) is set by the script. A script can never
+    /// promote a variable to `secret: true`; only the user can do that via the
+    /// environment editor UI. On a successful save, publishes the same
+    /// `DomainEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
+    /// audit trail a manual save produces (via `env_audit::publish_env_write_events`),
+    /// plus one `DomainEvent::ScriptVariableWritten` per write actually applied.
     fn apply_env_writes(
         &self,
         repo: &dyn EnvironmentRepository,
         env_name: &str,
         writes: &[rocket_scripting::EnvVarWrite],
         force_persist: bool,
-    ) -> bool {
-        let persist_writes: Vec<_> = writes
+    ) {
+        let persist_writes: Vec<&rocket_scripting::EnvVarWrite> = writes
             .iter()
             .filter(|w| force_persist || w.persist)
             .collect();
         if persist_writes.is_empty() {
-            return false;
+            return;
         }
-        match repo.get(env_name) {
-            Ok(mut env) => {
-                for write in persist_writes {
-                    if write.value.is_null() {
-                        env.remove_variable(&write.key);
-                    } else {
-                        let str_val = write.value.as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| write.value.to_string());
-                        env.set_variable(rocket_environment::Variable::new(
-                            write.key.clone(),
-                            str_val,
-                        ));
-                    }
-                }
-                match repo.save(&env) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            environment = %env_name,
-                            "failed to persist script env var write"
-                        );
-                        false
-                    }
-                }
-            }
+        let mut env = match repo.get(env_name) {
+            Ok(env) => env,
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     environment = %env_name,
                     "rok.setEnvVar/setGlobalEnvVar: environment not found, write dropped"
                 );
-                false
+                return;
+            }
+        };
+        let before = env.clone();
+
+        for write in persist_writes.iter() {
+            if write.value.is_null() {
+                env.remove_variable(&write.key);
+                continue;
+            }
+            let str_val = write
+                .value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| write.value.to_string());
+            let existing = env.variables.iter().find(|v| v.key == write.key);
+            let updated = rocket_environment::Variable {
+                key: write.key.clone(),
+                value: str_val,
+                enabled: existing.map(|v| v.enabled).unwrap_or(true),
+                secret: existing.map(|v| v.secret).unwrap_or(false),
+                description: existing.and_then(|v| v.description.clone()),
+                value_variants: None,
+                secret_type: existing.and_then(|v| v.secret_type.clone()),
+            };
+            env.set_variable(updated);
+        }
+
+        match repo.save(&env) {
+            Ok(()) => {
+                env_audit::publish_env_write_events(
+                    self.events.as_ref(),
+                    self.audit.as_ref(),
+                    env_name,
+                    &before,
+                    &env,
+                );
+                for write in persist_writes.iter() {
+                    self.events.publish(DomainEvent::ScriptVariableWritten {
+                        scope: "environment".to_string(),
+                        environment: Some(env_name.to_string()),
+                        collection: None,
+                        key: write.key.clone(),
+                    });
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    environment = %env_name,
+                    "failed to persist script env var write"
+                );
             }
         }
     }
@@ -585,7 +617,7 @@ impl RequestExecutionService {
                 "environment" => {
                     if let Some(name) = env_name {
                         let repo = self.regular_env_repo(collection);
-                        let saved = self.apply_env_writes(
+                        self.apply_env_writes(
                             repo.as_ref(),
                             name,
                             &[rocket_scripting::EnvVarWrite {
@@ -595,9 +627,6 @@ impl RequestExecutionService {
                             }],
                             true,
                         );
-                        if saved {
-                            self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                        }
                     } else {
                         tracing::warn!(variable = %var_name, "action scope 'environment' but no active environment");
                     }
@@ -1446,17 +1475,6 @@ mod tests {
     #[tokio::test]
     async fn execute_publishes_event() {
         use rocket_shared::events::DomainEvent;
-        use std::sync::Mutex;
-
-        struct RecordingPublisher {
-            events: Mutex<Vec<DomainEvent>>,
-        }
-
-        impl rocket_shared::events::EventPublisher for RecordingPublisher {
-            fn publish(&self, event: DomainEvent) {
-                self.events.lock().unwrap().push(event);
-            }
-        }
 
         let publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
 
@@ -1736,6 +1754,15 @@ mod tests {
     impl SecurityAuditPublisher for CapturingAuditPublisher {
         fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
             self.captured.lock().unwrap().push(kind);
+        }
+    }
+
+    struct RecordingPublisher {
+        events: Mutex<Vec<DomainEvent>>,
+    }
+    impl rocket_shared::events::EventPublisher for RecordingPublisher {
+        fn publish(&self, event: DomainEvent) {
+            self.events.lock().expect("lock").push(event);
         }
     }
 
@@ -2080,6 +2107,171 @@ mod tests {
         let saved = env_repo.last_saved()
             .expect("env_repo.save() must be called for all active-env writes");
         assert_eq!(saved.get_value("TOKEN"), Some("new-value"));
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_preserves_secret_flag() {
+        // A script overwriting a previously-secret variable's value must not
+        // silently strip its secret flag.
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("sk-new"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        assert_eq!(var.value, "sk-new");
+        assert!(var.secret, "secret flag must be preserved across a script write");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_new_key_defaults_to_non_secret() {
+        // A script writing a brand-new key (no pre-existing variable) must not be
+        // able to implicitly create a secret — only the user can promote via the UI.
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "NEW_TOKEN".into(),
+                value: serde_json::json!("t-123"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "NEW_TOKEN").expect("NEW_TOKEN present");
+        assert!(!var.secret, "a script must not be able to implicitly create a secret variable");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_publishes_secret_audit_and_events() {
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("sk-new"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&event_publisher))),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let published = event_publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            "expected EnvironmentSaved, got {:?}", *published
+        );
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ScriptVariableWritten { scope, environment, key, .. }
+                    if scope == "environment" && environment.as_deref() == Some("prod") && key == "API_KEY"
+            )),
+            "expected ScriptVariableWritten, got {:?}", *published
+        );
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SecretVariableWritten { environment, variable_key }
+                    if environment == "prod" && variable_key == "API_KEY"
+            )),
+            "expected SecretVariableWritten, got {:?}", *captured
+        );
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_non_secret_does_not_publish_secret_audit() {
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::new("HOST", "old.example.com"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "HOST".into(),
+                value: serde_json::json!("new.example.com"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            !captured.iter().any(|k| matches!(k, AuditEventKind::SecretVariableWritten { .. })),
+            "a non-secret write must not publish SecretVariableWritten, got {:?}", *captured
+        );
     }
 
     #[tokio::test]
