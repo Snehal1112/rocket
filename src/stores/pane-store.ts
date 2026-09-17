@@ -9,7 +9,8 @@ import {
   splitLeaf,
   updateLeaf,
 } from '@/lib/pane-utils';
-import { renameRequest } from '@/lib/tauri-api';
+import { flattenRunnerEntries } from '@/lib/runner-flatten';
+import { getCollection, renameRequest } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 import type {
   CollectionSection,
@@ -24,6 +25,8 @@ import type {
   RequestState,
   RequestTab,
   ResponseState,
+  RunnerRequestEntry,
+  RunnerTab,
   SplitNode,
   Tab,
   WorkspaceTab,
@@ -124,6 +127,9 @@ export interface PaneState {
   /** Opens or focuses the collection tab for `collection` and navigates to `section`.
    *  Returns false if no collection tab is currently open for that collection. */
   openCollectionTab: (collection: string, section: CollectionSection) => boolean;
+
+  // Runner tab.
+  openRunnerTab: (collectionName: string | null, folderPath?: string) => Promise<void>;
 }
 
 export const usePaneStore = create<PaneState>((set, get) => ({
@@ -376,6 +382,30 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       collectionName,
       collectionRoot,
       isDirty: false,
+    };
+    get().openTab(tab);
+  },
+
+  async openRunnerTab(collectionName, folderPath) {
+    let requests: RunnerRequestEntry[] = [];
+    if (collectionName) {
+      try {
+        const collection = await getCollection(collectionName);
+        requests = flattenRunnerEntries(collection, folderPath);
+      } catch (err) {
+        console.error('[pane-store] openRunnerTab: failed to load collection', err);
+      }
+    }
+    const label = folderPath ? folderPath.split('/').pop() : collectionName;
+    const tab: RunnerTab = {
+      id: crypto.randomUUID(),
+      title: label ? `Run: ${label}` : 'Runner',
+      isDirty: false,
+      tabType: 'runner',
+      collectionName,
+      folderPath,
+      runState: 'idle',
+      requests,
     };
     get().openTab(tab);
   },

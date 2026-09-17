@@ -8,12 +8,17 @@ import type {
   ResponseState,
   SplitNode,
 } from '@/types/pane-types';
-import { isRequestTab } from '@/types/pane-types';
+import { isRequestTab, isRunnerTab } from '@/types/pane-types';
 import { usePaneStore } from '../pane-store';
 
 vi.mock('@/lib/auto-save', () => ({
   scheduleAutoSave: vi.fn(),
 }));
+
+vi.mock('@/lib/tauri-api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
+  return { ...actual, getCollection: vi.fn() };
+});
 
 // Helper: assert the root is a leaf and return it.
 function getLeaf(): LeafNode {
@@ -497,5 +502,57 @@ describe('pane-store', () => {
     expect(usePaneStore.getState().getOpenTabCount('colA')).toBe(2);
     expect(usePaneStore.getState().getOpenTabCount('colB')).toBe(1);
     expect(usePaneStore.getState().getOpenTabCount('colC')).toBe(0);
+  });
+});
+
+describe('Runner tab actions', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('openRunnerTab opens a runner tab scoped to a collection, populated with its requests', async () => {
+    const { getCollection } = await import('@/lib/tauri-api');
+    vi.mocked(getCollection).mockResolvedValue({
+      name: 'demo',
+      settings: { headers: [], variables: [] } as never,
+      root: {
+        uid: 'root',
+        name: 'demo',
+        items: [
+          {
+            type: 'request',
+            uid: 'r1',
+            name: 'Ping',
+            method: 'GET',
+            url: 'https://example.com/ping',
+            headers: [],
+            auth: { authType: 'none' },
+            fileName: 'ping.yml',
+          },
+        ],
+      },
+    });
+
+    await usePaneStore.getState().openRunnerTab('demo');
+
+    const leaf = getLeaf();
+    expect(leaf.tabs).toHaveLength(1);
+    const tab = leaf.tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.collectionName).toBe('demo');
+    expect(tab.runState).toBe('idle');
+    expect(tab.requests).toHaveLength(1);
+    expect(tab.requests[0].requestPath).toBe('ping.yml');
+  });
+
+  it('openRunnerTab opens an empty picker tab when collectionName is null', async () => {
+    await usePaneStore.getState().openRunnerTab(null);
+
+    const leaf = getLeaf();
+    const tab = leaf.tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    expect(tab.collectionName).toBeNull();
+    expect(tab.requests).toEqual([]);
   });
 });
