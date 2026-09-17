@@ -11,6 +11,11 @@ use crate::scripting::ops::{console, redact, req, res, rok};
 /// Creates one `JsRuntime` per `execute()` call — complete isolation between requests.
 /// No Deno standard library, no file system, no network — only the `rok`, `req`,
 /// `res`, `console`, `test`, `expect`, and `require` globals defined in `bootstrap.js`.
+///
+/// `bootstrap.js` deletes the `Deno` global as its last act, so a user script sees
+/// `typeof Deno === 'undefined'` and cannot reach `deno_core`'s built-in ops such as
+/// `op_print` or `op_panic` directly. The wrappers keep working because they call
+/// through an ops reference captured in a closure before that deletion.
 pub struct DenoScriptEngine;
 
 impl DenoScriptEngine {
