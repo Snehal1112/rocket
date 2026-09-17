@@ -771,4 +771,40 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.runtime_vars.get("id").expect("id"), "id=123");
     }
+
+    // ── sandbox lockdown ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn deno_global_is_hidden_from_user_scripts() {
+        // bootstrap.js must delete globalThis.Deno once it has wired up the
+        // intended globals, so the user script sees no Deno at all.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('typeofDeno', typeof Deno)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(
+            result
+                .runtime_vars
+                .get("typeofDeno")
+                .expect("typeofDeno present"),
+            "undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn deno_core_ops_unreachable_from_user_scripts() {
+        // op_print is a deno_core built-in that writes straight to the host
+        // process stdout, bypassing the captured console surface. Reaching it
+        // must now fail the same way any other missing global does.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(r#"Deno.core.ops.op_print("pwned\n", false)"#);
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result
+            .error
+            .expect("reaching Deno.core.ops must be a script error, not a silent success");
+        assert!(
+            err.contains("Deno is not defined"),
+            "expected a ReferenceError for the deleted Deno global, got: {err}"
+        );
+    }
 }
