@@ -234,9 +234,12 @@ git commit -m "feat: add RunnerPane with collection picker and view switching"
 - Modify: `src/components/panes/TabBar.tsx:1-20,248-261` (imports and
   the "new tab" context menu)
 - Test: `src/components/panes/__tests__/TabBar.test.tsx` (add to
-  existing file if present — if no such file exists yet, create it
-  following the pattern of the other `__tests__` component tests in
-  this plan set, e.g. `RunnerRequestList.test.tsx`)
+  existing file if present — no test currently exists under
+  `src/components/panes/`, so create this path. This repo mixes both a
+  colocated-`.test.tsx` convention and a `__tests__`-subfolder
+  convention depending on directory — the Runner plan set's own
+  components colocate, but that's not a binding precedent for this
+  directory; use the `__tests__` path given here.)
 
 **Interfaces:**
 - Consumes: `RunnerPane` (Task 1), `isRunnerTab` (Plan A Task 1),
