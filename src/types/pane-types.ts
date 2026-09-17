@@ -101,6 +101,32 @@ export function isContractDiffTab(tab: Tab): tab is ContractDiffTab {
   return tab.tabType === 'contract_diff';
 }
 
+export type RunnerRunState = 'idle' | 'running' | 'stopped' | 'done';
+
+export interface RunnerRequestEntry {
+  requestPath: string;
+  // Full backend Request, not just name/method — startRun (Plan C) needs
+  // the whole object to call executeRunnerEntry. Components read
+  // entry.request.name / entry.request.method for display.
+  request: import('@/lib/tauri-api').Request;
+  included: boolean;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+  result?: import('@/lib/tauri-api').ExecuteRequestResponse;
+  error?: string;
+}
+
+export interface RunnerTab extends BaseTab {
+  tabType: 'runner';
+  collectionName: string | null;
+  folderPath?: string;
+  runState: RunnerRunState;
+  requests: RunnerRequestEntry[];
+}
+
+export function isRunnerTab(tab: Tab): tab is RunnerTab {
+  return tab.tabType === 'runner';
+}
+
 export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
@@ -113,7 +139,8 @@ export type Tab =
   | ConflictTab
   | GitTab
   | ContractTab
-  | ContractDiffTab;
+  | ContractDiffTab
+  | RunnerTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

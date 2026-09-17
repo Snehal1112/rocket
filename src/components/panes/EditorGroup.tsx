@@ -39,6 +39,7 @@ import {
   isDiffTab,
   isGitTab,
   isRequestTab,
+  isRunnerTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
 import { BreadcrumbBar } from './BreadcrumbBar';
@@ -206,6 +207,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             ) : activeTab.activeSection === 'audit' ? (
               <AuditLogTab />
             ) : null
+          ) : isRunnerTab(activeTab) ? (
+            <EmptyState variant={emptyStateVariant} />
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )

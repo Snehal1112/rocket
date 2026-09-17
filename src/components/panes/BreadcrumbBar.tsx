@@ -30,6 +30,7 @@ import {
   isDiffTab,
   isGitTab,
   isRequestTab,
+  isRunnerTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
 
@@ -432,6 +433,10 @@ function deriveSegments(
 
   if (isContractDiffTab(tab)) {
     return [{ label: 'Contract Diff', icon: <FileLock className='h-3 w-3' /> }];
+  }
+
+  if (isRunnerTab(tab)) {
+    return [{ label: tab.collectionName || 'Collection Runner' }];
   }
 
   const _exhaustive: never = tab;
