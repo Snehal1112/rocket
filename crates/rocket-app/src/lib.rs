@@ -3,6 +3,7 @@
 pub mod collection_service;
 pub mod contract_service;
 pub mod cookie_service;
+pub mod env_audit;
 pub mod environment_service;
 pub mod export_service;
 pub mod execution_service;
