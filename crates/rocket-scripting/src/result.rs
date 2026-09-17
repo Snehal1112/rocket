@@ -96,7 +96,11 @@ pub struct EnvVarWrite {
     pub key: String,
     /// JSON value. `null` = delete.
     pub value: serde_json::Value,
-    /// When `true`, write is persisted to the environment `.yml` file.
+    /// Historically gated whether this write reached disk. As of `rocket-app`
+    /// commits `3e116d6`/`1d67d3d`, both active-environment and
+    /// global-environment writes are always persisted regardless of this flag
+    /// (`force_persist: true` at both `RequestExecutionService::apply_env_writes`
+    /// call sites). Preserved for wire/API compatibility; currently inert.
     pub persist: bool,
 }
 
