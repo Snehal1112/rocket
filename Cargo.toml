@@ -44,6 +44,7 @@ tracing-log = "0.2"
 async-trait = "0.1"
 ulid = { version = "1", features = ["serde"] }
 dashmap = "6"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # Internal crates
 rocket-shared = { path = "crates/rocket-shared" }

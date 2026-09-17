@@ -15,12 +15,23 @@ use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_infra::{
     FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo, FsContractRepo, FsCookieRepo,
     FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo,
-    NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
-    scripting::DenoScriptEngine,
+    KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo,
+    SharedPathCollectionRepo, scripting::DenoScriptEngine,
 };
+use rocket_environment::secret_store::SecretStore;
 use rocket_workspace::WorkspaceConfigRepository;
 use rocket_shared::events::NullEventPublisher;
 use tauri::Manager;
+
+/// OS-keychain backend for environment secret values.
+///
+/// `KeyringSecretStore` is a stateless unit struct, so each call site can build
+/// its own handle; this helper keeps the concrete type in one place. Every
+/// `FsEnvironmentRepo` that serves user-facing environments must be built with
+/// it — `FsEnvironmentRepo::new` silently drops secret values.
+pub(crate) fn env_secret_store() -> Arc<dyn SecretStore> {
+    Arc::new(KeyringSecretStore)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -193,7 +204,10 @@ pub fn run() {
                 Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)));
 
             let exec_svc = RequestExecutionService::new_with_audit(
-                Box::new(FsEnvironmentRepo::new(environments_dir.clone())),
+                Box::new(FsEnvironmentRepo::with_secret_store(
+                    environments_dir.clone(),
+                    env_secret_store(),
+                )),
                 Arc::clone(&executor),
                 Box::new(FsHistoryRepo::new(history_dir)),
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
@@ -209,7 +223,10 @@ pub fn run() {
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Uses its own repo instances pointed at the same paths as the exec service.
             let oauth2_svc = rocket_app::oauth2_service::OAuth2Service::new(
-                Box::new(FsEnvironmentRepo::new(environments_dir)),
+                Box::new(FsEnvironmentRepo::with_secret_store(
+                    environments_dir,
+                    env_secret_store(),
+                )),
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
             );
 
