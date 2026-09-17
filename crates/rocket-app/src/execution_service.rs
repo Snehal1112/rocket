@@ -392,7 +392,18 @@ impl RequestExecutionService {
     fn apply_collection_var_write(&self, collection: &str, key: &str, value: &str) -> DomainResult<()> {
         let mut settings = self.collection_repo.get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
-        self.collection_repo.save_settings(collection, &settings)
+        self.collection_repo.save_settings(collection, &settings)?;
+        self.events.publish(DomainEvent::CollectionVariableWritten {
+            collection: collection.to_string(),
+            key: key.to_string(),
+        });
+        self.events.publish(DomainEvent::ScriptVariableWritten {
+            scope: "collection".to_string(),
+            environment: None,
+            collection: Some(collection.to_string()),
+            key: key.to_string(),
+        });
+        Ok(())
     }
 
     /// Read-modify-write helper for env var writes against a named environment.
@@ -2311,6 +2322,70 @@ mod tests {
             .expect("save_settings should have been called");
         let written = saved.variables.iter().find(|v| v.key == "BASE_URL");
         assert_eq!(written.map(|v| v.value.as_str()), Some("https://new.example.com"));
+    }
+
+    #[tokio::test]
+    async fn post_response_script_collection_var_write_publishes_events() {
+        let initial_settings = CollectionSettings {
+            variables: vec![CollectionVariable {
+                key: "BASE_URL".into(),
+                value: "https://old.example.com".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            }],
+            ..Default::default()
+        };
+        let col_repo = RecordingCollectionRepo::with_settings(initial_settings);
+
+        let result = ScriptResult {
+            collection_var_writes: vec![CollectionVarWrite {
+                key: "BASE_URL".into(),
+                value: serde_json::json!("https://new.example.com"),
+            }],
+            ..Default::default()
+        };
+
+        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&event_publisher))),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("my-api".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let published = event_publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::CollectionVariableWritten { collection, key }
+                    if collection == "my-api" && key == "BASE_URL"
+            )),
+            "expected CollectionVariableWritten, got {:?}", *published
+        );
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ScriptVariableWritten { scope, collection, key, .. }
+                    if scope == "collection" && collection.as_deref() == Some("my-api") && key == "BASE_URL"
+            )),
+            "expected ScriptVariableWritten, got {:?}", *published
+        );
     }
 
     #[tokio::test]
