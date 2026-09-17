@@ -1,7 +1,4 @@
-use rocket_audit::{
-    event::AuditEventKind,
-    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
-};
+use rocket_audit::publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher};
 use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -68,6 +65,7 @@ impl EnvironmentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_audit::event::AuditEventKind;
     use rocket_environment::Variable;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
