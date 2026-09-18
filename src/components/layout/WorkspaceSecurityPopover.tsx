@@ -44,8 +44,10 @@ export function WorkspaceSecurityPopover() {
         {/* Toggles */}
         <div className='p-3 space-y-3'>
           <p className='text-xs text-muted-foreground'>
-            Block a BeforeRequest script's <code>req.setUrl()</code> redirect from reaching internal
-            hosts. Your own manually-typed URLs are never affected.
+            Blocks a BeforeRequest script's <code>req.setUrl()</code> from targeting internal hosts
+            directly. Your own manually-typed URLs are never affected. Redirect chains are not
+            followed by this check — a redirect via an allowed host can still reach an internal
+            address.
           </p>
 
           <div className='flex items-start justify-between gap-3'>
