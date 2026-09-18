@@ -30,6 +30,46 @@ pub enum DomainEvent {
     // HTTP execution events
     RequestExecuted { method: String, url: String, status: u16, duration_ms: u64 },
 
+    // Collection Runner events
+    /// Emitted once when a run starts, before its first step.
+    /// `total_steps` is the run set's length; a script jumping with
+    /// `setNextRequest` can make the number of executed steps differ from it.
+    RunnerStarted {
+        run_id: String,
+        collection: String,
+        folder_path: Option<String>,
+        total_steps: usize,
+    },
+    /// Emitted after every step of a run, in execution order.
+    /// `status` is `"completed"`, `"skipped"`, or `"error"`.
+    RunnerStepCompleted {
+        run_id: String,
+        /// Position in the emitted step stream, starting at 0.
+        index: usize,
+        item_name: String,
+        request_path: String,
+        status: String,
+        /// `None` for a skipped or errored step.
+        status_code: Option<u16>,
+        duration_ms: u64,
+        test_pass_count: usize,
+        test_fail_count: usize,
+        /// Uncaught script exception message, if any.
+        script_error: Option<String>,
+        /// Transport or sequencing error, if any.
+        error: Option<String>,
+    },
+    /// Emitted once when a run ends, for any reason.
+    /// `stopped_reason` is `"completed"`, `"stoppedByScript"`,
+    /// `"stoppedOnFailure"`, `"unknownNextRequest"`, `"cancelled"`, or
+    /// `"stepLimitReached"`.
+    RunnerFinished {
+        run_id: String,
+        stopped_reason: String,
+        step_count: usize,
+        failed_count: usize,
+    },
+
     // File system events
     FileChanged { path: String, event_type: FileChangeKind, collection: Option<String> },
 
@@ -235,5 +275,60 @@ mod tests {
         assert!(json.contains("collectionVariableWritten") || json.contains("CollectionVariableWritten"));
         assert!(json.contains("my-api"));
         assert!(json.contains("BASE_URL"));
+    }
+
+    #[test]
+    fn runner_started_wire_shape() {
+        let event = DomainEvent::RunnerStarted {
+            run_id: "01J".into(),
+            collection: "my-api".into(),
+            folder_path: Some("auth".into()),
+            total_steps: 3,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"runnerStarted","run_id":"01J","collection":"my-api","folder_path":"auth","total_steps":3}"#
+        );
+    }
+
+    #[test]
+    fn runner_step_completed_wire_shape() {
+        let event = DomainEvent::RunnerStepCompleted {
+            run_id: "01J".into(),
+            index: 0,
+            item_name: "Login".into(),
+            request_path: "auth/login.yml".into(),
+            status: "completed".into(),
+            status_code: Some(200),
+            duration_ms: 12,
+            test_pass_count: 2,
+            test_fail_count: 0,
+            script_error: None,
+            error: None,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""type":"runnerStepCompleted""#));
+        // Struct-variant fields stay snake_case — the enum's rename_all only
+        // renames variants. The frontend contract depends on this.
+        assert!(json.contains(r#""run_id":"01J""#));
+        assert!(json.contains(r#""item_name":"Login""#));
+        assert!(json.contains(r#""test_pass_count":2"#));
+        assert!(json.contains(r#""status_code":200"#));
+    }
+
+    #[test]
+    fn runner_finished_wire_shape() {
+        let event = DomainEvent::RunnerFinished {
+            run_id: "01J".into(),
+            stopped_reason: "completed".into(),
+            step_count: 3,
+            failed_count: 1,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"runnerFinished","run_id":"01J","stopped_reason":"completed","step_count":3,"failed_count":1}"#
+        );
     }
 }

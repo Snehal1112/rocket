@@ -18,6 +18,11 @@ impl EventPublisher for TauriEventBus {
             // needs to refresh when files are created/modified/deleted.
             DomainEvent::FileChanged { .. } => "collection-changed",
             DomainEvent::RequestExecuted { .. } => "request-executed",
+            // Collection Runner events — each gets its own channel so the run
+            // view can append steps without re-reading the whole run.
+            DomainEvent::RunnerStarted { .. } => "runner-started",
+            DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
+            DomainEvent::RunnerFinished { .. } => "runner-finished",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",
