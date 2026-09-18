@@ -1,5 +1,6 @@
 // Application services — orchestration layer
 
+pub mod collection_runner_service;
 pub mod collection_service;
 pub mod contract_service;
 pub mod cookie_service;
@@ -20,6 +21,10 @@ pub mod template_service;
 pub mod workspace_service;
 pub mod assertion_evaluator;
 
+pub use collection_runner_service::{
+    CollectionRunnerService, RunCollectionInput, RunStepResult, RunStepStatus, RunSummary,
+    StoppedReason,
+};
 pub use collection_service::CollectionService;
 pub use contract_service::ContractService;
 pub use cookie_service::CookieService;
