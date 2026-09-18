@@ -274,6 +274,8 @@ export interface ExecuteRequestInput {
   pathParams?: PathParam[];
   /** Declarative `set-variable` actions, evaluated at the phase they declare. */
   actions?: ActionEntry[];
+  /** Opt-in per-workspace policy checked against BeforeRequest req.setUrl() redirects. */
+  requestGuardPolicy?: RequestGuardPolicy;
 }
 
 export interface FileChangedEvent {
@@ -432,11 +434,17 @@ export interface WorkspaceEnvironmentsConfig {
   activeEnvironment?: string | null;
 }
 
+export interface RequestGuardPolicy {
+  blockScriptRedirectsToInternalHosts: boolean;
+  alsoBlockPrivateRanges: boolean;
+}
+
 export interface WorkspaceConfig {
   name: string;
   description?: string | null;
   collections: CollectionReference[];
   environments: WorkspaceEnvironmentsConfig;
+  requestGuardPolicy: RequestGuardPolicy;
 }
 
 // ============================================================
@@ -982,6 +990,9 @@ export const openWorkspaceFromDisk = (path: string) =>
 
 export const getWorkspaceConfig = (workspaceId: string) =>
   invoke<WorkspaceConfig>('get_workspace_config', { workspaceId });
+
+export const updateRequestGuardPolicy = (workspaceId: string, policy: RequestGuardPolicy) =>
+  invoke<void>('update_request_guard_policy', { workspaceId, policy });
 
 export const getMultiWorkspaceMode = () => invoke<boolean>('get_multi_workspace_mode');
 
