@@ -496,7 +496,12 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   if (activeWorkspaceId) {
     try {
       const config = await getWorkspaceConfig(activeWorkspaceId);
-      requestGuardPolicy = config.requestGuardPolicy;
+      // The field is absent, not just default-valued, for a workspace that
+      // has never opted in — the Rust side skips serializing it.
+      requestGuardPolicy = config.requestGuardPolicy ?? {
+        blockScriptRedirectsToInternalHosts: false,
+        alsoBlockPrivateRanges: false,
+      };
     } catch {
       // Non-critical — keep the permissive default.
     }

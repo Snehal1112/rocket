@@ -3041,6 +3041,49 @@ mod tests {
         assert!(result.is_err(), "the IPv4-mapped metadata endpoint must be blocked");
     }
 
+    #[test]
+    fn check_request_guard_blocks_unspecified_address_shorthand_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // Regression test for a second bypass found by re-review: "0" and
+        // "0.0.0.0" both resolve to the unspecified IPv4 address, which url
+        // normalizes to "0.0.0.0" -- and 0.0.0.0 reaches loopback-bound
+        // services on Linux/macOS, so it must be blocked even though it is
+        // not itself loopback, link-local, or private.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://0/", &policy);
+        assert!(result.is_err(), "the unspecified-address shorthand '0' must be blocked");
+    }
+
+    #[test]
+    fn check_request_guard_blocks_localhost_with_trailing_dot_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://localhost./", &policy);
+        assert!(result.is_err(), "'localhost.' must be blocked exactly like 'localhost'");
+    }
+
     /// Executor that captures the RequestOptions it received.
     struct OptionsCapturingExecutor {
         last_options: Mutex<Option<RequestOptions>>,

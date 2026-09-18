@@ -444,7 +444,8 @@ export interface WorkspaceConfig {
   description?: string | null;
   collections: CollectionReference[];
   environments: WorkspaceEnvironmentsConfig;
-  requestGuardPolicy: RequestGuardPolicy;
+  /** Absent (not just default-valued) for a workspace that has never opted in — the Rust side skips serializing a fully-permissive policy. */
+  requestGuardPolicy?: RequestGuardPolicy;
 }
 
 // ============================================================

@@ -7,9 +7,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// Returns true if `host` should be blocked under the given policy.
 ///
 /// Checks, at minimum: 127.0.0.0/8, ::1, 169.254.0.0/16 (including the
-/// 169.254.169.254 cloud metadata endpoint), and the literal string
-/// "localhost". When `also_block_private` is true, additionally checks
-/// 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16.
+/// 169.254.169.254 cloud metadata endpoint), the unspecified addresses
+/// 0.0.0.0 and ::, and the literal string "localhost". When
+/// `also_block_private` is true, additionally checks 10.0.0.0/8,
+/// 172.16.0.0/12, 192.168.0.0/16.
 ///
 /// Accepts a host with or without the `[...]` brackets `url::Url::host_str()`
 /// puts around an IPv6 literal — stripping them here, once, means every
@@ -18,6 +19,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// silently failing to parse a bracketed form and falling through to "not
 /// blocked".
 pub fn is_blocked_host(host: &str, also_block_private: bool) -> bool {
+    // A trailing root-label dot ("localhost.") still resolves to loopback,
+    // and `url` preserves it verbatim rather than stripping it, so the
+    // literal-string compare must strip it too or this one entry in the
+    // guard's own documented minimum blocklist silently misses a variant.
+    let host = host.trim_end_matches('.');
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -33,7 +39,10 @@ pub fn is_blocked_host(host: &str, also_block_private: bool) -> bool {
 }
 
 fn is_blocked_ipv4(ip: Ipv4Addr, also_block_private: bool) -> bool {
-    if ip.is_loopback() || ip.is_link_local() {
+    // 0.0.0.0 is not itself loopback/link-local/private, but on Linux and
+    // macOS it reaches services bound to any local interface — the classic
+    // "unspecified address as a loopback alias" SSRF trick.
+    if ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() {
         return true;
     }
     also_block_private && ip.is_private()
@@ -47,7 +56,7 @@ fn is_blocked_ipv6(ip: Ipv6Addr, also_block_private: bool) -> bool {
     if let Some(v4) = ip.to_ipv4_mapped() {
         return is_blocked_ipv4(v4, also_block_private);
     }
-    if ip.is_loopback() || ip.is_unicast_link_local() {
+    if ip.is_loopback() || ip.is_unicast_link_local() || ip.is_unspecified() {
         return true;
     }
     also_block_private && ip.is_unique_local()
@@ -93,6 +102,27 @@ mod tests {
     fn blocks_ipv6_unique_local_only_with_private_flag() {
         assert!(!is_blocked_host("[fc00::1]", false));
         assert!(is_blocked_host("[fc00::1]", true));
+    }
+
+    #[test]
+    fn blocks_localhost_with_trailing_root_label_dot() {
+        // "localhost." still resolves to loopback (root-label dot is a valid,
+        // ignorable DNS suffix), and url::Url preserves it verbatim rather
+        // than stripping it before host_str() is called.
+        assert!(is_blocked_host("localhost.", false));
+        assert!(is_blocked_host("LOCALHOST.", false));
+    }
+
+    #[test]
+    fn blocks_unspecified_ipv4() {
+        // 0.0.0.0 reaches services bound to any local interface on Linux and
+        // macOS -- a loopback alias, not itself loopback/link-local/private.
+        assert!(is_blocked_host("0.0.0.0", false));
+    }
+
+    #[test]
+    fn blocks_unspecified_ipv6() {
+        assert!(is_blocked_host("[::]", false));
     }
 
     #[test]
