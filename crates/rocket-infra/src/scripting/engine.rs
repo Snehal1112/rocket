@@ -50,6 +50,12 @@ const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 /// here is what makes termination reliable instead of best-effort.
 const HANDLE_WAIT: Duration = Duration::from_millis(250);
 
+/// Best-effort V8 heap cap for a single script execution.
+///
+/// Generous on purpose. Legitimate scripts manipulate small JSON payloads, so
+/// this only catches runaway allocation and never ordinary work.
+const SCRIPT_HEAP_LIMIT_BYTES: usize = 256 * 1024 * 1024;
+
 #[async_trait]
 impl ScriptEngine for DenoScriptEngine {
     async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
@@ -197,13 +203,28 @@ fn run_script(
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![rocket_scripting_ext::init()],
+        create_params: Some(
+            v8::CreateParams::default().heap_limits(0, SCRIPT_HEAP_LIMIT_BYTES),
+        ),
         ..Default::default()
     });
+
+    let isolate_handle = runtime.v8_isolate().thread_safe_handle();
 
     // Publish the isolate handle before running any script code, so a timeout
     // can always reach it. A send failure only means the caller already gave
     // up, and there is nothing useful to do about that here.
-    let _ = handle_tx.send(runtime.v8_isolate().thread_safe_handle());
+    let _ = handle_tx.send(isolate_handle.clone());
+
+    // Without this callback V8's default near-OOM behaviour is to abort the
+    // whole process, which would be worse than the problem we are fixing.
+    // Terminating the isolate turns an out-of-memory into an ordinary script
+    // error instead. The raised limit returned here is only headroom for V8 to
+    // unwind in. Termination is what actually stops the script.
+    runtime.add_near_heap_limit_callback(move |current, _initial| {
+        isolate_handle.terminate_execution();
+        current + (current / 4)
+    });
 
     // Seed OpState with input and output state.
     {
@@ -964,6 +985,39 @@ mod tests {
         let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
             .await
             .expect("engine must still work after repeated terminations");
+        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+    }
+
+    #[tokio::test]
+    async fn memory_hog_script_does_not_abort_the_process() {
+        // Roughly 1 MB per iteration, so the 256 MB cap is reached in well
+        // under a second. Either outcome is acceptable — the heap limit firing
+        // or the wall-clock timeout firing first — what must never happen is
+        // the process aborting.
+        let ctx = minimal_ctx("let s = ''; while (true) { s += 'x'.repeat(1000000); }");
+
+        let outcome = run_script_with_timeout(ctx, std::time::Duration::from_secs(5)).await;
+
+        match outcome {
+            Ok(result) => assert!(
+                result.error.is_some(),
+                "a heap-exhausting script must report an error, got a clean result"
+            ),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("timed out") || msg.contains("terminated"),
+                    "unexpected error: {msg}"
+                );
+            }
+        }
+
+        // Reaching this line proves the process survived. A working script
+        // afterwards proves the engine is not wedged.
+        let ctx = minimal_ctx("rok.setVar('alive', 'yes')");
+        let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
+            .await
+            .expect("engine must still work after a heap-limit termination");
         assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
     }
 }
