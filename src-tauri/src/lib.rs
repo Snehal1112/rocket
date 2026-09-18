@@ -396,6 +396,7 @@ pub fn run() {
             commands::workspaces::get_workspace_config,
             commands::workspaces::get_multi_workspace_mode,
             commands::workspaces::set_multi_workspace_mode,
+            commands::workspaces::update_request_guard_policy,
             commands::workspaces::open_folder_picker,
             commands::workspaces::link_external_collection,
             commands::ui_state::load_ui_state,
