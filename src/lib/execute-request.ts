@@ -486,7 +486,10 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   // never block sending a request — fall back to the fully-permissive default,
   // matching today's behavior, rather than surfacing an unrelated error.
   const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
-  let requestGuardPolicy: { blockScriptRedirectsToInternalHosts: boolean; alsoBlockPrivateRanges: boolean } = {
+  let requestGuardPolicy: {
+    blockScriptRedirectsToInternalHosts: boolean;
+    alsoBlockPrivateRanges: boolean;
+  } = {
     blockScriptRedirectsToInternalHosts: false,
     alsoBlockPrivateRanges: false,
   };
