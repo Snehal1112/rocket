@@ -1,7 +1,9 @@
 use async_trait::async_trait;
-use deno_core::{extension, JsRuntime, OpState, RuntimeOptions, op2};
+use deno_core::{extension, v8, JsRuntime, OpState, RuntimeOptions, op2};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
+use std::time::Duration;
+use tokio::sync::oneshot;
 
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use crate::scripting::ops::{console, redact, req, res, rok};
@@ -33,14 +35,56 @@ impl Default for DenoScriptEngine {
     }
 }
 
+/// Wall-clock budget for a single script execution.
+///
+/// Five seconds comfortably exceeds any legitimate pre-request, post-response,
+/// or test script. Those scripts do in-memory templating, signing, and small
+/// JSON manipulation. They have no network or filesystem access at all, so
+/// there is nothing legitimate for them to wait on.
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Grace period for the blocking thread to publish its isolate handle.
+///
+/// The handle is the first thing `run_script` sends, but the blocking thread
+/// may not have been scheduled yet when the deadline fires. Waiting briefly
+/// here is what makes termination reliable instead of best-effort.
+const HANDLE_WAIT: Duration = Duration::from_millis(250);
+
 #[async_trait]
 impl ScriptEngine for DenoScriptEngine {
     async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
-        // JsRuntime is !Send, so all V8 work must stay on one thread.
-        let result = tokio::task::spawn_blocking(move || run_script(ctx))
-            .await
-            .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?;
-        result
+        run_script_with_timeout(ctx, SCRIPT_TIMEOUT).await
+    }
+}
+
+/// Runs a script on a blocking thread and aborts it if `timeout` elapses.
+///
+/// Cancelling the async future alone would not stop the OS thread running V8,
+/// so on timeout we ask V8 itself to abort the script through the isolate
+/// handle the thread published on start. Tests call this directly with a short
+/// timeout so the suite never waits the full `SCRIPT_TIMEOUT`.
+async fn run_script_with_timeout(
+    ctx: ScriptContext,
+    timeout: Duration,
+) -> DomainResult<ScriptResult> {
+    // JsRuntime is !Send, so all V8 work must stay on one thread.
+    let (handle_tx, handle_rx) = oneshot::channel();
+    let join = tokio::task::spawn_blocking(move || run_script(ctx, handle_tx));
+
+    match tokio::time::timeout(timeout, join).await {
+        Ok(join_result) => join_result
+            .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?,
+        Err(_elapsed) => {
+            // Terminating makes the blocking thread's execute_script return an
+            // "execution terminated" error. It then tears the runtime down on
+            // its own and its result is discarded, so we do not wait for it.
+            if let Ok(Ok(isolate_handle)) = tokio::time::timeout(HANDLE_WAIT, handle_rx).await {
+                isolate_handle.terminate_execution();
+            }
+            Err(DomainError::Internal(format!(
+                "script execution timed out after {timeout:?}"
+            )))
+        }
     }
 }
 
@@ -145,13 +189,21 @@ extension!(
     ],
 );
 
-fn run_script(ctx: ScriptContext) -> DomainResult<ScriptResult> {
+fn run_script(
+    ctx: ScriptContext,
+    handle_tx: oneshot::Sender<v8::IsolateHandle>,
+) -> DomainResult<ScriptResult> {
     let code = ctx.code;
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![rocket_scripting_ext::init()],
         ..Default::default()
     });
+
+    // Publish the isolate handle before running any script code, so a timeout
+    // can always reach it. A send failure only means the caller already gave
+    // up, and there is nothing useful to do about that here.
+    let _ = handle_tx.send(runtime.v8_isolate().thread_safe_handle());
 
     // Seed OpState with input and output state.
     {
@@ -851,6 +903,31 @@ mod tests {
         assert_eq!(
             result.runtime_vars.get("leaks").expect("leaks present").to_string(),
             "[]"
+        );
+    }
+
+    // ── execution timeout ────────────────────────────────────────────────────
+
+    /// Short budget so the timeout tests finish fast instead of waiting the
+    /// real five-second SCRIPT_TIMEOUT.
+    const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+
+    #[tokio::test]
+    async fn infinite_loop_script_is_terminated_by_timeout() {
+        let ctx = minimal_ctx("while (true) {}");
+
+        let started = std::time::Instant::now();
+        let outcome = run_script_with_timeout(ctx, TEST_TIMEOUT).await;
+        let elapsed = started.elapsed();
+
+        let err = outcome.expect_err("an infinite loop must not return Ok");
+        assert!(
+            err.to_string().contains("timed out"),
+            "expected a timeout error, got: {err}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "execute() must return promptly after the deadline, took {elapsed:?}"
         );
     }
 }
