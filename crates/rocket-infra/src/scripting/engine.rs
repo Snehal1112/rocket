@@ -990,11 +990,16 @@ mod tests {
 
     #[tokio::test]
     async fn memory_hog_script_does_not_abort_the_process() {
-        // Roughly 1 MB per iteration, so the 256 MB cap is reached in well
-        // under a second. Either outcome is acceptable — the heap limit firing
-        // or the wall-clock timeout firing first — what must never happen is
-        // the process aborting.
-        let ctx = minimal_ctx("let s = ''; while (true) { s += 'x'.repeat(1000000); }");
+        // Allocates via many distinct arrays rather than one growing string.
+        // A single-string version (`s += 'x'.repeat(1000000)`) hits V8's own
+        // built-in max-string-length RangeError almost instantly, independent
+        // of both the wall-clock timeout and SCRIPT_HEAP_LIMIT_BYTES — so it
+        // would pass identically even with the heap limit reverted. This
+        // shape genuinely exercises the near-heap-limit callback: either
+        // outcome below is acceptable (the heap limit firing or the
+        // wall-clock timeout firing first), what must never happen is the
+        // process aborting.
+        let ctx = minimal_ctx("const a = []; while (true) { a.push(new Array(10000).fill(0)); }");
 
         let outcome = run_script_with_timeout(ctx, std::time::Duration::from_secs(5)).await;
 
