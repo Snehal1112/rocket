@@ -188,6 +188,14 @@ impl CollectionRunnerService {
         }
     }
 
+    /// Replaces the cancellation registry. Test seam — it lets a test hold the
+    /// same registry the run loop reads and cancel a run while it is in flight.
+    #[cfg(test)]
+    pub(crate) fn with_cancellations(mut self, cancelled: Arc<Mutex<HashSet<String>>>) -> Self {
+        self.cancelled = cancelled;
+        self
+    }
+
     /// Runs every request in the target folder or collection, in order.
     ///
     /// Returns once the run ends. Progress is also streamed as
@@ -292,6 +300,15 @@ impl CollectionRunnerService {
             steps,
             stopped_reason,
         })
+    }
+
+    /// Asks an in-progress run to stop. The run ends before its next step; a
+    /// step already in flight finishes first. Cancelling an unknown or finished
+    /// run id is a no-op.
+    pub fn cancel(&self, run_id: &str) {
+        if let Ok(mut set) = self.cancelled.lock() {
+            set.insert(run_id.to_string());
+        }
     }
 
     /// Runs one step: before-request, then — unless the script skipped it —
@@ -869,5 +886,148 @@ mod tests {
             summary.stopped_reason,
             StoppedReason::StepLimitReached { limit: MAX_RUN_STEPS }
         );
+    }
+
+    /// Publisher that cancels the run as soon as it sees the Nth
+    /// `RunnerStepCompleted` event, by writing straight into the shared
+    /// cancellation registry the service was built with.
+    struct CancelAfterSteps {
+        cancel_after: usize,
+        seen: Mutex<usize>,
+        cancelled: Arc<Mutex<HashSet<String>>>,
+    }
+
+    impl EventPublisher for CancelAfterSteps {
+        fn publish(&self, event: DomainEvent) {
+            if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
+                let mut seen = self.seen.lock().expect("lock");
+                *seen += 1;
+                if *seen >= self.cancel_after {
+                    self.cancelled.lock().expect("lock").insert(run_id.clone());
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_step_does_not_stop_the_run_by_default() {
+        let executor = RecordingExecutor::new();
+        executor.set_status("second.yml", 500);
+        let h = harness(three_step_collection(), ProgrammableEngine::new(), executor);
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 3, "every remaining item still runs");
+        assert_eq!(summary.stopped_reason, StoppedReason::Completed);
+        assert!(summary.steps[1].is_failure());
+        assert_eq!(summary.steps[1].status_code, Some(500));
+    }
+
+    #[tokio::test]
+    async fn stop_on_failure_ends_the_run_at_the_first_failure() {
+        let executor = RecordingExecutor::new();
+        executor.set_status("second.yml", 500);
+        let h = harness(three_step_collection(), ProgrammableEngine::new(), executor);
+        let mut input = sample_run_input();
+        input.stop_on_failure = true;
+        let summary = h.runner.run(&h.exec, input).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 2);
+        assert_eq!(
+            summary.stopped_reason,
+            StoppedReason::StoppedOnFailure { item_name: "Second".into() }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_test_counts_as_a_step_failure() {
+        use rocket_scripting::{TestResult, TestStatus};
+
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                test_results: vec![
+                    TestResult { name: "ok".into(), status: TestStatus::Passed, error: None },
+                    TestResult {
+                        name: "nope".into(),
+                        status: TestStatus::Failed,
+                        error: Some("expected 200".into()),
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps[0].test_pass_count, 1);
+        assert_eq!(summary.steps[0].test_fail_count, 1);
+        assert!(summary.steps[0].is_failure());
+        assert_eq!(summary.steps.len(), 3, "continue-on-failure is the default");
+    }
+
+    #[tokio::test]
+    async fn a_transport_error_is_an_error_step_and_the_run_continues() {
+        // Status 0 makes the recording executor fail the send.
+        let executor = RecordingExecutor::new();
+        executor.set_status("second.yml", 0);
+        let h = harness(three_step_collection(), ProgrammableEngine::new(), executor);
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 3);
+        assert_eq!(summary.steps[1].status, RunStepStatus::Error);
+        assert!(summary.steps[1].error.is_some());
+        assert_eq!(summary.stopped_reason, StoppedReason::Completed);
+    }
+
+    #[tokio::test]
+    async fn cancelling_mid_run_stops_before_the_next_step() {
+        // Build the runner by hand so the test and the canceller share one
+        // cancellation registry; the publisher cancels once step 1 reports.
+        let collection = three_step_collection();
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+        let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(CancelAfterSteps {
+                cancel_after: 1,
+                seen: Mutex::new(0),
+                cancelled: Arc::clone(&cancelled),
+            }),
+        )
+        .with_cancellations(Arc::clone(&cancelled));
+
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 1, "the run stops before step 2 starts");
+        assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
+        assert_eq!(executor.sent_urls(), vec!["https://api.test/first.yml".to_string()]);
+        assert!(
+            !cancelled.lock().expect("lock").contains(&summary.run_id),
+            "a finished run must not leak its id in the registry"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_unknown_run_id_is_a_no_op() {
+        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
+        h.runner.cancel("not-a-real-run");
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        assert_eq!(summary.stopped_reason, StoppedReason::Completed);
+        assert_eq!(summary.steps.len(), 3);
     }
 }
