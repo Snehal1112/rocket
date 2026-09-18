@@ -3,6 +3,28 @@ use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
 use crate::ScriptPhase;
 
+/// How the request carrying a script was dispatched.
+///
+/// Maps 1:1 to the string `req.getExecutionMode()` returns inside the sandbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionMode {
+    /// A single send, e.g. from the Request tab.
+    #[default]
+    Standalone,
+    /// A step dispatched by the Collection Runner.
+    Runner,
+}
+
+impl ExecutionMode {
+    /// The exact string the sandbox exposes. Do not change these values.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExecutionMode::Standalone => "standalone",
+            ExecutionMode::Runner => "runner",
+        }
+    }
+}
+
 /// Everything the JS sandbox needs to read at execution time.
 ///
 /// This is a snapshot — immutable once constructed. The engine returns
@@ -126,6 +148,14 @@ impl ScriptContext {
             path_params,
         }
     }
+
+    /// Overrides the execution mode. The three constructors default to
+    /// `Standalone`; the Collection Runner sets `Runner` on every context it
+    /// builds, so `req.getExecutionMode()` reports the truth.
+    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.execution_mode = mode.as_str().to_string();
+        self
+    }
 }
 
 #[cfg(test)]
@@ -220,5 +250,27 @@ mod tests {
         assert_eq!(ctx.request_tags, vec!["smoke".to_string()]);
         assert_eq!(ctx.path_params.len(), 1);
         assert_eq!(ctx.path_params[0].name, "id");
+    }
+
+    #[test]
+    fn execution_mode_as_str_matches_script_api_strings() {
+        assert_eq!(ExecutionMode::Standalone.as_str(), "standalone");
+        assert_eq!(ExecutionMode::Runner.as_str(), "runner");
+        assert_eq!(ExecutionMode::default(), ExecutionMode::Standalone);
+    }
+
+    #[test]
+    fn with_execution_mode_overrides_the_standalone_default() {
+        let ctx = ScriptContext::before_request(
+            String::new(),
+            VariableContext::default(),
+            stub_request(),
+            None,
+            String::new(),
+            vec![],
+            vec![],
+        )
+        .with_execution_mode(ExecutionMode::Runner);
+        assert_eq!(ctx.execution_mode, "runner");
     }
 }
