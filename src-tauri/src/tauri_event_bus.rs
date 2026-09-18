@@ -25,6 +25,7 @@ impl EventPublisher for TauriEventBus {
                 "collection-changed"
             }
             DomainEvent::ItemMoved { .. } => "collection-changed",
+            DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
                 "environment-changed"
             }
@@ -55,6 +56,7 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::ConsoleOutput { .. } => "script-console",
             DomainEvent::TestsCompleted { .. } => "script-tests",
             DomainEvent::ScriptError { .. } => "script-error",
+            DomainEvent::ScriptVariableWritten { .. } => "script-variable-written",
         };
         let _ = self.app.emit(event_name, &event);
         // A branch switch replaces the working-tree content visible to the

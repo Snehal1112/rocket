@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub struct VariableContext {
@@ -9,6 +9,10 @@ pub struct VariableContext {
     pub collection:  HashMap<String, String>,
     pub global_env:  HashMap<String, String>,
     pub process_env: HashMap<String, String>,
+    /// Keys (from any scope) whose *value* must be redacted if it appears in
+    /// script-emitted console/test-error text. Not a per-scope map — a value is
+    /// either sensitive or not, regardless of which scope surfaced it.
+    pub secret_values: HashSet<String>,
 }
 
 impl VariableContext {
@@ -138,17 +142,57 @@ mod tests {
 
     #[test]
     fn full_hierarchy_runtime_wins() {
-        // All 7 scopes present — runtime must win.
+        // All 8 scopes present — runtime must win.
         let ctx = VariableContext {
-            runtime:     m(&[("k", "runtime")]),
-            request:     m(&[("k", "request")]),
-            folder:      m(&[("k", "folder")]),
-            env:         m(&[("k", "env")]),
-            collection:  m(&[("k", "collection")]),
-            global_env:  m(&[("k", "global")]),
-            process_env: m(&[("k", "process")]),
+            runtime:       m(&[("k", "runtime")]),
+            request:       m(&[("k", "request")]),
+            folder:        m(&[("k", "folder")]),
+            env:           m(&[("k", "env")]),
+            collection:    m(&[("k", "collection")]),
+            global_env:    m(&[("k", "global")]),
+            process_env:   m(&[("k", "process")]),
+            secret_values: std::collections::HashSet::new(),
         };
         assert_eq!(ctx.flatten().get("k").unwrap(), "runtime");
+    }
+
+    #[test]
+    fn secret_values_defaults_to_empty() {
+        assert!(VariableContext::default().secret_values.is_empty());
+    }
+
+    #[test]
+    fn secret_values_does_not_affect_flatten() {
+        let mut ctx = VariableContext {
+            env: m(&[("API_KEY", "sk-live-abcdef123")]),
+            ..Default::default()
+        };
+        ctx.secret_values.insert("sk-live-abcdef123".to_string());
+        // flatten() still returns the real value — secret_values is a
+        // separate redaction list, not a filter on the scope maps.
+        let flat = ctx.flatten();
+        assert_eq!(flat.get("API_KEY").expect("API_KEY present"), "sk-live-abcdef123");
+    }
+
+    #[test]
+    fn secret_values_does_not_affect_flatten_with_process_env() {
+        let mut ctx = VariableContext {
+            env: m(&[("API_KEY", "sk-live-abcdef123")]),
+            ..Default::default()
+        };
+        ctx.secret_values.insert("sk-live-abcdef123".to_string());
+        let flat = ctx.flatten_with_process_env();
+        assert_eq!(flat.get("API_KEY").expect("API_KEY present"), "sk-live-abcdef123");
+    }
+
+    #[test]
+    fn secret_values_is_content_addressed_not_tied_to_a_scope_key() {
+        // A value can be marked sensitive without needing to also appear
+        // in any scope map — redaction matches on the value alone.
+        let mut ctx = VariableContext::default();
+        ctx.secret_values.insert("standalone-secret".to_string());
+        assert!(ctx.secret_values.contains("standalone-secret"));
+        assert!(ctx.flatten().is_empty());
     }
 
     #[test]

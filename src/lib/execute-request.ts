@@ -10,6 +10,7 @@ import {
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
+  getWorkspaceConfig,
   type Header,
   oauth2GetToken,
   oauth2RefreshToken,
@@ -19,6 +20,7 @@ import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
 // Reads the active environment's variables from the query cache.
@@ -259,6 +261,32 @@ export async function resolveRequestFields(
   );
 }
 
+// Returns the React Query keys to invalidate after a script-driven variable
+// write (rok.setEnvVar / rok.setGlobalEnvVar), so the environment editor and
+// any open request tabs stop showing a stale value. `collection` is the
+// collection whose per-collection environments should be re-fetched (env
+// data is keyed by collection name, not environment name — see
+// `environmentKeys.collection` in `@/lib/queries/environment-queries`).
+// When globalEnvName is set, both `global(name)` and `globalList` are
+// invalidated — the Global Environments editor (WorkspaceEnvironmentsTab)
+// reads its variable list from `globalList` (via useGlobalEnvironments()),
+// not from `global(name)`, so invalidating only the latter would leave that
+// editor showing a stale value and risk a later manual save there silently
+// reverting the script's write. This matches the pair `useSaveGlobalEnvironment`
+// already invalidates on a manual save.
+export function getEnvInvalidationKeys(
+  collection: string | undefined,
+  globalEnvName: string | undefined,
+): readonly (readonly unknown[])[] {
+  const keys: (readonly unknown[])[] = [];
+  if (collection) keys.push(environmentKeys.collection(collection));
+  if (globalEnvName) {
+    keys.push(environmentKeys.global(globalEnvName));
+    keys.push(environmentKeys.globalList);
+  }
+  return keys;
+}
+
 // Non-interactive grants — safe to silently fetch on send. Authorization Code
 // and Implicit pop a browser window, which would be surprising as a side effect
 // of hitting Send, so they're excluded from auto-fetch.
@@ -469,6 +497,31 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
 
   const requestName = found?.tab.title ?? resolvedUrl;
 
+  // Fetch the active workspace's opt-in RequestGuardPolicy. Failure here must
+  // never block sending a request — fall back to the fully-permissive default,
+  // matching today's behavior, rather than surfacing an unrelated error.
+  const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+  let requestGuardPolicy: {
+    blockScriptRedirectsToInternalHosts: boolean;
+    alsoBlockPrivateRanges: boolean;
+  } = {
+    blockScriptRedirectsToInternalHosts: false,
+    alsoBlockPrivateRanges: false,
+  };
+  if (activeWorkspaceId) {
+    try {
+      const config = await getWorkspaceConfig(activeWorkspaceId);
+      // The field is absent, not just default-valued, for a workspace that
+      // has never opted in — the Rust side skips serializing it.
+      requestGuardPolicy = config.requestGuardPolicy ?? {
+        blockScriptRedirectsToInternalHosts: false,
+        alsoBlockPrivateRanges: false,
+      };
+    } catch {
+      // Non-critical — keep the permissive default.
+    }
+  }
+
   try {
     const result = await executeRequest({
       method: effectiveRequest.method,
@@ -496,6 +549,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       pathParams: effectiveRequest.pathParams
         .filter((p) => p.enabled && p.key)
         .map((p) => ({ name: p.key, value: p.value })),
+      requestGuardPolicy,
     });
 
     const responseState: ResponseState = {
@@ -517,6 +571,22 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       scriptError: result.scriptError,
     };
     usePaneStore.getState().setResponse(tabId, responseState);
+
+    // A pre/post-response or tests script may have written env or collection
+    // variables via rok.setEnvVar/setGlobalEnvVar/setCollectionVar. Refresh the
+    // relevant caches so the environment editor and this tab's variable context
+    // don't keep showing the stale pre-write value. Cheap even when nothing
+    // changed — React Query dedupes a no-op invalidate against unchanged data.
+    const qc = getQueryClient();
+    for (const key of getEnvInvalidationKeys(collection, globalEnvName)) {
+      qc.invalidateQueries({ queryKey: key });
+    }
+    if (collection) {
+      window.dispatchEvent(
+        new CustomEvent('rocket:collection-vars-written', { detail: { collection } }),
+      );
+    }
+
     // Merge auth-synthesized headers with explicit headers for the console.
     // Auth headers (Bearer, Basic, API Key) are injected by reqwest at the Rust
     // level and never appear in effectiveHeaders — add them here so the console

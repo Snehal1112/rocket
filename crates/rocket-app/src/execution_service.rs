@@ -1,3 +1,4 @@
+use crate::env_audit;
 use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
@@ -66,6 +67,11 @@ pub struct ExecuteRequestInput {
     /// `before-request`/`after-response` phase they declare.
     #[serde(default)]
     pub actions: Vec<rocket_shared::ActionSetVariable>,
+    /// Opt-in per-workspace policy: when a BeforeRequest script redirects the
+    /// request via req.setUrl(), validate the new host against a blocklist of
+    /// internal/loopback ranges before dispatch. Defaults to fully permissive.
+    #[serde(default)]
+    pub request_guard_policy: rocket_workspace::RequestGuardPolicy,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -120,6 +126,14 @@ pub struct RequestExecutionService {
     audit: Arc<dyn SecurityAuditPublisher>,
     script_engine: Option<Box<dyn ScriptEngine>>,
 }
+
+/// Secrets shorter than this are not added to `VariableContext.secret_values`
+/// and are therefore never redacted in console/test-failure output. A
+/// documented, deliberate trade-off (see
+/// docs/superpowers/specs/2026-09-16-secret-aware-variable-context-spec.md
+/// §3.4) — redacting every occurrence of a very short string risks
+/// over-redacting unrelated output.
+const MIN_REDACTION_LEN: usize = 6;
 
 impl RequestExecutionService {
     pub fn new(
@@ -220,14 +234,21 @@ impl RequestExecutionService {
         if let Some(col) = collection {
             let settings = self.collection_repo.get_settings(col).unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
-                ctx.collection.insert(cv.key.clone(), effective_val(cv));
+                let val = effective_val(cv);
+                ctx.collection.insert(cv.key.clone(), val.clone());
+                if cv.secret && val.len() >= MIN_REDACTION_LEN {
+                    ctx.secret_values.insert(val);
+                }
             }
         }
 
         if let Some(name) = environment_name {
             if let Ok(env) = self.regular_env_repo(collection).get(name) {
-                for (k, v) in env.enabled_variables() {
-                    ctx.env.insert(k.to_string(), v.to_string());
+                for var in env.variables.iter().filter(|v| v.enabled) {
+                    ctx.env.insert(var.key.clone(), var.value.clone());
+                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
+                        ctx.secret_values.insert(var.value.clone());
+                    }
                 }
             }
         }
@@ -328,9 +349,7 @@ impl RequestExecutionService {
         if !result.env_var_writes.is_empty() {
             if let Some(name) = env_name {
                 let repo = self.regular_env_repo(collection);
-                if self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true) {
-                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                }
+                self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true);
             } else {
                 tracing::warn!(
                     "rok.setEnvVar write(s) queued but no active environment is selected — write(s) dropped"
@@ -341,9 +360,7 @@ impl RequestExecutionService {
         // Apply global-environment writes (always persisted — modifying a shared env).
         if !result.global_env_var_writes.is_empty() {
             if let Some(name) = global_env_name {
-                if self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true) {
-                    self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                }
+                self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true);
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -380,65 +397,124 @@ impl RequestExecutionService {
     fn apply_collection_var_write(&self, collection: &str, key: &str, value: &str) -> DomainResult<()> {
         let mut settings = self.collection_repo.get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
-        self.collection_repo.save_settings(collection, &settings)
+        self.collection_repo.save_settings(collection, &settings)?;
+        self.events.publish(DomainEvent::CollectionVariableWritten {
+            collection: collection.to_string(),
+            key: key.to_string(),
+        });
+        self.events.publish(DomainEvent::ScriptVariableWritten {
+            scope: "collection".to_string(),
+            environment: None,
+            collection: Some(collection.to_string()),
+            key: key.to_string(),
+        });
+        Ok(())
     }
 
     /// Read-modify-write helper for env var writes against a named environment.
     ///
-    /// When `force_persist` is true (used for global env writes), all writes go
-    /// to disk regardless of the individual `persist` flag. For active-environment
-    /// writes, only entries with `persist: true` are saved.
+    /// `EnvVarWrite.persist` is preserved for wire/API compatibility but
+    /// currently has no effect — both call sites in `apply_script_side_effects`
+    /// and the `runtime.actions` "environment" scope branch always pass
+    /// `force_persist: true`, so every write here is unconditionally persisted.
     ///
-    /// Returns `true` when the environment was actually saved, so callers can
-    /// decide whether to publish `DomainEvent::EnvironmentSaved`.
+    /// Existing variable metadata (`enabled`, `secret`, `description`, `secret_type`)
+    /// is preserved across a script-driven write — only `value` (and, for a
+    /// brand-new key, `enabled: true`) is set by the script. `value_variants`
+    /// is the one field NOT preserved — it is always cleared to `None` on a
+    /// script write, matching this method's pre-existing behavior before this
+    /// plan and the spec's explicit choice not to extend preservation to it.
+    /// Metadata is looked up against the pre-batch snapshot (`before`), not the
+    /// progressively-mutated `env`, so a delete-then-recreate of the same key
+    /// within one script still finds the original metadata. A script can never
+    /// promote a variable to `secret: true`; only the user can do that via the
+    /// environment editor UI. On a successful save, publishes the same
+    /// `DomainEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
+    /// audit trail a manual save produces (via `env_audit::publish_env_write_events`),
+    /// plus one `DomainEvent::ScriptVariableWritten` per write actually applied.
     fn apply_env_writes(
         &self,
         repo: &dyn EnvironmentRepository,
         env_name: &str,
         writes: &[rocket_scripting::EnvVarWrite],
         force_persist: bool,
-    ) -> bool {
-        let persist_writes: Vec<_> = writes
+    ) {
+        let persist_writes: Vec<&rocket_scripting::EnvVarWrite> = writes
             .iter()
             .filter(|w| force_persist || w.persist)
             .collect();
         if persist_writes.is_empty() {
-            return false;
+            return;
         }
-        match repo.get(env_name) {
-            Ok(mut env) => {
-                for write in persist_writes {
-                    if write.value.is_null() {
-                        env.remove_variable(&write.key);
-                    } else {
-                        let str_val = write.value.as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| write.value.to_string());
-                        env.set_variable(rocket_environment::Variable::new(
-                            write.key.clone(),
-                            str_val,
-                        ));
-                    }
-                }
-                match repo.save(&env) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            environment = %env_name,
-                            "failed to persist script env var write"
-                        );
-                        false
-                    }
-                }
-            }
+        let mut env = match repo.get(env_name) {
+            Ok(env) => env,
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     environment = %env_name,
                     "rok.setEnvVar/setGlobalEnvVar: environment not found, write dropped"
                 );
-                false
+                return;
+            }
+        };
+        let before = env.clone();
+
+        for write in persist_writes.iter() {
+            if write.value.is_null() {
+                env.remove_variable(&write.key);
+                continue;
+            }
+            let str_val = write
+                .value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| write.value.to_string());
+            // Look up metadata from the pre-batch snapshot, not the
+            // progressively-mutated `env` — otherwise a delete followed by a
+            // re-set of the same key within one script (e.g.
+            // rok.deleteEnvVar('K'); rok.setEnvVar('K', v)) would find no
+            // "existing" entry in the already-mutated `env`, silently
+            // stripping the secret flag (and other metadata) with no audit
+            // trail. `before` is the metadata the user actually established
+            // before this script ran, which is also the semantically correct
+            // source regardless of same-batch reordering.
+            let existing = before.variables.iter().find(|v| v.key == write.key);
+            let updated = rocket_environment::Variable {
+                key: write.key.clone(),
+                value: str_val,
+                enabled: existing.map(|v| v.enabled).unwrap_or(true),
+                secret: existing.map(|v| v.secret).unwrap_or(false),
+                description: existing.and_then(|v| v.description.clone()),
+                value_variants: None,
+                secret_type: existing.and_then(|v| v.secret_type.clone()),
+            };
+            env.set_variable(updated);
+        }
+
+        match repo.save(&env) {
+            Ok(()) => {
+                env_audit::publish_env_write_events(
+                    self.events.as_ref(),
+                    self.audit.as_ref(),
+                    env_name,
+                    &before,
+                    &env,
+                );
+                for write in persist_writes.iter() {
+                    self.events.publish(DomainEvent::ScriptVariableWritten {
+                        scope: "environment".to_string(),
+                        environment: Some(env_name.to_string()),
+                        collection: None,
+                        key: write.key.clone(),
+                    });
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    environment = %env_name,
+                    "failed to persist script env var write"
+                );
             }
         }
     }
@@ -468,12 +544,20 @@ impl RequestExecutionService {
                 result
             }
             Err(e) => {
+                let message = e.to_string();
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
-                    message: e.to_string(),
+                    message: message.clone(),
                 });
-                ScriptResult::default()
+                // Carry the failure in `error` as well. Callers build
+                // ExecuteOutput.script_error from this field only, so without
+                // it a timed-out script would fire an event but show nothing
+                // in the request's own error surface.
+                ScriptResult {
+                    error: Some(message),
+                    ..Default::default()
+                }
             }
         }
     }
@@ -570,7 +654,7 @@ impl RequestExecutionService {
                 "environment" => {
                     if let Some(name) = env_name {
                         let repo = self.regular_env_repo(collection);
-                        let saved = self.apply_env_writes(
+                        self.apply_env_writes(
                             repo.as_ref(),
                             name,
                             &[rocket_scripting::EnvVarWrite {
@@ -580,9 +664,6 @@ impl RequestExecutionService {
                             }],
                             true,
                         );
-                        if saved {
-                            self.events.publish(DomainEvent::EnvironmentSaved { name: name.to_string() });
-                        }
                     } else {
                         tracing::warn!(variable = %var_name, "action scope 'environment' but no active environment");
                     }
@@ -631,6 +712,51 @@ impl RequestExecutionService {
         }
     }
 
+    /// Validates a BeforeRequest script's URL mutation against the workspace's
+    /// opt-in `RequestGuardPolicy`. Only ever inspects `mutated_url` — the
+    /// user's own manually-typed URL never reaches this method (see call site
+    /// in `execute()`, which only calls this when a script actually set a new
+    /// URL). Compares resolved hosts, not raw URL strings: a script that only
+    /// rewrites the path/query of the same host the user already declared is
+    /// never blocked, regardless of whether that host happens to be internal.
+    fn check_request_guard(
+        &self,
+        original_url: &str,
+        mutated_url: &str,
+        policy: &rocket_workspace::RequestGuardPolicy,
+    ) -> DomainResult<()> {
+        if !policy.block_script_redirects_to_internal_hosts {
+            return Ok(());
+        }
+
+        let mutated = url::Url::parse(mutated_url).map_err(|e| {
+            rocket_shared::error::DomainError::InvalidInput(format!(
+                "script produced an invalid URL: {e}"
+            ))
+        })?;
+        let Some(mutated_host) = mutated.host_str() else {
+            // No host component (e.g. a relative/opaque URL) — nothing to check.
+            return Ok(());
+        };
+
+        // If the script only changed the path/query of the host the user
+        // already declared, this is not a redirect in the sense the guard
+        // cares about.
+        if let Ok(original) = url::Url::parse(original_url) {
+            if original.host_str() == Some(mutated_host) {
+                return Ok(());
+            }
+        }
+
+        if crate::request_guard::is_blocked_host(mutated_host, policy.also_block_private_ranges) {
+            return Err(rocket_shared::error::DomainError::InvalidInput(format!(
+                "blocked: script redirected request to internal host '{mutated_host}' \
+                 (workspace policy blocks script-driven redirects to internal hosts)"
+            )));
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(
         name = "http_request",
         skip(self, input),
@@ -673,8 +799,11 @@ impl RequestExecutionService {
         );
         if let Some(name) = input.global_env_name.as_deref() {
             if let Ok(global_env) = self.env_repo.get(name) {
-                for (k, v) in global_env.enabled_variables() {
-                    var_ctx.global_env.insert(k.to_string(), v.to_string());
+                for var in global_env.variables.iter().filter(|v| v.enabled) {
+                    var_ctx.global_env.insert(var.key.clone(), var.value.clone());
+                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
+                        var_ctx.secret_values.insert(var.value.clone());
+                    }
                 }
             }
         }
@@ -698,6 +827,8 @@ impl RequestExecutionService {
                 // Apply request mutations.
                 if let Some(ref mutations) = result.request_mutations {
                     if let Some(ref url) = mutations.url {
+                        let original_url = http_request.url.clone();
+                        self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
                         http_request.url = url.clone();
                     }
                     if let Some(ref method_str) = mutations.method {
@@ -1302,6 +1433,7 @@ mod tests {
             tags: vec![],
             path_params: vec![],
             actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
         }
     }
 
@@ -1428,17 +1560,6 @@ mod tests {
     #[tokio::test]
     async fn execute_publishes_event() {
         use rocket_shared::events::DomainEvent;
-        use std::sync::Mutex;
-
-        struct RecordingPublisher {
-            events: Mutex<Vec<DomainEvent>>,
-        }
-
-        impl rocket_shared::events::EventPublisher for RecordingPublisher {
-            fn publish(&self, event: DomainEvent) {
-                self.events.lock().unwrap().push(event);
-            }
-        }
 
         let publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
 
@@ -1718,6 +1839,15 @@ mod tests {
     impl SecurityAuditPublisher for CapturingAuditPublisher {
         fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
             self.captured.lock().unwrap().push(kind);
+        }
+    }
+
+    struct RecordingPublisher {
+        events: Mutex<Vec<DomainEvent>>,
+    }
+    impl rocket_shared::events::EventPublisher for RecordingPublisher {
+        fn publish(&self, event: DomainEvent) {
+            self.events.lock().expect("lock").push(event);
         }
     }
 
@@ -2065,6 +2195,232 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn post_response_script_env_var_write_preserves_secret_flag() {
+        // A script overwriting a previously-secret variable's value must not
+        // silently strip its secret flag.
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("sk-new"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        assert_eq!(var.value, "sk-new");
+        assert!(var.secret, "secret flag must be preserved across a script write");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_delete_then_set_preserves_secret_flag_and_publishes_audit() {
+        // rok.deleteEnvVar('K') followed by rok.setEnvVar('K', v) in the same
+        // script queues a Null write then a value write for the same key in
+        // one env_var_writes batch. Metadata lookup must use the pre-batch
+        // snapshot, not the progressively-mutated env, or the delete erases
+        // "existing" before the re-set can find it — silently downgrading the
+        // secret flag to false with no SecretVariableWritten audit event.
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![
+                EnvVarWrite {
+                    key: "API_KEY".into(),
+                    value: serde_json::Value::Null,
+                    persist: true,
+                },
+                EnvVarWrite {
+                    key: "API_KEY".into(),
+                    value: serde_json::json!("sk-new"),
+                    persist: true,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        assert_eq!(var.value, "sk-new");
+        assert!(var.secret, "secret flag must survive a delete-then-recreate within one script");
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SecretVariableWritten { environment, variable_key }
+                    if environment == "prod" && variable_key == "API_KEY"
+            )),
+            "expected SecretVariableWritten even after a delete-then-recreate, got {:?}",
+            *captured
+        );
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_new_key_defaults_to_non_secret() {
+        // A script writing a brand-new key (no pre-existing variable) must not be
+        // able to implicitly create a secret — only the user can promote via the UI.
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "NEW_TOKEN".into(),
+                value: serde_json::json!("t-123"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let var = saved.variables.iter().find(|v| v.key == "NEW_TOKEN").expect("NEW_TOKEN present");
+        assert!(!var.secret, "a script must not be able to implicitly create a secret variable");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_publishes_secret_audit_and_events() {
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("sk-new"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&event_publisher))),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let published = event_publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            "expected EnvironmentSaved, got {:?}", *published
+        );
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ScriptVariableWritten { scope, environment, key, .. }
+                    if scope == "environment" && environment.as_deref() == Some("prod") && key == "API_KEY"
+            )),
+            "expected ScriptVariableWritten, got {:?}", *published
+        );
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            captured.iter().any(|k| matches!(
+                k,
+                AuditEventKind::SecretVariableWritten { environment, variable_key }
+                    if environment == "prod" && variable_key == "API_KEY"
+            )),
+            "expected SecretVariableWritten, got {:?}", *captured
+        );
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_write_non_secret_does_not_publish_secret_audit() {
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::new("HOST", "old.example.com"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "HOST".into(),
+                value: serde_json::json!("new.example.com"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            audit_publisher.clone(),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let captured = audit_publisher.captured.lock().expect("lock");
+        assert!(
+            !captured.iter().any(|k| matches!(k, AuditEventKind::SecretVariableWritten { .. })),
+            "a non-secret write must not publish SecretVariableWritten, got {:?}", *captured
+        );
+    }
+
+    #[tokio::test]
     async fn post_response_script_collection_var_write_calls_save_settings() {
         let initial_settings = CollectionSettings {
             variables: vec![CollectionVariable {
@@ -2101,6 +2457,70 @@ mod tests {
             .expect("save_settings should have been called");
         let written = saved.variables.iter().find(|v| v.key == "BASE_URL");
         assert_eq!(written.map(|v| v.value.as_str()), Some("https://new.example.com"));
+    }
+
+    #[tokio::test]
+    async fn post_response_script_collection_var_write_publishes_events() {
+        let initial_settings = CollectionSettings {
+            variables: vec![CollectionVariable {
+                key: "BASE_URL".into(),
+                value: "https://old.example.com".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            }],
+            ..Default::default()
+        };
+        let col_repo = RecordingCollectionRepo::with_settings(initial_settings);
+
+        let result = ScriptResult {
+            collection_var_writes: vec![CollectionVarWrite {
+                key: "BASE_URL".into(),
+                value: serde_json::json!("https://new.example.com"),
+            }],
+            ..Default::default()
+        };
+
+        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&event_publisher))),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("my-api".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let published = event_publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::CollectionVariableWritten { collection, key }
+                    if collection == "my-api" && key == "BASE_URL"
+            )),
+            "expected CollectionVariableWritten, got {:?}", *published
+        );
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ScriptVariableWritten { scope, collection, key, .. }
+                    if scope == "collection" && collection.as_deref() == Some("my-api") && key == "BASE_URL"
+            )),
+            "expected ScriptVariableWritten, got {:?}", *published
+        );
     }
 
     #[tokio::test]
@@ -2166,6 +2586,195 @@ mod tests {
         assert_eq!(output.response.status, 200, "the original method must still be used, unmodified");
         let err = output.script_error.expect("an invalid setMethod() must surface a script_error");
         assert!(err.contains("PACTH"), "error should name the invalid method: {err}");
+    }
+
+    #[tokio::test]
+    async fn ac1_policy_disabled_sends_redirect_unmodified() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://169.254.169.254/latest/meta-data/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        // request_guard_policy left at its Default — fully permissive.
+        let output = svc.execute(input).await.expect("execute should succeed — policy is off");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac2_policy_enabled_blocks_redirect_to_metadata_endpoint() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://169.254.169.254/latest/meta-data/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let err = svc.execute(input).await.expect_err("must be blocked");
+        assert!(err.to_string().contains("169.254.169.254"));
+    }
+
+    #[tokio::test]
+    async fn ac3_policy_enabled_without_private_flag_allows_private_redirect() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://192.168.1.1/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let output = svc.execute(input).await.expect("private ranges must be allowed by default");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac4_both_flags_enabled_blocks_private_redirect() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://192.168.1.1/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let err = svc.execute(input).await.expect_err("must be blocked with both flags on");
+        assert!(err.to_string().contains("192.168.1.1"));
+    }
+
+    #[tokio::test]
+    async fn ac5_manual_loopback_url_never_blocked_regardless_of_policy() {
+        use rocket_workspace::RequestGuardPolicy;
+
+        // No pre_request_script at all — this is exactly what a user manually
+        // typing http://localhost:8080/ into the URL bar looks like to the
+        // service. The guard must never inspect input.url itself.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("http://localhost:8080/", None);
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let output = svc.execute(input).await.expect("manual URLs are never checked");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac6_script_without_seturl_is_unaffected_by_policy() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_shared::types::HttpMethod;
+        use rocket_workspace::RequestGuardPolicy;
+
+        // Script only calls req.setMethod — no URL mutation at all.
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                method: Some("POST".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.method = HttpMethod::Get;
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let output = svc.execute(input).await.expect("no URL mutation means nothing to check");
+        assert_eq!(output.response.status, 200);
     }
 
     #[tokio::test]
@@ -2245,6 +2854,234 @@ mod tests {
             "a string body should respect the script's explicit Content-Type instead of being forced to JSON"
         );
         assert_eq!(body.content.as_deref(), Some("<a/>"));
+    }
+
+    #[test]
+    fn check_request_guard_noop_when_policy_disabled() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy::default();
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://169.254.169.254/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_blocks_metadata_endpoint_when_enabled() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://169.254.169.254/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("169.254.169.254"), "error should name the blocked host: {msg}");
+    }
+
+    #[test]
+    fn check_request_guard_allows_private_range_when_flag_off() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://192.168.1.1/",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_blocks_private_range_when_both_flags_on() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://192.168.1.1/",
+            &policy,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_request_guard_ignores_same_host_path_only_rewrite() {
+        use rocket_workspace::RequestGuardPolicy;
+        // A script that only rewrites the path/query of a host the user already
+        // declared themselves (even an internal one) must never be blocked —
+        // only a host *change* introduced by the script is in scope.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let result = svc.check_request_guard(
+            "http://192.168.1.1/foo",
+            "http://192.168.1.1/bar",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_errors_on_unparseable_mutated_url() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "not a url", &policy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_request_guard_blocks_bracketed_ipv6_loopback_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // Regression test for a real bug found by review: check_request_guard
+        // extracts the host via url::Url::host_str(), which returns an IPv6
+        // literal wrapped in brackets (e.g. "[::1]"), not a bare address.
+        // is_blocked_host's own unit tests passed bare strings that never went
+        // through this parsing step, so this must exercise the real call path.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://[::1]/", &policy);
+        assert!(result.is_err(), "a bracketed IPv6 loopback URL must be blocked");
+    }
+
+    #[test]
+    fn check_request_guard_blocks_ipv4_mapped_metadata_endpoint_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // The IPv4-mapped IPv6 form of the cloud metadata endpoint must be
+        // blocked exactly like its plain IPv4 form is.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://[::ffff:169.254.169.254]/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_err(), "the IPv4-mapped metadata endpoint must be blocked");
+    }
+
+    #[test]
+    fn check_request_guard_blocks_unspecified_address_shorthand_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // Regression test for a second bypass found by re-review: "0" and
+        // "0.0.0.0" both resolve to the unspecified IPv4 address, which url
+        // normalizes to "0.0.0.0" -- and 0.0.0.0 reaches loopback-bound
+        // services on Linux/macOS, so it must be blocked even though it is
+        // not itself loopback, link-local, or private.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://0/", &policy);
+        assert!(result.is_err(), "the unspecified-address shorthand '0' must be blocked");
+    }
+
+    #[test]
+    fn check_request_guard_blocks_localhost_with_trailing_dot_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://localhost./", &policy);
+        assert!(result.is_err(), "'localhost.' must be blocked exactly like 'localhost'");
     }
 
     /// Executor that captures the RequestOptions it received.
@@ -2611,6 +3448,179 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn secret_env_and_collection_vars_populate_secret_values() {
+        let settings = CollectionSettings {
+            variables: vec![
+                CollectionVariable {
+                    key: "COL_SECRET".into(),
+                    value: "col-secret-val".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: true,
+                },
+                cv("COL_PLAIN", "col-plain-val"),
+            ],
+            ..Default::default()
+        };
+        let collection_repo = StubCollectionRepo::with_settings(settings);
+
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("API_KEY", "sk-live-abcdef123"));
+        active_env.set_variable(Variable::new("PLAIN", "plain-not-secret"));
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineSecrets(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineSecrets {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(collection_repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineSecrets(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("sk-live-abcdef123"), "secret env var value must be in secret_values");
+        assert!(captured.secret_values.contains("col-secret-val"), "secret collection var value must be in secret_values");
+        assert!(!captured.secret_values.contains("plain-not-secret"), "non-secret env var value must not be in secret_values");
+        assert!(!captured.secret_values.contains("col-plain-val"), "non-secret collection var value must not be in secret_values");
+    }
+
+    #[tokio::test]
+    async fn short_secret_value_is_not_added_to_secret_values() {
+        // Documented limitation (MIN_REDACTION_LEN = 6): secrets shorter
+        // than this are not added to secret_values, so they are never
+        // redacted. Asserted explicitly so this doesn't get "fixed"
+        // accidentally later without revisiting the trade-off.
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("SHORT", "abc")); // 3 chars < MIN_REDACTION_LEN
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineShort(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineShort {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineShort(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(!captured.secret_values.contains("abc"), "secrets shorter than MIN_REDACTION_LEN must not be added to secret_values");
+    }
+
+    #[tokio::test]
+    async fn secret_value_exactly_at_min_redaction_len_is_added_to_secret_values() {
+        // MIN_REDACTION_LEN = 6 is an inclusive floor ("len >= MIN_REDACTION_LEN"):
+        // a secret exactly 6 characters long must still be added and redacted,
+        // not excluded. Complements short_secret_value_is_not_added_to_secret_values,
+        // which only covers the too-short (3-char) side of the boundary.
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::secret("EXACT", "abcdef")); // 6 chars == MIN_REDACTION_LEN
+        let env_repo = MockEnvRepo::with_env(active_env);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineExact(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineExact {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineExact(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("abcdef"), "a secret exactly MIN_REDACTION_LEN characters long must be added to secret_values");
+    }
+
+    #[tokio::test]
+    async fn global_env_secret_populates_secret_values() {
+        let mut active_env = Environment::new("dev");
+        active_env.set_variable(Variable::new("BASE_URL", "https://dev.local"));
+        let mut global_env = Environment::new("shared-global");
+        global_env.set_variable(Variable::secret("GLOBAL_TOKEN", "glbl-secret-999"));
+        global_env.set_variable(Variable::new("GLOBAL_PLAIN", "glbl-plain-val"));
+        let env_repo = MultiEnvRepo::new(vec![active_env, global_env]);
+
+        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        struct SharedCapturingEngineGlobal(Arc<CapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedCapturingEngineGlobal {
+            async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let engine_arc = Arc::clone(&engine);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedCapturingEngineGlobal(engine)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.global_env_name = Some("shared-global".into());
+        input.pre_request_script = Some("console.log('probe')".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
+        assert!(captured.secret_values.contains("glbl-secret-999"), "secret global env var value must be in secret_values");
+        assert!(!captured.secret_values.contains("glbl-plain-val"), "non-secret global env var value must not be in secret_values");
+    }
+
+    #[tokio::test]
     async fn action_jsonq_error_does_not_abort_request() {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
@@ -2623,5 +3633,43 @@ mod tests {
 
         let output = svc.execute(input).await.expect("execute must succeed despite a bad jsonq expression");
         assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn script_engine_error_surfaces_in_output_script_error() {
+        // Stands in for a timed-out script: the engine returns Err, not an
+        // Ok(ScriptResult) that carries an error.
+        struct FailingEngine;
+
+        #[async_trait]
+        impl ScriptEngine for FailingEngine {
+            async fn execute(&self, _ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                Err(DomainError::Internal(
+                    "script execution timed out after 5s".into(),
+                ))
+            }
+        }
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(FailingEngine));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("while (true) {}".into());
+        let output = svc.execute(input).await.expect("execute failed");
+
+        // The request itself must still complete normally.
+        assert_eq!(output.response.status, 200);
+
+        let err = output
+            .script_error
+            .expect("a timed-out script must populate script_error, not just fire an event");
+        assert!(err.contains("timed out"), "unexpected message: {err}");
     }
 }

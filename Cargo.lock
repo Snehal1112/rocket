@@ -4630,6 +4630,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ulid",
+ "url",
 ]
 
 [[package]]
@@ -4750,6 +4751,7 @@ dependencies = [
  "deno_core",
  "deno_error",
  "dirs 5.0.1",
+ "keyring",
  "notify",
  "reqwest 0.12.28",
  "rocket-audit",

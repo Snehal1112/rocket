@@ -26,7 +26,7 @@ fn env_service_for(collection: &str, ws_path: &Path) -> Result<EnvironmentServic
         .join(collection)
         .join("environments");
     Ok(EnvironmentService::new(
-        Box::new(FsEnvironmentRepo::new(env_dir)),
+        Box::new(FsEnvironmentRepo::with_secret_store(env_dir, crate::env_secret_store())),
         Box::new(NullEventPublisher),
     ))
 }
@@ -103,7 +103,7 @@ pub fn set_global_environment(
 fn global_env_service(ws_path: &Path) -> Result<EnvironmentService, DomainError> {
     let env_dir = ws_path.join("environments");
     Ok(EnvironmentService::new(
-        Box::new(FsEnvironmentRepo::new(env_dir)),
+        Box::new(FsEnvironmentRepo::with_secret_store(env_dir, crate::env_secret_store())),
         Box::new(NullEventPublisher),
     ))
 }

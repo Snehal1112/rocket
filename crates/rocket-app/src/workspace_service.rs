@@ -183,6 +183,24 @@ impl WorkspaceService {
         self.config_repo.load(&workspace.path)
     }
 
+    /// Update the opt-in RequestGuardPolicy for a workspace. Unlike
+    /// `update_description`, this is not cached in the registry — the policy
+    /// only ever lives in workspace.yml, mirroring `set_multi_workspace_mode`'s
+    /// simplicity (a plain settings toggle, no domain event published).
+    pub fn update_request_guard_policy(
+        &self,
+        workspace_id: &str,
+        policy: rocket_workspace::RequestGuardPolicy,
+    ) -> DomainResult<()> {
+        let registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id(workspace_id)
+            .ok_or_else(|| DomainError::NotFound(workspace_id.into()))?;
+        let mut config = self.config_repo.load(&workspace.path)?;
+        config.request_guard_policy = policy;
+        self.config_repo.save(&workspace.path, &config)
+    }
+
     /// Open an existing workspace from disk. The directory must contain `workspace.yml`.
     pub fn open_workspace(&self, path: PathBuf) -> DomainResult<Workspace> {
         if !path.join("workspace.yml").exists() {
@@ -582,6 +600,35 @@ mod tests {
         let ws = svc.create("Configurable", tmp.path().join("cfg-ws")).unwrap();
         let config = svc.get_workspace_config(&ws.id).unwrap();
         assert_eq!(config.name, "Configurable");
+    }
+
+    #[test]
+    fn update_request_guard_policy_persists_to_workspace_yml() {
+        use rocket_workspace::RequestGuardPolicy;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let svc = make_service(&tmp);
+        let ws = svc.create("Guarded", tmp.path().join("guarded-ws")).expect("create should succeed");
+
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        svc.update_request_guard_policy(&ws.id, policy.clone())
+            .expect("update should succeed");
+
+        let loaded = svc.get_workspace_config(&ws.id).expect("load should succeed");
+        assert_eq!(loaded.request_guard_policy, policy);
+    }
+
+    #[test]
+    fn update_request_guard_policy_nonexistent_workspace_fails() {
+        use rocket_workspace::RequestGuardPolicy;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let svc = make_service(&tmp);
+        let result = svc.update_request_guard_policy("nope", RequestGuardPolicy::default());
+        assert!(result.is_err());
     }
 
     #[test]

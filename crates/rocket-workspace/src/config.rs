@@ -31,6 +31,34 @@ pub struct WorkspaceEnvironmentsConfig {
     pub active_environment: Option<String>,
 }
 
+/// Opt-in security policy for BeforeRequest script URL mutations. When both
+/// flags are false (the default), behavior is unchanged from today: a script
+/// may redirect a request to any host, exactly like a user typing the URL
+/// manually — see docs/superpowers/specs/2026-09-16-request-mutation-host-guard-spec.md.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestGuardPolicy {
+    /// When true, a BeforeRequest script's `req.setUrl` mutation is checked
+    /// against the blocked ranges below before the request is dispatched.
+    #[serde(default)]
+    pub block_script_redirects_to_internal_hosts: bool,
+    /// Additionally block RFC1918 private ranges (10/8, 172.16/12, 192.168/16),
+    /// not just loopback/link-local. Off by default even when the guard itself
+    /// is enabled, since many legitimate internal APIs live on private ranges.
+    #[serde(default)]
+    pub also_block_private_ranges: bool,
+}
+
+impl RequestGuardPolicy {
+    /// True when both flags are at their default (fully-permissive) value.
+    /// Used to skip serializing this block for the common case of a
+    /// workspace that has not opted in, so `workspace.yml` stays unchanged
+    /// for every non-adopter.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Represents the per-workspace `workspace.yml` that lives inside
 /// each workspace directory. This file makes the workspace portable
 /// and Git-friendly.
@@ -47,6 +75,10 @@ pub struct WorkspaceConfig {
     /// Name of the selected global environment (workspace/environments/<n>.yml).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_environment: Option<String>,
+    /// Opt-in security policy for BeforeRequest script URL mutations. Defaults
+    /// to fully permissive (today's behavior) for every existing workspace.
+    #[serde(default, skip_serializing_if = "RequestGuardPolicy::is_default")]
+    pub request_guard_policy: RequestGuardPolicy,
 }
 
 impl WorkspaceConfig {
@@ -58,6 +90,7 @@ impl WorkspaceConfig {
             collections: Vec::new(),
             environments: WorkspaceEnvironmentsConfig::default(),
             global_environment: None,
+            request_guard_policy: RequestGuardPolicy::default(),
         }
     }
 
@@ -225,5 +258,60 @@ mod tests {
     fn workspace_global_environment_defaults_none() {
         let ws: WorkspaceConfig = serde_yaml::from_str("name: test").unwrap();
         assert!(ws.global_environment.is_none());
+    }
+
+    #[test]
+    fn request_guard_policy_default_is_fully_permissive() {
+        let policy = RequestGuardPolicy::default();
+        assert!(!policy.block_script_redirects_to_internal_hosts);
+        assert!(!policy.also_block_private_ranges);
+    }
+
+    #[test]
+    fn request_guard_policy_serde_roundtrip() {
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let yaml = serde_yaml::to_string(&policy).expect("serialize");
+        assert!(yaml.contains("blockScriptRedirectsToInternalHosts: true"));
+        assert!(yaml.contains("alsoBlockPrivateRanges: true"));
+        let back: RequestGuardPolicy = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(policy, back);
+    }
+
+    #[test]
+    fn request_guard_policy_deserializes_from_empty_yaml_as_permissive() {
+        // Backward compatibility: a workspace.yml predating this field must not
+        // fail to load, and must not implicitly enable the guard.
+        let policy: RequestGuardPolicy = serde_yaml::from_str("{}").expect("deserialize");
+        assert_eq!(policy, RequestGuardPolicy::default());
+    }
+
+    #[test]
+    fn workspace_config_new_has_permissive_request_guard_policy() {
+        let cfg = WorkspaceConfig::new("Test");
+        assert_eq!(cfg.request_guard_policy, RequestGuardPolicy::default());
+    }
+
+    #[test]
+    fn workspace_config_request_guard_policy_serde_roundtrip() {
+        let mut cfg = WorkspaceConfig::new("My Project");
+        cfg.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
+        let back: WorkspaceConfig = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn workspace_config_deserialize_minimal_yaml_defaults_request_guard_policy() {
+        // A workspace.yml written before this feature existed has no
+        // requestGuardPolicy key at all — it must still load, permissively.
+        let yaml = "name: Minimal\n";
+        let cfg: WorkspaceConfig = serde_yaml::from_str(yaml).expect("deserialize");
+        assert_eq!(cfg.request_guard_policy, RequestGuardPolicy::default());
     }
 }

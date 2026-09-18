@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use rocket_app::WorkspaceService;
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
-use rocket_workspace::{Workspace, WorkspaceConfig};
+use rocket_workspace::{RequestGuardPolicy, Workspace, WorkspaceConfig};
 use tauri::State;
 
 #[tauri::command]
@@ -127,6 +127,15 @@ pub fn set_multi_workspace_mode(
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
     svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.set_multi_workspace_mode(enabled)
+}
+
+#[tauri::command]
+pub fn update_request_guard_policy(
+    workspace_id: String,
+    policy: RequestGuardPolicy,
+    svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.update_request_guard_policy(&workspace_id, policy)
 }
 
 #[tauri::command]

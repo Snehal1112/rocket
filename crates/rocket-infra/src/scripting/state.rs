@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
     CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite,
@@ -20,6 +20,12 @@ pub struct ScriptInputState {
     pub request_name: String,
     pub request_tags: Vec<String>,
     pub path_params: Vec<PathParam>,
+    /// Values that must be redacted if they appear in script-emitted
+    /// console/test-error text. Copied from `variables.secret_values` when
+    /// this state is seeded in `run_script` (engine.rs) — kept as its own
+    /// field so ops that only need the redaction list (console/test-fail
+    /// ops) don't have to reach through `variables`.
+    pub secret_values: HashSet<String>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

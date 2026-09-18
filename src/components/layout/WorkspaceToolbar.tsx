@@ -2,6 +2,7 @@ import { CollectionDropdown } from './CollectionDropdown';
 import { EnvironmentSwitcher } from './EnvironmentSwitcher';
 import { GitToolbarButton } from './GitToolbarButton';
 import { SandboxPopover } from './SandboxPopover';
+import { WorkspaceSecurityPopover } from './WorkspaceSecurityPopover';
 
 export function WorkspaceToolbar() {
   return (
@@ -15,6 +16,7 @@ export function WorkspaceToolbar() {
       <div className='flex items-center gap-1'>
         <GitToolbarButton />
         <SandboxPopover />
+        <WorkspaceSecurityPopover />
         <EnvironmentSwitcher />
       </div>
     </div>
