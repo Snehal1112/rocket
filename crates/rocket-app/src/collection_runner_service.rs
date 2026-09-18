@@ -700,4 +700,174 @@ mod tests {
         assert_eq!(summary.steps.len(), 3);
         assert_eq!(summary.steps[1].status, RunStepStatus::Completed);
     }
+
+    #[tokio::test]
+    async fn skip_request_makes_no_http_call_and_runs_no_later_phase() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "Second",
+            "before-request",
+            ScriptResult { skip_request: true, ..Default::default() },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(
+            h.executor.sent_urls(),
+            vec![
+                "https://api.test/first.yml".to_string(),
+                "https://api.test/third.yml".to_string(),
+            ],
+            "the skipped request must never reach the executor"
+        );
+        assert_eq!(summary.steps[1].status, RunStepStatus::Skipped);
+        assert_eq!(summary.steps[1].status_code, None);
+        assert!(
+            !h.engine.calls().contains(&"Second|after-response".to_string()),
+            "a skipped step has no response, so no later phase may run"
+        );
+        assert!(!h.engine.calls().contains(&"Second|tests".to_string()));
+        // Only the two sent requests are history-worthy.
+        assert_eq!(h.history.saved_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn set_next_request_from_tests_phase_jumps_the_run() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Third".into())),
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
+        assert_eq!(names, vec!["First", "Third"], "Second must be jumped over");
+    }
+
+    #[tokio::test]
+    async fn skip_request_combined_with_set_next_request_honours_the_jump() {
+        // Bruno cannot do this (usebruno/bruno#5831) because it only reads
+        // setNextRequest from post-response scripts. Rocket checks after every
+        // phase that ran, so both calls in one before-request script work.
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "before-request",
+            ScriptResult {
+                skip_request: true,
+                next_request: Some(NextRequest::Name("Third".into())),
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
+        assert_eq!(names, vec!["First", "Third"]);
+        assert_eq!(summary.steps[0].status, RunStepStatus::Skipped);
+        assert_eq!(h.executor.sent_urls(), vec!["https://api.test/third.yml".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn later_phase_wins_when_two_phases_set_next_request() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "before-request",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Second".into())),
+                ..Default::default()
+            },
+        );
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Third".into())),
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
+        assert_eq!(names, vec!["First", "Third"], "the last phase that ran wins");
+    }
+
+    #[tokio::test]
+    async fn set_next_request_null_stops_the_run() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "after-response",
+            ScriptResult { next_request: Some(NextRequest::Stop), ..Default::default() },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(summary.stopped_reason, StoppedReason::StoppedByScript);
+        assert_eq!(h.executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unknown_next_request_records_an_error_and_stops() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Nowhere".into())),
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(summary.steps[0].status, RunStepStatus::Error);
+        let error = summary.steps[0].error.as_deref().expect("error recorded on the step");
+        assert!(error.contains("Nowhere"), "got {error}");
+        assert_eq!(
+            summary.stopped_reason,
+            StoppedReason::UnknownNextRequest {
+                item_name: "First".into(),
+                next_request: "Nowhere".into(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_next_request_cycle_stops_at_the_step_limit() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Second".into())),
+                ..Default::default()
+            },
+        );
+        engine.on(
+            "Second",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("First".into())),
+                ..Default::default()
+            },
+        );
+        let h = harness(three_step_collection(), engine, RecordingExecutor::new());
+        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), MAX_RUN_STEPS);
+        assert_eq!(
+            summary.stopped_reason,
+            StoppedReason::StepLimitReached { limit: MAX_RUN_STEPS }
+        );
+    }
 }
