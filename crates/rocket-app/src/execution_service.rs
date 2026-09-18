@@ -67,6 +67,11 @@ pub struct ExecuteRequestInput {
     /// `before-request`/`after-response` phase they declare.
     #[serde(default)]
     pub actions: Vec<rocket_shared::ActionSetVariable>,
+    /// Opt-in per-workspace policy: when a BeforeRequest script redirects the
+    /// request via req.setUrl(), validate the new host against a blocklist of
+    /// internal/loopback ranges before dispatch. Defaults to fully permissive.
+    #[serde(default)]
+    pub request_guard_policy: rocket_workspace::RequestGuardPolicy,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -822,6 +827,8 @@ impl RequestExecutionService {
                 // Apply request mutations.
                 if let Some(ref mutations) = result.request_mutations {
                     if let Some(ref url) = mutations.url {
+                        let original_url = http_request.url.clone();
+                        self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
                         http_request.url = url.clone();
                     }
                     if let Some(ref method_str) = mutations.method {
@@ -1426,6 +1433,7 @@ mod tests {
             tags: vec![],
             path_params: vec![],
             actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
         }
     }
 
@@ -2578,6 +2586,195 @@ mod tests {
         assert_eq!(output.response.status, 200, "the original method must still be used, unmodified");
         let err = output.script_error.expect("an invalid setMethod() must surface a script_error");
         assert!(err.contains("PACTH"), "error should name the invalid method: {err}");
+    }
+
+    #[tokio::test]
+    async fn ac1_policy_disabled_sends_redirect_unmodified() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://169.254.169.254/latest/meta-data/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        // request_guard_policy left at its Default — fully permissive.
+        let output = svc.execute(input).await.expect("execute should succeed — policy is off");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac2_policy_enabled_blocks_redirect_to_metadata_endpoint() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://169.254.169.254/latest/meta-data/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let err = svc.execute(input).await.expect_err("must be blocked");
+        assert!(err.to_string().contains("169.254.169.254"));
+    }
+
+    #[tokio::test]
+    async fn ac3_policy_enabled_without_private_flag_allows_private_redirect() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://192.168.1.1/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let output = svc.execute(input).await.expect("private ranges must be allowed by default");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac4_both_flags_enabled_blocks_private_redirect() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_workspace::RequestGuardPolicy;
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("http://192.168.1.1/".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let err = svc.execute(input).await.expect_err("must be blocked with both flags on");
+        assert!(err.to_string().contains("192.168.1.1"));
+    }
+
+    #[tokio::test]
+    async fn ac5_manual_loopback_url_never_blocked_regardless_of_policy() {
+        use rocket_workspace::RequestGuardPolicy;
+
+        // No pre_request_script at all — this is exactly what a user manually
+        // typing http://localhost:8080/ into the URL bar looks like to the
+        // service. The guard must never inspect input.url itself.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+
+        let mut input = sample_input("http://localhost:8080/", None);
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let output = svc.execute(input).await.expect("manual URLs are never checked");
+        assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn ac6_script_without_seturl_is_unaffected_by_policy() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+        use rocket_shared::types::HttpMethod;
+        use rocket_workspace::RequestGuardPolicy;
+
+        // Script only calls req.setMethod — no URL mutation at all.
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                method: Some("POST".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", None);
+        input.method = HttpMethod::Get;
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let output = svc.execute(input).await.expect("no URL mutation means nothing to check");
+        assert_eq!(output.response.status, 200);
     }
 
     #[tokio::test]
