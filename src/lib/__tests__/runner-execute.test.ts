@@ -16,6 +16,11 @@ vi.mock('@/lib/execute-request', () => ({
     environmentName: undefined,
     requestPath: 'ping.yml',
   })),
+  getActiveGlobalEnvName: vi.fn(() => 'global-prod'),
+  getActiveWorkspaceRequestGuardPolicy: vi.fn(async () => ({
+    blockScriptRedirectsToInternalHosts: true,
+    alsoBlockPrivateRanges: true,
+  })),
 }));
 
 import { resolveRequestFieldsForPath } from '@/lib/execute-request';
@@ -124,5 +129,37 @@ describe('executeRunnerEntry', () => {
     const outcome = await executeRunnerEntry('demo', 'ping.yml', baseRequest(), undefined);
     expect(outcome.status).toBe('failed');
     expect(outcome.error).toBe('network down');
+  });
+
+  it('passes globalEnvName, pathParams, and requestGuardPolicy through to executeRequest', async () => {
+    // Regression test for a real gap found by final review: runner-executed
+    // requests built ExecuteRequestInput without these three fields, so a
+    // workspace that opted into the request-mutation host guard was
+    // protected on single Send but not when the same request ran through
+    // the Collection Runner -- a silent security-control bypass.
+    vi.mocked(executeRequest).mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: [],
+      body: '',
+      durationMs: 10,
+      ttfbMs: 5,
+      sizeBytes: 0,
+      testResults: [],
+      consoleEntries: [],
+      scriptError: null,
+    });
+    await executeRunnerEntry('demo', 'ping.yml', baseRequest(), undefined);
+
+    expect(executeRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        globalEnvName: 'global-prod',
+        pathParams: [],
+        requestGuardPolicy: {
+          blockScriptRedirectsToInternalHosts: true,
+          alsoBlockPrivateRanges: true,
+        },
+      }),
+    );
   });
 });

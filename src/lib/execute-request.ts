@@ -14,6 +14,7 @@ import {
   type Header,
   oauth2GetToken,
   oauth2RefreshToken,
+  type RequestGuardPolicy,
 } from '@/lib/tauri-api';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
@@ -287,6 +288,42 @@ export function getEnvInvalidationKeys(
   return keys;
 }
 
+// Name of the currently-selected global environment, read from the React
+// Query cache. Shared by every request-execution path (single send, the
+// collection runner) so they all resolve {{var}} placeholders and script
+// globalEnv access identically.
+export function getActiveGlobalEnvName(): string | undefined {
+  return (
+    (getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? undefined) ||
+    undefined
+  );
+}
+
+const PERMISSIVE_REQUEST_GUARD_POLICY: RequestGuardPolicy = {
+  blockScriptRedirectsToInternalHosts: false,
+  alsoBlockPrivateRanges: false,
+};
+
+// Fetches the active workspace's opt-in RequestGuardPolicy. Failure here must
+// never block sending a request — falls back to the fully-permissive default
+// rather than surfacing an unrelated error. Shared by every request-execution
+// path so a workspace that has opted into the guard is actually protected on
+// every path that can run a BeforeRequest script, not just single-request
+// Send -- duplicating this fetch-with-fallback per call site is exactly how a
+// path can silently end up unguarded.
+export async function getActiveWorkspaceRequestGuardPolicy(): Promise<RequestGuardPolicy> {
+  const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+  if (!activeWorkspaceId) return PERMISSIVE_REQUEST_GUARD_POLICY;
+  try {
+    const config = await getWorkspaceConfig(activeWorkspaceId);
+    // The field is absent, not just default-valued, for a workspace that has
+    // never opted in — the Rust side skips serializing it.
+    return config.requestGuardPolicy ?? PERMISSIVE_REQUEST_GUARD_POLICY;
+  } catch {
+    return PERMISSIVE_REQUEST_GUARD_POLICY;
+  }
+}
+
 // Non-interactive grants — safe to silently fetch on send. Authorization Code
 // and Implicit pop a browser window, which would be surprising as a side effect
 // of hitting Send, so they're excluded from auto-fetch.
@@ -491,36 +528,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     requestPath,
   } = await resolveRequestFields(tabId, effectiveRequest);
 
-  const globalEnvName =
-    (getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? undefined) ||
-    undefined;
-
+  const globalEnvName = getActiveGlobalEnvName();
   const requestName = found?.tab.title ?? resolvedUrl;
-
-  // Fetch the active workspace's opt-in RequestGuardPolicy. Failure here must
-  // never block sending a request — fall back to the fully-permissive default,
-  // matching today's behavior, rather than surfacing an unrelated error.
-  const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
-  let requestGuardPolicy: {
-    blockScriptRedirectsToInternalHosts: boolean;
-    alsoBlockPrivateRanges: boolean;
-  } = {
-    blockScriptRedirectsToInternalHosts: false,
-    alsoBlockPrivateRanges: false,
-  };
-  if (activeWorkspaceId) {
-    try {
-      const config = await getWorkspaceConfig(activeWorkspaceId);
-      // The field is absent, not just default-valued, for a workspace that
-      // has never opted in — the Rust side skips serializing it.
-      requestGuardPolicy = config.requestGuardPolicy ?? {
-        blockScriptRedirectsToInternalHosts: false,
-        alsoBlockPrivateRanges: false,
-      };
-    } catch {
-      // Non-critical — keep the permissive default.
-    }
-  }
+  const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
 
   try {
     const result = await executeRequest({

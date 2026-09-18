@@ -121,6 +121,13 @@ export interface RunnerTab extends BaseTab {
   folderPath?: string;
   runState: RunnerRunState;
   requests: RunnerRequestEntry[];
+  // Monotonic id for the current/most-recent run, assigned fresh by every
+  // startRun call. A run loop's writes (per-entry status/result, the
+  // finalizer) only apply while this still matches the id the loop was
+  // started with — this is what makes Stop followed immediately by Re-run
+  // safe: the old loop's next write sees a mismatched id and becomes a
+  // no-op instead of racing the new run and overwriting its results.
+  runId?: number;
 }
 
 export function isRunnerTab(tab: Tab): tab is RunnerTab {

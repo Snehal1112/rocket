@@ -137,6 +137,12 @@ export interface PaneState {
   rerunAll: (tabId: string) => Promise<void>;
 }
 
+// Monotonic source for RunnerTab.runId. Module-level (not per-tab) is
+// intentional: any two runs started anywhere in the session, even on
+// different tabs, get distinct ids, so a stale loop can never coincide with
+// a fresh one by chance.
+let runIdCounter = 0;
+
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
 
@@ -435,9 +441,16 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const collectionName = found.tab.collectionName;
     const entries = found.tab.requests;
 
+    // Assigning a fresh id here, and making every subsequent write in this
+    // run conditional on it still matching, is what makes it safe to press
+    // Stop and then immediately Re-run: rerunAll's own startRun call assigns
+    // a new id, so this (now-superseded) loop's writes below become no-ops
+    // instead of racing the new run and overwriting its results.
+    const myRunId = ++runIdCounter;
+
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
-        isRunnerTab(tab) ? { ...tab, runState: 'running' } : tab,
+        isRunnerTab(tab) ? { ...tab, runState: 'running', runId: myRunId } : tab,
       ),
     });
 
@@ -445,12 +458,18 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     for (const entry of entries) {
       const live = findTabInTree(get().root, tabId);
-      if (!live || !isRunnerTab(live.tab) || live.tab.runState !== 'running') break;
+      if (
+        !live ||
+        !isRunnerTab(live.tab) ||
+        live.tab.runId !== myRunId ||
+        live.tab.runState !== 'running'
+      )
+        break;
       if (!entry.included) continue;
 
       set({
         root: updateTabInTree(get().root, tabId, (tab) => {
-          if (!isRunnerTab(tab)) return tab;
+          if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
           return {
             ...tab,
             requests: tab.requests.map((e) =>
@@ -469,7 +488,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
       set({
         root: updateTabInTree(get().root, tabId, (tab) => {
-          if (!isRunnerTab(tab)) return tab;
+          if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
           return {
             ...tab,
             requests: tab.requests.map((e) =>
@@ -484,7 +503,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     set({
       root: updateTabInTree(get().root, tabId, (tab) => {
-        if (!isRunnerTab(tab)) return tab;
+        if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
         const requests = tab.requests.map((e) =>
           e.status === 'pending' ? { ...e, status: 'skipped' as const } : e,
         );

@@ -680,4 +680,72 @@ describe('Runner tab actions', () => {
     if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
     expect(tab.requests.every((e) => e.status === 'passed')).toBe(true);
   });
+
+  it('stopping then immediately re-running does not let the stopped run dispatch further requests or overwrite the new run', async () => {
+    // Regression test for a real race found by final review: stopRun only
+    // flips runState to 'stopped', and the run loop's continuation guard
+    // checked runState alone. rerunAll's own startRun call resets runState
+    // back to 'running', so a still-in-flight old loop resumed as if it had
+    // never been stopped -- dispatching a request the user believed they had
+    // cancelled, and racing the new run's writes with stale results.
+    const { executeRunnerEntry } = await import('@/lib/runner-execute');
+
+    const calls: string[] = [];
+    let resolveRun1Second: (() => void) | undefined;
+    vi.mocked(executeRunnerEntry).mockImplementation(async (_collection, requestPath) => {
+      calls.push(requestPath);
+      if (requestPath === 'second.yml' && calls.filter((p) => p === 'second.yml').length === 1) {
+        // Run 1's second.yml (its first-ever call) hangs until
+        // resolveRun1Second() is invoked -- this is the request still in
+        // flight when Stop is pressed.
+        return new Promise((resolve) => {
+          resolveRun1Second = () => resolve({ status: 'failed', error: 'STALE-FROM-RUN-1' });
+        });
+      }
+      return { status: 'passed', result: undefined };
+    });
+
+    // Deterministically waits for the Nth call to executeRunnerEntry to have
+    // been recorded, without assuming how many microtask ticks any given
+    // mock resolution takes internally.
+    async function waitForCallCount(n: number): Promise<void> {
+      for (let i = 0; i < 100 && calls.length < n; i++) {
+        await Promise.resolve();
+      }
+      expect(calls.length).toBeGreaterThanOrEqual(n);
+    }
+
+    const tabId = await openTwoRequestRunnerTab();
+    const run1Promise = usePaneStore.getState().startRun(tabId);
+
+    // Let run 1 dispatch first.yml (resolves immediately) and reach
+    // second.yml (hangs), without letting second.yml resolve yet.
+    await waitForCallCount(2);
+
+    usePaneStore.getState().stopRun(tabId);
+    const run2Promise = usePaneStore.getState().rerunAll(tabId);
+
+    // Let run 2 dispatch its own first.yml before resolving run 1's stale
+    // second.yml call, so the interleaving matches the reviewer's repro:
+    // the old run's late result arrives after the new run has already taken
+    // the tab over.
+    await waitForCallCount(3);
+    resolveRun1Second?.();
+
+    await Promise.all([run1Promise, run2Promise]);
+
+    const tab = getLeaf().tabs[0];
+    if (!isRunnerTab(tab)) throw new Error('Expected a runner tab');
+    // Run 2 must win cleanly: both entries passed (run 2's outcome), the run
+    // finished 'done', and run 1's stale 'failed' write never lands.
+    expect(tab.runState).toBe('done');
+    expect(tab.requests.find((e) => e.requestPath === 'first.yml')?.status).toBe('passed');
+    expect(tab.requests.find((e) => e.requestPath === 'second.yml')?.status).toBe('passed');
+    // Exactly 4 real dispatches: run 1's first.yml + second.yml, run 2's
+    // first.yml + second.yml. Critically, second.yml is only ever dispatched
+    // once per run -- run 1 never gets a second chance to dispatch anything
+    // after being superseded.
+    expect(executeRunnerEntry).toHaveBeenCalledTimes(4);
+    expect(calls.filter((p) => p === 'second.yml')).toHaveLength(2);
+  });
 });

@@ -1,4 +1,8 @@
-import { resolveRequestFieldsForPath } from '@/lib/execute-request';
+import {
+  getActiveGlobalEnvName,
+  getActiveWorkspaceRequestGuardPolicy,
+  resolveRequestFieldsForPath,
+} from '@/lib/execute-request';
 import { mapApiRequestToState } from '@/lib/pane-utils';
 import {
   type ExecuteRequestInput,
@@ -25,6 +29,8 @@ export async function executeRunnerEntry(
   try {
     const requestState = mapApiRequestToState(request, true);
     const resolved = await resolveRequestFieldsForPath(collection, requestPath, requestState);
+    const globalEnvName = getActiveGlobalEnvName();
+    const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
 
     const input: ExecuteRequestInput = {
       method: request.method,
@@ -48,6 +54,11 @@ export async function executeRunnerEntry(
       assertions: request.assertions,
       tags: request.tags,
       actions: request.actions,
+      globalEnvName,
+      pathParams: requestState.pathParams
+        .filter((p) => p.enabled && p.key)
+        .map((p) => ({ name: p.key, value: p.value })),
+      requestGuardPolicy,
     };
 
     const result = await executeRequest(input);
