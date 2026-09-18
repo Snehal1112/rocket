@@ -1093,6 +1093,7 @@ fn oc_workspace_config_to_workspace_config() {
         docs: Some("Docs here".into()),
         environments: Some(OcWorkspaceEnvironments { active_environment: Some("Staging".into()) }),
         global_environment: Some("Global".into()),
+        request_guard_policy: OcRequestGuardPolicy::default(),
     };
     let cfg = WorkspaceConfig::from(oc);
     assert_eq!(cfg.name, "Acme");

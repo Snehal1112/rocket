@@ -197,4 +197,49 @@ mod tests {
         assert_eq!(cfg.description.as_deref(), Some("Legacy"));
         assert_eq!(cfg.collections.len(), 1);
     }
+
+    #[test]
+    fn request_guard_policy_survives_a_real_save_and_load_round_trip() {
+        // Regression guard for a gap the request-mutation-host-guard plan's own
+        // tests would not have caught: FsWorkspaceConfigRepo::save always
+        // converts through OcWorkspaceConfig before writing to disk, so a field
+        // that only exists on the domain WorkspaceConfig (and not on
+        // OcWorkspaceConfig) compiles fine and passes every domain-level serde
+        // test, yet silently never reaches workspace.yml.
+        let tmp = TempDir::new().expect("tempdir");
+        let ws_path = tmp.path().join("guarded-ws");
+        let repo = FsWorkspaceConfigRepo::new();
+
+        let mut cfg = WorkspaceConfig::new("Guarded");
+        cfg.request_guard_policy = rocket_workspace::RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        repo.save(&ws_path, &cfg).expect("save");
+
+        let raw = fs::read_to_string(ws_path.join("workspace.yml")).expect("read");
+        assert!(
+            raw.contains("requestGuardPolicy"),
+            "requestGuardPolicy block missing from persisted workspace.yml:\n{raw}"
+        );
+
+        let loaded = repo.load(&ws_path).expect("load");
+        assert_eq!(loaded.request_guard_policy, cfg.request_guard_policy);
+    }
+
+    #[test]
+    fn request_guard_policy_defaults_permissive_on_pre_existing_workspace_yml() {
+        // A workspace.yml written before this feature existed has neither
+        // requestGuardPolicy nor any Rocket-extension block for it. Loading
+        // must not fail, and must default to fully permissive.
+        let tmp = TempDir::new().expect("tempdir");
+        let ws_path = tmp.path().join("pre-existing-ws");
+        fs::create_dir_all(&ws_path).expect("mkdir");
+        let yaml = "opencollection: \"1.0.0\"\ninfo:\n  name: Pre Existing\n";
+        fs::write(ws_path.join("workspace.yml"), yaml).expect("write");
+
+        let repo = FsWorkspaceConfigRepo::new();
+        let cfg = repo.load(&ws_path).expect("load");
+        assert_eq!(cfg.request_guard_policy, rocket_workspace::RequestGuardPolicy::default());
+    }
 }

@@ -65,6 +65,10 @@ pub struct WorkspaceConfig {
     /// Name of the selected global environment (workspace/environments/<n>.yml).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_environment: Option<String>,
+    /// Opt-in security policy for BeforeRequest script URL mutations. Defaults
+    /// to fully permissive (today's behavior) for every existing workspace.
+    #[serde(default)]
+    pub request_guard_policy: RequestGuardPolicy,
 }
 
 impl WorkspaceConfig {
@@ -76,6 +80,7 @@ impl WorkspaceConfig {
             collections: Vec::new(),
             environments: WorkspaceEnvironmentsConfig::default(),
             global_environment: None,
+            request_guard_policy: RequestGuardPolicy::default(),
         }
     }
 
@@ -271,5 +276,32 @@ mod tests {
         // fail to load, and must not implicitly enable the guard.
         let policy: RequestGuardPolicy = serde_yaml::from_str("{}").expect("deserialize");
         assert_eq!(policy, RequestGuardPolicy::default());
+    }
+
+    #[test]
+    fn workspace_config_new_has_permissive_request_guard_policy() {
+        let cfg = WorkspaceConfig::new("Test");
+        assert_eq!(cfg.request_guard_policy, RequestGuardPolicy::default());
+    }
+
+    #[test]
+    fn workspace_config_request_guard_policy_serde_roundtrip() {
+        let mut cfg = WorkspaceConfig::new("My Project");
+        cfg.request_guard_policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize");
+        let back: WorkspaceConfig = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn workspace_config_deserialize_minimal_yaml_defaults_request_guard_policy() {
+        // A workspace.yml written before this feature existed has no
+        // requestGuardPolicy key at all — it must still load, permissively.
+        let yaml = "name: Minimal\n";
+        let cfg: WorkspaceConfig = serde_yaml::from_str(yaml).expect("deserialize");
+        assert_eq!(cfg.request_guard_policy, RequestGuardPolicy::default());
     }
 }

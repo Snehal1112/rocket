@@ -44,6 +44,12 @@ impl From<OcWorkspaceConfig> for WorkspaceConfig {
                 active_environment: oc.environments.and_then(|e| e.active_environment),
             },
             global_environment: oc.global_environment,
+            request_guard_policy: rocket_workspace::RequestGuardPolicy {
+                block_script_redirects_to_internal_hosts: oc
+                    .request_guard_policy
+                    .block_script_redirects_to_internal_hosts,
+                also_block_private_ranges: oc.request_guard_policy.also_block_private_ranges,
+            },
         }
     }
 }
@@ -67,6 +73,12 @@ impl From<WorkspaceConfig> for OcWorkspaceConfig {
                 None
             },
             global_environment: w.global_environment,
+            request_guard_policy: crate::oc::OcRequestGuardPolicy {
+                block_script_redirects_to_internal_hosts: w
+                    .request_guard_policy
+                    .block_script_redirects_to_internal_hosts,
+                also_block_private_ranges: w.request_guard_policy.also_block_private_ranges,
+            },
         }
     }
 }

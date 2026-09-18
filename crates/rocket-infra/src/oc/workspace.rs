@@ -26,6 +26,16 @@ pub struct OcWorkspaceEnvironments {
     pub active_environment: Option<String>,
 }
 
+/// workspace.yml — opt-in request-mutation host guard policy (Rocket extension).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OcRequestGuardPolicy {
+    #[serde(default)]
+    pub block_script_redirects_to_internal_hosts: bool,
+    #[serde(default)]
+    pub also_block_private_ranges: bool,
+}
+
 /// Top-level workspace.yml document.
 /// Follows Bruno's OpenCollection workspace extension.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,4 +57,7 @@ pub struct OcWorkspaceConfig {
     /// Global environment override (Rocket extension).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_environment: Option<String>,
+    /// Opt-in request-mutation host guard policy (Rocket extension).
+    #[serde(default)]
+    pub request_guard_policy: OcRequestGuardPolicy,
 }
