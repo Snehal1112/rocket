@@ -107,6 +107,24 @@ pub struct ExecuteRequestOutput {
     pub script_error: Option<String>,
 }
 
+/// Mutable state threaded through the phases of one request execution.
+///
+/// `RequestExecutionService::execute()` and `CollectionRunnerService` both drive
+/// the same phase methods against this struct, so phase orchestration is never
+/// duplicated between the single-send path and the runner.
+pub(crate) struct PhaseState {
+    /// The resolved request. A before-request script can still mutate it.
+    pub http_request: HttpRequest,
+    /// Scope-separated variables. `runtime` accumulates across phases.
+    pub var_ctx: VariableContext,
+    /// First script error seen, in phase order.
+    pub script_error: Option<String>,
+    /// Console output collected from every phase that ran.
+    pub console: Vec<ConsoleEntry>,
+    /// Test results from the tests phase plus declarative assertions.
+    pub test_results: Vec<TestResult>,
+}
+
 pub struct RequestExecutionService {
     /// Correct only for the workspace-level GLOBAL environment (`global_env_name`).
     /// REGULAR (per-collection) environment lookups must go through
@@ -757,16 +775,11 @@ impl RequestExecutionService {
         Ok(())
     }
 
-    #[tracing::instrument(
-        name = "http_request",
-        skip(self, input),
-        fields(
-            method = %input.method,
-            url = %input.url,
-        )
-    )]
-    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
-        let mut http_request = self.resolve_request(&input)?;
+    /// Resolves the request, emits the sensitive-auth audit event, and builds
+    /// the scope-separated variable context. Every phase method below assumes
+    /// this ran first.
+    pub(crate) fn begin_phases(&self, input: &ExecuteRequestInput) -> DomainResult<PhaseState> {
+        let http_request = self.resolve_request(input)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -782,12 +795,6 @@ impl RequestExecutionService {
                 },
             );
         }
-
-        let request_name = input.request_name.clone().unwrap_or_default();
-        let env_name = input.environment_name.clone();
-        let mut all_console: Vec<ConsoleEntry> = Vec::new();
-        let mut all_test_results: Vec<TestResult> = Vec::new();
-        let mut script_error: Option<String> = None;
 
         // Build scope-separated variable context for script phases. Scripts read
         // individual scopes via rok.getCollectionVar/getEnvVar/getGlobalEnvVar, so
@@ -808,38 +815,60 @@ impl RequestExecutionService {
             }
         }
 
-        // ── Before-request script ─────────────────────────────────────────────
+        Ok(PhaseState {
+            http_request,
+            var_ctx,
+            script_error: None,
+            console: Vec::new(),
+            test_results: Vec::new(),
+        })
+    }
+
+    /// Runs the before-request script (if any), applies its request mutations
+    /// and side effects, then runs the `before-request` declarative actions.
+    ///
+    /// Returns an error only when a script's `req.setUrl()` mutation is
+    /// blocked by the workspace's `RequestGuardPolicy` — every other script
+    /// problem is recorded on `state.script_error` instead of aborting.
+    pub(crate) async fn run_before_request_phase(
+        &self,
+        input: &ExecuteRequestInput,
+        state: &mut PhaseState,
+    ) -> DomainResult<()> {
+        let request_name = input.request_name.clone().unwrap_or_default();
+        let env_name = input.environment_name.clone();
+
         if let Some(code) = &input.pre_request_script {
             if !code.trim().is_empty() {
                 let ctx = ScriptContext::before_request(
                     code.clone(),
-                    var_ctx.clone(),
-                    http_request.clone(),
+                    state.var_ctx.clone(),
+                    state.http_request.clone(),
                     env_name.clone(),
                     request_name.clone(),
                     input.tags.clone(),
                     input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
-                    code, ctx, &request_name, "before-request", &mut all_console,
+                    code, ctx, &request_name, "before-request", &mut state.console,
                 ).await;
 
                 // Apply request mutations.
                 if let Some(ref mutations) = result.request_mutations {
                     if let Some(ref url) = mutations.url {
-                        let original_url = http_request.url.clone();
+                        let original_url = state.http_request.url.clone();
                         self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
-                        http_request.url = url.clone();
+                        state.http_request.url = url.clone();
                     }
                     if let Some(ref method_str) = mutations.method {
                         if let Ok(m) = method_str.parse() {
-                            http_request.method = m;
+                            state.http_request.method = m;
                         } else {
                             tracing::warn!(
                                 method = %method_str,
                                 "req.setMethod() called with an unrecognized HTTP method, ignored"
                             );
-                            script_error.get_or_insert_with(|| format!(
+                            state.script_error.get_or_insert_with(|| format!(
                                 "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
                             ));
                         }
@@ -850,21 +879,21 @@ impl RequestExecutionService {
                     for mutation in &mutations.headers {
                         match mutation {
                             rocket_scripting::HeaderMutation::Set { name, value } => {
-                                if let Some(h) = http_request.headers.iter_mut()
+                                if let Some(h) = state.http_request.headers.iter_mut()
                                     .find(|h| h.key.eq_ignore_ascii_case(name))
                                 {
                                     h.value = value.clone();
                                 } else {
-                                    http_request.headers.push(Header::new(name, value));
+                                    state.http_request.headers.push(Header::new(name, value));
                                 }
                             }
                             rocket_scripting::HeaderMutation::Delete { name } => {
-                                http_request.headers.retain(|h| !h.key.eq_ignore_ascii_case(name));
+                                state.http_request.headers.retain(|h| !h.key.eq_ignore_ascii_case(name));
                             }
                         }
                     }
                     if let Some(ms) = mutations.timeout_ms {
-                        http_request.options.timeout_ms = ms;
+                        state.http_request.options.timeout_ms = ms;
                     }
                     if let Some(ref body_val) = mutations.body {
                         // A JS object/array is unambiguously meant as JSON. A string
@@ -874,12 +903,12 @@ impl RequestExecutionService {
                         let mode = if body_val.is_object() || body_val.is_array() {
                             rocket_shared::types::BodyMode::Json
                         } else {
-                            body_mode_from_content_type(&http_request.headers)
+                            body_mode_from_content_type(&state.http_request.headers)
                         };
                         let content = body_val.as_str()
                             .map(str::to_owned)
                             .unwrap_or_else(|| body_val.to_string());
-                        http_request.body = Some(rocket_shared::types::Body {
+                        state.http_request.body = Some(rocket_shared::types::Body {
                             mode,
                             content: Some(content),
                             form_data: None,
@@ -887,7 +916,7 @@ impl RequestExecutionService {
                         });
                     }
                     if let Some(n) = mutations.max_redirects {
-                        http_request.options.max_redirects = Some(n);
+                        state.http_request.options.max_redirects = Some(n);
                     }
                 }
 
@@ -896,16 +925,17 @@ impl RequestExecutionService {
                     input.environment_name.as_deref(),
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
-                    &mut var_ctx,
+                    &mut state.var_ctx,
                 );
 
                 if result.error.is_some() {
-                    script_error = result.error;
+                    state.script_error = result.error;
                 }
             }
         }
 
         // ── Before-request actions (runtime.actions, set-variable) ─────────────
+        let http_request = state.http_request.clone();
         self.apply_actions(
             &input.actions,
             "before-request",
@@ -915,13 +945,17 @@ impl RequestExecutionService {
             input.environment_name.as_deref(),
             input.collection.as_deref(),
             input.request_path.as_deref(),
-            &mut var_ctx,
+            &mut state.var_ctx,
             &input.tags,
             &input.path_params,
         ).await;
 
-        // ── HTTP execution ────────────────────────────────────────────────────
-        let response = self.executor.execute(&http_request).await?;
+        Ok(())
+    }
+
+    /// Dispatches the (possibly script-mutated) request.
+    pub(crate) async fn send_request(&self, state: &PhaseState) -> DomainResult<HttpResponse> {
+        let response = self.executor.execute(&state.http_request).await?;
 
         tracing::info!(
             status = response.status,
@@ -930,13 +964,25 @@ impl RequestExecutionService {
             "Request completed"
         );
 
-        // ── After-response script ─────────────────────────────────────────────
+        Ok(response)
+    }
+
+    /// Runs the after-response script (if any) and applies its side effects.
+    pub(crate) async fn run_after_response_phase(
+        &self,
+        input: &ExecuteRequestInput,
+        response: &HttpResponse,
+        state: &mut PhaseState,
+    ) {
+        let request_name = input.request_name.clone().unwrap_or_default();
+        let env_name = input.environment_name.clone();
+
         if let Some(code) = &input.post_response_script {
             if !code.trim().is_empty() {
                 let ctx = ScriptContext::after_response(
                     code.clone(),
-                    var_ctx.clone(),
-                    http_request.clone(),
+                    state.var_ctx.clone(),
+                    state.http_request.clone(),
                     response.clone(),
                     env_name.clone(),
                     request_name.clone(),
@@ -944,28 +990,38 @@ impl RequestExecutionService {
                     input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
-                    code, ctx, &request_name, "after-response", &mut all_console,
+                    code, ctx, &request_name, "after-response", &mut state.console,
                 ).await;
                 self.apply_script_side_effects(
                     &result,
                     input.environment_name.as_deref(),
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
-                    &mut var_ctx,
+                    &mut state.var_ctx,
                 );
-                if result.error.is_some() && script_error.is_none() {
-                    script_error = result.error;
+                if result.error.is_some() && state.script_error.is_none() {
+                    state.script_error = result.error;
                 }
             }
         }
+    }
 
-        // ── Tests script ──────────────────────────────────────────────────────
+    /// Runs the tests script (if any) and collects its `rok.test()` results.
+    pub(crate) async fn run_tests_phase(
+        &self,
+        input: &ExecuteRequestInput,
+        response: &HttpResponse,
+        state: &mut PhaseState,
+    ) {
+        let request_name = input.request_name.clone().unwrap_or_default();
+        let env_name = input.environment_name.clone();
+
         if let Some(code) = &input.tests_script {
             if !code.trim().is_empty() {
                 let ctx = ScriptContext::tests(
                     code.clone(),
-                    var_ctx.clone(),
-                    http_request.clone(),
+                    state.var_ctx.clone(),
+                    state.http_request.clone(),
                     response.clone(),
                     env_name.clone(),
                     request_name.clone(),
@@ -973,23 +1029,56 @@ impl RequestExecutionService {
                     input.path_params.clone(),
                 );
                 let result = self.run_script_phase(
-                    code, ctx, &request_name, "tests", &mut all_console,
+                    code, ctx, &request_name, "tests", &mut state.console,
                 ).await;
                 self.apply_script_side_effects(
                     &result,
                     input.environment_name.as_deref(),
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
-                    &mut var_ctx,
+                    &mut state.var_ctx,
                 );
-                all_test_results.extend(result.test_results.clone());
-                if result.error.is_some() && script_error.is_none() {
-                    script_error = result.error;
+                state.test_results.extend(result.test_results.clone());
+                if result.error.is_some() && state.script_error.is_none() {
+                    state.script_error = result.error;
                 }
             }
         }
+    }
+
+    /// Publishes collected console output, if any. Shared by `finish_phases`
+    /// and by the runner, which needs it for a step that was skipped before the
+    /// send (and therefore never reaches `finish_phases`).
+    pub(crate) fn publish_console(&self, request_name: &str, entries: &[ConsoleEntry]) {
+        if entries.is_empty() {
+            return;
+        }
+        let entries = entries.iter().map(|e| {
+            let level = match e.level {
+                ConsoleLevel::Log => "log",
+                ConsoleLevel::Warn => "warn",
+                ConsoleLevel::Error => "error",
+            };
+            serde_json::json!({ "level": level, "message": e.message })
+        }).collect();
+        self.events.publish(DomainEvent::ConsoleOutput {
+            request_name: request_name.to_string(),
+            entries,
+        });
+    }
+
+    /// Runs the after-response actions and declarative assertions, publishes the
+    /// console/tests/executed events, saves history, and builds the output.
+    pub(crate) async fn finish_phases(
+        &self,
+        input: &ExecuteRequestInput,
+        response: HttpResponse,
+        state: &mut PhaseState,
+    ) -> ExecuteRequestOutput {
+        let request_name = input.request_name.clone().unwrap_or_default();
 
         // ── After-response actions (runtime.actions, set-variable) ─────────────
+        let http_request = state.http_request.clone();
         self.apply_actions(
             &input.actions,
             "after-response",
@@ -999,7 +1088,7 @@ impl RequestExecutionService {
             input.environment_name.as_deref(),
             input.collection.as_deref(),
             input.request_path.as_deref(),
-            &mut var_ctx,
+            &mut state.var_ctx,
             &input.tags,
             &input.path_params,
         ).await;
@@ -1010,26 +1099,13 @@ impl RequestExecutionService {
             &input.assertions,
             &response,
         );
-        all_test_results.extend(assertion_results);
+        state.test_results.extend(assertion_results);
 
         // ── Emit events ───────────────────────────────────────────────────────
-        if !all_console.is_empty() {
-            let entries = all_console.iter().map(|e| {
-                let level = match e.level {
-                    ConsoleLevel::Log => "log",
-                    ConsoleLevel::Warn => "warn",
-                    ConsoleLevel::Error => "error",
-                };
-                serde_json::json!({ "level": level, "message": e.message })
-            }).collect();
-            self.events.publish(DomainEvent::ConsoleOutput {
-                request_name: request_name.clone(),
-                entries,
-            });
-        }
+        self.publish_console(&request_name, &state.console);
 
-        if !all_test_results.is_empty() {
-            let results = all_test_results.iter().map(|t| {
+        if !state.test_results.is_empty() {
+            let results = state.test_results.iter().map(|t| {
                 let status = match t.status {
                     TestStatus::Passed => "passed",
                     TestStatus::Failed => "failed",
@@ -1045,7 +1121,7 @@ impl RequestExecutionService {
         // Persist history (non-fatal — a save failure won't cancel the response).
         let mut entry = HistoryEntry::new(
             input.method.to_string(),
-            &http_request.url,
+            &state.http_request.url,
             response.status,
             response.duration_ms,
             response.size_bytes,
@@ -1058,17 +1134,37 @@ impl RequestExecutionService {
         // Publish domain event.
         self.events.publish(DomainEvent::RequestExecuted {
             method: input.method.to_string(),
-            url: http_request.url.clone(),
+            url: state.http_request.url.clone(),
             status: response.status,
             duration_ms: response.duration_ms,
         });
 
-        Ok(ExecuteRequestOutput {
+        ExecuteRequestOutput {
             response,
-            test_results: all_test_results,
-            console_entries: all_console,
-            script_error,
-        })
+            test_results: state.test_results.clone(),
+            console_entries: state.console.clone(),
+            script_error: state.script_error.clone(),
+        }
+    }
+
+    #[tracing::instrument(
+        name = "http_request",
+        skip(self, input),
+        fields(
+            method = %input.method,
+            url = %input.url,
+        )
+    )]
+    pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
+        // Every phase runs unconditionally — this is the single-send path. The
+        // Collection Runner calls the same methods one at a time so it can act
+        // on skip_request / next_request between them.
+        let mut state = self.begin_phases(&input)?;
+        self.run_before_request_phase(&input, &mut state).await?;
+        let response = self.send_request(&state).await?;
+        self.run_after_response_phase(&input, &response, &mut state).await;
+        self.run_tests_phase(&input, &response, &mut state).await;
+        Ok(self.finish_phases(&input, response, &mut state).await)
     }
 
     pub async fn run_load_test(
