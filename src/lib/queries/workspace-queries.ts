@@ -5,13 +5,16 @@ import {
   deleteWorkspace,
   getActiveWorkspace,
   getMultiWorkspaceMode,
+  getWorkspaceConfig,
   listWorkspaces,
   openWorkspaceFromDisk,
   pinWorkspace,
   renameWorkspace,
+  type RequestGuardPolicy,
   setMultiWorkspaceMode,
   switchWorkspace,
   unpinWorkspace,
+  updateRequestGuardPolicy,
   updateWorkspaceDescription,
 } from '@/lib/tauri-api';
 
@@ -19,6 +22,7 @@ export const workspaceKeys = {
   all: ['workspaces'] as const,
   active: ['workspaces', 'active'] as const,
   multiMode: ['workspaces', 'multiMode'] as const,
+  config: (id: string) => ['workspaces', id, 'config'] as const,
 };
 
 export function useWorkspaces() {
@@ -39,6 +43,14 @@ export function useMultiWorkspaceMode() {
   return useQuery({
     queryKey: workspaceKeys.multiMode,
     queryFn: getMultiWorkspaceMode,
+  });
+}
+
+export function useWorkspaceConfig(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: workspaceKeys.config(workspaceId ?? ''),
+    queryFn: () => getWorkspaceConfig(workspaceId as string),
+    enabled: Boolean(workspaceId),
   });
 }
 
@@ -90,6 +102,17 @@ export function usePinWorkspace() {
   return useMutation({
     mutationFn: (id: string) => pinWorkspace(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: workspaceKeys.all }),
+  });
+}
+
+export function useUpdateRequestGuardPolicy(workspaceId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (policy: RequestGuardPolicy) =>
+      updateRequestGuardPolicy(workspaceId as string, policy),
+    onSuccess: () => {
+      if (workspaceId) qc.invalidateQueries({ queryKey: workspaceKeys.config(workspaceId) });
+    },
   });
 }
 
