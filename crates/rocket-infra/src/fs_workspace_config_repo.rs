@@ -242,4 +242,22 @@ mod tests {
         let cfg = repo.load(&ws_path).expect("load");
         assert_eq!(cfg.request_guard_policy, rocket_workspace::RequestGuardPolicy::default());
     }
+
+    #[test]
+    fn default_request_guard_policy_is_not_written_to_workspace_yml() {
+        // A workspace that has not opted in must not gain a
+        // requestGuardPolicy: {false, false} block on every save — that
+        // would be pure diff noise for every existing git-tracked
+        // workspace.yml that never touches this feature.
+        let tmp = TempDir::new().expect("tempdir");
+        let ws_path = tmp.path().join("unguarded-ws");
+        let repo = FsWorkspaceConfigRepo::new();
+        repo.save(&ws_path, &WorkspaceConfig::new("Unguarded")).expect("save");
+
+        let raw = fs::read_to_string(ws_path.join("workspace.yml")).expect("read");
+        assert!(
+            !raw.contains("requestGuardPolicy"),
+            "a fully-permissive policy must not be written:\n{raw}"
+        );
+    }
 }

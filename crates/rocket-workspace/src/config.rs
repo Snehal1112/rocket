@@ -49,6 +49,16 @@ pub struct RequestGuardPolicy {
     pub also_block_private_ranges: bool,
 }
 
+impl RequestGuardPolicy {
+    /// True when both flags are at their default (fully-permissive) value.
+    /// Used to skip serializing this block for the common case of a
+    /// workspace that has not opted in, so `workspace.yml` stays unchanged
+    /// for every non-adopter.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Represents the per-workspace `workspace.yml` that lives inside
 /// each workspace directory. This file makes the workspace portable
 /// and Git-friendly.
@@ -67,7 +77,7 @@ pub struct WorkspaceConfig {
     pub global_environment: Option<String>,
     /// Opt-in security policy for BeforeRequest script URL mutations. Defaults
     /// to fully permissive (today's behavior) for every existing workspace.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "RequestGuardPolicy::is_default")]
     pub request_guard_policy: RequestGuardPolicy,
 }
 

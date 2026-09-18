@@ -36,6 +36,15 @@ pub struct OcRequestGuardPolicy {
     pub also_block_private_ranges: bool,
 }
 
+impl OcRequestGuardPolicy {
+    /// True when both flags are at their default (fully-permissive) value.
+    /// Used to skip serializing this block for a workspace that has not
+    /// opted in, so `workspace.yml` stays unchanged for every non-adopter.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Top-level workspace.yml document.
 /// Follows Bruno's OpenCollection workspace extension.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,6 +67,6 @@ pub struct OcWorkspaceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_environment: Option<String>,
     /// Opt-in request-mutation host guard policy (Rocket extension).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "OcRequestGuardPolicy::is_default")]
     pub request_guard_policy: OcRequestGuardPolicy,
 }
