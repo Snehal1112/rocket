@@ -13,6 +13,8 @@ pub mod load_test_service;
 pub mod oauth2_service;
 pub mod request_guard;
 pub mod runner_sequence;
+#[cfg(test)]
+pub(crate) mod test_doubles;
 pub mod security_audit_service;
 pub mod template_service;
 pub mod workspace_service;
