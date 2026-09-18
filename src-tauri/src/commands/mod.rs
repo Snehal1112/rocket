@@ -11,6 +11,7 @@ pub mod git;
 pub mod history;
 pub mod load_test;
 pub mod oauth2;
+pub mod runner;
 pub mod templates;
 pub mod ui_state;
 pub mod workspaces;

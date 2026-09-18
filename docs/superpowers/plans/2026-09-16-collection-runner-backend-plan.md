@@ -3043,6 +3043,13 @@ interface RunCollectionInput {
   environmentName?: string | null;
   globalEnvName?: string | null;
   stopOnFailure?: boolean;         // default false
+  // Same shape as ExecuteRequestInput.requestGuardPolicy (see tauri-api.ts).
+  // Deviation from this plan's original design: added during implementation
+  // because the plan predates Item 6's SSRF guard. Applied to every step's
+  // BeforeRequest mutations exactly like a single send applies it to its own.
+  // Omitting it defaults to fully permissive (unprotected) -- resolve it the
+  // same way execute_request already does, via getActiveWorkspaceRequestGuardPolicy().
+  requestGuardPolicy?: RequestGuardPolicy;
 }
 
 interface RunSummary {

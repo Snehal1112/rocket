@@ -15,6 +15,8 @@ touches the filesystem or any I/O directly — those concerns live in
 | `EnvironmentService` | CRUD for environments; publishes `EnvironmentSaved/Deleted` events. |
 | `RequestExecutionService` | Core HTTP dispatch: resolves variables, merges collection settings, runs the request, saves history, publishes `RequestExecuted`. |
 | `ExecuteRequestInput` | Serialisable input DTO for `RequestExecutionService::execute`. |
+| `CollectionRunnerService` | Runs a folder's/collection's requests in sequence; honours `rok.runner.setNextRequest`/`skipRequest`; publishes `RunnerStarted/StepCompleted/Finished`. |
+| `RunCollectionInput` / `RunSummary` | IPC DTOs for `CollectionRunnerService::run`. |
 | `GitAppService` | Full git workflow (status, stage, commit, push/pull/fetch, branch, stash, conflicts) with event publishing. |
 | `HistoryService` | List, search, and clear request history. |
 | `TemplateService` | CRUD for saved request templates (stored via `rocket-history`). |
@@ -57,6 +59,7 @@ Wraps `Box<dyn GitService>`. Every mutating operation publishes a `DomainEvent`.
 - **Trait-object injection.** Every service takes `Box<dyn SomeRepository>` and `Box<dyn EventPublisher>` via its constructor. No concrete types appear in this crate, making all services fully testable with in-memory mocks.
 - **DomainResult everywhere.** All fallible methods return `DomainResult<T>` from `rocket-shared`.
 - **Variable resolution in `RequestExecutionService::execute`.** Collection variables are loaded first; environment variables override them. The merged map is passed to `rocket_environment::resolve()` before the HTTP call.
+- **Phase-callable execution.** `RequestExecutionService::execute` is a thin composition over `begin_phases` → `run_before_request_phase` → `send_request` → `run_after_response_phase` → `run_tests_phase` → `finish_phases`, all sharing one `PhaseState`. `CollectionRunnerService` drives the same methods one phase at a time so it can act on `skip_request` before the send and on `next_request` after every phase. Do not add phase logic to only one caller.
 - **Header and auth merging.** Collection-level headers and auth are applied as defaults; request-level values take precedence. A *disabled* request header does not suppress the collection header with the same key.
 - **Non-fatal history write.** `let _ = self.history_repo.save(...)` is intentional — a history persistence failure must not abort the response.
 - **Event publishing is fire-and-forget.** Services publish `DomainEvent` variants after successful operations; errors from downstream listeners are not propagated back.

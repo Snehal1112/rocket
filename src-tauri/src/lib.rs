@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_app::{
-    CollectionService, ContractService, CookieService, GitAppService,
+    CollectionRunnerService, CollectionService, ContractService, CookieService, GitAppService,
     HistoryService, RequestExecutionService, SecurityAuditService, TemplateService,
     WorkspaceService,
 };
@@ -230,6 +230,14 @@ pub fn run() {
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
             );
 
+            // Collection Runner — its own collection repo instance (same path as
+            // the execution service) and the Tauri bus, so run progress reaches
+            // the frontend as it happens.
+            let runner_svc = CollectionRunnerService::new(
+                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            );
+
             let git_svc = GitAppService::new(
                 Box::new(rocket_git::Git2Service::new()),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
@@ -254,6 +262,7 @@ pub fn run() {
             app.manage(template_svc);
             app.manage(cookie_svc);
             app.manage(exec_svc);
+            app.manage(runner_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
             app.manage(git_svc);
@@ -316,6 +325,8 @@ pub fn run() {
             commands::environments::delete_global_environment,
             commands::execution::execute_request,
             commands::execution::evaluate_var_expression,
+            commands::runner::run_collection,
+            commands::runner::stop_collection_run,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,
