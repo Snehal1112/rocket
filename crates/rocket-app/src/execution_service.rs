@@ -539,12 +539,20 @@ impl RequestExecutionService {
                 result
             }
             Err(e) => {
+                let message = e.to_string();
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
-                    message: e.to_string(),
+                    message: message.clone(),
                 });
-                ScriptResult::default()
+                // Carry the failure in `error` as well. Callers build
+                // ExecuteOutput.script_error from this field only, so without
+                // it a timed-out script would fire an event but show nothing
+                // in the request's own error surface.
+                ScriptResult {
+                    error: Some(message),
+                    ..Default::default()
+                }
             }
         }
     }
@@ -3155,5 +3163,43 @@ mod tests {
 
         let output = svc.execute(input).await.expect("execute must succeed despite a bad jsonq expression");
         assert_eq!(output.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn script_engine_error_surfaces_in_output_script_error() {
+        // Stands in for a timed-out script: the engine returns Err, not an
+        // Ok(ScriptResult) that carries an error.
+        struct FailingEngine;
+
+        #[async_trait]
+        impl ScriptEngine for FailingEngine {
+            async fn execute(&self, _ctx: ScriptContext) -> DomainResult<ScriptResult> {
+                Err(DomainError::Internal(
+                    "script execution timed out after 5s".into(),
+                ))
+            }
+        }
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        )
+        .with_script_engine(Box::new(FailingEngine));
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("while (true) {}".into());
+        let output = svc.execute(input).await.expect("execute failed");
+
+        // The request itself must still complete normally.
+        assert_eq!(output.response.status, 200);
+
+        let err = output
+            .script_error
+            .expect("a timed-out script must populate script_error, not just fire an event");
+        assert!(err.contains("timed out"), "unexpected message: {err}");
     }
 }
