@@ -707,6 +707,51 @@ impl RequestExecutionService {
         }
     }
 
+    /// Validates a BeforeRequest script's URL mutation against the workspace's
+    /// opt-in `RequestGuardPolicy`. Only ever inspects `mutated_url` — the
+    /// user's own manually-typed URL never reaches this method (see call site
+    /// in `execute()`, which only calls this when a script actually set a new
+    /// URL). Compares resolved hosts, not raw URL strings: a script that only
+    /// rewrites the path/query of the same host the user already declared is
+    /// never blocked, regardless of whether that host happens to be internal.
+    fn check_request_guard(
+        &self,
+        original_url: &str,
+        mutated_url: &str,
+        policy: &rocket_workspace::RequestGuardPolicy,
+    ) -> DomainResult<()> {
+        if !policy.block_script_redirects_to_internal_hosts {
+            return Ok(());
+        }
+
+        let mutated = url::Url::parse(mutated_url).map_err(|e| {
+            rocket_shared::error::DomainError::InvalidInput(format!(
+                "script produced an invalid URL: {e}"
+            ))
+        })?;
+        let Some(mutated_host) = mutated.host_str() else {
+            // No host component (e.g. a relative/opaque URL) — nothing to check.
+            return Ok(());
+        };
+
+        // If the script only changed the path/query of the host the user
+        // already declared, this is not a redirect in the sense the guard
+        // cares about.
+        if let Ok(original) = url::Url::parse(original_url) {
+            if original.host_str() == Some(mutated_host) {
+                return Ok(());
+            }
+        }
+
+        if crate::request_guard::is_blocked_host(mutated_host, policy.also_block_private_ranges) {
+            return Err(rocket_shared::error::DomainError::InvalidInput(format!(
+                "blocked: script redirected request to internal host '{mutated_host}' \
+                 (workspace policy blocks script-driven redirects to internal hosts)"
+            )));
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(
         name = "http_request",
         skip(self, input),
@@ -2612,6 +2657,142 @@ mod tests {
             "a string body should respect the script's explicit Content-Type instead of being forced to JSON"
         );
         assert_eq!(body.content.as_deref(), Some("<a/>"));
+    }
+
+    #[test]
+    fn check_request_guard_noop_when_policy_disabled() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy::default();
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://169.254.169.254/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_blocks_metadata_endpoint_when_enabled() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://169.254.169.254/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("169.254.169.254"), "error should name the blocked host: {msg}");
+    }
+
+    #[test]
+    fn check_request_guard_allows_private_range_when_flag_off() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://192.168.1.1/",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_blocks_private_range_when_both_flags_on() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://192.168.1.1/",
+            &policy,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_request_guard_ignores_same_host_path_only_rewrite() {
+        use rocket_workspace::RequestGuardPolicy;
+        // A script that only rewrites the path/query of a host the user already
+        // declared themselves (even an internal one) must never be blocked —
+        // only a host *change* introduced by the script is in scope.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: true,
+        };
+        let result = svc.check_request_guard(
+            "http://192.168.1.1/foo",
+            "http://192.168.1.1/bar",
+            &policy,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_request_guard_errors_on_unparseable_mutated_url() {
+        use rocket_workspace::RequestGuardPolicy;
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "not a url", &policy);
+        assert!(result.is_err());
     }
 
     /// Executor that captures the RequestOptions it received.
