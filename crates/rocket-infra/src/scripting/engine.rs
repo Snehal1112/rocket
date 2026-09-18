@@ -1066,8 +1066,11 @@ mod tests {
             // If the queued script had been abandoned unterminated (the bug
             // this test guards against), it would now occupy the pool's only
             // thread forever, and this call would queue behind it forever
-            // too. Bound it so a regression fails this test instead of
-            // hanging the suite.
+            // too. The inner timeout below gives a regression a clear
+            // diagnostic on its way to that hang -- the process still blocks
+            // afterward at Runtime::Drop waiting on the abandoned
+            // spawn_blocking task, same as the original bug, since nothing
+            // outside that task can force it to stop.
             let ctx = minimal_ctx("rok.setVar('alive', 'yes')");
             let result = tokio::time::timeout(
                 Duration::from_secs(3),
