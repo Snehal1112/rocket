@@ -174,6 +174,11 @@ pub struct CollectionRunnerService {
     /// Run ids that have been asked to stop. Shared behind an `Arc` so a test
     /// (and, later, any other holder) can flip a run to cancelled mid-flight.
     cancelled: Arc<Mutex<HashSet<String>>>,
+    /// Run ids currently executing. `cancel()` only inserts into `cancelled`
+    /// for an id present here, so a `stop_collection_run` call for an unknown
+    /// or already-finished run id does not leak an entry into `cancelled`
+    /// forever — a run only ever removes its own id, never anyone else's.
+    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 impl CollectionRunnerService {
@@ -185,6 +190,7 @@ impl CollectionRunnerService {
             collection_repo,
             events,
             cancelled: Arc::new(Mutex::new(HashSet::new())),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -208,6 +214,9 @@ impl CollectionRunnerService {
         let collection = self.collection_repo.get(&input.collection)?;
         let items = flatten_run_set(&collection, input.folder_path.as_deref())?;
         let run_id = Ulid::new().to_string();
+        if let Ok(mut set) = self.in_flight.lock() {
+            set.insert(run_id.clone());
+        }
 
         self.events.publish(DomainEvent::RunnerStarted {
             run_id: run_id.clone(),
@@ -284,6 +293,9 @@ impl CollectionRunnerService {
         }
 
         self.clear_cancellation(&run_id);
+        if let Ok(mut set) = self.in_flight.lock() {
+            set.remove(&run_id);
+        }
 
         let failed_count = steps.iter().filter(|s| s.is_failure()).count();
         self.events.publish(DomainEvent::RunnerFinished {
@@ -304,8 +316,17 @@ impl CollectionRunnerService {
 
     /// Asks an in-progress run to stop. The run ends before its next step; a
     /// step already in flight finishes first. Cancelling an unknown or finished
-    /// run id is a no-op.
+    /// run id is a no-op — it does not insert into `cancelled` at all, so a
+    /// stale or mistyped run id can never leak an entry there forever.
     pub fn cancel(&self, run_id: &str) {
+        let is_in_flight = self
+            .in_flight
+            .lock()
+            .map(|set| set.contains(run_id))
+            .unwrap_or(false);
+        if !is_in_flight {
+            return;
+        }
         if let Ok(mut set) = self.cancelled.lock() {
             set.insert(run_id.to_string());
         }

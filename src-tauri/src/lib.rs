@@ -230,11 +230,13 @@ pub fn run() {
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
             );
 
-            // Collection Runner — its own collection repo instance (same path as
-            // the execution service) and the Tauri bus, so run progress reaches
-            // the frontend as it happens.
+            // Collection Runner — SharedPathCollectionRepo, not a path-pinned
+            // FsCollectionRepo: the run set is the entire content of a run (URLs,
+            // scripts, auth), so it must follow workspace switches the same way
+            // collection_svc's sidebar reads do, not read whatever workspace was
+            // active at process startup.
             let runner_svc = CollectionRunnerService::new(
-                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 

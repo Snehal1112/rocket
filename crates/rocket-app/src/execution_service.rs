@@ -879,6 +879,11 @@ impl RequestExecutionService {
                 if let Some(ref mutations) = result.request_mutations {
                     if let Some(ref url) = mutations.url {
                         let original_url = state.http_request.url.clone();
+                        // Deliberate: an early return here also discards any
+                        // next_request/runtime_vars this same script set below.
+                        // A script whose req.setUrl() just tripped the SSRF
+                        // guard does not get to steer the run via
+                        // setNextRequest() or leave variables behind either.
                         self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
                         state.http_request.url = url.clone();
                     }
