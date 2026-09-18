@@ -1051,4 +1051,71 @@ mod tests {
         assert_eq!(summary.stopped_reason, StoppedReason::Completed);
         assert_eq!(summary.steps.len(), 3);
     }
+
+    /// Calls the real `CollectionRunnerService::cancel` (not the `cancelled`
+    /// test seam) once step 1 reports, to prove the `in_flight` registry that
+    /// gates it is actually populated while a run is executing -- a positive-
+    /// path check the other cancellation tests don't exercise, since they
+    /// write into `cancelled` directly.
+    struct CancelViaRealMethod {
+        cancel_after: usize,
+        seen: Mutex<usize>,
+        runner: Mutex<Option<Arc<CollectionRunnerService>>>,
+    }
+
+    impl EventPublisher for CancelViaRealMethod {
+        fn publish(&self, event: DomainEvent) {
+            if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
+                let mut seen = self.seen.lock().expect("lock");
+                *seen += 1;
+                if *seen >= self.cancel_after {
+                    if let Some(runner) = self.runner.lock().expect("lock").as_ref() {
+                        runner.cancel(run_id);
+                    }
+                }
+            }
+        }
+    }
+
+    struct SharedCancelViaRealMethod(Arc<CancelViaRealMethod>);
+    impl EventPublisher for SharedCancelViaRealMethod {
+        fn publish(&self, event: DomainEvent) {
+            self.0.publish(event);
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_actually_stops_a_run_it_is_called_on_while_in_flight() {
+        let collection = three_step_collection();
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+
+        let cancel_hook = Arc::new(CancelViaRealMethod {
+            cancel_after: 1,
+            seen: Mutex::new(0),
+            runner: Mutex::new(None),
+        });
+        let runner = Arc::new(CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(SharedCancelViaRealMethod(Arc::clone(&cancel_hook))),
+        ));
+        *cancel_hook.runner.lock().expect("lock") = Some(Arc::clone(&runner));
+
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 1, "the run stops before step 2 starts");
+        assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
+        assert_eq!(executor.sent_urls(), vec!["https://api.test/first.yml".to_string()]);
+    }
 }
