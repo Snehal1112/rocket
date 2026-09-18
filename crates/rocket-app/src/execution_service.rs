@@ -2992,6 +2992,55 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn check_request_guard_blocks_bracketed_ipv6_loopback_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // Regression test for a real bug found by review: check_request_guard
+        // extracts the host via url::Url::host_str(), which returns an IPv6
+        // literal wrapped in brackets (e.g. "[::1]"), not a bare address.
+        // is_blocked_host's own unit tests passed bare strings that never went
+        // through this parsing step, so this must exercise the real call path.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard("https://example.com/", "http://[::1]/", &policy);
+        assert!(result.is_err(), "a bracketed IPv6 loopback URL must be blocked");
+    }
+
+    #[test]
+    fn check_request_guard_blocks_ipv4_mapped_metadata_endpoint_through_url_parse() {
+        use rocket_workspace::RequestGuardPolicy;
+        // The IPv4-mapped IPv6 form of the cloud metadata endpoint must be
+        // blocked exactly like its plain IPv4 form is.
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+        );
+        let policy = RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let result = svc.check_request_guard(
+            "https://example.com/",
+            "http://[::ffff:169.254.169.254]/latest/meta-data/",
+            &policy,
+        );
+        assert!(result.is_err(), "the IPv4-mapped metadata endpoint must be blocked");
+    }
+
     /// Executor that captures the RequestOptions it received.
     struct OptionsCapturingExecutor {
         last_options: Mutex<Option<RequestOptions>>,
