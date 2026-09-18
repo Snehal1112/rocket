@@ -13,7 +13,8 @@ use rocket_http::{
     LoadTestConfig, LoadTestResult, RequestOptions,
 };
 use rocket_scripting::{
-    ConsoleEntry, ConsoleLevel, ScriptContext, ScriptEngine, ScriptResult, TestResult, TestStatus,
+    ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext, ScriptEngine,
+    ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::DomainResult;
 use std::sync::Arc;
@@ -123,6 +124,23 @@ pub(crate) struct PhaseState {
     pub console: Vec<ConsoleEntry>,
     /// Test results from the tests phase plus declarative assertions.
     pub test_results: Vec<TestResult>,
+    /// Last `next_request` set by any phase that ran — later phase wins, the
+    /// same "later overrides earlier" rule `runtime_vars` merging already uses.
+    /// Only the Collection Runner reads this.
+    pub next_request: Option<NextRequest>,
+    /// Set by a before-request script calling `rok.runner.skipRequest()`.
+    /// Only the Collection Runner reads this; `execute()` always sends.
+    pub skip_request: bool,
+}
+
+impl PhaseState {
+    /// Seeds the runtime scope with variables carried over from earlier steps
+    /// of the same collection run (spec §8.2). No-op for a single send.
+    pub(crate) fn seed_runtime(&mut self, carried: &std::collections::HashMap<String, String>) {
+        for (k, v) in carried {
+            self.var_ctx.runtime.insert(k.clone(), v.clone());
+        }
+    }
 }
 
 pub struct RequestExecutionService {
@@ -821,6 +839,8 @@ impl RequestExecutionService {
             script_error: None,
             console: Vec::new(),
             test_results: Vec::new(),
+            next_request: None,
+            skip_request: false,
         })
     }
 
@@ -833,6 +853,7 @@ impl RequestExecutionService {
     pub(crate) async fn run_before_request_phase(
         &self,
         input: &ExecuteRequestInput,
+        mode: ExecutionMode,
         state: &mut PhaseState,
     ) -> DomainResult<()> {
         let request_name = input.request_name.clone().unwrap_or_default();
@@ -848,7 +869,8 @@ impl RequestExecutionService {
                     request_name.clone(),
                     input.tags.clone(),
                     input.path_params.clone(),
-                );
+                )
+                .with_execution_mode(mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "before-request", &mut state.console,
                 ).await;
@@ -931,6 +953,15 @@ impl RequestExecutionService {
                 if result.error.is_some() {
                     state.script_error = result.error;
                 }
+
+                // Runner controls. `execute()` never reads these; the runner
+                // checks them after every phase that ran (spec §4).
+                if result.skip_request {
+                    state.skip_request = true;
+                }
+                if result.next_request.is_some() {
+                    state.next_request = result.next_request.clone();
+                }
             }
         }
 
@@ -971,6 +1002,7 @@ impl RequestExecutionService {
     pub(crate) async fn run_after_response_phase(
         &self,
         input: &ExecuteRequestInput,
+        mode: ExecutionMode,
         response: &HttpResponse,
         state: &mut PhaseState,
     ) {
@@ -988,7 +1020,8 @@ impl RequestExecutionService {
                     request_name.clone(),
                     input.tags.clone(),
                     input.path_params.clone(),
-                );
+                )
+                .with_execution_mode(mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "after-response", &mut state.console,
                 ).await;
@@ -1002,6 +1035,9 @@ impl RequestExecutionService {
                 if result.error.is_some() && state.script_error.is_none() {
                     state.script_error = result.error;
                 }
+                if result.next_request.is_some() {
+                    state.next_request = result.next_request.clone();
+                }
             }
         }
     }
@@ -1010,6 +1046,7 @@ impl RequestExecutionService {
     pub(crate) async fn run_tests_phase(
         &self,
         input: &ExecuteRequestInput,
+        mode: ExecutionMode,
         response: &HttpResponse,
         state: &mut PhaseState,
     ) {
@@ -1027,7 +1064,8 @@ impl RequestExecutionService {
                     request_name.clone(),
                     input.tags.clone(),
                     input.path_params.clone(),
-                );
+                )
+                .with_execution_mode(mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "tests", &mut state.console,
                 ).await;
@@ -1041,6 +1079,9 @@ impl RequestExecutionService {
                 state.test_results.extend(result.test_results.clone());
                 if result.error.is_some() && state.script_error.is_none() {
                     state.script_error = result.error;
+                }
+                if result.next_request.is_some() {
+                    state.next_request = result.next_request.clone();
                 }
             }
         }
@@ -1160,10 +1201,10 @@ impl RequestExecutionService {
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
         let mut state = self.begin_phases(&input)?;
-        self.run_before_request_phase(&input, &mut state).await?;
+        self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state).await?;
         let response = self.send_request(&state).await?;
-        self.run_after_response_phase(&input, &response, &mut state).await;
-        self.run_tests_phase(&input, &response, &mut state).await;
+        self.run_after_response_phase(&input, ExecutionMode::Standalone, &response, &mut state).await;
+        self.run_tests_phase(&input, ExecutionMode::Standalone, &response, &mut state).await;
         Ok(self.finish_phases(&input, response, &mut state).await)
     }
 
@@ -3767,5 +3808,121 @@ mod tests {
             .script_error
             .expect("a timed-out script must populate script_error, not just fire an event");
         assert!(err.contains("timed out"), "unexpected message: {err}");
+    }
+
+    /// Script engine that reports the execution mode string it was given and
+    /// returns a fixed result for the before-request phase.
+    struct ModeProbeEngine {
+        seen_modes: Mutex<Vec<String>>,
+        before_request_result: ScriptResult,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for ModeProbeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            use rocket_scripting::ScriptPhase;
+            self.seen_modes.lock().expect("lock").push(ctx.execution_mode.clone());
+            if ctx.phase == ScriptPhase::BeforeRequest {
+                Ok(self.before_request_result.clone())
+            } else {
+                Ok(ScriptResult::default())
+            }
+        }
+    }
+
+    struct SharedModeProbe(Arc<ModeProbeEngine>);
+    #[async_trait]
+    impl ScriptEngine for SharedModeProbe {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_always_reports_standalone_execution_mode() {
+        let engine = Arc::new(ModeProbeEngine {
+            seen_modes: Mutex::new(vec![]),
+            before_request_result: ScriptResult::default(),
+        });
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedModeProbe(Arc::clone(&engine))),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        svc.execute(input).await.expect("execute");
+
+        let modes = engine.seen_modes.lock().expect("lock").clone();
+        assert_eq!(modes, vec!["standalone", "standalone", "standalone"]);
+    }
+
+    #[tokio::test]
+    async fn execute_ignores_skip_request_and_still_sends() {
+        // skipRequest() is a runner-only control. The single-send path must not
+        // start honouring it.
+        let engine = Arc::new(ModeProbeEngine {
+            seen_modes: Mutex::new(vec![]),
+            before_request_result: ScriptResult { skip_request: true, ..Default::default() },
+        });
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedModeProbe(Arc::clone(&engine))),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        let out = svc.execute(input).await.expect("execute");
+        assert_eq!(out.response.status, 200, "single send must ignore skipRequest()");
+    }
+
+    #[tokio::test]
+    async fn before_request_phase_records_skip_and_next_request() {
+        let engine = ModeProbeEngine {
+            seen_modes: Mutex::new(vec![]),
+            before_request_result: ScriptResult {
+                skip_request: true,
+                next_request: Some(rocket_scripting::NextRequest::Name("Poll Status".into())),
+                ..Default::default()
+            },
+        };
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(engine),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        let mut state = svc.begin_phases(&input).expect("begin");
+        svc.run_before_request_phase(&input, rocket_scripting::ExecutionMode::Runner, &mut state).await
+            .expect("run_before_request_phase");
+
+        assert!(state.skip_request);
+        assert!(matches!(
+            state.next_request,
+            Some(rocket_scripting::NextRequest::Name(ref n)) if n == "Poll Status"
+        ));
+    }
+
+    #[tokio::test]
+    async fn seed_runtime_puts_carried_vars_in_the_runtime_scope() {
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(ErrorJsonqEngine),
+        );
+        let input = sample_input("https://example.com", None);
+        let mut state = svc.begin_phases(&input).expect("begin");
+
+        let mut carried = std::collections::HashMap::new();
+        carried.insert("TOKEN".to_string(), "from-step-1".to_string());
+        state.seed_runtime(&carried);
+
+        assert_eq!(state.var_ctx.runtime.get("TOKEN"), Some(&"from-step-1".to_string()));
     }
 }
