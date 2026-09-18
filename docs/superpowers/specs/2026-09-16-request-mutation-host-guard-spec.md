@@ -134,14 +134,15 @@ pattern, not invent a new settings surface.
 - Not covering `req.setUrl` calls that resolve to the *same* effective host the user already typed
   (e.g. a script rewriting only the path/query) — those are unaffected by design, since `original_url == mutated_url`'s host component is what actually matters; refine the comparison to compare resolved hosts, not raw strings, during implementation (the pseudocode above compares whole URLs for the early-exit short-circuit only; the actual blocked-host check always operates on the parsed host).
 - Not following HTTP redirect chains — the guard validates only the host the script's `req.setUrl()`
-  names directly, before dispatch. `reqwest`'s redirect policy (`crates/rocket-infra/src/
-  reqwest_executor.rs`) applies no host filtering of its own, so a script that sets the URL to an
+  names directly, before dispatch. `reqwest`'s redirect policy (`crates/rocket-infra/src/reqwest_executor.rs`)
+  applies no host filtering of its own, so a script that sets the URL to an
   allowed public host which then responds with a redirect to an internal address is not caught —
   the same one-hop-of-indirection limitation a user's own manually-typed URL already has, since
   this feature deliberately never restricts that case either (see the non-goal above). Closing this
   would mean threading `is_blocked_host` into `reqwest_executor.rs`'s redirect policy, which crosses
-  the `rocket-app`/`rocket-infra` boundary this spec deliberately keeps this feature out of; tracked
-  as a follow-up roadmap item, not part of this plan's scope.
+  the `rocket-app`/`rocket-infra` boundary this spec deliberately keeps this feature out of; should
+  be tracked as a follow-up roadmap item rather than folded into this plan's scope. No such item
+  exists yet as of this writing.
 
 ## 5. Interfaces (for the implementation plan)
 
