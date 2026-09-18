@@ -43,13 +43,6 @@ impl Default for DenoScriptEngine {
 /// there is nothing legitimate for them to wait on.
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Grace period for the blocking thread to publish its isolate handle.
-///
-/// The handle is the first thing `run_script` sends, but the blocking thread
-/// may not have been scheduled yet when the deadline fires. Waiting briefly
-/// here is what makes termination reliable instead of best-effort.
-const HANDLE_WAIT: Duration = Duration::from_millis(250);
-
 /// Best-effort V8 heap cap for a single script execution.
 ///
 /// Generous on purpose. Legitimate scripts manipulate small JSON payloads, so
@@ -81,12 +74,29 @@ async fn run_script_with_timeout(
         Ok(join_result) => join_result
             .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?,
         Err(_elapsed) => {
-            // Terminating makes the blocking thread's execute_script return an
-            // "execution terminated" error. It then tears the runtime down on
-            // its own and its result is discarded, so we do not wait for it.
-            if let Ok(Ok(isolate_handle)) = tokio::time::timeout(HANDLE_WAIT, handle_rx).await {
-                isolate_handle.terminate_execution();
-            }
+            // Terminate whenever the handle arrives, however late. Bounding
+            // this wait would abandon a script that had not started yet: it
+            // would then run unterminated and pin a blocking thread forever,
+            // since dropping a spawn_blocking JoinHandle detaches rather than
+            // cancels it.
+            //
+            // This must be a plain OS thread, not a `tokio::spawn`ed task: a
+            // detached async task is tied to this call's Tokio runtime, and
+            // on a short-lived runtime (every #[tokio::test] creates and
+            // drops one per test) it can be cancelled before it ever gets
+            // polled, deadlocking against the `spawn_blocking` thread that
+            // Runtime::Drop waits on. A `std::thread` keeps running
+            // regardless of what happens to the runtime that spawned it.
+            //
+            // Terminating makes the blocking thread's execute_script return
+            // an "execution terminated" error; it then tears the runtime
+            // down on its own and its result is discarded, so we do not wait
+            // for it here.
+            std::thread::spawn(move || {
+                if let Ok(isolate_handle) = handle_rx.blocking_recv() {
+                    isolate_handle.terminate_execution();
+                }
+            });
             Err(DomainError::Internal(format!(
                 "script execution timed out after {timeout:?}"
             )))
@@ -1024,5 +1034,53 @@ mod tests {
             .await
             .expect("engine must still work after a heap-limit termination");
         assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+    }
+
+    #[test]
+    fn queued_script_that_times_out_before_starting_is_still_terminated() {
+        // Regression test for a real bug found by final review: the isolate
+        // handle wait used to be bounded, so a script whose spawn_blocking
+        // task had not even been scheduled yet when the deadline fired was
+        // abandoned unterminated and pinned a blocking-pool thread forever.
+        // Force that ordering with a pool of exactly one blocking thread.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .expect("build runtime");
+
+        runtime.block_on(async {
+            // Occupy the pool's only thread for longer than TEST_TIMEOUT, so
+            // the real script below is still queued behind it when its own
+            // deadline fires.
+            let occupier =
+                tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(500)));
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            let ctx = minimal_ctx("while (true) {}");
+            let outcome = run_script_with_timeout(ctx, TEST_TIMEOUT).await;
+            assert!(outcome.is_err(), "a queued script must still report a timeout");
+
+            occupier.await.expect("occupier task");
+
+            // If the queued script had been abandoned unterminated (the bug
+            // this test guards against), it would now occupy the pool's only
+            // thread forever, and this call would queue behind it forever
+            // too. Bound it so a regression fails this test instead of
+            // hanging the suite.
+            let ctx = minimal_ctx("rok.setVar('alive', 'yes')");
+            let result = tokio::time::timeout(
+                Duration::from_secs(3),
+                run_script_with_timeout(ctx, TEST_TIMEOUT),
+            )
+            .await
+            .expect(
+                "the pool's only thread must be freed -- a queued script that timed out \
+                 before it started must still be terminated once it runs, not left pinning \
+                 the pool forever",
+            )
+            .expect("engine must still work after a queued-then-terminated script");
+            assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+        });
     }
 }
