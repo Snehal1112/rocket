@@ -10,6 +10,7 @@ import {
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
+  getWorkspaceConfig,
   type Header,
   oauth2GetToken,
   oauth2RefreshToken,
@@ -19,6 +20,7 @@ import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
 // Reads the active environment's variables from the query cache.
@@ -480,6 +482,23 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
 
   const requestName = found?.tab.title ?? resolvedUrl;
 
+  // Fetch the active workspace's opt-in RequestGuardPolicy. Failure here must
+  // never block sending a request — fall back to the fully-permissive default,
+  // matching today's behavior, rather than surfacing an unrelated error.
+  const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+  let requestGuardPolicy: { blockScriptRedirectsToInternalHosts: boolean; alsoBlockPrivateRanges: boolean } = {
+    blockScriptRedirectsToInternalHosts: false,
+    alsoBlockPrivateRanges: false,
+  };
+  if (activeWorkspaceId) {
+    try {
+      const config = await getWorkspaceConfig(activeWorkspaceId);
+      requestGuardPolicy = config.requestGuardPolicy;
+    } catch {
+      // Non-critical — keep the permissive default.
+    }
+  }
+
   try {
     const result = await executeRequest({
       method: effectiveRequest.method,
@@ -507,6 +526,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       pathParams: effectiveRequest.pathParams
         .filter((p) => p.enabled && p.key)
         .map((p) => ({ name: p.key, value: p.value })),
+      requestGuardPolicy,
     });
 
     const responseState: ResponseState = {
