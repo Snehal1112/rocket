@@ -930,4 +930,40 @@ mod tests {
             "execute() must return promptly after the deadline, took {elapsed:?}"
         );
     }
+
+    #[tokio::test]
+    async fn fast_script_is_unaffected_by_the_timeout() {
+        let ctx = minimal_ctx("console.log('quick'); rok.setVar('x', 'ok')");
+
+        // Deliberately uses the same 200ms budget as the timeout test. A normal
+        // script must complete well inside it with a fully populated result.
+        let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
+            .await
+            .expect("a fast script must not be affected by the timeout");
+
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("x").expect("x present"), "ok");
+        assert_eq!(result.console_entries.len(), 1);
+        assert!(result.console_entries[0].message.contains("quick"));
+    }
+
+    #[tokio::test]
+    async fn repeated_timeouts_do_not_crash_or_wedge_the_engine() {
+        // Five back-to-back terminations. Each one leaves a blocking thread to
+        // unwind, so this also checks those threads are actually released
+        // rather than leaked until the pool is exhausted.
+        for attempt in 0..5 {
+            let ctx = minimal_ctx("while (true) {}");
+            let outcome = run_script_with_timeout(ctx, TEST_TIMEOUT).await;
+            assert!(outcome.is_err(), "attempt {attempt} should have timed out");
+        }
+
+        // Reaching this line at all proves the process did not abort. A working
+        // script afterwards proves the engine is not wedged.
+        let ctx = minimal_ctx("rok.setVar('alive', 'yes')");
+        let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
+            .await
+            .expect("engine must still work after repeated terminations");
+        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+    }
 }
