@@ -8,6 +8,7 @@ pub mod credentials;
 pub mod remote;
 pub mod service;
 pub mod git2_service;
+mod remote_verification;
 
 pub use status::*;
 pub use diff::*;
@@ -19,3 +20,4 @@ pub use credentials::*;
 pub use remote::*;
 pub use service::GitService;
 pub use git2_service::Git2Service;
+pub use remote_verification::{SshHostFailure, SshHostFailureKind};

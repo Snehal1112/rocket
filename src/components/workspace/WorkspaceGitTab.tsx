@@ -10,17 +10,15 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
   const { data: workspaces = [] } = useWorkspaces();
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const workspace = workspaces.find((w) => w.id === (workspaceId || activeWorkspaceId));
-  const workspacePath = workspace?.path ?? null;
+  const repositoryId = workspace?.repositoryId ?? null;
 
-  if (!workspacePath) {
+  if (!repositoryId) {
     return (
       <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
-        No workspace path configured.
+        No workspace repository configured.
       </div>
     );
   }
 
-  return (
-    <GitPanel collectionPath={workspacePath} collectionName={workspace?.name ?? 'Collection'} />
-  );
+  return <GitPanel repositoryId={repositoryId} repositoryLabel={workspace?.name ?? 'Workspace'} />;
 }

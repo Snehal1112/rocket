@@ -1,6 +1,8 @@
 #[cfg(test)]
 use git2::Repository;
 use rocket_shared::error::DomainResult;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::branch::BranchList;
 use crate::commit::CommitInfo;
@@ -19,16 +21,65 @@ mod remote;
 mod repo;
 #[cfg(test)]
 mod safety_contracts;
+mod ssh_host_verification;
 mod staging;
 mod stash;
 mod status_diff;
 
+/// Read-only source for the OpenSSH `known_hosts` file used to classify SSH
+/// certificate failures.
+pub trait SshTrustStore: Send + Sync {
+    fn known_hosts_path(&self) -> Option<PathBuf>;
+}
+
+#[derive(Debug, Default)]
+pub struct SystemSshTrustStore;
+
+impl SshTrustStore for SystemSshTrustStore {
+    fn known_hosts_path(&self) -> Option<PathBuf> {
+        ssh_host_verification::default_known_hosts_path()
+    }
+}
+
+#[derive(Debug)]
+struct FixedPathSshTrustStore {
+    path: PathBuf,
+}
+
+impl SshTrustStore for FixedPathSshTrustStore {
+    fn known_hosts_path(&self) -> Option<PathBuf> {
+        Some(self.path.clone())
+    }
+}
+
 /// Git service backed by libgit2.
-pub struct Git2Service;
+pub struct Git2Service {
+    ssh_trust_store: Arc<dyn SshTrustStore>,
+}
 
 impl Git2Service {
+    /// Use the current user's `~/.ssh/known_hosts` as a read-only trust store.
     pub fn new() -> Self {
-        Git2Service
+        Self::with_trust_store(SystemSshTrustStore)
+    }
+
+    /// Inject a read-only SSH trust-store provider.
+    pub fn with_trust_store<T>(trust_store: T) -> Self
+    where
+        T: SshTrustStore + 'static,
+    {
+        Self {
+            ssh_trust_store: Arc::new(trust_store),
+        }
+    }
+
+    /// Use an explicit OpenSSH `known_hosts` path.
+    pub fn with_known_hosts_path(path: impl Into<PathBuf>) -> Self {
+        Self::with_trust_store(FixedPathSshTrustStore { path: path.into() })
+    }
+
+    fn known_hosts_path(&self) -> Option<PathBuf> {
+        self.ssh_trust_store.known_hosts_path()
     }
 }
 
@@ -53,7 +104,7 @@ impl GitService for Git2Service {
         dest_path: &str,
         creds: &GitCredentials,
     ) -> DomainResult<()> {
-        repo::clone_repo(url, dest_path, creds)
+        repo::clone_repo(url, dest_path, creds, self.known_hosts_path())
     }
 
     fn list_remotes(&self, path: &str) -> DomainResult<Vec<RemoteInfo>> {
@@ -109,15 +160,15 @@ impl GitService for Git2Service {
     }
 
     fn push(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<()> {
-        remote::push(path, remote_name, creds)
+        remote::push(path, remote_name, creds, self.known_hosts_path())
     }
 
     fn pull(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<()> {
-        remote::pull(path, remote_name, creds)
+        remote::pull(path, remote_name, creds, self.known_hosts_path())
     }
 
     fn fetch(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
-        remote::fetch(path, remote_name, creds)
+        remote::fetch(path, remote_name, creds, self.known_hosts_path())
     }
 
     fn branches(&self, path: &str) -> DomainResult<BranchList> {
@@ -188,8 +239,38 @@ mod tests {
     use crate::service::GitService;
     use crate::status::GitStatus;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    #[test]
+    fn default_and_custom_trust_store_providers_return_expected_paths() {
+        assert_eq!(
+            Git2Service::new().known_hosts_path(),
+            ssh_host_verification::default_known_hosts_path()
+        );
+
+        let custom_path = PathBuf::from("/test/ssh/known_hosts");
+        assert_eq!(
+            Git2Service::with_known_hosts_path(custom_path.clone()).known_hosts_path(),
+            Some(custom_path)
+        );
+    }
+
+    struct UnavailableTrustStore;
+
+    impl SshTrustStore for UnavailableTrustStore {
+        fn known_hosts_path(&self) -> Option<PathBuf> {
+            None
+        }
+    }
+
+    #[test]
+    fn custom_provider_can_report_that_verification_is_unavailable() {
+        assert_eq!(
+            Git2Service::with_trust_store(UnavailableTrustStore).known_hosts_path(),
+            None
+        );
+    }
 
     fn setup_repo() -> (TempDir, String) {
         let dir = TempDir::new().unwrap();

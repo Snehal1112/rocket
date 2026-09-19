@@ -68,7 +68,7 @@ const cleanStatus: tauriApi.RepoStatus = {
 
 function setRepositoryState(overrides: Partial<ReturnType<typeof useGitStore.getState>> = {}) {
   useGitStore.setState({
-    collectionPath: '/collections/active',
+    repositoryId: 'collection:default:active',
     isRepo: true,
     credentials: { type: 'sshAgent' },
     remotes: [{ name: 'origin', url: 'git@example.com:team/repo.git' }],

@@ -70,9 +70,18 @@ mod tests {
                 new_start: 1,
                 new_lines: 2,
                 lines: vec![
-                    DiffLine { content: "- old".into(), line_type: LineType::Remove },
-                    DiffLine { content: "+ new".into(), line_type: LineType::Add },
-                    DiffLine { content: "+ extra".into(), line_type: LineType::Add },
+                    DiffLine {
+                        content: "- old".into(),
+                        line_type: LineType::Remove,
+                    },
+                    DiffLine {
+                        content: "+ new".into(),
+                        line_type: LineType::Add,
+                    },
+                    DiffLine {
+                        content: "+ extra".into(),
+                        line_type: LineType::Add,
+                    },
                 ],
             }],
         };
@@ -82,7 +91,10 @@ mod tests {
 
     #[test]
     fn diff_serialization() {
-        let line = DiffLine { content: "hello".into(), line_type: LineType::Add };
+        let line = DiffLine {
+            content: "hello".into(),
+            line_type: LineType::Add,
+        };
         let json = serde_json::to_string(&line).unwrap();
         assert!(json.contains("\"lineType\":\"add\""));
     }

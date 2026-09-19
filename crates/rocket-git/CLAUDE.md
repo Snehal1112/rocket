@@ -38,10 +38,15 @@ cargo test -p rocket-git -- --nocapture
 | `stash` | `stash_list`, `stash_save`, `stash_pop`, `stash_apply`, `stash_drop` |
 | `conflict` | `conflicts`, `resolve_conflict`, `abort_merge` |
 | `helpers` | shared internals: `open_repo`, `build_callbacks`, `map_git2_status`, `build_simple_diff`, `ahead_behind`, path/worktree helpers |
+| `ssh_host_verification` | offline SSH host-key classification against a `known_hosts` file: `classify_remote_host`, `classify_known_host`, `parse_ssh_endpoint`, `openssh_sha256_fingerprint` |
 
 These submodule files share their names with the top-level domain-type modules (`crate::branch`, `crate::stash`, ...) declared in `lib.rs` — that's intentional, not duplication: the top-level module owns the domain **type** (e.g. `crate::branch::Branch`), the `git2_service` submodule of the same name owns the libgit2-backed **implementation** of the operations on that type.
 
 All methods take a `path: &str` argument — the repository root on disk. There is no persistent repository handle; `Repository::open()` is called per-operation.
+
+### SSH host verification
+
+`Git2Service` is no longer a unit struct — it carries an injectable `Arc<dyn SshTrustStore>` (`Git2Service::new()` uses `~/.ssh/known_hosts` via `SystemSshTrustStore`; `Git2Service::with_trust_store(...)` / `with_known_hosts_path(...)` inject an alternative, e.g. for tests). `helpers::build_callbacks` uses the trust store with `ssh_host_verification::classify_remote_host` to classify SSH host-key failures purely for diagnostics — the accept/reject decision is always delegated back to libgit2/libssh2 itself via `CertificateCheckStatus::CertificatePassthrough`. Classification only enriches the resulting `git2::Error` (when its code is `Certificate`) into a typed `DomainError::SshUnknownHost` / `SshHostKeyChanged` / `SshHostVerificationUnavailable`, carrying host/port/algorithm/fingerprint from `remote_verification::SshHostFailure`.
 
 ### Domain types
 
@@ -57,6 +62,7 @@ Each module owns its types and re-exports them via `lib.rs`:
 | `conflict` | `ConflictFile`, `ConflictResolution` |
 | `credentials` | `GitCredentials` (enum: SshKey, SshAgent, UserPass, Token) |
 | `remote` | `RemoteInfo` |
+| `remote_verification` | `SshHostFailure`, `SshHostFailureKind` (enum: UnknownHost, ChangedHost, VerificationUnavailable) — declared as a private `mod`, types re-exported at the crate root |
 
 All types derive `Serialize`/`Deserialize` with `camelCase` field names (for Tauri IPC). Enums use `lowercase` variant names.
 

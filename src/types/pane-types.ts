@@ -49,7 +49,8 @@ export interface WorkspaceTab extends BaseTab {
 
 export interface DiffState {
   filePath: string;
-  collectionPath: string;
+  repositoryId: string;
+  repositoryLabel: string;
   oldContent: string;
   newContent: string;
   status: string;
@@ -63,7 +64,8 @@ export interface DiffTab extends BaseTab {
 
 export interface ConflictState {
   filePath: string;
-  collectionPath: string;
+  repositoryId: string;
+  repositoryLabel: string;
   ours: string;
   theirs: string;
   ancestor: string | null;
@@ -76,8 +78,8 @@ export interface ConflictTab extends BaseTab {
 
 export interface GitTab extends BaseTab {
   tabType: 'git';
-  collectionName: string;
-  collectionPath: string;
+  repositoryId: string;
+  repositoryLabel: string;
 }
 
 export interface ContractTab extends BaseTab {

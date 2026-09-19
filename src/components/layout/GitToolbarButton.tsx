@@ -1,9 +1,9 @@
 import { GitBranch } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { findTabInTree } from '@/lib/pane-utils';
-import { listCollections } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { type CollectionSummary, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { GitTab } from '@/types/pane-types';
 
@@ -12,26 +12,28 @@ export async function openGitPanel(): Promise<void> {
   const { activeCollection, openTab, root, closeTab } = usePaneStore.getState();
   if (!activeCollection) return;
 
-  let path = useGitStore.getState().collectionPath ?? '';
-  if (!path) {
-    try {
-      const summaries = await listCollections();
-      const match = summaries.find((s) => s.name === activeCollection);
-      path = match?.path ?? '';
-    } catch {
-      // Fall through — GitPanel will show appropriate state.
-    }
+  let summary: CollectionSummary | undefined;
+  try {
+    const summaries = await listCollections();
+    summary = summaries.find((candidate) => candidate.name === activeCollection);
+  } catch {
+    toast.error('Failed to open Git panel: could not load collections.');
+    return;
+  }
+  if (!summary) {
+    toast.error('Failed to open Git panel: collection not found.');
+    return;
   }
 
   const tabId = `git:${activeCollection}`;
-
-  if (path) {
-    const found = findTabInTree(root, tabId);
-    if (found) {
-      const existingTab = found.tab as GitTab;
-      if (!existingTab.collectionPath) {
-        closeTab(tabId, found.leaf.groupId);
-      }
+  const found = findTabInTree(root, tabId);
+  if (found) {
+    const existingTab = found.tab as Partial<GitTab>;
+    if (
+      existingTab.repositoryId !== summary.repositoryId ||
+      existingTab.repositoryLabel !== summary.name
+    ) {
+      closeTab(tabId, found.leaf.groupId);
     }
   }
 
@@ -39,8 +41,8 @@ export async function openGitPanel(): Promise<void> {
     id: tabId,
     title: 'Git UI',
     tabType: 'git',
-    collectionName: activeCollection,
-    collectionPath: path,
+    repositoryId: summary.repositoryId,
+    repositoryLabel: summary.name,
     isDirty: false,
   };
   openTab(tab);

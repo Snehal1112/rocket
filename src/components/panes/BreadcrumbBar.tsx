@@ -58,10 +58,6 @@ interface Segment {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-function collectionBasename(absPath: string): string {
-  return absPath.split('/').filter(Boolean).pop() ?? absPath;
-}
-
 function workspaceSectionLabel(section: WorkspaceTabSection): string {
   switch (section) {
     case 'overview':
@@ -350,14 +346,14 @@ function deriveSegments(
   if (isGitTab(tab)) {
     return [
       {
-        label: tab.collectionName,
+        label: tab.repositoryLabel,
         picker: {
           loadItems: async () => {
             const summaries = await listCollections();
             return summaries.map((s) => ({
               id: s.name,
               label: s.name,
-              isActive: s.name === tab.collectionName,
+              isActive: s.repositoryId === tab.repositoryId,
             }));
           },
           onSelect: (item) => nav.switchCollection(item.id),
@@ -368,17 +364,16 @@ function deriveSegments(
   }
 
   if (isDiffTab(tab)) {
-    const collection = collectionBasename(tab.diffState.collectionPath);
     return [
       {
-        label: collection,
+        label: tab.diffState.repositoryLabel,
         picker: {
           loadItems: async () => {
             const summaries = await listCollections();
             return summaries.map((s) => ({
               id: s.name,
               label: s.name,
-              isActive: s.name === collection,
+              isActive: s.repositoryId === tab.diffState.repositoryId,
             }));
           },
           onSelect: (item) => nav.switchCollection(item.id),
@@ -390,17 +385,16 @@ function deriveSegments(
   }
 
   if (isConflictTab(tab)) {
-    const collection = collectionBasename(tab.conflictState.collectionPath);
     return [
       {
-        label: collection,
+        label: tab.conflictState.repositoryLabel,
         picker: {
           loadItems: async () => {
             const summaries = await listCollections();
             return summaries.map((s) => ({
               id: s.name,
               label: s.name,
-              isActive: s.name === collection,
+              isActive: s.repositoryId === tab.conflictState.repositoryId,
             }));
           },
           onSelect: (item) => nav.switchCollection(item.id),

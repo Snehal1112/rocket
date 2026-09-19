@@ -4,21 +4,57 @@ use std::sync::{Arc, Mutex};
 use rocket_app::WorkspaceService;
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
-use rocket_workspace::{RequestGuardPolicy, Workspace, WorkspaceConfig};
+use rocket_workspace::{RepositoryId, RequestGuardPolicy, Workspace, WorkspaceConfig};
+use serde::Serialize;
 use tauri::State;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub repository_id: String,
+    pub name: String,
+    pub path: String,
+    pub description: Option<String>,
+    pub pinned: bool,
+}
+
+impl TryFrom<Workspace> for WorkspaceDto {
+    type Error = DomainError;
+
+    fn try_from(workspace: Workspace) -> Result<Self, Self::Error> {
+        let repository_id = RepositoryId::workspace(&workspace.id)?.to_string();
+        Ok(Self {
+            id: workspace.id,
+            repository_id,
+            name: workspace.name,
+            path: workspace.path.to_string_lossy().into_owned(),
+            description: workspace.description,
+            pinned: workspace.pinned,
+        })
+    }
+}
 
 #[tauri::command]
 pub fn list_workspaces(
     svc: State<'_, Mutex<WorkspaceService>>,
-) -> Result<Vec<Workspace>, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.list()
+) -> Result<Vec<WorkspaceDto>, DomainError> {
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .list()?
+        .into_iter()
+        .map(WorkspaceDto::try_from)
+        .collect()
 }
 
 #[tauri::command]
 pub fn get_active_workspace(
     svc: State<'_, Mutex<WorkspaceService>>,
-) -> Result<Workspace, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.get_active()
+) -> Result<WorkspaceDto, DomainError> {
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .get_active()?
+        .try_into()
 }
 
 #[tauri::command]
@@ -26,8 +62,11 @@ pub fn create_workspace(
     name: String,
     path: String,
     svc: State<'_, Mutex<WorkspaceService>>,
-) -> Result<Workspace, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.create(&name, PathBuf::from(path))
+) -> Result<WorkspaceDto, DomainError> {
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .create(&name, PathBuf::from(path))?
+        .try_into()
 }
 
 #[tauri::command]
@@ -36,7 +75,7 @@ pub fn switch_workspace(
     svc: State<'_, Mutex<WorkspaceService>>,
     watcher: State<'_, NotifyFileWatcher>,
     app: tauri::AppHandle,
-) -> Result<Workspace, DomainError> {
+) -> Result<WorkspaceDto, DomainError> {
     let workspace = svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.switch(&id)?;
     // Restart the file watcher on the new workspace's collections directory so
     // filesystem changes in the new workspace trigger sidebar refreshes.
@@ -45,7 +84,7 @@ pub fn switch_workspace(
     watcher.stop();
     let publisher = Arc::new(crate::tauri_event_bus::TauriEventBus::new(app));
     let _ = watcher.start(new_collections_dir, publisher);
-    Ok(workspace)
+    workspace.try_into()
 }
 
 #[tauri::command]
@@ -102,8 +141,11 @@ pub fn update_workspace_description(
 pub fn open_workspace(
     path: String,
     svc: State<'_, Mutex<WorkspaceService>>,
-) -> Result<Workspace, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.open_workspace(PathBuf::from(path))
+) -> Result<WorkspaceDto, DomainError> {
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .open_workspace(PathBuf::from(path))?
+        .try_into()
 }
 
 #[tauri::command]
@@ -160,4 +202,26 @@ pub async fn open_folder_picker(app: tauri::AppHandle) -> Result<Option<String>,
     rx.await
         .map_err(|_| "Dialog closed unexpectedly".to_string())
         .map(|f| f.map(|p| p.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_dto_contains_backend_issued_repository_id() {
+        let workspace = Workspace {
+            id: "workspace-1".into(),
+            name: "Workspace".into(),
+            path: PathBuf::from("/tmp/workspace"),
+            description: None,
+            pinned: false,
+        };
+
+        let dto = WorkspaceDto::try_from(workspace).expect("valid workspace DTO");
+
+        assert_eq!(dto.repository_id, "workspace:workspace-1");
+        let json = serde_json::to_value(dto).expect("serialize workspace DTO");
+        assert_eq!(json["repositoryId"], "workspace:workspace-1");
+    }
 }

@@ -26,6 +26,34 @@ pub enum DomainError {
 
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    #[error("Unknown SSH host {host}:{port} (algorithm {algorithm}, fingerprint {fingerprint})")]
+    SshUnknownHost {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+
+    #[error(
+        "SSH host key changed for {host}:{port} (algorithm {algorithm}, fingerprint {fingerprint})"
+    )]
+    SshHostKeyChanged {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+
+    #[error(
+        "SSH host verification unavailable for {host}:{port} (algorithm {algorithm}, fingerprint {fingerprint})"
+    )]
+    SshHostVerificationUnavailable {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
 }
 
 impl From<std::io::Error> for DomainError {
@@ -72,5 +100,36 @@ mod tests {
         let err = DomainError::NotFound("test".into());
         let json = serde_json::to_string(&err).unwrap();
         assert_eq!(json, "\"Not found: test\"");
+    }
+
+    #[test]
+    fn ssh_errors_display_actionable_verification_details() {
+        let errors = [
+            DomainError::SshUnknownHost {
+                host: "git.example.com".into(),
+                port: 22,
+                algorithm: "ssh-ed25519".into(),
+                fingerprint: "SHA256:unknown".into(),
+            },
+            DomainError::SshHostKeyChanged {
+                host: "git.example.com".into(),
+                port: 2222,
+                algorithm: "rsa-sha2-512".into(),
+                fingerprint: "SHA256:changed".into(),
+            },
+            DomainError::SshHostVerificationUnavailable {
+                host: "git.example.com".into(),
+                port: 22,
+                algorithm: "unknown".into(),
+                fingerprint: "SHA256:unavailable".into(),
+            },
+        ];
+
+        for error in errors {
+            let display = error.to_string();
+            assert!(display.contains("git.example.com"));
+            assert!(display.contains("algorithm"));
+            assert!(display.contains("fingerprint SHA256:"));
+        }
     }
 }

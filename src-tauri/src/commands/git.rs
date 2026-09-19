@@ -5,6 +5,7 @@ use rocket_git::{
     FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainError;
+use rocket_workspace::{RepositoryId, RepositorySelector};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
@@ -34,12 +35,84 @@ impl From<CloneDestinationGrant> for CloneDestinationGrantDto {
     }
 }
 
-#[tauri::command]
+#[derive(Debug, Serialize)]
+#[serde(tag = "code", rename_all = "camelCase")]
+pub enum GitNetworkErrorDto {
+    SshUnknownHost {
+        message: String,
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+    SshHostKeyChanged {
+        message: String,
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+    SshHostVerificationUnavailable {
+        message: String,
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+    Generic {
+        message: String,
+    },
+}
+
+impl From<DomainError> for GitNetworkErrorDto {
+    fn from(error: DomainError) -> Self {
+        let message = error.to_string();
+        match error {
+            DomainError::SshUnknownHost {
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            } => Self::SshUnknownHost {
+                message,
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            },
+            DomainError::SshHostKeyChanged {
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            } => Self::SshHostKeyChanged {
+                message,
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            },
+            DomainError::SshHostVerificationUnavailable {
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            } => Self::SshHostVerificationUnavailable {
+                message,
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            },
+            _ => Self::Generic { message },
+        }
+    }
+}
+
 pub fn git_is_repo(collection_path: String, svc: State<'_, GitAppService>) -> Result<bool, DomainError> {
     Ok(svc.is_repo(&collection_path))
 }
 
-#[tauri::command]
 pub fn git_init(collection_path: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.init(&collection_path)
 }
@@ -71,163 +144,133 @@ pub fn git_clone(
     creds: GitCredentials,
     capabilities: State<'_, CloneDestinationCapabilities>,
     svc: State<'_, GitAppService>,
-) -> Result<(), DomainError> {
+) -> Result<(), GitNetworkErrorDto> {
     let destination = capabilities.consume(&capability)?;
     let destination = destination.to_str().ok_or_else(|| {
         DomainError::InvalidInput("Clone destination path is not valid UTF-8".into())
     })?;
-    svc.clone_repo(&url, destination, &creds)
+    svc.clone_repo(&url, destination, &creds).map_err(Into::into)
 }
 
-#[tauri::command]
 pub fn git_status(collection_path: String, svc: State<'_, GitAppService>) -> Result<RepoStatus, DomainError> {
     svc.status(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_diff(collection_path: String, file: String, svc: State<'_, GitAppService>) -> Result<FileDiff, DomainError> {
     svc.diff_file(&collection_path, &file)
 }
 
-#[tauri::command]
 pub fn git_diff_staged(collection_path: String, file: String, svc: State<'_, GitAppService>) -> Result<FileDiff, DomainError> {
     svc.diff_staged(&collection_path, &file)
 }
 
-#[tauri::command]
 pub fn git_diff_commit(collection_path: String, oid: String, svc: State<'_, GitAppService>) -> Result<Vec<FileDiff>, DomainError> {
     svc.diff_commit(&collection_path, &oid)
 }
 
-#[tauri::command]
 pub fn git_stage(collection_path: String, files: Vec<String>, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     svc.stage(&collection_path, &refs)
 }
 
-#[tauri::command]
 pub fn git_unstage(collection_path: String, files: Vec<String>, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     svc.unstage(&collection_path, &refs)
 }
 
-#[tauri::command]
 pub fn git_discard(collection_path: String, files: Vec<String>, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     svc.discard(&collection_path, &refs)
 }
 
-#[tauri::command]
 pub fn git_commit(collection_path: String, message: String, svc: State<'_, GitAppService>) -> Result<CommitInfo, DomainError> {
     svc.commit(&collection_path, &message)
 }
 
-#[tauri::command]
 pub fn git_log(collection_path: String, limit: usize, svc: State<'_, GitAppService>) -> Result<Vec<CommitInfo>, DomainError> {
     svc.log(&collection_path, limit)
 }
 
-#[tauri::command]
 pub fn git_push(collection_path: String, remote: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.push(&collection_path, &remote, &creds)
 }
 
-#[tauri::command]
 pub fn git_pull(collection_path: String, remote: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.pull(&collection_path, &remote, &creds)
 }
 
-#[tauri::command]
 pub fn git_fetch(collection_path: String, remote: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<FetchResult, DomainError> {
     svc.fetch(&collection_path, &remote, &creds)
 }
 
-#[tauri::command]
 pub fn git_branches(collection_path: String, svc: State<'_, GitAppService>) -> Result<BranchList, DomainError> {
     svc.branches(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_switch_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.switch_branch(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_checkout_remote_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.checkout_remote_branch(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_create_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.create_branch(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_delete_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.delete_branch(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_merge_branch(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.merge_branch(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_stash_list(collection_path: String, svc: State<'_, GitAppService>) -> Result<Vec<StashEntry>, DomainError> {
     svc.stash_list(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_stash_save(collection_path: String, message: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.stash_save(&collection_path, &message)
 }
 
-#[tauri::command]
 pub fn git_stash_pop(collection_path: String, index: usize, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.stash_pop(&collection_path, index)
 }
 
-#[tauri::command]
 pub fn git_stash_apply(collection_path: String, index: usize, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.stash_apply(&collection_path, index)
 }
 
-#[tauri::command]
 pub fn git_stash_drop(collection_path: String, index: usize, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.stash_drop(&collection_path, index)
 }
 
-#[tauri::command]
 pub fn git_conflicts(collection_path: String, svc: State<'_, GitAppService>) -> Result<Vec<ConflictFile>, DomainError> {
     svc.conflicts(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_resolve_conflict(collection_path: String, file: String, resolution: ConflictResolution, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.resolve_conflict(&collection_path, &file, &resolution)
 }
 
-#[tauri::command]
 pub fn git_abort_merge(collection_path: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.abort_merge(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_list_remotes(collection_path: String, svc: State<'_, GitAppService>) -> Result<Vec<RemoteInfo>, DomainError> {
     svc.list_remotes(&collection_path)
 }
 
-#[tauri::command]
 pub fn git_add_remote(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.add_remote(&collection_path, &name, &url)
 }
 
-#[tauri::command]
 pub fn git_remove_remote(collection_path: String, name: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.remove_remote(&collection_path, &name)
 }
 
-#[tauri::command]
 pub fn git_set_remote_url(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.set_remote_url(&collection_path, &name, &url)
 }
@@ -378,9 +421,9 @@ pub fn git_push_v2(
     creds: GitCredentials,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
-) -> Result<(), DomainError> {
+) -> Result<(), GitNetworkErrorDto> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_push(path, remote, creds, svc)
+    git_push(path, remote, creds, svc).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -390,9 +433,9 @@ pub fn git_pull_v2(
     creds: GitCredentials,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
-) -> Result<(), DomainError> {
+) -> Result<(), GitNetworkErrorDto> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_pull(path, remote, creds, svc)
+    git_pull(path, remote, creds, svc).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -402,9 +445,9 @@ pub fn git_fetch_v2(
     creds: GitCredentials,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
-) -> Result<FetchResult, DomainError> {
+) -> Result<FetchResult, GitNetworkErrorDto> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_fetch(path, remote, creds, svc)
+    git_fetch(path, remote, creds, svc).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -735,7 +778,6 @@ pub fn list_ssh_key_paths() -> Vec<String> {
 /// Persist git credentials to the OS keychain (macOS Keychain, Windows
 /// Credential Manager, Linux Secret Service). The passphrase, if present,
 /// is stored inside the encrypted keychain entry — never written to disk.
-#[tauri::command]
 pub fn save_git_credentials(workspace_id: String, creds: GitCredentialsPayload) -> Result<(), DomainError> {
     let json = serde_json::to_string(&creds)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -747,7 +789,6 @@ pub fn save_git_credentials(workspace_id: String, creds: GitCredentialsPayload) 
 /// Load previously saved git credentials from the OS keychain.
 /// Returns None if no entry exists yet (first run). Errors if the keychain
 /// is unavailable (e.g. locked) — callers should treat this as no-credentials.
-#[tauri::command]
 pub fn load_git_credentials(workspace_id: String) -> Result<Option<GitCredentialsPayload>, DomainError> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(&workspace_id))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -778,12 +819,32 @@ pub fn load_git_credentials_v2(
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<Option<GitCredentialsPayload>, DomainError> {
     let _path = resolve_repository_path(&repository_id, workspace_svc)?;
-    load_git_credentials(repository_id)
+    if let Some(creds) = load_git_credentials(repository_id.clone())? {
+        return Ok(Some(creds));
+    }
+
+    // No entry under the new per-repository key yet. Fall back to the
+    // legacy per-workspace key so credentials saved before repositories
+    // were scoped individually are still found, and copy them forward so
+    // this repository has its own entry from now on.
+    let legacy_workspace_id = match RepositoryId::parse(&repository_id)?.selector()? {
+        RepositorySelector::Workspace { workspace_id } => workspace_id,
+        RepositorySelector::Collection { workspace_id, .. } => workspace_id,
+    };
+    let Some(legacy_creds) = load_git_credentials(legacy_workspace_id)? else {
+        return Ok(None);
+    };
+    if let Err(error) = save_git_credentials(repository_id, legacy_creds.clone()) {
+        tracing::warn!(
+            error = %error,
+            "failed to migrate legacy workspace-scoped git credentials forward"
+        );
+    }
+    Ok(Some(legacy_creds))
 }
 
 /// Read user.name and user.email from the repo's git config (local → global → system).
 /// Returns empty strings when the values are unset — never errors on a missing entry.
-#[tauri::command]
 pub fn git_get_identity(path: String) -> Result<GitIdentity, DomainError> {
     let repo = git2::Repository::open(&path)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -795,7 +856,6 @@ pub fn git_get_identity(path: String) -> Result<GitIdentity, DomainError> {
 }
 
 /// Write user.name and user.email to the repo-local .git/config.
-#[tauri::command]
 pub fn git_set_identity(path: String, name: String, email: String) -> Result<(), DomainError> {
     let repo = git2::Repository::open(&path)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -865,6 +925,81 @@ mod tests {
     fn keyring_account_includes_workspace_id() {
         assert_eq!(keyring_account("ws-abc"), "git-credentials-ws-abc");
         assert_eq!(keyring_account("default"), "git-credentials-default");
+    }
+
+    #[test]
+    fn git_network_ssh_errors_serialize_with_exact_shape() {
+        let cases = [
+            (
+                DomainError::SshUnknownHost {
+                    host: "unknown.example.com".into(),
+                    port: 22,
+                    algorithm: "ssh-ed25519".into(),
+                    fingerprint: "SHA256:unknown".into(),
+                },
+                serde_json::json!({
+                    "code": "sshUnknownHost",
+                    "message": "Unknown SSH host unknown.example.com:22 (algorithm ssh-ed25519, fingerprint SHA256:unknown)",
+                    "host": "unknown.example.com",
+                    "port": 22,
+                    "algorithm": "ssh-ed25519",
+                    "fingerprint": "SHA256:unknown"
+                }),
+            ),
+            (
+                DomainError::SshHostKeyChanged {
+                    host: "changed.example.com".into(),
+                    port: 2222,
+                    algorithm: "rsa-sha2-512".into(),
+                    fingerprint: "SHA256:changed".into(),
+                },
+                serde_json::json!({
+                    "code": "sshHostKeyChanged",
+                    "message": "SSH host key changed for changed.example.com:2222 (algorithm rsa-sha2-512, fingerprint SHA256:changed)",
+                    "host": "changed.example.com",
+                    "port": 2222,
+                    "algorithm": "rsa-sha2-512",
+                    "fingerprint": "SHA256:changed"
+                }),
+            ),
+            (
+                DomainError::SshHostVerificationUnavailable {
+                    host: "unavailable.example.com".into(),
+                    port: 22,
+                    algorithm: "unknown".into(),
+                    fingerprint: "SHA256:unavailable".into(),
+                },
+                serde_json::json!({
+                    "code": "sshHostVerificationUnavailable",
+                    "message": "SSH host verification unavailable for unavailable.example.com:22 (algorithm unknown, fingerprint SHA256:unavailable)",
+                    "host": "unavailable.example.com",
+                    "port": 22,
+                    "algorithm": "unknown",
+                    "fingerprint": "SHA256:unavailable"
+                }),
+            ),
+        ];
+
+        for (domain_error, expected) in cases {
+            let actual = serde_json::to_value(GitNetworkErrorDto::from(domain_error))
+                .expect("Git network error DTO should serialize");
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn git_network_non_ssh_error_maps_to_generic_shape() {
+        let error = GitNetworkErrorDto::from(DomainError::Internal("network failed".into()));
+        let actual = serde_json::to_value(error)
+            .expect("generic Git network error DTO should serialize");
+
+        assert_eq!(
+            actual,
+            serde_json::json!({
+                "code": "generic",
+                "message": "Internal error: network failed"
+            })
+        );
     }
 
     #[test]

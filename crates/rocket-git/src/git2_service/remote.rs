@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use git2::build::CheckoutBuilder;
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -66,7 +68,12 @@ pub(super) fn set_remote_url(path: &str, name: &str, url: &str) -> DomainResult<
 }
 
 #[tracing::instrument(name = "git_push", skip(creds), fields(repo_path = %path, remote = %remote))]
-pub(super) fn push(path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
+pub(super) fn push(
+    path: &str,
+    remote: &str,
+    creds: &GitCredentials,
+    known_hosts_path: Option<PathBuf>,
+) -> DomainResult<()> {
     let repo = open_repo(path)?;
     let mut remote_obj = repo
         .find_remote(remote)
@@ -75,9 +82,7 @@ pub(super) fn push(path: &str, remote: &str, creds: &GitCredentials) -> DomainRe
     let head = repo
         .head()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
-    let branch_name_str = head
-        .shorthand()
-        .unwrap_or("main");
+    let branch_name_str = head.shorthand().unwrap_or("main");
 
     // Prefer the configured upstream's remote branch name as the push target.
     // Falls back to same-name if no upstream is configured.
@@ -88,30 +93,44 @@ pub(super) fn push(path: &str, remote: &str, creds: &GitCredentials) -> DomainRe
         .and_then(|u| {
             u.name().ok().flatten().map(|full| {
                 // upstream name is "origin/feat-x" — strip the "origin/" prefix.
-                full.splitn(2, '/').nth(1).map(String::from)
+                full.split_once('/').map(|(_, branch)| branch.to_string())
             })
         })
         .flatten()
         .unwrap_or_else(|| branch_name_str.to_string());
 
     let refspec = format!("refs/heads/{branch_name_str}:refs/heads/{remote_branch}");
+    let remote_url = remote_obj
+        .pushurl()
+        .or_else(|| remote_obj.url())
+        .ok_or_else(|| DomainError::InvalidInput(format!("Remote '{remote}' has no URL")))?
+        .to_owned();
 
-    let callbacks = build_callbacks(creds);
+    let (callbacks, verification) = build_callbacks(creds, &remote_url, known_hosts_path);
     let mut push_opts = git2::PushOptions::new();
     push_opts.remote_callbacks(callbacks);
 
     remote_obj
         .push(&[&refspec], Some(&mut push_opts))
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(|error| verification.map_error(error))?;
     Ok(())
 }
 
 #[tracing::instrument(name = "git_fetch", skip(creds), fields(repo_path = %path, remote = %remote))]
-pub(super) fn fetch(path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
+pub(super) fn fetch(
+    path: &str,
+    remote: &str,
+    creds: &GitCredentials,
+    known_hosts_path: Option<PathBuf>,
+) -> DomainResult<FetchResult> {
     let repo = open_repo(path)?;
     let mut remote_obj = repo
         .find_remote(remote)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let remote_url = remote_obj
+        .url()
+        .ok_or_else(|| DomainError::InvalidInput(format!("Remote '{remote}' has no URL")))?
+        .to_owned();
 
     let updated_refs = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let received_objects = std::sync::Arc::new(std::sync::Mutex::new(0usize));
@@ -121,7 +140,7 @@ pub(super) fn fetch(path: &str, remote: &str, creds: &GitCredentials) -> DomainR
     let objs_clone = received_objects.clone();
     let bytes_clone = received_bytes.clone();
 
-    let mut callbacks = build_callbacks(creds);
+    let (mut callbacks, verification) = build_callbacks(creds, &remote_url, known_hosts_path);
     callbacks.update_tips(move |refname, _old, _new| {
         if let Ok(mut v) = refs_clone.lock() {
             v.push(refname.to_owned());
@@ -143,7 +162,7 @@ pub(super) fn fetch(path: &str, remote: &str, creds: &GitCredentials) -> DomainR
 
     remote_obj
         .fetch::<&str>(&[], Some(&mut fetch_opts), None)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(|error| verification.map_error(error))?;
 
     Ok(FetchResult {
         updated_refs: updated_refs.lock().map(|v| v.clone()).unwrap_or_default(),
@@ -153,9 +172,14 @@ pub(super) fn fetch(path: &str, remote: &str, creds: &GitCredentials) -> DomainR
 }
 
 #[tracing::instrument(name = "git_pull", skip(creds), fields(repo_path = %path, remote = %remote))]
-pub(super) fn pull(path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
-    // Fetch first.
-    fetch(path, remote, creds)?;
+pub(super) fn pull(
+    path: &str,
+    remote: &str,
+    creds: &GitCredentials,
+    known_hosts_path: Option<PathBuf>,
+) -> DomainResult<()> {
+    // Fetch first, using the same injected read-only trust store.
+    fetch(path, remote, creds, known_hosts_path)?;
 
     let repo = open_repo(path)?;
     let current_branch = branch_name(&repo);
@@ -173,13 +197,17 @@ pub(super) fn pull(path: &str, remote: &str, creds: &GitCredentials) -> DomainRe
         .and_then(|u| u.get().resolve().ok())
         .or_else(|| {
             let refname = format!("refs/remotes/{remote}/{current_branch}");
-            repo.find_reference(&refname).ok().and_then(|r| r.resolve().ok())
+            repo.find_reference(&refname)
+                .ok()
+                .and_then(|r| r.resolve().ok())
         })
         .or_else(|| {
             // refs/remotes/origin/HEAD is a symbolic ref pointing to the
             // remote's default branch (set during clone / git remote set-head).
             let head_refname = format!("refs/remotes/{remote}/HEAD");
-            repo.find_reference(&head_refname).ok().and_then(|r| r.resolve().ok())
+            repo.find_reference(&head_refname)
+                .ok()
+                .and_then(|r| r.resolve().ok())
         });
 
     let fetch_commit = tracking_ref

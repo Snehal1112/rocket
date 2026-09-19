@@ -36,16 +36,17 @@ import {
   gitStatus,
   gitSwitchBranch,
   gitUnstage,
+  type GitSshTrustFailure,
   loadGitCredentials,
+  parseGitNetworkError,
   type RemoteInfo,
   type RepoStatus,
   type StashEntry,
 } from '@/lib/tauri-api';
-import { useWorkspaceStore } from '@/stores/workspace-store';
 
 interface GitState {
   isRepo: boolean;
-  collectionPath: string | null;
+  repositoryId: string | null;
   status: RepoStatus | null;
   conflicts: ConflictFile[];
   stashes: StashEntry[];
@@ -54,6 +55,8 @@ interface GitState {
   commitLog: CommitInfo[];
   loading: boolean;
   error: string | null;
+  /** Set only for SSH host-trust failures (unknown/changed/unavailable). Never treated as an auth error. */
+  trustFailure: GitSshTrustFailure | null;
   credentials: GitCredentials | null;
   showCredentialsDialog: boolean;
   /** Operation that triggered the credentials dialog — auto-retried once credentials are saved. */
@@ -64,7 +67,7 @@ interface GitState {
   pendingCredentialsForIdentitySetup: GitCredentials | null;
   activatePendingCredentials: () => void;
 
-  setCollection: (path: string) => Promise<void>;
+  setRepository: (repositoryId: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   refreshConflicts: () => Promise<void>;
   refreshStashes: () => Promise<void>;
@@ -102,7 +105,7 @@ interface GitState {
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
-  initRepo: (path: string) => Promise<void>;
+  initRepo: (repositoryId: string) => Promise<void>;
   hasConflicts: () => boolean;
 }
 
@@ -113,7 +116,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     return status?.files.some((f) => f.status === 'conflicted') ?? false;
   },
   isRepo: false,
-  collectionPath: null,
+  repositoryId: null,
   status: null,
   conflicts: [],
   stashes: [],
@@ -122,7 +125,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   commitLog: [],
   loading: false,
   error: null,
-  credentials: null,
+  trustFailure: null,credentials: null,
   showCredentialsDialog: false,
   pendingNetworkOp: null,
   showIdentitySetupDialog: false,
@@ -130,26 +133,23 @@ export const useGitStore = create<GitState>((set, get) => ({
   identitySetupInitialEmail: '',
   pendingCredentialsForIdentitySetup: null,
 
-  // Set the active collection path and check if it is a git repo.
-  setCollection: async (path: string) => {
-    set({ collectionPath: path, loading: true, error: null });
+  // Set the active repository and check if it is a git repo.
+  setRepository: async (repositoryId: string) => {
+    set({ repositoryId, loading: true, error: null });
     try {
-      const isRepo = await gitIsRepo(path);
+      const isRepo = await gitIsRepo(repositoryId);
       set({ isRepo });
       if (isRepo) {
-        // Always reload workspace-scoped credentials so switching workspaces
+        // Always reload repository-scoped credentials so switching repositories
         // picks up the right identity without requiring a manual re-entry.
         try {
-          const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
-          if (workspaceId) {
-            const saved = await loadGitCredentials(workspaceId);
-            set({ credentials: saved ?? null });
-          }
+          const saved = await loadGitCredentials(repositoryId);
+          set({ credentials: saved ?? null });
         } catch {
           // Keychain unavailable — proceed without credentials.
         }
         const [status] = await Promise.all([
-          gitStatus(path),
+          gitStatus(repositoryId),
           get().refreshStashes(),
           get().refreshBranches(),
           get().refreshRemotes(),
@@ -165,10 +165,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the current status from disk.
   refreshStatus: async () => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const status = await gitStatus(collectionPath);
+      const status = await gitStatus(repositoryId);
       set({ status });
     } catch (e) {
       set({ error: String(e) });
@@ -177,10 +177,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the conflict list from disk.
   refreshConflicts: async () => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const conflicts = await gitConflicts(collectionPath);
+      const conflicts = await gitConflicts(repositoryId);
       set({ conflicts });
     } catch {
       set({ conflicts: [] });
@@ -189,10 +189,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Resolve a single conflicted file with the given strategy.
   resolveConflict: async (file, resolution) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitResolveConflict(collectionPath, file, resolution);
+      await gitResolveConflict(repositoryId, file, resolution);
       await get().refreshStatus();
       await get().refreshConflicts();
     } catch (e) {
@@ -202,10 +202,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Abort a merge and reset to HEAD.
   abortMerge: async () => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitAbortMerge(collectionPath);
+      await gitAbortMerge(repositoryId);
       await get().refreshStatus();
       await get().refreshConflicts();
     } catch (e) {
@@ -215,10 +215,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the stash list from disk.
   refreshStashes: async () => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const stashes = await gitStashList(collectionPath);
+      const stashes = await gitStashList(repositoryId);
       set({ stashes });
     } catch (e) {
       set({ error: String(e) });
@@ -227,10 +227,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the branch list from disk.
   refreshBranches: async () => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const branches = await gitBranches(collectionPath);
+      const branches = await gitBranches(repositoryId);
       set({ branches });
     } catch (e) {
       set({ error: String(e) });
@@ -239,10 +239,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the remote list from disk.
   refreshRemotes: async () => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const remotes = await gitListRemotes(collectionPath);
+      const remotes = await gitListRemotes(repositoryId);
       set({ remotes });
     } catch (e) {
       set({ error: String(e) });
@@ -251,10 +251,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Reload the commit log from disk, up to the given limit.
   refreshLog: async (limit) => {
-    const { collectionPath, isRepo } = get();
-    if (!collectionPath || !isRepo) return;
+    const { repositoryId, isRepo } = get();
+    if (!repositoryId || !isRepo) return;
     try {
-      const log = await gitLog(collectionPath, limit ?? 50);
+      const log = await gitLog(repositoryId, limit ?? 50);
       set({ commitLog: log });
     } catch (e) {
       set({ error: String(e) });
@@ -263,10 +263,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Stage the given file paths.
   stageFiles: async (files: string[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitStage(collectionPath, files);
+      await gitStage(repositoryId, files);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -275,10 +275,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Unstage the given file paths.
   unstageFiles: async (files: string[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitUnstage(collectionPath, files);
+      await gitUnstage(repositoryId, files);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -287,10 +287,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Discard working-tree changes for the given file paths.
   discardFiles: async (files: string[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitDiscard(collectionPath, files);
+      await gitDiscard(repositoryId, files);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -299,10 +299,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Commit all currently staged changes with the provided message.
   commitChanges: async (message: string) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitCommit(collectionPath, message);
+      await gitCommit(repositoryId, message);
       await get().refreshStatus();
       await get().refreshLog();
     } catch (e) {
@@ -316,14 +316,14 @@ export const useGitStore = create<GitState>((set, get) => ({
     // that could contain directory-level entries (trailing '/') from an
     // older status response.
     await get().refreshStatus();
-    const { collectionPath, status } = get();
-    if (!collectionPath || !status) return;
+    const { repositoryId, status } = get();
+    if (!repositoryId || !status) return;
     const paths = status.files
       .filter((f: FileStatus) => !f.staged && f.status !== 'unchanged')
       .map((f: FileStatus) => f.path);
     if (paths.length === 0) return;
     try {
-      await gitStage(collectionPath, paths);
+      await gitStage(repositoryId, paths);
       await get().refreshStatus();
     } catch (e) {
       set({ error: String(e) });
@@ -342,10 +342,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Save current working-tree changes as a new stash entry.
   saveStash: async (message: string) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitStashSave(collectionPath, message);
+      await gitStashSave(repositoryId, message);
       await get().refreshStatus();
       await get().refreshStashes();
     } catch (e) {
@@ -355,10 +355,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Pop the stash at the given index and restore it to the working tree.
   popStash: async (index: number) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitStashPop(collectionPath, index);
+      await gitStashPop(repositoryId, index);
       await get().refreshStatus();
       await get().refreshStashes();
     } catch (e) {
@@ -368,10 +368,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Apply the stash at the given index without removing it.
   applyStash: async (index: number) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitStashApply(collectionPath, index);
+      await gitStashApply(repositoryId, index);
       await get().refreshStatus();
       await get().refreshStashes();
     } catch (e) {
@@ -381,10 +381,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Drop (delete) the stash at the given index.
   dropStash: async (index: number) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitStashDrop(collectionPath, index);
+      await gitStashDrop(repositoryId, index);
       await get().refreshStashes();
     } catch (e) {
       set({ error: String(e) });
@@ -393,13 +393,13 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Apply stashes ascending (stash@{0} first). Apply leaves the stack intact so no renumbering occurs.
   applyStashMany: async (indices: number[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     const sorted = [...indices].sort((a, b) => a - b);
     set({ error: null });
     for (const index of sorted) {
       try {
-        await gitStashApply(collectionPath, index);
+        await gitStashApply(repositoryId, index);
       } catch (e) {
         set({
           error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already applied.`,
@@ -413,13 +413,13 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Pop multiple stashes oldest-first (descending index) to avoid renumbering. Stops on first error.
   popStashMany: async (indices: number[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     const sorted = [...indices].sort((a, b) => b - a);
     set({ error: null });
     for (const index of sorted) {
       try {
-        await gitStashPop(collectionPath, index);
+        await gitStashPop(repositoryId, index);
       } catch (e) {
         set({
           error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already popped.`,
@@ -433,13 +433,13 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Drop multiple stashes oldest-first (descending index) to avoid renumbering. Stops on first error. No working-tree changes.
   dropStashMany: async (indices: number[]) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     const sorted = [...indices].sort((a, b) => b - a);
     set({ error: null });
     for (const index of sorted) {
       try {
-        await gitStashDrop(collectionPath, index);
+        await gitStashDrop(repositoryId, index);
       } catch (e) {
         set({
           error: `Failed at stash@{${index}}: ${String(e)}. Stashes processed before this one were already dropped.`,
@@ -452,10 +452,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Switch to the named branch.
   switchBranch: async (name) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitSwitchBranch(collectionPath, name);
+      await gitSwitchBranch(repositoryId, name);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
@@ -465,10 +465,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Check out a remote branch as a new local tracking branch.
   checkoutRemoteBranch: async (name) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitCheckoutRemoteBranch(collectionPath, name);
+      await gitCheckoutRemoteBranch(repositoryId, name);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
@@ -478,10 +478,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Create a new branch with the given name and switch to it.
   createBranch: async (name) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitCreateBranch(collectionPath, name);
+      await gitCreateBranch(repositoryId, name);
       await Promise.all([get().refreshBranches(), get().refreshStatus()]);
     } catch (e) {
       set({ error: String(e) });
@@ -490,10 +490,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Delete the named branch.
   deleteBranch: async (name) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitDeleteBranch(collectionPath, name);
+      await gitDeleteBranch(repositoryId, name);
       await get().refreshBranches();
     } catch (e) {
       set({ error: String(e) });
@@ -502,10 +502,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Merge the named branch into the current branch.
   mergeBranch: async (name) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitMergeBranch(collectionPath, name);
+      await gitMergeBranch(repositoryId, name);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
@@ -515,10 +515,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Add a new remote.
   addRemote: async (name: string, url: string) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitAddRemote(collectionPath, name, url);
+      await gitAddRemote(repositoryId, name, url);
       await get().refreshRemotes();
     } catch (e) {
       set({ error: String(e) });
@@ -527,10 +527,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Remove a remote.
   removeRemote: async (name: string) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitRemoveRemote(collectionPath, name);
+      await gitRemoveRemote(repositoryId, name);
       await get().refreshRemotes();
     } catch (e) {
       set({ error: String(e) });
@@ -539,10 +539,10 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Update the URL for an existing remote.
   setRemoteUrl: async (name: string, url: string) => {
-    const { collectionPath } = get();
-    if (!collectionPath) return;
+    const { repositoryId } = get();
+    if (!repositoryId) return;
     try {
-      await gitSetRemoteUrl(collectionPath, name, url);
+      await gitSetRemoteUrl(repositoryId, name, url);
       await get().refreshRemotes();
     } catch (e) {
       set({ error: String(e) });
@@ -551,7 +551,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Store credentials, close the dialog, and auto-retry the operation that triggered it.
   setCredentials: (creds) => {
-    const { pendingNetworkOp, collectionPath } = get();
+    const { pendingNetworkOp, repositoryId } = get();
 
     // Close the credentials dialog immediately so the user gets instant feedback and
     // so no user action (Escape/overlay click) can fire onOpenChange and clear
@@ -560,10 +560,10 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ showCredentialsDialog: false });
 
     // SSH key: prompt user to confirm/update git identity before activating.
-    if (creds.type === 'sshKey' && collectionPath) {
+    if (creds.type === 'sshKey' && repositoryId) {
       void (async () => {
         try {
-          const identity = await gitGetIdentity(collectionPath);
+          const identity = await gitGetIdentity(repositoryId);
           set({
             pendingCredentialsForIdentitySetup: creds,
             showIdentitySetupDialog: true,
@@ -610,8 +610,8 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Push local commits to the remote, prompting for credentials if needed.
   push: async (remote) => {
-    const { collectionPath, credentials } = get();
-    if (!collectionPath) return;
+    const { repositoryId, credentials } = get();
+    if (!repositoryId) return;
     if (!credentials) {
       set({ showCredentialsDialog: true, pendingNetworkOp: 'push' });
       return;
@@ -619,7 +619,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
-      await gitPush(collectionPath, resolvedRemote, credentials);
+      await gitPush(repositoryId, resolvedRemote, credentials);
       await get().refreshStatus();
     } catch (e) {
       const msg = String(e);
@@ -636,8 +636,8 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Pull remote commits into the current branch, prompting for credentials if needed.
   pull: async (remote) => {
-    const { collectionPath, credentials } = get();
-    if (!collectionPath) return;
+    const { repositoryId, credentials } = get();
+    if (!repositoryId) return;
     if (!credentials) {
       set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' });
       return;
@@ -645,7 +645,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
-      await gitPull(collectionPath, resolvedRemote, credentials);
+      await gitPull(repositoryId, resolvedRemote, credentials);
     } catch (e) {
       const msg = String(e);
       const isAuthError =
@@ -665,8 +665,8 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   // Fetch remote refs without merging, prompting for credentials if needed.
   fetch: async (remote) => {
-    const { collectionPath, credentials } = get();
-    if (!collectionPath) return;
+    const { repositoryId, credentials } = get();
+    if (!repositoryId) return;
     if (!credentials) {
       set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' });
       return;
@@ -674,7 +674,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const resolvedRemote = remote ?? get().remotes[0]?.name;
     set({ error: null });
     try {
-      await gitFetch(collectionPath, resolvedRemote, credentials);
+      await gitFetch(repositoryId, resolvedRemote, credentials);
       await get().refreshStatus();
       await get().refreshBranches();
     } catch (e) {
@@ -690,11 +690,11 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 
-  // Initialize a new git repository at the given path then load it into the store.
-  initRepo: async (path: string) => {
+  // Initialize a new git repository then load it into the store.
+  initRepo: async (repositoryId: string) => {
     try {
-      await gitInit(path);
-      await get().setCollection(path);
+      await gitInit(repositoryId);
+      await get().setRepository(repositoryId);
     } catch (e) {
       set({ error: String(e) });
     }
@@ -704,7 +704,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   reset: () => {
     set({
       isRepo: false,
-      collectionPath: null,
+      repositoryId: null,
       status: null,
       conflicts: [],
       stashes: [],

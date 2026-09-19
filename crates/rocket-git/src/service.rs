@@ -1,11 +1,14 @@
-use rocket_shared::error::DomainResult;
 use crate::{
-    status::RepoStatus, diff::FileDiff, branch::BranchList,
-    commit::CommitInfo, stash::StashEntry,
+    branch::BranchList,
+    commit::CommitInfo,
     conflict::{ConflictFile, ConflictResolution},
     credentials::GitCredentials,
+    diff::FileDiff,
     remote::{FetchResult, RemoteInfo},
+    stash::StashEntry,
+    status::RepoStatus,
 };
+use rocket_shared::error::DomainResult;
 
 pub trait GitService: Send + Sync {
     // Repository
@@ -56,7 +59,12 @@ pub trait GitService: Send + Sync {
 
     // Conflicts
     fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>>;
-    fn resolve_conflict(&self, path: &str, file: &str, resolution: &ConflictResolution) -> DomainResult<()>;
+    fn resolve_conflict(
+        &self,
+        path: &str,
+        file: &str,
+        resolution: &ConflictResolution,
+    ) -> DomainResult<()>;
     fn abort_merge(&self, path: &str) -> DomainResult<()>;
 }
 
@@ -64,5 +72,7 @@ pub trait GitService: Send + Sync {
 mod tests {
     use super::*;
     #[test]
-    fn trait_is_object_safe() { fn _assert(_: Box<dyn GitService>) {} }
+    fn trait_is_object_safe() {
+        fn _assert(_: Box<dyn GitService>) {}
+    }
 }

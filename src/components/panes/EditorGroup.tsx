@@ -185,8 +185,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (
             <GitPanel
-              collectionPath={activeTab.collectionPath}
-              collectionName={activeTab.collectionName}
+              repositoryId={activeTab.repositoryId}
+              repositoryLabel={activeTab.repositoryLabel}
             />
           ) : isContractTab(activeTab) ? (
             <ContractsTab

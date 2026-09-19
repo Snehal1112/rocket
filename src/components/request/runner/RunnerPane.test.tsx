@@ -50,7 +50,13 @@ describe('RunnerPane', () => {
   it('shows a collection picker when collectionName is null', async () => {
     const { listCollections } = await import('@/lib/tauri-api');
     vi.mocked(listCollections).mockResolvedValue([
-      { uid: 'c1', name: 'demo', path: '/tmp/demo', requestCount: 1 },
+      {
+        uid: 'c1',
+        repositoryId: 'collection:default:c1',
+        name: 'demo',
+        path: '/tmp/demo',
+        requestCount: 1,
+      },
     ]);
 
     render(<RunnerPane tab={pickerTab()} groupId='g1' />);
@@ -62,7 +68,13 @@ describe('RunnerPane', () => {
     const user = userEvent.setup();
     const { getCollection, listCollections } = await import('@/lib/tauri-api');
     vi.mocked(listCollections).mockResolvedValue([
-      { uid: 'c1', name: 'demo', path: '/tmp/demo', requestCount: 1 },
+      {
+        uid: 'c1',
+        repositoryId: 'collection:default:c1',
+        name: 'demo',
+        path: '/tmp/demo',
+        requestCount: 1,
+      },
     ]);
     vi.mocked(getCollection).mockResolvedValue({
       name: 'demo',

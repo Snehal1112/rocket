@@ -32,10 +32,16 @@ struct DestinationIdentity {
     device: u64,
     #[cfg(unix)]
     inode: u64,
+    #[cfg(unix)]
+    change_time_seconds: i64,
+    #[cfg(unix)]
+    change_time_nanoseconds: i64,
     #[cfg(windows)]
     volume_serial_number: u32,
     #[cfg(windows)]
     file_index: u64,
+    #[cfg(windows)]
+    creation_time: u64,
 }
 
 #[derive(Debug)]
@@ -268,6 +274,8 @@ fn destination_identity(metadata: &Metadata) -> DomainResult<DestinationIdentity
     Ok(DestinationIdentity {
         device: metadata.dev(),
         inode: metadata.ino(),
+        change_time_seconds: metadata.ctime(),
+        change_time_nanoseconds: metadata.ctime_nsec(),
     })
 }
 
@@ -285,6 +293,7 @@ fn destination_identity(metadata: &Metadata) -> DomainResult<DestinationIdentity
     Ok(DestinationIdentity {
         volume_serial_number,
         file_index,
+        creation_time: metadata.creation_time(),
     })
 }
 

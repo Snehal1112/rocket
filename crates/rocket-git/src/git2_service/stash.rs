@@ -5,8 +5,7 @@ use crate::stash::StashEntry;
 
 #[tracing::instrument(name = "git_stash_list", fields(repo_path = %path))]
 pub(super) fn stash_list(path: &str) -> DomainResult<Vec<StashEntry>> {
-    let mut repo = Repository::open(path)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
 
     // Collect raw data first — stash_foreach borrows repo mutably, so we
     // can't call repo.find_commit() inside the closure.
@@ -71,7 +70,12 @@ pub(super) fn stash_list(path: &str) -> DomainResult<Vec<StashEntry>> {
                     None,
                 )
                 .ok()?;
-                Some((stats.files_changed(), stats.insertions(), stats.deletions(), paths))
+                Some((
+                    stats.files_changed(),
+                    stats.insertions(),
+                    stats.deletions(),
+                    paths,
+                ))
             })
             .unwrap_or_default();
 
@@ -92,8 +96,7 @@ pub(super) fn stash_list(path: &str) -> DomainResult<Vec<StashEntry>> {
 
 #[tracing::instrument(name = "git_stash_save", fields(repo_path = %path))]
 pub(super) fn stash_save(path: &str, message: &str) -> DomainResult<()> {
-    let mut repo = Repository::open(path)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
     let sig = repo
         .signature()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -109,8 +112,7 @@ pub(super) fn stash_save(path: &str, message: &str) -> DomainResult<()> {
 
 #[tracing::instrument(name = "git_stash_pop", fields(repo_path = %path, index = %index))]
 pub(super) fn stash_pop(path: &str, index: usize) -> DomainResult<()> {
-    let mut repo = Repository::open(path)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
     repo.stash_pop(index, None)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     Ok(())
@@ -118,8 +120,7 @@ pub(super) fn stash_pop(path: &str, index: usize) -> DomainResult<()> {
 
 #[tracing::instrument(name = "git_stash_apply", fields(repo_path = %path, index = %index))]
 pub(super) fn stash_apply(path: &str, index: usize) -> DomainResult<()> {
-    let mut repo = Repository::open(path)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
     repo.stash_apply(index, None)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     Ok(())
@@ -127,8 +128,7 @@ pub(super) fn stash_apply(path: &str, index: usize) -> DomainResult<()> {
 
 #[tracing::instrument(name = "git_stash_drop", fields(repo_path = %path, index = %index))]
 pub(super) fn stash_drop(path: &str, index: usize) -> DomainResult<()> {
-    let mut repo = Repository::open(path)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
     repo.stash_drop(index)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     Ok(())

@@ -38,7 +38,7 @@ export function CollectionDropdown() {
 
   const handleSelect = (summary: CollectionSummary) => {
     switchCollection(summary.name);
-    useGitStore.getState().setCollection(summary.path);
+    void useGitStore.getState().setRepository(summary.repositoryId);
     setOpen(false);
   };
 

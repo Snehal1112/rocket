@@ -65,6 +65,7 @@ export interface CollectionSettings {
 
 export interface CollectionSummary {
   uid: string;
+  repositoryId: string;
   name: string;
   path: string;
   requestCount: number;
@@ -396,6 +397,87 @@ export type GitCredentials =
   | { type: 'userPass'; username: string; password: string }
   | { type: 'token'; token: string };
 
+/**
+ * Structured Git network error returned by `git_clone`, `git_push_v2`,
+ * `git_pull_v2`, and `git_fetch_v2`. These commands reject with this typed
+ * object (not a plain string like other Git commands), so callers must use
+ * `parseGitNetworkError` rather than `String(error)`.
+ */
+export type GitNetworkError =
+  | {
+      code: 'sshUnknownHost' | 'sshHostKeyChanged' | 'sshHostVerificationUnavailable';
+      message: string;
+      host: string;
+      port: number;
+      algorithm: string;
+      fingerprint: string;
+    }
+  | { code: 'generic'; message: string };
+
+/** The three SSH host-trust failure variants of {@link GitNetworkError}. */
+export type GitSshTrustFailure = Extract<
+  GitNetworkError,
+  { code: 'sshUnknownHost' | 'sshHostKeyChanged' | 'sshHostVerificationUnavailable' }
+>;
+
+const GIT_SSH_TRUST_FAILURE_CODES = new Set<GitSshTrustFailure['code']>([
+  'sshUnknownHost',
+  'sshHostKeyChanged',
+  'sshHostVerificationUnavailable',
+]);
+
+export function isGitSshTrustFailure(error: GitNetworkError): error is GitSshTrustFailure {
+  return GIT_SSH_TRUST_FAILURE_CODES.has(error.code as GitSshTrustFailure['code']);
+}
+
+/**
+ * Normalize a rejected `git_clone`/`git_push_v2`/`git_pull_v2`/`git_fetch_v2`
+ * promise into a {@link GitNetworkError}. Tauri rejects with the deserialized
+ * JSON error object for these commands, but this defensively falls back to a
+ * generic error for any unexpected shape (e.g. a transport-level rejection).
+ */
+export function parseGitNetworkError(error: unknown): GitNetworkError {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    'message' in error &&
+    typeof (error as { code: unknown }).code === 'string' &&
+    typeof (error as { message: unknown }).message === 'string'
+  ) {
+    const candidate = error as { code: string; message: string };
+    if (GIT_SSH_TRUST_FAILURE_CODES.has(candidate.code as GitSshTrustFailure['code'])) {
+      const trust = error as {
+        code: string;
+        message: string;
+        host?: unknown;
+        port?: unknown;
+        algorithm?: unknown;
+        fingerprint?: unknown;
+      };
+      if (
+        typeof trust.host === 'string' &&
+        typeof trust.port === 'number' &&
+        typeof trust.algorithm === 'string' &&
+        typeof trust.fingerprint === 'string'
+      ) {
+        return {
+          code: trust.code as GitSshTrustFailure['code'],
+          message: trust.message,
+          host: trust.host,
+          port: trust.port,
+          algorithm: trust.algorithm,
+          fingerprint: trust.fingerprint,
+        };
+      }
+    }
+    if (candidate.code === 'generic') {
+      return { code: 'generic', message: candidate.message };
+    }
+  }
+  return { code: 'generic', message: String(error) };
+}
+
 export interface RemoteInfo {
   name: string;
   url: string;
@@ -424,6 +506,7 @@ export interface ClonedRepoStructure {
 
 export interface Workspace {
   id: string;
+  repositoryId: string;
   name: string;
   path: string;
   description?: string | null;
@@ -718,10 +801,10 @@ export const stopWatching = () => invoke<void>('stop_watching');
 // Git
 // ============================================================
 
-export const gitIsRepo = (collectionPath: string) =>
-  invoke<boolean>('git_is_repo', { collectionPath });
+export const gitIsRepo = (repositoryId: string) =>
+  invoke<boolean>('git_is_repo_v2', { repositoryId });
 
-export const gitInit = (collectionPath: string) => invoke<void>('git_init', { collectionPath });
+export const gitInit = (repositoryId: string) => invoke<void>('git_init_v2', { repositoryId });
 
 export const selectCloneDestination = () =>
   invoke<CloneDestinationGrant | null>('select_clone_destination');
@@ -729,104 +812,104 @@ export const selectCloneDestination = () =>
 export const gitClone = (url: string, capability: string, creds: GitCredentials) =>
   invoke<void>('git_clone', { url, capability, creds });
 
-export const gitStatus = (collectionPath: string) =>
-  invoke<RepoStatus>('git_status', { collectionPath });
+export const gitStatus = (repositoryId: string) =>
+  invoke<RepoStatus>('git_status_v2', { repositoryId });
 
-export const gitDiff = (collectionPath: string, file: string) =>
-  invoke<FileDiff>('git_diff', { collectionPath, file });
+export const gitDiff = (repositoryId: string, file: string) =>
+  invoke<FileDiff>('git_diff_v2', { repositoryId, file });
 
-export const gitDiffStaged = (collectionPath: string, file: string) =>
-  invoke<FileDiff>('git_diff_staged', { collectionPath, file });
+export const gitDiffStaged = (repositoryId: string, file: string) =>
+  invoke<FileDiff>('git_diff_staged_v2', { repositoryId, file });
 
-export const gitDiffCommit = (collectionPath: string, oid: string) =>
-  invoke<FileDiff[]>('git_diff_commit', { collectionPath, oid });
+export const gitDiffCommit = (repositoryId: string, oid: string) =>
+  invoke<FileDiff[]>('git_diff_commit_v2', { repositoryId, oid });
 
-export const gitStage = (collectionPath: string, files: string[]) =>
-  invoke<void>('git_stage', { collectionPath, files });
+export const gitStage = (repositoryId: string, files: string[]) =>
+  invoke<void>('git_stage_v2', { repositoryId, files });
 
-export const gitUnstage = (collectionPath: string, files: string[]) =>
-  invoke<void>('git_unstage', { collectionPath, files });
+export const gitUnstage = (repositoryId: string, files: string[]) =>
+  invoke<void>('git_unstage_v2', { repositoryId, files });
 
-export const gitDiscard = (collectionPath: string, files: string[]) =>
-  invoke<void>('git_discard', { collectionPath, files });
+export const gitDiscard = (repositoryId: string, files: string[]) =>
+  invoke<void>('git_discard_v2', { repositoryId, files });
 
-export const gitCommit = (collectionPath: string, message: string) =>
-  invoke<CommitInfo>('git_commit', { collectionPath, message });
+export const gitCommit = (repositoryId: string, message: string) =>
+  invoke<CommitInfo>('git_commit_v2', { repositoryId, message });
 
-export const gitLog = (collectionPath: string, limit: number) =>
-  invoke<CommitInfo[]>('git_log', { collectionPath, limit });
+export const gitLog = (repositoryId: string, limit: number) =>
+  invoke<CommitInfo[]>('git_log_v2', { repositoryId, limit });
 
-export const gitPush = (collectionPath: string, remote: string, creds: GitCredentials) =>
-  invoke<void>('git_push', { collectionPath, remote, creds });
+export const gitPush = (repositoryId: string, remote: string, creds: GitCredentials) =>
+  invoke<void>('git_push_v2', { repositoryId, remote, creds });
 
-export const gitPull = (collectionPath: string, remote: string, creds: GitCredentials) =>
-  invoke<void>('git_pull', { collectionPath, remote, creds });
+export const gitPull = (repositoryId: string, remote: string, creds: GitCredentials) =>
+  invoke<void>('git_pull_v2', { repositoryId, remote, creds });
 
-export const gitFetch = (collectionPath: string, remote: string, creds: GitCredentials) =>
-  invoke<FetchResult>('git_fetch', { collectionPath, remote, creds });
+export const gitFetch = (repositoryId: string, remote: string, creds: GitCredentials) =>
+  invoke<FetchResult>('git_fetch_v2', { repositoryId, remote, creds });
 
-export const gitBranches = (collectionPath: string) =>
-  invoke<BranchList>('git_branches', { collectionPath });
+export const gitBranches = (repositoryId: string) =>
+  invoke<BranchList>('git_branches_v2', { repositoryId });
 
-export const gitSwitchBranch = (collectionPath: string, name: string) =>
-  invoke<void>('git_switch_branch', { collectionPath, name });
+export const gitSwitchBranch = (repositoryId: string, name: string) =>
+  invoke<void>('git_switch_branch_v2', { repositoryId, name });
 
-export const gitCheckoutRemoteBranch = (collectionPath: string, name: string) =>
-  invoke<void>('git_checkout_remote_branch', { collectionPath, name });
+export const gitCheckoutRemoteBranch = (repositoryId: string, name: string) =>
+  invoke<void>('git_checkout_remote_branch_v2', { repositoryId, name });
 
-export const gitCreateBranch = (collectionPath: string, name: string) =>
-  invoke<void>('git_create_branch', { collectionPath, name });
+export const gitCreateBranch = (repositoryId: string, name: string) =>
+  invoke<void>('git_create_branch_v2', { repositoryId, name });
 
-export const gitDeleteBranch = (collectionPath: string, name: string) =>
-  invoke<void>('git_delete_branch', { collectionPath, name });
+export const gitDeleteBranch = (repositoryId: string, name: string) =>
+  invoke<void>('git_delete_branch_v2', { repositoryId, name });
 
-export const gitMergeBranch = (collectionPath: string, name: string) =>
-  invoke<void>('git_merge_branch', { collectionPath, name });
+export const gitMergeBranch = (repositoryId: string, name: string) =>
+  invoke<void>('git_merge_branch_v2', { repositoryId, name });
 
-export const gitStashList = (collectionPath: string) =>
-  invoke<StashEntry[]>('git_stash_list', { collectionPath });
+export const gitStashList = (repositoryId: string) =>
+  invoke<StashEntry[]>('git_stash_list_v2', { repositoryId });
 
-export const gitStashSave = (collectionPath: string, message: string) =>
-  invoke<void>('git_stash_save', { collectionPath, message });
+export const gitStashSave = (repositoryId: string, message: string) =>
+  invoke<void>('git_stash_save_v2', { repositoryId, message });
 
-export const gitStashPop = (collectionPath: string, index: number) =>
-  invoke<void>('git_stash_pop', { collectionPath, index });
+export const gitStashPop = (repositoryId: string, index: number) =>
+  invoke<void>('git_stash_pop_v2', { repositoryId, index });
 
-export const gitStashApply = (collectionPath: string, index: number) =>
-  invoke<void>('git_stash_apply', { collectionPath, index });
+export const gitStashApply = (repositoryId: string, index: number) =>
+  invoke<void>('git_stash_apply_v2', { repositoryId, index });
 
-export const gitStashDrop = (collectionPath: string, index: number) =>
-  invoke<void>('git_stash_drop', { collectionPath, index });
+export const gitStashDrop = (repositoryId: string, index: number) =>
+  invoke<void>('git_stash_drop_v2', { repositoryId, index });
 
-export const gitConflicts = (collectionPath: string) =>
-  invoke<ConflictFile[]>('git_conflicts', { collectionPath });
+export const gitConflicts = (repositoryId: string) =>
+  invoke<ConflictFile[]>('git_conflicts_v2', { repositoryId });
 
 export const gitResolveConflict = (
-  collectionPath: string,
+  repositoryId: string,
   file: string,
   resolution: ConflictResolution,
-) => invoke<void>('git_resolve_conflict', { collectionPath, file, resolution });
+) => invoke<void>('git_resolve_conflict_v2', { repositoryId, file, resolution });
 
-export const gitAbortMerge = (collectionPath: string) =>
-  invoke<void>('git_abort_merge', { collectionPath });
+export const gitAbortMerge = (repositoryId: string) =>
+  invoke<void>('git_abort_merge_v2', { repositoryId });
 
-export const gitListRemotes = (collectionPath: string) =>
-  invoke<RemoteInfo[]>('git_list_remotes', { collectionPath });
+export const gitListRemotes = (repositoryId: string) =>
+  invoke<RemoteInfo[]>('git_list_remotes_v2', { repositoryId });
 
-export const gitAddRemote = (collectionPath: string, name: string, url: string) =>
-  invoke<void>('git_add_remote', { collectionPath, name, url });
+export const gitAddRemote = (repositoryId: string, name: string, url: string) =>
+  invoke<void>('git_add_remote_v2', { repositoryId, name, url });
 
-export const gitRemoveRemote = (collectionPath: string, name: string) =>
-  invoke<void>('git_remove_remote', { collectionPath, name });
+export const gitRemoveRemote = (repositoryId: string, name: string) =>
+  invoke<void>('git_remove_remote_v2', { repositoryId, name });
 
-export const gitSetRemoteUrl = (collectionPath: string, name: string, url: string) =>
-  invoke<void>('git_set_remote_url', { collectionPath, name, url });
+export const gitSetRemoteUrl = (repositoryId: string, name: string, url: string) =>
+  invoke<void>('git_set_remote_url_v2', { repositoryId, name, url });
 
-export const gitGetIdentity = (collectionPath: string) =>
-  invoke<GitIdentity>('git_get_identity', { path: collectionPath });
+export const gitGetIdentity = (repositoryId: string) =>
+  invoke<GitIdentity>('git_get_identity_v2', { repositoryId });
 
-export const gitSetIdentity = (collectionPath: string, name: string, email: string) =>
-  invoke<void>('git_set_identity', { path: collectionPath, name, email });
+export const gitSetIdentity = (repositoryId: string, name: string, email: string) =>
+  invoke<void>('git_set_identity_v2', { repositoryId, name, email });
 
 export const scanCollectionsInPath = (path: string) =>
   invoke<CollectionScanResult[]>('scan_collections_in_path', { path });
@@ -839,11 +922,11 @@ export const getDefaultSshKeyPath = (): Promise<string | null> =>
 
 export const listSshKeyPaths = (): Promise<string[]> => invoke<string[]>('list_ssh_key_paths');
 
-export const saveGitCredentials = (workspaceId: string, creds: GitCredentials): Promise<void> =>
-  invoke<void>('save_git_credentials', { workspaceId, creds });
+export const saveGitCredentials = (repositoryId: string, creds: GitCredentials): Promise<void> =>
+  invoke<void>('save_git_credentials_v2', { repositoryId, creds });
 
-export const loadGitCredentials = (workspaceId: string): Promise<GitCredentials | null> =>
-  invoke<GitCredentials | null>('load_git_credentials', { workspaceId });
+export const loadGitCredentials = (repositoryId: string): Promise<GitCredentials | null> =>
+  invoke<GitCredentials | null>('load_git_credentials_v2', { repositoryId });
 
 // ============================================================
 // Realtime events

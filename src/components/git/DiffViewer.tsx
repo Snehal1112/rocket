@@ -71,8 +71,8 @@ export function DiffViewer({
     async (isStaged: boolean) => {
       try {
         const diff = isStaged
-          ? await gitDiffStaged(diffState.collectionPath, diffState.filePath)
-          : await gitDiff(diffState.collectionPath, diffState.filePath);
+          ? await gitDiffStaged(diffState.repositoryId, diffState.filePath)
+          : await gitDiff(diffState.repositoryId, diffState.filePath);
         setDiffState((prev) => ({
           ...prev,
           oldContent: diff.oldContent ?? '',
@@ -83,7 +83,7 @@ export function DiffViewer({
         // Keep current state on error.
       }
     },
-    [diffState.collectionPath, diffState.filePath],
+    [diffState.repositoryId, diffState.filePath],
   );
 
   // Visual mode is only available for JSON request files.

@@ -35,11 +35,11 @@ type RightPanelView =
   | { kind: 'stashes' };
 
 interface GitPanelProps {
-  collectionPath: string;
-  collectionName: string;
+  repositoryId: string;
+  repositoryLabel: string;
 }
 
-export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
+export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   // null = loading, false = not a repo, true = is a repo.
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [leftWidth, setLeftWidth] = useState(320);
@@ -49,49 +49,46 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
 
-  const {
-    showCredentialsDialog,
-    setCollection,
-    refreshLog,
-    refreshStashes,
-    refreshStatus,
-    status,
-    collectionPath: loadedPath,
-    isRepo: storeIsRepo,
-    initRepo,
-    showIdentitySetupDialog,
-    identitySetupInitialName,
-    identitySetupInitialEmail,
-    activatePendingCredentials,
-  } = useGitStore();
+  const showCredentialsDialog = useGitStore((state) => state.showCredentialsDialog);
+  const setRepository = useGitStore((state) => state.setRepository);
+  const refreshLog = useGitStore((state) => state.refreshLog);
+  const refreshStashes = useGitStore((state) => state.refreshStashes);
+  const refreshStatus = useGitStore((state) => state.refreshStatus);
+  const status = useGitStore((state) => state.status);
+  const loadedRepositoryId = useGitStore((state) => state.repositoryId);
+  const storeIsRepo = useGitStore((state) => state.isRepo);
+  const initRepo = useGitStore((state) => state.initRepo);
+  const showIdentitySetupDialog = useGitStore((state) => state.showIdentitySetupDialog);
+  const identitySetupInitialName = useGitStore((state) => state.identitySetupInitialName);
+  const identitySetupInitialEmail = useGitStore((state) => state.identitySetupInitialEmail);
+  const activatePendingCredentials = useGitStore((state) => state.activatePendingCredentials);
   const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
-  // Initialize the git store for the given path. setCollection handles the isRepo
-  // check internally, so we read back the result from the store rather than
-  // calling gitIsRepo a second time here.
+  // Initialize the git store for the given repository. setRepository handles the
+  // isRepo check internally, so read back the result rather than checking twice.
   const checkAndLoad = useCallback(
-    async (path: string) => {
+    async (id: string) => {
       setIsRepo(null);
       try {
-        await setCollection(path);
+        await setRepository(id);
         setIsRepo(useGitStore.getState().isRepo);
       } catch {
         setIsRepo(false);
       }
     },
-    [setCollection],
+    [setRepository],
   );
 
   useEffect(() => {
-    // Skip the round-trip if the store already has this collection loaded.
-    if (loadedPath === collectionPath) {
+    // Skip the round-trip if the store already has this repository loaded.
+    if (loadedRepositoryId === repositoryId) {
       setIsRepo(storeIsRepo);
       return;
     }
-    void checkAndLoad(collectionPath);
-  }, [collectionPath, checkAndLoad, loadedPath, storeIsRepo]);
+    void checkAndLoad(repositoryId);
+  }, [repositoryId, checkAndLoad, loadedRepositoryId, storeIsRepo]);
 
   // Keyboard handler for the vertical separator: ArrowLeft/ArrowRight adjust width.
   const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -106,7 +103,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
   const handleIdentitySetupConfirm = async (name: string, email: string) => {
     try {
-      await gitSetIdentity(collectionPath, name, email);
+      await gitSetIdentity(repositoryId, name, email);
     } catch {
       // Non-blocking — proceed even if identity save fails.
     }
@@ -119,7 +116,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
 
   const handleCommitClick = async (commit: CommitInfo) => {
     try {
-      const diffs = await gitDiffCommit(collectionPath, commit.fullId);
+      const diffs = await gitDiffCommit(repositoryId, commit.fullId);
       setRightPanel({ kind: 'commitDiff', commit, diffs });
     } catch {
       // If diff fails, silently stay on commits view.
@@ -183,7 +180,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             variant='outline'
             size='sm'
             onClick={async () => {
-              await initRepo(collectionPath);
+              await initRepo(repositoryId);
               setIsRepo(useGitStore.getState().isRepo);
             }}
           >
@@ -220,7 +217,7 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           {/* Collection name header with branch selector. */}
           <div className='flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0'>
             <Package className='h-3.5 w-3.5 text-muted-foreground' />
-            <span className='text-sm font-medium truncate flex-1'>{collectionName}</span>
+            <span className='text-sm font-medium truncate flex-1'>{repositoryLabel}</span>
             <BranchSelector />
           </div>
 
@@ -311,14 +308,19 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
           <div className='flex-1 overflow-hidden'>
             {rightPanel.kind === 'landing' && <GitLandingPanel />}
             {rightPanel.kind === 'diff' && (
-              <DiffViewForFile file={rightPanel.file} collectionPath={collectionPath} />
+              <DiffViewForFile
+                file={rightPanel.file}
+                repositoryId={repositoryId}
+                repositoryLabel={repositoryLabel}
+              />
             )}
             {rightPanel.kind === 'conflict' && (
               <Suspense fallback={null}>
                 <ConflictResolver
                   conflictState={{
                     filePath: rightPanel.conflictFile.path,
-                    collectionPath: collectionPath,
+                    repositoryId,
+                    repositoryLabel,
                     ours: rightPanel.conflictFile.ours,
                     theirs: rightPanel.conflictFile.theirs,
                     ancestor: rightPanel.conflictFile.ancestor ?? null,
@@ -328,7 +330,11 @@ export function GitPanel({ collectionPath, collectionName }: GitPanelProps) {
             )}
             {rightPanel.kind === 'commits' && <GitCommitLog onCommitClick={handleCommitClick} />}
             {rightPanel.kind === 'commitDiff' && (
-              <CommitDiffView diffs={rightPanel.diffs} collectionPath={collectionPath} />
+              <CommitDiffView
+                diffs={rightPanel.diffs}
+                repositoryId={repositoryId}
+                repositoryLabel={repositoryLabel}
+              />
             )}
             {rightPanel.kind === 'stashes' && (
               <div className='overflow-y-auto h-full'>

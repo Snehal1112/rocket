@@ -8,13 +8,19 @@ const DiffViewer = lazy(() => import('./DiffViewer').then((m) => ({ default: m.D
 
 interface CommitDiffViewProps {
   diffs: FileDiff[];
-  collectionPath: string;
+  repositoryId: string;
+  repositoryLabel: string;
 }
 
-function fileDiffToDiffState(diff: FileDiff, collectionPath: string): DiffState {
+function fileDiffToDiffState(
+  diff: FileDiff,
+  repositoryId: string,
+  repositoryLabel: string,
+): DiffState {
   return {
     filePath: diff.path,
-    collectionPath,
+    repositoryId,
+    repositoryLabel,
     oldContent: diff.oldContent ?? '',
     newContent: diff.newContent ?? '',
     status: diff.oldContent == null ? 'added' : diff.newContent == null ? 'deleted' : 'modified',
@@ -28,7 +34,7 @@ function fileStatus(diff: FileDiff): GitStatusKind {
   return 'modified';
 }
 
-export function CommitDiffView({ diffs, collectionPath }: CommitDiffViewProps) {
+export function CommitDiffView({ diffs, repositoryId, repositoryLabel }: CommitDiffViewProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(
     diffs.length > 0 ? diffs[0].path : null,
   );
@@ -75,7 +81,7 @@ export function CommitDiffView({ diffs, collectionPath }: CommitDiffViewProps) {
           <Suspense fallback={null}>
             <DiffViewer
               key={selectedDiff.path}
-              diffState={fileDiffToDiffState(selectedDiff, collectionPath)}
+              diffState={fileDiffToDiffState(selectedDiff, repositoryId, repositoryLabel)}
               hideStageToggle
             />
           </Suspense>

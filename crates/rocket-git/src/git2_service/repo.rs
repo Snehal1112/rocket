@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use git2::Repository;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -23,22 +23,23 @@ pub(super) fn clone_repo(
     url: &str,
     dest_path: &str,
     creds: &GitCredentials,
+    known_hosts_path: Option<PathBuf>,
 ) -> DomainResult<()> {
     let dest = Path::new(dest_path);
-    if dest.is_dir() && std::fs::read_dir(dest).map_or(false, |mut d| d.next().is_some()) {
+    if dest.is_dir() && std::fs::read_dir(dest).is_ok_and(|mut d| d.next().is_some()) {
         return Err(DomainError::InvalidInput(format!(
             "Destination '{}' already exists and is not empty. Please choose an empty directory or a new path.",
             dest_path
         )));
     }
 
-    let callbacks = build_callbacks(creds);
+    let (callbacks, verification) = build_callbacks(creds, url, known_hosts_path);
     let mut fetch_opts = git2::FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
 
     git2::build::RepoBuilder::new()
         .fetch_options(fetch_opts)
         .clone(url, dest)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+        .map_err(|error| verification.map_error(error))?;
     Ok(())
 }

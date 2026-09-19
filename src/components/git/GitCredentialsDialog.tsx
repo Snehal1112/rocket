@@ -20,12 +20,14 @@ import {
   saveGitCredentials,
 } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
-import { useWorkspaceStore } from '@/stores/workspace-store';
 
 type AuthType = 'sshKey' | 'sshAgent' | 'userPass' | 'token';
 
 export function GitCredentialsDialog() {
-  const { showCredentialsDialog, setShowCredentialsDialog, setCredentials } = useGitStore();
+  const showCredentialsDialog = useGitStore((state) => state.showCredentialsDialog);
+  const setShowCredentialsDialog = useGitStore((state) => state.setShowCredentialsDialog);
+  const setCredentials = useGitStore((state) => state.setCredentials);
+  const repositoryId = useGitStore((state) => state.repositoryId);
   const [authType, setAuthType] = useState<AuthType>('sshKey');
   const [privateKeyPath, setPrivateKeyPath] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -34,8 +36,6 @@ export function GitCredentialsDialog() {
   const [token, setToken] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [availableKeyPaths, setAvailableKeyPaths] = useState<string[]>([]);
-
-  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   // On open: load persisted credentials first; fall back to SSH key auto-detection.
   useEffect(() => {
@@ -52,7 +52,7 @@ export function GitCredentialsDialog() {
       }
 
       try {
-        const saved = await loadGitCredentials(activeWorkspaceId);
+        const saved = repositoryId ? await loadGitCredentials(repositoryId) : null;
         if (saved) {
           if (saved.type === 'sshKey') {
             setAuthType('sshKey');
@@ -82,7 +82,7 @@ export function GitCredentialsDialog() {
         // Auto-detection failed — leave field empty (placeholder shown).
       }
     })();
-  }, [showCredentialsDialog, activeWorkspaceId]);
+  }, [showCredentialsDialog, repositoryId]);
 
   const handleBrowseKey = async () => {
     // Always open the picker in ~/.ssh/ — use getDefaultSshKeyPath to resolve
@@ -119,11 +119,14 @@ export function GitCredentialsDialog() {
         break;
     }
 
-    // Persist to OS keychain; surface error inline but never block the connect.
-    try {
-      await saveGitCredentials(activeWorkspaceId, creds);
-    } catch (e) {
-      setSaveError(`Could not save credentials to keychain: ${String(e)}`);
+    // Persist repository-scoped credentials when a repository is active. Clone flows
+    // have no repository yet, but still activate the credentials for the pending operation.
+    if (repositoryId) {
+      try {
+        await saveGitCredentials(repositoryId, creds);
+      } catch (e) {
+        setSaveError(`Could not save credentials to keychain: ${String(e)}`);
+      }
     }
 
     setCredentials(creds);

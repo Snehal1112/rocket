@@ -84,10 +84,7 @@ pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
     }
 
     // Save the current HEAD ref for rollback if checkout fails.
-    let old_head = repo
-        .head()
-        .ok()
-        .and_then(|r| r.name().map(String::from));
+    let old_head = repo.head().ok().and_then(|r| r.name().map(String::from));
 
     repo.set_head(&format!("refs/heads/{name}"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;

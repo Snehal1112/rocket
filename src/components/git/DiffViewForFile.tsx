@@ -8,10 +8,11 @@ const DiffViewer = lazy(() => import('./DiffViewer').then((m) => ({ default: m.D
 
 interface DiffViewForFileProps {
   file: FileStatus;
-  collectionPath: string;
+  repositoryId: string;
+  repositoryLabel: string;
 }
 
-export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) {
+export function DiffViewForFile({ file, repositoryId, repositoryLabel }: DiffViewForFileProps) {
   const [diffState, setDiffState] = useState<DiffState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,12 +26,13 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
     const fetchDiff = async () => {
       try {
         const diff = file.staged
-          ? await gitDiffStaged(collectionPath, file.path)
-          : await gitDiff(collectionPath, file.path);
+          ? await gitDiffStaged(repositoryId, file.path)
+          : await gitDiff(repositoryId, file.path);
         if (cancelled) return;
         setDiffState({
           filePath: file.path,
-          collectionPath,
+          repositoryId,
+          repositoryLabel,
           oldContent: diff.oldContent ?? '',
           newContent: diff.newContent ?? '',
           status: file.status,
@@ -47,7 +49,7 @@ export function DiffViewForFile({ file, collectionPath }: DiffViewForFileProps) 
     return () => {
       cancelled = true;
     };
-  }, [file.path, file.staged, file.status, collectionPath]);
+  }, [file.path, file.staged, file.status, repositoryId, repositoryLabel]);
 
   if (loading) {
     return (

@@ -1,7 +1,7 @@
 # Git UI and Integration Audit — Consolidated Management Report
 
-**Audit date:** 2026-09-19  
-**Decision status:** Remediation required before the Git integration should be treated as safe for destructive or security-sensitive workflows  
+**Audit date:** 2026-09-19
+**Decision status:** Remediation required before the Git integration should be treated as safe for destructive or security-sensitive workflows
 **Audience:** Engineering, product, security, QA, and delivery owners
 
 ## Contents
@@ -335,7 +335,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-001 — Establish the executable Git safety contract
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Add failing-first regression coverage for the reproduced security/data-loss cases and outcome semantics before changing implementation; tests assert rejection plus zero unintended mutation.
 - **Dependencies:** None.
@@ -346,7 +346,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-002 — Constrain repository and file authority at the backend boundary
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Commands accept backend-resolved repository IDs/capabilities; every Git-relative path is validated and symlink-aware before I/O; clone uses a destination-bound capability.
 - **Dependencies:** GIT-001.
@@ -357,7 +357,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-003 — Restore TLS and SSH server verification
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Remove universal certificate acceptance; HTTPS uses normal CA verification; SSH known-host behavior fails closed and exposes a typed unknown/changed-host challenge if explicit trust-on-first-use is supported.
 - **Dependencies:** GIT-001; typed errors from GIT-005 may be staged additively.
@@ -368,7 +368,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-004 — Make destructive operations preflighted, loss-aware, and confirmed
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Reuse target-aware safe checkout; preserve the index on unstaged discard; require merge state for abort; validate conflict membership; add impact previews and confirmations for discard, abort, branch delete, and stash drop.
 - **Dependencies:** GIT-001, GIT-002.
@@ -379,7 +379,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-005 — Introduce typed errors and operation outcomes end to end
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Return structured codes and mutation outcomes (`none`, `completed`, `conflictStateCreated`, `partial`) through git2/app/IPC/store; frontend action results govern control flow.
 - **Dependencies:** GIT-001.
@@ -392,7 +392,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-006 — Make frontend state repository-scoped and race-safe
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Use repository-keyed state or a panel-scoped controller; every action captures an immutable repository identity; stale completions cannot update another panel.
 - **Dependencies:** Prefer GIT-002 repository IDs and GIT-005 outcomes; can begin with explicit captured paths.
@@ -403,7 +403,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-007 — Rebuild clone and credential handling as one scoped workflow
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Exactly one clone operation owns progress/cancel/retry; cloned workspaces, standalone collections, and multi-collection repositories use supported opening paths; secrets remain backend-side in remote-bound credential profiles.
 - **Dependencies:** GIT-002, GIT-003, GIT-005, GIT-006.
@@ -414,7 +414,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-008 — Correct core backend status/diff/stage/commit semantics
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Worktree diff uses index baseline; unborn unstage works; repository/head/content states are explicit; binary/symlink/type/rename behavior is represented without false absence.
 - **Dependencies:** GIT-001, GIT-002, GIT-005.
@@ -425,7 +425,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-009 — Make branch, remote, sync, stash, and conflict flows explicit
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Resolve and display explicit remote/ref targets; support no-remote/multi-remote states; use stable stash identities; provide conflict progression and merge completion.
 - **Dependencies:** GIT-004, GIT-005, GIT-006, GIT-008.
@@ -438,7 +438,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-010 — Define precise invalidation and event semantics
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Mutations return affected facets and emit typed repository-ID events; queries are side-effect-free; frontend invalidation is centralized and detail views hold stable identifiers.
 - **Dependencies:** GIT-005, GIT-006.
@@ -449,7 +449,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-011 — Move blocking work to bounded workers and serialize mutations
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Async Tauri handlers run blocking Git/keyring/filesystem work off command threads; operation IDs, timeout/cancel semantics, progress, and per-repository mutation locks are explicit.
 - **Dependencies:** GIT-005 and stable repository identity from GIT-002.
@@ -460,7 +460,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-012 — Bring Git UI into accessibility and component-policy compliance
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Replace raw controls with shadcn primitives, remove nested interaction patterns, name destructive controls, and announce loading/error/success states.
 - **Dependencies:** GIT-005 operation states; GIT-009 flow semantics.
@@ -473,7 +473,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-013 — Add vertical integration and native smoke coverage
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Exercise wrapper → Tauri dispatch → app service → real git2 with local bare remotes, plus a small stateful browser workflow suite and native desktop smoke path.
 - **Dependencies:** GIT-002–GIT-010 sufficiently stable.
@@ -484,7 +484,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-014 — Add correlated, redacted diagnostics
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Carry operation IDs across IPC/app/git2/events/UI; emit phase/outcome/duration records; detect event/log delivery failures; support privacy-safe local diagnostics.
 - **Dependencies:** GIT-005, GIT-010, GIT-011.
@@ -495,7 +495,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-015 — Realign I/O boundaries incrementally
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Centralize repository location, credential store, host trust, identity config, and SSH discovery behind application traits; move concrete I/O toward `rocket-infra` without blocking urgent fixes.
 - **Dependencies:** Interfaces established by GIT-002, GIT-003, GIT-007.
@@ -506,7 +506,7 @@ Owner and status are intentionally placeholders for planning assignment. IDs are
 
 #### - [ ] GIT-016 — Improve lower-priority Git fidelity after safety work
 
-- **Owner:** TBD  
+- **Owner:** TBD
 - **Status:** Proposed
 - **Recommended outcome:** Document and improve hunk algorithm, log ordering/root behavior, stash options/stats, bare/worktree capabilities, and SSH candidate validation before adding net-new advanced Git features.
 - **Dependencies:** GIT-008, GIT-009, GIT-013.
@@ -569,6 +569,8 @@ Each task is intended to be independently mergeable. The OpenCollection pre-read
 
 #### Task 1.2 — Repository locator and clone destination capability
 
+> **Implementation status (2026-09-19): Complete.** Git IPC now accepts backend-resolved `workspace:<workspace-id>` and `collection:<workspace-id>:<collection-uid>` authority instead of renderer filesystem paths. Resolution is checked against the current workspace registry, embedded collection markers, and explicitly configured external collection references. Clone uses native-picker-issued, one-time, expiring destination capabilities with canonical path and filesystem identity revalidation. Workspace and collection IPC DTOs issue repository IDs, every frontend Git caller and pane/store state uses those IDs, and all legacy path-taking Git commands have been removed from Tauri registration. Validation covers 43 workspace tests, 11 filesystem resolver tests, 9 clone capability tests, 33 workspace-service tests, Tauri DTO/identity tests, 98 focused frontend tests, TypeScript, Biome, and registration/invoke audits.
+
 - **Goal:** Stop treating renderer paths as repository authority.
 - **Files/layers:** app interfaces, Tauri state/commands, workspace/external-collection lookup, wrappers.
 - **Exact steps:**
@@ -582,6 +584,8 @@ Each task is intended to be independently mergeable. The OpenCollection pre-read
 - **Non-goals:** General workspace registry redesign; exposing arbitrary filesystem browsing.
 
 #### Task 1.3 — Fail-closed TLS/SSH verification
+
+> **Implementation status (2026-09-19): In progress.** The shared libgit2 certificate callback no longer returns unconditional `CertificateOk`; failed native HTTPS certificate and SSH host-key verification returns `CertificatePassthrough`, preserving libgit2's rejection across clone, fetch, pull, and push. An offline `ssh2` known-hosts classifier now distinguishes unknown, changed, and unavailable verification states for plain, non-default-port, and hashed OpenSSH entries, and records host, port, algorithm, and OpenSSH SHA-256 fingerprint. Only certificate-class errors are enriched with these details; authentication and unrelated transport failures are preserved. `Git2Service` now takes an injectable `SshTrustStore` (`with_trust_store` / `with_known_hosts_path`), so the dedicated trust-store abstraction is in place. The full `rocket-git` suite has 115 passing and five ignored tests, and the full Tauri application compiles. A structured Tauri error envelope, local invalid-certificate/host-key integration fixtures, and any explicit trust UI remain to be implemented.
 
 - **Goal:** Authenticate the remote before presenting credentials or accepting repository data.
 - **Files/layers:** git2 callbacks, trust-store interface, IPC trust challenge, focused UI.

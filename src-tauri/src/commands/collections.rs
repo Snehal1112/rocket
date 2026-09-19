@@ -1,18 +1,75 @@
-use rocket_app::{CollectionService, ContractService};
+use rocket_app::{CollectionService, ContractService, WorkspaceService};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::{Collection, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::error::DomainError;
+use rocket_workspace::RepositoryId;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionSummaryDto {
+    pub uid: String,
+    pub repository_id: String,
+    pub name: String,
+    pub path: String,
+    pub request_count: usize,
+    pub modified_at: Option<String>,
+    pub ref_type: String,
+}
+
+impl CollectionSummaryDto {
+    fn from_summary(summary: CollectionSummary, workspace_id: &str) -> Result<Self, DomainError> {
+        let repository_id = RepositoryId::collection(workspace_id, &summary.uid)?.to_string();
+        Ok(Self {
+            uid: summary.uid,
+            repository_id,
+            name: summary.name,
+            path: summary.path,
+            request_count: summary.request_count,
+            modified_at: summary.modified_at,
+            ref_type: summary.ref_type,
+        })
+    }
+}
+
 #[tauri::command]
 pub fn list_collections(
-    svc: State<'_, CollectionService>,
-) -> Result<Vec<CollectionSummary>, DomainError> {
-    svc.list()
+    collection_svc: State<'_, CollectionService>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<Vec<CollectionSummaryDto>, DomainError> {
+    let workspace_guard = workspace_svc
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?;
+    let active_workspace = workspace_guard.get_active()?;
+    let collections = collection_svc
+        .list()?
+        .into_iter()
+        .filter_map(|summary| {
+            // Capture identifying fields before `summary` is moved into
+            // `from_summary`, so a failure can still be logged usefully.
+            let uid = summary.uid.clone();
+            let name = summary.name.clone();
+            match CollectionSummaryDto::from_summary(summary, &active_workspace.id) {
+                Ok(dto) => Some(dto),
+                Err(e) => {
+                    // A single collection with a malformed/legacy uid must not
+                    // take down the entire list. Skip it and keep the rest.
+                    tracing::warn!(
+                        uid = %uid,
+                        name = %name,
+                        error = %e,
+                        "collection failed to build repository id — skipping from list"
+                    );
+                    None
+                }
+            }
+        })
+        .collect();
+    Ok(collections)
 }
 
 #[tauri::command]
@@ -385,4 +442,33 @@ pub fn update_request_docs(
     svc: State<'_, CollectionService>,
 ) -> Result<(), DomainError> {
     svc.update_request_docs(&collection, &path, docs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collection_summary_dto_contains_scoped_repository_id() {
+        let summary = CollectionSummary::new(
+            "collection-1",
+            "Collection",
+            "/tmp/collection",
+            2,
+            None,
+        );
+
+        let dto = CollectionSummaryDto::from_summary(summary, "workspace-1")
+            .expect("valid collection summary DTO");
+
+        assert_eq!(
+            dto.repository_id,
+            "collection:workspace-1:collection-1"
+        );
+        let json = serde_json::to_value(dto).expect("serialize collection summary DTO");
+        assert_eq!(
+            json["repositoryId"],
+            "collection:workspace-1:collection-1"
+        );
+    }
 }

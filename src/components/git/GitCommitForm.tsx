@@ -10,7 +10,9 @@ export function GitCommitForm() {
   const [message, setMessage] = useState('');
   const [committing, setCommitting] = useState(false);
   const [showIdentityDialog, setShowIdentityDialog] = useState(false);
-  const { status, commitChanges, collectionPath } = useGitStore();
+  const status = useGitStore((state) => state.status);
+  const commitChanges = useGitStore((state) => state.commitChanges);
+  const repositoryId = useGitStore((state) => state.repositoryId);
 
   const stagedCount = status?.files.filter((f) => f.staged).length ?? 0;
 
@@ -26,12 +28,12 @@ export function GitCommitForm() {
 
   const handleCommit = async () => {
     if (!message.trim() || stagedCount === 0) return;
-    if (!collectionPath) return;
+    if (!repositoryId) return;
 
     // Check identity; treat any error as "identity unknown" — show dialog.
     let identityMissing = false;
     try {
-      const identity = await gitGetIdentity(collectionPath);
+      const identity = await gitGetIdentity(repositoryId);
       identityMissing = !identity.name.trim() || !identity.email.trim();
     } catch {
       identityMissing = true;
@@ -47,9 +49,9 @@ export function GitCommitForm() {
 
   const handleIdentityConfirm = async (name: string, email: string) => {
     setShowIdentityDialog(false);
-    if (!collectionPath) return;
+    if (!repositoryId) return;
     try {
-      await gitSetIdentity(collectionPath, name, email);
+      await gitSetIdentity(repositoryId, name, email);
     } catch (e) {
       useGitStore.setState({ error: `Failed to save git identity: ${String(e)}` });
       return;

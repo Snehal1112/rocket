@@ -361,7 +361,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   openDiffTab(diffState) {
-    const tabId = `diff:${diffState.collectionPath}/${diffState.filePath}:${diffState.isStaged ? 'staged' : 'working'}`;
+    const tabId = `diff:${diffState.repositoryId}/${diffState.filePath}:${diffState.isStaged ? 'staged' : 'working'}`;
     const tab: DiffTab = {
       id: tabId,
       title: `${diffState.filePath} (${diffState.isStaged ? 'Staged' : 'Working'})`,
@@ -373,7 +373,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   openConflictTab(conflictState) {
-    const tabId = `conflict:${conflictState.collectionPath}/${conflictState.filePath}`;
+    const tabId = `conflict:${conflictState.repositoryId}/${conflictState.filePath}`;
     const tab: ConflictTab = {
       id: tabId,
       title: `${conflictState.filePath} (Conflict)`,

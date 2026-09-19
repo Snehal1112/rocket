@@ -6,6 +6,7 @@ import { useGitStore } from '../git-store';
 
 vi.mock('@/lib/tauri-api', () => ({
   gitIsRepo: vi.fn(),
+  gitInit: vi.fn().mockResolvedValue(undefined),
   gitStatus: vi.fn().mockResolvedValue({
     branch: 'main',
     files: [],
@@ -51,16 +52,6 @@ vi.mock('@/lib/tauri-api', () => ({
   gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
 }));
 
-vi.mock('@/stores/workspace-store', () => ({
-  useWorkspaceStore: Object.assign(
-    (selector: (s: { activeWorkspaceId: string; multiWorkspaceMode: boolean }) => unknown) =>
-      selector({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
-    {
-      getState: () => ({ activeWorkspaceId: 'ws-test', multiWorkspaceMode: false }),
-    },
-  ),
-}));
-
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
 
 beforeEach(() => {
@@ -99,7 +90,7 @@ describe('git-store clearError', () => {
   beforeEach(() => {
     useGitStore.setState({
       error: null,
-      collectionPath: null,
+      repositoryId: null,
       credentials: null,
       remotes: [],
     });
@@ -118,7 +109,7 @@ describe('git-store clearError', () => {
 
     useGitStore.setState({
       error: 'stale error',
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
@@ -134,7 +125,7 @@ describe('git-store clearError', () => {
 
     useGitStore.setState({
       error: 'stale error',
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
@@ -154,7 +145,7 @@ describe('git-store clearError', () => {
 
     useGitStore.setState({
       error: 'stale error',
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
@@ -169,7 +160,7 @@ describe('git-store clearError', () => {
     vi.mocked(gitPush).mockRejectedValueOnce(new Error('NotFastForward'));
 
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
@@ -180,10 +171,10 @@ describe('git-store clearError', () => {
   });
 });
 
-describe('setCollection', () => {
+describe('setRepository', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: null,
+      repositoryId: null,
       isRepo: false,
       error: null,
       status: null,
@@ -195,7 +186,7 @@ describe('setCollection', () => {
     vi.clearAllMocks();
   });
 
-  it('non-repo path sets isRepo=false and status=null', async () => {
+  it('non-repository ID sets isRepo=false and status=null', async () => {
     const { gitIsRepo } = await import('@/lib/tauri-api');
     // Seed non-default state so assertions are meaningful.
     useGitStore.setState({
@@ -204,25 +195,25 @@ describe('setCollection', () => {
     });
     vi.mocked(gitIsRepo).mockResolvedValueOnce(false);
 
-    await useGitStore.getState().setCollection('/not/a/repo');
+    await useGitStore.getState().setRepository('repository-not-git');
 
     expect(useGitStore.getState().isRepo).toBe(false);
     expect(useGitStore.getState().status).toBeNull();
   });
 
-  it('valid repo path loads status, branches, remotes, and stashes', async () => {
+  it('valid repository ID loads status, branches, remotes, and stashes', async () => {
     const { gitIsRepo, gitStatus, gitBranches, gitListRemotes, gitStashList } = await import(
       '@/lib/tauri-api'
     );
     vi.mocked(gitIsRepo).mockResolvedValueOnce(true);
 
-    await useGitStore.getState().setCollection('/test/repo');
+    await useGitStore.getState().setRepository('repository-test');
 
     expect(useGitStore.getState().isRepo).toBe(true);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
-    expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
-    expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
+    expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
+    expect(gitStashList).toHaveBeenCalledWith('repository-test');
     // Verify state was actually stored, not just that functions were called.
     expect(useGitStore.getState().status).not.toBeNull();
     expect(useGitStore.getState().loading).toBe(false);
@@ -232,34 +223,46 @@ describe('setCollection', () => {
     const { gitIsRepo } = await import('@/lib/tauri-api');
     vi.mocked(gitIsRepo).mockRejectedValueOnce(new Error('disk error'));
 
-    await useGitStore.getState().setCollection('/test/repo');
+    await useGitStore.getState().setRepository('repository-test');
 
     expect(useGitStore.getState().error).toContain('disk error');
+  });
+
+  it('initRepo initializes and selects the repository ID', async () => {
+    const { gitInit, gitIsRepo } = await import('@/lib/tauri-api');
+    vi.mocked(gitInit).mockResolvedValueOnce(undefined);
+    vi.mocked(gitIsRepo).mockResolvedValueOnce(true);
+
+    await useGitStore.getState().initRepo('repository-test');
+
+    expect(gitInit).toHaveBeenCalledWith('repository-test');
+    expect(gitIsRepo).toHaveBeenCalledWith('repository-test');
+    expect(useGitStore.getState().repositoryId).toBe('repository-test');
   });
 });
 
 // Phase 3 repository-scoping work will make late responses unable to overwrite the active repo.
-knownRedDescribe('known-red: setCollection repository race contracts', () => {
+knownRedDescribe('known-red: setRepository repository race contracts', () => {
   it('keeps B authoritative when delayed A resolves after B', async () => {
     const { gitIsRepo, gitStatus } = await import('@/lib/tauri-api');
     const repoA = createDeferred<boolean>();
     const repoB = createDeferred<boolean>();
 
-    vi.mocked(gitIsRepo).mockImplementation((path) => {
-      if (path === '/collections/A') return repoA.promise;
-      if (path === '/collections/B') return repoB.promise;
-      throw new Error(`Unexpected repository path: ${path}`);
+    vi.mocked(gitIsRepo).mockImplementation((repositoryId) => {
+      if (repositoryId === 'repository-a') return repoA.promise;
+      if (repositoryId === 'repository-b') return repoB.promise;
+      throw new Error(`Unexpected repository ID: ${repositoryId}`);
     });
-    vi.mocked(gitStatus).mockImplementation(async (path) => ({
-      branch: path === '/collections/A' ? 'branch-a' : 'branch-b',
+    vi.mocked(gitStatus).mockImplementation(async (repositoryId) => ({
+      branch: repositoryId === 'repository-a' ? 'branch-a' : 'branch-b',
       files: [],
       ahead: 0,
       behind: 0,
       isClean: true,
     }));
 
-    const loadA = useGitStore.getState().setCollection('/collections/A');
-    const loadB = useGitStore.getState().setCollection('/collections/B');
+    const loadA = useGitStore.getState().setRepository('repository-a');
+    const loadB = useGitStore.getState().setRepository('repository-b');
 
     repoB.resolve(true);
     await loadB;
@@ -267,7 +270,7 @@ knownRedDescribe('known-red: setCollection repository race contracts', () => {
     await loadA;
 
     expect(useGitStore.getState()).toMatchObject({
-      collectionPath: '/collections/B',
+      repositoryId: 'repository-b',
       isRepo: true,
       status: expect.objectContaining({ branch: 'branch-b' }),
       loading: false,
@@ -278,7 +281,7 @@ knownRedDescribe('known-red: setCollection repository race contracts', () => {
 describe('pendingNetworkOp and setCredentials', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       credentials: null,
       error: null,
@@ -307,7 +310,7 @@ describe('pendingNetworkOp and setCredentials', () => {
     useGitStore.getState().setCredentials({ type: 'sshAgent' });
 
     await vi.waitFor(() => {
-      expect(gitPull).toHaveBeenCalledWith('/test/repo', 'origin', { type: 'sshAgent' });
+      expect(gitPull).toHaveBeenCalledWith('repository-test', 'origin', { type: 'sshAgent' });
     });
 
     expect(useGitStore.getState().pendingNetworkOp).toBeNull();
@@ -350,7 +353,7 @@ describe('pendingNetworkOp and setCredentials', () => {
 describe('staging', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       error: null,
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
@@ -363,8 +366,8 @@ describe('staging', () => {
 
     await useGitStore.getState().stageFiles(['foo.bru']);
 
-    expect(gitStage).toHaveBeenCalledWith('/test/repo', ['foo.bru']);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
+    expect(gitStage).toHaveBeenCalledWith('repository-test', ['foo.bru']);
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
   });
 
   it('unstageFiles calls gitUnstage and refreshes status', async () => {
@@ -372,8 +375,8 @@ describe('staging', () => {
 
     await useGitStore.getState().unstageFiles(['foo.bru']);
 
-    expect(gitUnstage).toHaveBeenCalledWith('/test/repo', ['foo.bru']);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
+    expect(gitUnstage).toHaveBeenCalledWith('repository-test', ['foo.bru']);
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
   });
 
   it('stageAll stages only unstaged non-unchanged files', async () => {
@@ -394,7 +397,7 @@ describe('staging', () => {
 
     await useGitStore.getState().stageAll();
 
-    expect(gitStage).toHaveBeenCalledWith('/test/repo', ['unstaged-modified.bru']);
+    expect(gitStage).toHaveBeenCalledWith('repository-test', ['unstaged-modified.bru']);
   });
 
   it('discardFiles calls gitDiscard and refreshes status', async () => {
@@ -402,8 +405,8 @@ describe('staging', () => {
 
     await useGitStore.getState().discardFiles(['foo.bru']);
 
-    expect(gitDiscard).toHaveBeenCalledWith('/test/repo', ['foo.bru']);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
+    expect(gitDiscard).toHaveBeenCalledWith('repository-test', ['foo.bru']);
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
   });
 
   it('commitChanges calls gitCommit and refreshes status', async () => {
@@ -411,8 +414,8 @@ describe('staging', () => {
 
     await useGitStore.getState().commitChanges('initial commit');
 
-    expect(gitCommit).toHaveBeenCalledWith('/test/repo', 'initial commit');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
+    expect(gitCommit).toHaveBeenCalledWith('repository-test', 'initial commit');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
   });
 
   it('stageFiles sets error on failure', async () => {
@@ -428,7 +431,7 @@ describe('staging', () => {
 describe('branches', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       error: null,
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
@@ -442,9 +445,9 @@ describe('branches', () => {
 
     await useGitStore.getState().switchBranch('feature');
 
-    expect(gitSwitchBranch).toHaveBeenCalledWith('/test/repo', 'feature');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+    expect(gitSwitchBranch).toHaveBeenCalledWith('repository-test', 'feature');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
 
   it('createBranch calls api and refreshes branches', async () => {
@@ -452,8 +455,8 @@ describe('branches', () => {
 
     await useGitStore.getState().createBranch('new-branch');
 
-    expect(gitCreateBranch).toHaveBeenCalledWith('/test/repo', 'new-branch');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+    expect(gitCreateBranch).toHaveBeenCalledWith('repository-test', 'new-branch');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
 
   it('deleteBranch calls api and refreshes branches', async () => {
@@ -461,8 +464,8 @@ describe('branches', () => {
 
     await useGitStore.getState().deleteBranch('old-branch');
 
-    expect(gitDeleteBranch).toHaveBeenCalledWith('/test/repo', 'old-branch');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+    expect(gitDeleteBranch).toHaveBeenCalledWith('repository-test', 'old-branch');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
 
   it('mergeBranch calls api and refreshes status and branches', async () => {
@@ -470,9 +473,9 @@ describe('branches', () => {
 
     await useGitStore.getState().mergeBranch('feature');
 
-    expect(gitMergeBranch).toHaveBeenCalledWith('/test/repo', 'feature');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+    expect(gitMergeBranch).toHaveBeenCalledWith('repository-test', 'feature');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
 
   it('switchBranch sets error on failure', async () => {
@@ -489,16 +492,16 @@ describe('branches', () => {
 
     await useGitStore.getState().checkoutRemoteBranch('origin/feature');
 
-    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('/test/repo', 'origin/feature');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitBranches).toHaveBeenCalledWith('/test/repo');
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('repository-test', 'origin/feature');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
 });
 
 describe('stash', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       error: null,
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
@@ -512,9 +515,9 @@ describe('stash', () => {
 
     await useGitStore.getState().saveStash('WIP');
 
-    expect(gitStashSave).toHaveBeenCalledWith('/test/repo', 'WIP');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    expect(gitStashSave).toHaveBeenCalledWith('repository-test', 'WIP');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitStashList).toHaveBeenCalledWith('repository-test');
   });
 
   it('popStash calls api and refreshes status and stashes', async () => {
@@ -522,9 +525,9 @@ describe('stash', () => {
 
     await useGitStore.getState().popStash(0);
 
-    expect(gitStashPop).toHaveBeenCalledWith('/test/repo', 0);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitStashList).toHaveBeenCalledWith('repository-test');
   });
 
   it('applyStash calls api and refreshes status and stashes', async () => {
@@ -532,9 +535,9 @@ describe('stash', () => {
 
     await useGitStore.getState().applyStash(0);
 
-    expect(gitStashApply).toHaveBeenCalledWith('/test/repo', 0);
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    expect(gitStashApply).toHaveBeenCalledWith('repository-test', 0);
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitStashList).toHaveBeenCalledWith('repository-test');
   });
 
   it('dropStash calls api and refreshes stashes but not status', async () => {
@@ -542,8 +545,8 @@ describe('stash', () => {
 
     await useGitStore.getState().dropStash(0);
 
-    expect(gitStashDrop).toHaveBeenCalledWith('/test/repo', 0);
-    expect(gitStashList).toHaveBeenCalledWith('/test/repo');
+    expect(gitStashDrop).toHaveBeenCalledWith('repository-test', 0);
+    expect(gitStashList).toHaveBeenCalledWith('repository-test');
     expect(gitStatus).not.toHaveBeenCalled();
   });
 });
@@ -551,7 +554,7 @@ describe('stash', () => {
 describe('remotes', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       error: null,
       remotes: [],
@@ -565,11 +568,11 @@ describe('remotes', () => {
     await useGitStore.getState().addRemote('upstream', 'https://github.com/org/repo.git');
 
     expect(gitAddRemote).toHaveBeenCalledWith(
-      '/test/repo',
+      'repository-test',
       'upstream',
       'https://github.com/org/repo.git',
     );
-    expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
+    expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
   });
 
   it('removeRemote calls api and refreshes remotes', async () => {
@@ -577,8 +580,8 @@ describe('remotes', () => {
 
     await useGitStore.getState().removeRemote('upstream');
 
-    expect(gitRemoveRemote).toHaveBeenCalledWith('/test/repo', 'upstream');
-    expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
+    expect(gitRemoveRemote).toHaveBeenCalledWith('repository-test', 'upstream');
+    expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
   });
 
   it('setRemoteUrl calls api and refreshes remotes', async () => {
@@ -587,11 +590,11 @@ describe('remotes', () => {
     await useGitStore.getState().setRemoteUrl('origin', 'https://github.com/org/new.git');
 
     expect(gitSetRemoteUrl).toHaveBeenCalledWith(
-      '/test/repo',
+      'repository-test',
       'origin',
       'https://github.com/org/new.git',
     );
-    expect(gitListRemotes).toHaveBeenCalledWith('/test/repo');
+    expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
   });
 
   it('addRemote sets error on failure', async () => {
@@ -607,7 +610,7 @@ describe('remotes', () => {
 describe('conflicts', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       error: null,
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
@@ -621,11 +624,11 @@ describe('conflicts', () => {
 
     await useGitStore.getState().resolveConflict('foo.bru', { resolution: 'ours' });
 
-    expect(gitResolveConflict).toHaveBeenCalledWith('/test/repo', 'foo.bru', {
+    expect(gitResolveConflict).toHaveBeenCalledWith('repository-test', 'foo.bru', {
       resolution: 'ours',
     });
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitConflicts).toHaveBeenCalledWith('/test/repo');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitConflicts).toHaveBeenCalledWith('repository-test');
   });
 
   it('abortMerge calls api and refreshes status and conflicts', async () => {
@@ -633,9 +636,9 @@ describe('conflicts', () => {
 
     await useGitStore.getState().abortMerge();
 
-    expect(gitAbortMerge).toHaveBeenCalledWith('/test/repo');
-    expect(gitStatus).toHaveBeenCalledWith('/test/repo');
-    expect(gitConflicts).toHaveBeenCalledWith('/test/repo');
+    expect(gitAbortMerge).toHaveBeenCalledWith('repository-test');
+    expect(gitStatus).toHaveBeenCalledWith('repository-test');
+    expect(gitConflicts).toHaveBeenCalledWith('repository-test');
   });
 });
 
@@ -648,7 +651,7 @@ describe('reset', () => {
   it('reset clears all state to initial values including pendingNetworkOp', () => {
     useGitStore.setState({
       isRepo: true,
-      collectionPath: '/some/path',
+      repositoryId: 'repository-some',
       error: 'some error',
       credentials: { type: 'sshAgent' },
       showCredentialsDialog: true,
@@ -661,7 +664,7 @@ describe('reset', () => {
 
     const s = useGitStore.getState();
     expect(s.isRepo).toBe(false);
-    expect(s.collectionPath).toBeNull();
+    expect(s.repositoryId).toBeNull();
     expect(s.status).toBeNull();
     expect(s.conflicts).toEqual([]);
     expect(s.stashes).toEqual([]);
@@ -679,7 +682,7 @@ describe('git-store stash batch operations', () => {
   beforeEach(() => {
     useGitStore.setState({
       error: null,
-      collectionPath: '/test/repo',
+      repositoryId: 'repository-test',
       isRepo: true,
       stashes: [],
     });
@@ -689,7 +692,7 @@ describe('git-store stash batch operations', () => {
   it('applyStashMany applies indices in ascending order (newest first)', async () => {
     const { gitStashApply } = await import('@/lib/tauri-api');
     const order: number[] = [];
-    vi.mocked(gitStashApply).mockImplementation(async (_path, index) => {
+    vi.mocked(gitStashApply).mockImplementation(async (_repositoryId, index) => {
       order.push(index);
     });
 
@@ -724,7 +727,7 @@ describe('git-store stash batch operations', () => {
   it('popStashMany applies indices in descending order (oldest first)', async () => {
     const { gitStashPop } = await import('@/lib/tauri-api');
     const order: number[] = [];
-    vi.mocked(gitStashPop).mockImplementation(async (_path, index) => {
+    vi.mocked(gitStashPop).mockImplementation(async (_repositoryId, index) => {
       order.push(index);
     });
 
@@ -736,7 +739,7 @@ describe('git-store stash batch operations', () => {
   it('dropStashMany applies indices in descending order (oldest first)', async () => {
     const { gitStashDrop } = await import('@/lib/tauri-api');
     const order: number[] = [];
-    vi.mocked(gitStashDrop).mockImplementation(async (_path, index) => {
+    vi.mocked(gitStashDrop).mockImplementation(async (_repositoryId, index) => {
       order.push(index);
     });
 
@@ -760,7 +763,7 @@ describe('git-store credential auto-load', () => {
   beforeEach(() => {
     useGitStore.setState({
       isRepo: false,
-      collectionPath: null,
+      repositoryId: null,
       credentials: null,
       status: null,
       branches: null,
@@ -776,7 +779,7 @@ describe('git-store credential auto-load', () => {
     vi.clearAllMocks();
   });
 
-  it('auto-loads saved credentials from keychain when collection is a repo', async () => {
+  it('auto-loads saved credentials from keychain when repository ID is a repo', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
     const savedCreds = {
       type: 'sshKey',
@@ -786,9 +789,9 @@ describe('git-store credential auto-load', () => {
     vi.mocked(gitIsRepo).mockResolvedValue(true);
     vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
 
-    await useGitStore.getState().setCollection('/some/path');
+    await useGitStore.getState().setRepository('repository-some');
 
-    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
     expect(useGitStore.getState().credentials).toEqual(savedCreds);
   });
 
@@ -797,24 +800,24 @@ describe('git-store credential auto-load', () => {
     vi.mocked(gitIsRepo).mockResolvedValue(true);
     vi.mocked(loadGitCredentials).mockResolvedValue(null);
 
-    await useGitStore.getState().setCollection('/some/path');
+    await useGitStore.getState().setRepository('repository-some');
 
-    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
     expect(useGitStore.getState().credentials).toBeNull();
   });
 
-  it('overwrites existing credentials with keychain result (always reloads on setCollection)', async () => {
+  it('overwrites existing credentials with keychain result (always reloads on setRepository)', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
     const existing = { type: 'token' as const, token: 'mytoken' };
     useGitStore.setState({ credentials: existing as unknown as GitCredentials });
     vi.mocked(loadGitCredentials).mockResolvedValue(null);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
 
-    await useGitStore.getState().setCollection('/some/collection');
+    await useGitStore.getState().setRepository('repository-some');
 
-    // New design: always reloads workspace-scoped credentials on setCollection;
+    // Always reload repository-scoped credentials on setRepository;
     // keychain returning null clears any previously-set in-memory credentials.
-    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('ws-test');
+    expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
     expect(useGitStore.getState().credentials).toBeNull();
   });
 });
@@ -822,7 +825,7 @@ describe('git-store credential auto-load', () => {
 describe('git-store identity setup flow', () => {
   beforeEach(() => {
     useGitStore.setState({
-      collectionPath: null,
+      repositoryId: null,
       credentials: null,
       showCredentialsDialog: false,
       showIdentitySetupDialog: false,
@@ -836,10 +839,10 @@ describe('git-store identity setup flow', () => {
     vi.clearAllMocks();
   });
 
-  it('setCredentials with sshKey and collectionPath shows identity setup dialog', async () => {
+  it('setCredentials with sshKey and repositoryId shows identity setup dialog', async () => {
     const { gitGetIdentity } = await import('@/lib/tauri-api');
     vi.mocked(gitGetIdentity).mockResolvedValue({ name: 'Snehal', email: 'snehal@example.com' });
-    useGitStore.setState({ collectionPath: '/some/repo' });
+    useGitStore.setState({ repositoryId: 'repository-some' });
 
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
     useGitStore.getState().setCredentials(creds);
@@ -854,8 +857,8 @@ describe('git-store identity setup flow', () => {
     expect(state.identitySetupInitialEmail).toBe('snehal@example.com');
   });
 
-  it('setCredentials with sshKey but no collectionPath activates immediately', () => {
-    useGitStore.setState({ collectionPath: null });
+  it('setCredentials with sshKey but no repositoryId activates immediately', () => {
+    useGitStore.setState({ repositoryId: null });
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
 
     useGitStore.getState().setCredentials(creds);
@@ -866,7 +869,7 @@ describe('git-store identity setup flow', () => {
   });
 
   it('setCredentials with token creds activates immediately without identity dialog', () => {
-    useGitStore.setState({ collectionPath: '/some/repo' });
+    useGitStore.setState({ repositoryId: 'repository-some' });
     const creds: GitCredentials = { type: 'token', token: 'ghp_xxx' };
 
     useGitStore.getState().setCredentials(creds);
@@ -879,7 +882,7 @@ describe('git-store identity setup flow', () => {
   it('setCredentials with sshKey falls back to immediate activation when gitGetIdentity throws', async () => {
     const { gitGetIdentity } = await import('@/lib/tauri-api');
     vi.mocked(gitGetIdentity).mockRejectedValue(new Error('no repo'));
-    useGitStore.setState({ collectionPath: '/some/repo' });
+    useGitStore.setState({ repositoryId: 'repository-some' });
 
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
     useGitStore.getState().setCredentials(creds);
@@ -915,7 +918,7 @@ describe('git-store identity setup flow', () => {
     vi.mocked(gitPush).mockResolvedValue(undefined);
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
     useGitStore.setState({
-      collectionPath: '/some/repo',
+      repositoryId: 'repository-some',
       pendingCredentialsForIdentitySetup: creds,
       showIdentitySetupDialog: true,
       pendingNetworkOp: 'push',
@@ -925,7 +928,7 @@ describe('git-store identity setup flow', () => {
     useGitStore.getState().activatePendingCredentials();
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('/some/repo', 'origin', creds);
+    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds);
   });
 
   it('activatePendingCredentials is a no-op when no pending credentials exist', () => {

@@ -54,11 +54,17 @@ impl RepoStatus {
     }
 
     pub fn staged_count(&self) -> usize {
-        self.files.iter().filter(|f| f.staged && f.status.is_changed()).count()
+        self.files
+            .iter()
+            .filter(|f| f.staged && f.status.is_changed())
+            .count()
     }
 
     pub fn unstaged_count(&self) -> usize {
-        self.files.iter().filter(|f| !f.staged && f.status.is_changed()).count()
+        self.files
+            .iter()
+            .filter(|f| !f.staged && f.status.is_changed())
+            .count()
     }
 }
 
@@ -88,9 +94,21 @@ mod tests {
         let status = RepoStatus {
             branch: "main".into(),
             files: vec![
-                FileStatus { path: "a.bru".into(), status: GitStatus::Modified, staged: false },
-                FileStatus { path: "b.bru".into(), status: GitStatus::Added, staged: true },
-                FileStatus { path: "c.bru".into(), status: GitStatus::Unchanged, staged: false },
+                FileStatus {
+                    path: "a.bru".into(),
+                    status: GitStatus::Modified,
+                    staged: false,
+                },
+                FileStatus {
+                    path: "b.bru".into(),
+                    status: GitStatus::Added,
+                    staged: true,
+                },
+                FileStatus {
+                    path: "c.bru".into(),
+                    status: GitStatus::Unchanged,
+                    staged: false,
+                },
             ],
             ahead: 1,
             behind: 0,
@@ -103,7 +121,11 @@ mod tests {
 
     #[test]
     fn file_status_serialization_roundtrip() {
-        let fs = FileStatus { path: "auth/login.bru".into(), status: GitStatus::Modified, staged: false };
+        let fs = FileStatus {
+            path: "auth/login.bru".into(),
+            status: GitStatus::Modified,
+            staged: false,
+        };
         let json = serde_json::to_string(&fs).unwrap();
         assert!(json.contains("\"status\":\"modified\""));
         let deserialized: FileStatus = serde_json::from_str(&json).unwrap();

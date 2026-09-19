@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use git2::{Repository, Status};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -7,18 +8,112 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::credentials::GitCredentials;
 use crate::diff::{DiffHunk, DiffLine, LineType};
 use crate::status::GitStatus;
+use crate::{SshHostFailure, SshHostFailureKind};
 
-/// Build credential callbacks for remote operations.
+use super::ssh_host_verification::{
+    classify_remote_host, openssh_sha256_fingerprint, SshHostClassification,
+};
+
+#[derive(Clone, Default)]
+pub(super) struct RemoteVerificationState {
+    ssh_failure: Arc<Mutex<Option<SshHostFailure>>>,
+}
+
+impl RemoteVerificationState {
+    pub(super) fn map_error(&self, error: git2::Error) -> DomainError {
+        if error.code() == git2::ErrorCode::Certificate {
+            let failure = self
+                .ssh_failure
+                .lock()
+                .ok()
+                .and_then(|failure| failure.clone());
+            if let Some(failure) = failure {
+                let SshHostFailure {
+                    kind,
+                    host,
+                    port,
+                    algorithm,
+                    fingerprint,
+                } = failure;
+                return match kind {
+                    SshHostFailureKind::UnknownHost => DomainError::SshUnknownHost {
+                        host,
+                        port,
+                        algorithm,
+                        fingerprint,
+                    },
+                    SshHostFailureKind::ChangedHost => DomainError::SshHostKeyChanged {
+                        host,
+                        port,
+                        algorithm,
+                        fingerprint,
+                    },
+                    SshHostFailureKind::VerificationUnavailable => {
+                        DomainError::SshHostVerificationUnavailable {
+                            host,
+                            port,
+                            algorithm,
+                            fingerprint,
+                        }
+                    }
+                };
+            }
+        }
+        DomainError::Internal(error.to_string())
+    }
+}
+
+/// Build credential and fail-closed verification callbacks for remote operations.
 ///
 /// The callback includes a one-shot guard: if libgit2 calls it more than once
 /// (which happens when credentials are rejected and it retries), we return an
 /// error on the second call so the operation fails fast instead of looping.
-pub(super) fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'_> {
+pub(super) fn build_callbacks(
+    creds: &GitCredentials,
+    remote_url: &str,
+    known_hosts_path: Option<PathBuf>,
+) -> (git2::RemoteCallbacks<'static>, RemoteVerificationState) {
     let mut callbacks = git2::RemoteCallbacks::new();
-    // Accept any SSH host key — Windows often has an empty known_hosts so
-    // libgit2 raises GIT_ECERTIFICATE (-17) without this. Authentication
-    // is still enforced via the SSH private key credential below.
-    callbacks.certificate_check(|_cert, _host| Ok(git2::CertificateCheckStatus::CertificateOk));
+    let verification = RemoteVerificationState::default();
+    let failure_slot = Arc::clone(&verification.ssh_failure);
+    let remote_url = remote_url.to_owned();
+    // This callback is invoked only after libgit2's HTTPS certificate or SSH
+    // host-key verification fails. Classification is diagnostic only, and
+    // passthrough always preserves libgit2's rejection.
+    callbacks.certificate_check(move |cert, host| {
+        if let Some(host_key) = cert.as_hostkey() {
+            let algorithm = host_key
+                .hostkey_type()
+                .map(|key_type| key_type.name().to_owned())
+                .unwrap_or_else(|| "unknown".into());
+            let native_digest = host_key.hash_sha256().map(|digest| digest.as_slice());
+            let classification = match host_key.hostkey() {
+                Some(raw_key) => classify_remote_host(
+                    &remote_url,
+                    host,
+                    known_hosts_path.as_deref(),
+                    &algorithm,
+                    raw_key,
+                    native_digest,
+                ),
+                None => SshHostClassification::Failure(SshHostFailure {
+                    kind: SshHostFailureKind::VerificationUnavailable,
+                    host: host.to_owned(),
+                    port: 22,
+                    algorithm,
+                    fingerprint: openssh_sha256_fingerprint(native_digest, &[]),
+                }),
+            };
+            if let SshHostClassification::Failure(failure) = classification {
+                if let Ok(mut slot) = failure_slot.lock() {
+                    if slot.is_none() {
+                        *slot = Some(failure);
+                    }
+                }
+            }
+        }
+        Ok(certificate_failure_policy())
+    });
     let creds = creds.clone();
     let mut used = false;
     callbacks.credentials(move |_url, username, _allowed| {
@@ -57,7 +152,11 @@ pub(super) fn build_callbacks(creds: &GitCredentials) -> git2::RemoteCallbacks<'
             GitCredentials::Token { token } => git2::Cred::userpass_plaintext("oauth2", token),
         }
     });
-    callbacks
+    (callbacks, verification)
+}
+
+fn certificate_failure_policy() -> git2::CertificateCheckStatus {
+    git2::CertificateCheckStatus::CertificatePassthrough
 }
 
 /// Open a git repository at the given path.
@@ -454,7 +553,77 @@ pub(super) fn ahead_behind(repo: &Repository) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::GitRelativePath;
+    use super::{certificate_failure_policy, GitRelativePath, RemoteVerificationState};
+    use crate::{SshHostFailure, SshHostFailureKind};
+    use rocket_shared::error::DomainError;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn failed_remote_verification_is_never_overridden() {
+        assert!(matches!(
+            certificate_failure_policy(),
+            git2::CertificateCheckStatus::CertificatePassthrough
+        ));
+    }
+
+    fn verification_state(kind: SshHostFailureKind) -> RemoteVerificationState {
+        RemoteVerificationState {
+            ssh_failure: Arc::new(Mutex::new(Some(SshHostFailure {
+                kind,
+                host: "git.example.com".into(),
+                port: 22,
+                algorithm: "ssh-ed25519".into(),
+                fingerprint: "SHA256:abc".into(),
+            }))),
+        }
+    }
+
+    fn certificate_error() -> git2::Error {
+        git2::Error::new(
+            git2::ErrorCode::Certificate,
+            git2::ErrorClass::Ssl,
+            "certificate rejected",
+        )
+    }
+
+    #[test]
+    fn certificate_errors_map_each_ssh_failure_to_its_domain_variant() {
+        assert!(matches!(
+            verification_state(SshHostFailureKind::UnknownHost).map_error(certificate_error()),
+            DomainError::SshUnknownHost {
+                ref host,
+                port: 22,
+                ref algorithm,
+                ref fingerprint,
+            } if host == "git.example.com"
+                && algorithm == "ssh-ed25519"
+                && fingerprint == "SHA256:abc"
+        ));
+        assert!(matches!(
+            verification_state(SshHostFailureKind::ChangedHost).map_error(certificate_error()),
+            DomainError::SshHostKeyChanged { .. }
+        ));
+        assert!(matches!(
+            verification_state(SshHostFailureKind::VerificationUnavailable)
+                .map_error(certificate_error()),
+            DomainError::SshHostVerificationUnavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn non_certificate_error_does_not_use_recorded_ssh_failure() {
+        let state = verification_state(SshHostFailureKind::UnknownHost);
+        let error = git2::Error::new(
+            git2::ErrorCode::Auth,
+            git2::ErrorClass::Ssh,
+            "authentication rejected",
+        );
+
+        let mapped = state.map_error(error).to_string();
+
+        assert!(mapped.contains("authentication rejected"));
+        assert!(!mapped.contains("unknown SSH host"));
+    }
 
     #[test]
     fn git_relative_path_accepts_normal_forward_slash_paths() {
