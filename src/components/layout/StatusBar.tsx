@@ -21,16 +21,28 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   const setRequestLayout = useLayoutStore((s) => s.setRequestLayout);
 
   useEffect(() => {
-    getVersion().then(setVersion);
+    let disposed = false;
+
+    void getVersion()
+      .then((appVersion) => {
+        if (!disposed) setVersion(appVersion);
+      })
+      .catch(() => {
+        // Version is supplementary status info; rendering must not depend on it.
+      });
+
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   return (
-    <div className='h-7 border-t border-statusbar-border bg-statusbar-bg px-2 flex items-center gap-1.5 shrink-0'>
+    <div className='flex h-6 shrink-0 items-center gap-0.5 border-t border-statusbar-border bg-statusbar-bg px-1 text-[11px]'>
       <Button
         variant='ghost'
         size='icon'
         onClick={toggleTheme}
-        className='h-5 w-5 hover:bg-statusbar-item-hover'
+        className='h-5 w-5 rounded-sm hover:bg-statusbar-item-hover'
         title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
@@ -44,10 +56,11 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         variant='ghost'
         size='sm'
         className={cn(
-          'h-5 px-1.5 text-xs gap-1 hover:bg-statusbar-item-hover',
+          'h-5 gap-1 rounded-sm px-1.5 text-[11px] hover:bg-statusbar-item-hover',
           isConsoleOpen && 'bg-statusbar-item-active',
         )}
         onClick={onConsoleToggle}
+        disabled={!onConsoleToggle}
         aria-label='Toggle Console'
       >
         <Terminal className='h-3.5 w-3.5 text-muted-foreground' />
@@ -63,7 +76,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         variant='ghost'
         size='sm'
         className={cn(
-          'h-5 px-1.5 text-xs gap-1 ml-auto hover:bg-statusbar-item-hover',
+          'ml-auto h-5 gap-1 rounded-sm px-1.5 text-[11px] hover:bg-statusbar-item-hover',
           requestLayout === 'side-by-side' && 'bg-statusbar-item-active',
         )}
         onClick={() => setRequestLayout(requestLayout === 'stacked' ? 'side-by-side' : 'stacked')}
@@ -77,7 +90,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
         )}
         {requestLayout === 'stacked' ? 'Side by side' : 'Stack'}
       </Button>
-      {version && <span className='text-2xs text-muted-foreground'>{`v${version}`}</span>}
+      {version && <span className='px-1 text-muted-foreground'>{`v${version}`}</span>}
     </div>
   );
 }

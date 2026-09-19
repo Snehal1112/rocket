@@ -586,6 +586,19 @@ html.windows.window-inactive #root {
   box-shadow: none;
 }
 
+/* Collection overview — VS Code uses flat workbench panels rather than elevated cards.
+   Scope this to collection views so dialogs and other workflows retain their existing treatment. */
+.collection-overview-workbench [data-slot="card"] {
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.dark .collection-overview-workbench [data-slot="card"] {
+  background-color: hsl(var(--background));
+  border-color: hsl(var(--border));
+  box-shadow: none;
+}
+
 /* Git hover actions — CSS hover avoids mouseenter timing issues when rows
    appear under an existing cursor position (e.g. after git init).
    All rules are custom (no Tailwind hidden class) to avoid layer-cascade

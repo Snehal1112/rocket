@@ -90,7 +90,7 @@ export function WorkspaceSwitcher() {
       <Button
         variant='ghost'
         size='icon'
-        className='h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100'
+        className='h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
         onClick={(e) => {
           e.stopPropagation();
           if (ws.pinned) {
@@ -109,7 +109,7 @@ export function WorkspaceSwitcher() {
           <Button
             variant='ghost'
             size='icon'
-            className='h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 mr-1'
+            className='h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 mr-1'
             onClick={(e) => e.stopPropagation()}
           >
             <MoreHorizontal className='h-3.5 w-3.5' />
@@ -153,10 +153,7 @@ export function WorkspaceSwitcher() {
           </Button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent
-          align='center'
-          className='min-w-[220px] bg-card/50 backdrop-blur-sm border border-border'
-        >
+        <DropdownMenuContent align='center' className='min-w-[220px]'>
           {pinned.map(renderWorkspaceRow)}
           {pinned.length > 0 && unpinned.length > 0 && <DropdownMenuSeparator />}
           {unpinned.map(renderWorkspaceRow)}

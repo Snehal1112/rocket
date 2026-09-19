@@ -70,10 +70,10 @@ export function KeyValueEditor({
             placeholder={keyPlaceholder}
             value={entry.key}
             onChange={(e) => updateEntry(entry.id, { key: e.target.value })}
-            className='flex-1 text-xs font-mono'
+            className='flex-1 min-w-0 text-xs font-mono'
           />
           {/* biome-ignore lint/a11y/useSemanticElements: fieldset breaks flex layout; div role=group labels the CodeMirror editor which has no aria-label prop */}
-          <div role='group' aria-label={`Value for row ${idx + 1}`} className='flex-1'>
+          <div role='group' aria-label={`Value for row ${idx + 1}`} className='flex-1 min-w-0'>
             <SingleLineEditor
               placeholder={valuePlaceholder}
               value={entry.value}

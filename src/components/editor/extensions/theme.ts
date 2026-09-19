@@ -20,13 +20,26 @@ export const rocketTheme = EditorView.theme({
     outline: 'none',
   },
   '.cm-scroller': {
-    // line-height equal to the inner height of the h-9 wrapper (36px − 2px border)
-    // naturally centers the single text line and the placeholder widget.
+    // CodeMirror's own base theme makes .cm-scroller `display: flex !important`
+    // with `align-items: flex-start !important` (for gutter layout). Overriding
+    // just the alignment to `center` (also !important, to win against CM's own
+    // rule) centers the single text line and placeholder widget vertically
+    // regardless of the wrapper's height — unlike a fixed line-height, this
+    // keeps working when a consumer overrides the default h-9 (e.g. h-7 rows).
     overflow: 'hidden',
-    lineHeight: '34px',
+    alignItems: 'center !important',
+    lineHeight: '1.4',
     fontFamily: 'inherit',
   },
   '.cm-content': {
+    // CM's base theme sets .cm-content { min-height: 100% } so a normal
+    // multi-line editor's click-to-focus area fills the scroller even when
+    // the document is short. For a single-line field that forces .cm-content
+    // (the sole flex item in .cm-scroller) to always fill the full height,
+    // leaving align-items no slack to center into. Overriding it to 'auto'
+    // lets .cm-content size to its own line + padding, which is what
+    // align-items: center above actually needs to have any effect.
+    minHeight: 'auto',
     padding: '0',
     caretColor: 'hsl(var(--foreground))',
   },

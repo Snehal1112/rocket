@@ -32,10 +32,10 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
 
   return (
     <Card>
-      <CardHeader className='pb-3 pt-5 px-5'>
+      <CardHeader className='pb-2 pt-4 px-4'>
         <CardTitle className='text-sm font-semibold'>Method Breakdown</CardTitle>
       </CardHeader>
-      <CardContent className='space-y-3.5 px-5 pb-5'>
+      <CardContent className='space-y-3 px-4 pb-4'>
         {rows.length === 0 ? (
           <p className='text-sm text-muted-foreground'>No requests in this collection.</p>
         ) : (

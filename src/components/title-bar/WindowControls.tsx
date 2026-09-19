@@ -1,4 +1,5 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { Copy, Minus, Square, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
@@ -30,35 +31,33 @@ export function WindowControls() {
       <Button
         variant='ghost'
         size='icon'
-        className='h-11 w-12 rounded-none text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+        className='h-10 w-12 rounded-none text-muted-foreground hover:bg-accent hover:text-accent-foreground'
         onClick={() => win.minimize()}
         aria-label='Minimize'
       >
-        <span className='text-xs' aria-hidden='true'>
-          ─
-        </span>
+        <Minus className='h-3.5 w-3.5' aria-hidden='true' />
       </Button>
       <Button
         variant='ghost'
         size='icon'
-        className='h-11 w-12 rounded-none text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+        className='h-10 w-12 rounded-none text-muted-foreground hover:bg-accent hover:text-accent-foreground'
         onClick={() => win.toggleMaximize()}
         aria-label={isMaximized ? 'Restore' : 'Maximize'}
       >
-        <span className='text-xs' aria-hidden='true'>
-          {isMaximized ? '❐' : '▢'}
-        </span>
+        {isMaximized ? (
+          <Copy className='h-3.5 w-3.5' aria-hidden='true' />
+        ) : (
+          <Square className='h-3.5 w-3.5' aria-hidden='true' />
+        )}
       </Button>
       <Button
         variant='ghost'
         size='icon'
-        className='h-11 w-12 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground'
+        className='h-10 w-12 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground'
         onClick={() => win.close()}
         aria-label='Close'
       >
-        <span className='text-xs' aria-hidden='true'>
-          ✕
-        </span>
+        <X className='h-3.5 w-3.5' aria-hidden='true' />
       </Button>
     </div>
   );

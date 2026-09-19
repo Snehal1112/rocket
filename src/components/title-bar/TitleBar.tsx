@@ -7,23 +7,23 @@ export function TitleBar() {
 
   return (
     <div
-      className='relative flex h-10 w-full items-center shrink-0 border-b border-titlebar-border bg-titlebar-bg text-titlebar-fg'
+      className='relative grid h-10 w-full grid-cols-[1fr_auto_1fr] items-center shrink-0 border-b border-titlebar-border bg-titlebar-bg text-titlebar-fg'
       data-tauri-drag-region
     >
-      {isMac && <div className='w-[72px] shrink-0' data-tauri-drag-region />}
+      <div className='flex items-center h-full' data-tauri-drag-region>
+        {isMac && <div className='w-[72px] shrink-0' data-tauri-drag-region />}
 
-      <div className='flex items-center gap-2 px-3 shrink-0'>
-        <img src='/rocket.png' alt='Rocket' className='h-4 w-4' />
-        <span className='text-sm font-medium'>Rocket</span>
+        <div className='flex items-center gap-2 px-3 shrink-0'>
+          <img src='/rocket.png' alt='Rocket' className='h-4 w-4' />
+          <span className='text-sm font-medium'>Rocket</span>
+        </div>
       </div>
-
-      <div className='flex-1' data-tauri-drag-region />
 
       <WorkspaceSwitcher />
 
-      <div className='flex-1' data-tauri-drag-region />
-
-      {!isMac && <WindowControls />}
+      <div className='flex items-center justify-end h-full' data-tauri-drag-region>
+        {!isMac && <WindowControls />}
+      </div>
     </div>
   );
 }
