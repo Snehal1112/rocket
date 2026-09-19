@@ -2,6 +2,7 @@
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/700.css";
 @import "@fontsource/lora/400.css";
 @import "@fontsource/lora/400-italic.css";
 @import "@fontsource/lora/600.css";
@@ -62,9 +63,9 @@
     --chart-4: 277 47% 43%;
     --chart-5: 3 93% 35%;
     --radius: 0.5rem;
-    --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+    --font-sans: "JetBrains Mono", ui-monospace, monospace;
     --font-mono: "JetBrains Mono", ui-monospace, monospace;
-    --font-serif: "Lora", Georgia, serif;
+    --font-serif: "JetBrains Mono", ui-monospace, monospace;
     /* VSCode 2026 Light: gitDecoration tokens */
     --git-added: 88 74% 26%; /* #587c0c */
     --git-modified: 72 74% 22%; /* #667309 */
