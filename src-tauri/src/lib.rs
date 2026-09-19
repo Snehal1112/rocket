@@ -13,10 +13,11 @@ use rocket_app::{
 };
 use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_infra::{
-    FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo, FsContractRepo, FsCookieRepo,
-    FsEnvironmentRepo, FsHistoryRepo, FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo,
-    KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo,
-    SharedPathCollectionRepo, scripting::DenoScriptEngine,
+    CloneDestinationCapabilities, FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo,
+    FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsRepositoryPathResolver,
+    FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo, KeyringSecretStore, NotifyFileWatcher,
+    ReqwestExecutor, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
+    scripting::DenoScriptEngine,
 };
 use rocket_environment::secret_store::SecretStore;
 use rocket_workspace::WorkspaceConfigRepository;
@@ -115,9 +116,10 @@ pub fn run() {
                 Arc::new(Mutex::new(PathBuf::new()));
             let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
             let workspace_config_repo = Box::new(FsWorkspaceConfigRepo::new());
-            let workspace_svc = WorkspaceService::new(
+            let workspace_svc = WorkspaceService::new_with_repository_locator(
                 workspace_repo,
                 workspace_config_repo,
+                Box::new(FsRepositoryPathResolver::new()),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 Arc::clone(&active_workspace_path),
             );
@@ -268,6 +270,7 @@ pub fn run() {
             app.manage(executor);
             app.manage(oauth2_svc);
             app.manage(git_svc);
+            app.manage(CloneDestinationCapabilities::default());
             app.manage(audit_svc);
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
@@ -358,6 +361,7 @@ pub fn run() {
             commands::oauth2::oauth2_refresh_token,
             commands::git::git_is_repo,
             commands::git::git_init,
+            commands::git::select_clone_destination,
             commands::git::git_clone,
             commands::git::git_status,
             commands::git::git_diff,

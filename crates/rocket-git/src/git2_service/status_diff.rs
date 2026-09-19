@@ -1,13 +1,14 @@
-use std::fs;
-use std::path::Path;
-
 use git2::Status;
 use rocket_shared::error::{DomainError, DomainResult};
+use std::fs;
 
 use crate::diff::FileDiff;
 use crate::status::{FileStatus, RepoStatus};
 
-use super::helpers::{ahead_behind, branch_name, build_simple_diff, get_head_content, get_index_content, map_git2_status, open_repo};
+use super::helpers::{
+    ahead_behind, branch_name, build_simple_diff, get_head_content, get_index_content,
+    inspect_worktree_path, map_git2_status, open_repo, GitRelativePath, WorktreeLeafKind,
+};
 
 #[tracing::instrument(name = "git_status", fields(repo_path = %path))]
 pub(super) fn status(path: &str) -> DomainResult<RepoStatus> {
@@ -100,13 +101,24 @@ pub(super) fn status(path: &str) -> DomainResult<RepoStatus> {
 #[tracing::instrument(name = "git_diff_file", fields(repo_path = %path, file = %file))]
 pub(super) fn diff_file(path: &str, file: &str) -> DomainResult<FileDiff> {
     let repo = open_repo(path)?;
-    let old_content = get_head_content(&repo, file);
-    let file_path = Path::new(path).join(file);
-    let new_content = fs::read_to_string(&file_path).ok();
+    let inspected = inspect_worktree_path(&repo, GitRelativePath::parse(file)?)?;
+    if inspected.leaf_kind() == WorktreeLeafKind::Symlink {
+        return Err(DomainError::InvalidInput(format!(
+            "cannot diff symlink leaf {:?}",
+            inspected.relative().as_str()
+        )));
+    }
+
+    let old_content = get_head_content(&repo, inspected.relative());
+    let new_content = match inspected.leaf_kind() {
+        WorktreeLeafKind::File => fs::read_to_string(inspected.full_path()).ok(),
+        WorktreeLeafKind::Missing | WorktreeLeafKind::Directory | WorktreeLeafKind::Other => None,
+        WorktreeLeafKind::Symlink => unreachable!("symlink leaves are rejected above"),
+    };
     let hunks = build_simple_diff(&old_content, &new_content);
 
     Ok(FileDiff {
-        path: file.to_string(),
+        path: inspected.relative().as_str().to_string(),
         old_content,
         new_content,
         hunks,
@@ -116,12 +128,13 @@ pub(super) fn diff_file(path: &str, file: &str) -> DomainResult<FileDiff> {
 #[tracing::instrument(name = "git_diff_staged", fields(repo_path = %path, file = %file))]
 pub(super) fn diff_staged(path: &str, file: &str) -> DomainResult<FileDiff> {
     let repo = open_repo(path)?;
-    let old_content = get_head_content(&repo, file);
-    let new_content = get_index_content(&repo, file);
+    let file = GitRelativePath::parse(file)?;
+    let old_content = get_head_content(&repo, &file);
+    let new_content = get_index_content(&repo, &file);
     let hunks = build_simple_diff(&old_content, &new_content);
 
     Ok(FileDiff {
-        path: file.to_string(),
+        path: file.as_str().to_string(),
         old_content,
         new_content,
         hunks,

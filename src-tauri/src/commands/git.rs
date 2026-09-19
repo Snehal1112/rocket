@@ -1,10 +1,12 @@
-use rocket_app::GitAppService;
+use rocket_app::{GitAppService, WorkspaceService};
+use rocket_infra::{CloneDestinationCapabilities, CloneDestinationGrant};
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution,
     FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tauri::State;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,6 +14,24 @@ use tauri::State;
 pub struct GitIdentity {
     pub name: String,
     pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneDestinationGrantDto {
+    pub capability: String,
+    pub display_path: String,
+    pub expires_in_seconds: u64,
+}
+
+impl From<CloneDestinationGrant> for CloneDestinationGrantDto {
+    fn from(grant: CloneDestinationGrant) -> Self {
+        Self {
+            capability: grant.capability,
+            display_path: grant.display_path,
+            expires_in_seconds: grant.expires_in_seconds,
+        }
+    }
 }
 
 #[tauri::command]
@@ -25,8 +45,38 @@ pub fn git_init(collection_path: String, svc: State<'_, GitAppService>) -> Resul
 }
 
 #[tauri::command]
-pub fn git_clone(url: String, dest_path: String, creds: GitCredentials, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
-    svc.clone_repo(&url, &dest_path, &creds)
+pub async fn select_clone_destination(
+    app: tauri::AppHandle,
+    capabilities: State<'_, CloneDestinationCapabilities>,
+) -> Result<Option<CloneDestinationGrantDto>, DomainError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+
+    let selected = rx.await.map_err(|_| {
+        DomainError::Internal("Clone destination dialog closed unexpectedly".into())
+    })?;
+    selected
+        .map(|path| capabilities.issue(path.to_string()).map(Into::into))
+        .transpose()
+}
+
+#[tauri::command]
+pub fn git_clone(
+    url: String,
+    capability: String,
+    creds: GitCredentials,
+    capabilities: State<'_, CloneDestinationCapabilities>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let destination = capabilities.consume(&capability)?;
+    let destination = destination.to_str().ok_or_else(|| {
+        DomainError::InvalidInput("Clone destination path is not valid UTF-8".into())
+    })?;
+    svc.clone_repo(&url, destination, &creds)
 }
 
 #[tauri::command]
@@ -180,6 +230,377 @@ pub fn git_remove_remote(collection_path: String, name: String, svc: State<'_, G
 #[tauri::command]
 pub fn git_set_remote_url(collection_path: String, name: String, url: String, svc: State<'_, GitAppService>) -> Result<(), DomainError> {
     svc.set_remote_url(&collection_path, &name, &url)
+}
+
+fn resolve_repository_path(
+    repository_id: &str,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<String, DomainError> {
+    let path = {
+        let workspace_svc = workspace_svc.lock().map_err(|_| {
+            DomainError::Internal("workspace service lock poisoned".into())
+        })?;
+        workspace_svc
+            .resolve_repository(repository_id)?
+            .path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| {
+                DomainError::InvalidInput("Resolved repository path is not valid UTF-8".into())
+            })?
+    };
+
+    Ok(path)
+}
+
+#[tauri::command]
+pub fn git_is_repo_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<bool, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_is_repo(path, svc)
+}
+
+#[tauri::command]
+pub fn git_init_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_init(path, svc)
+}
+
+#[tauri::command]
+pub fn git_status_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<RepoStatus, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_status(path, svc)
+}
+
+#[tauri::command]
+pub fn git_diff_v2(
+    repository_id: String,
+    file: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<FileDiff, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_diff(path, file, svc)
+}
+
+#[tauri::command]
+pub fn git_diff_staged_v2(
+    repository_id: String,
+    file: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<FileDiff, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_diff_staged(path, file, svc)
+}
+
+#[tauri::command]
+pub fn git_diff_commit_v2(
+    repository_id: String,
+    oid: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<FileDiff>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_diff_commit(path, oid, svc)
+}
+
+#[tauri::command]
+pub fn git_stage_v2(
+    repository_id: String,
+    files: Vec<String>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stage(path, files, svc)
+}
+
+#[tauri::command]
+pub fn git_unstage_v2(
+    repository_id: String,
+    files: Vec<String>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_unstage(path, files, svc)
+}
+
+#[tauri::command]
+pub fn git_discard_v2(
+    repository_id: String,
+    files: Vec<String>,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_discard(path, files, svc)
+}
+
+#[tauri::command]
+pub fn git_commit_v2(
+    repository_id: String,
+    message: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<CommitInfo, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_commit(path, message, svc)
+}
+
+#[tauri::command]
+pub fn git_log_v2(
+    repository_id: String,
+    limit: usize,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<CommitInfo>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_log(path, limit, svc)
+}
+
+#[tauri::command]
+pub fn git_push_v2(
+    repository_id: String,
+    remote: String,
+    creds: GitCredentials,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_push(path, remote, creds, svc)
+}
+
+#[tauri::command]
+pub fn git_pull_v2(
+    repository_id: String,
+    remote: String,
+    creds: GitCredentials,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_pull(path, remote, creds, svc)
+}
+
+#[tauri::command]
+pub fn git_fetch_v2(
+    repository_id: String,
+    remote: String,
+    creds: GitCredentials,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<FetchResult, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_fetch(path, remote, creds, svc)
+}
+
+#[tauri::command]
+pub fn git_branches_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<BranchList, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_branches(path, svc)
+}
+
+#[tauri::command]
+pub fn git_switch_branch_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_switch_branch(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_checkout_remote_branch_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_checkout_remote_branch(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_create_branch_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_create_branch(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_delete_branch_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_delete_branch(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_merge_branch_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_merge_branch(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_list_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<StashEntry>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_list(path, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_save_v2(
+    repository_id: String,
+    message: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_save(path, message, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_pop_v2(
+    repository_id: String,
+    index: usize,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_pop(path, index, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_apply_v2(
+    repository_id: String,
+    index: usize,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_apply(path, index, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_drop_v2(
+    repository_id: String,
+    index: usize,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_drop(path, index, svc)
+}
+
+#[tauri::command]
+pub fn git_conflicts_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<ConflictFile>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_conflicts(path, svc)
+}
+
+#[tauri::command]
+pub fn git_resolve_conflict_v2(
+    repository_id: String,
+    file: String,
+    resolution: ConflictResolution,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_resolve_conflict(path, file, resolution, svc)
+}
+
+#[tauri::command]
+pub fn git_abort_merge_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_abort_merge(path, svc)
+}
+
+#[tauri::command]
+pub fn git_list_remotes_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<RemoteInfo>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_list_remotes(path, svc)
+}
+
+#[tauri::command]
+pub fn git_add_remote_v2(
+    repository_id: String,
+    name: String,
+    url: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_add_remote(path, name, url, svc)
+}
+
+#[tauri::command]
+pub fn git_remove_remote_v2(
+    repository_id: String,
+    name: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_remove_remote(path, name, svc)
+}
+
+#[tauri::command]
+pub fn git_set_remote_url_v2(
+    repository_id: String,
+    name: String,
+    url: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_set_remote_url(path, name, url, svc)
 }
 
 const KEYRING_SERVICE: &str = "rocket-api";
@@ -341,6 +762,25 @@ pub fn load_git_credentials(workspace_id: String) -> Result<Option<GitCredential
     }
 }
 
+#[tauri::command]
+pub fn save_git_credentials_v2(
+    repository_id: String,
+    creds: GitCredentialsPayload,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    let _path = resolve_repository_path(&repository_id, workspace_svc)?;
+    save_git_credentials(repository_id, creds)
+}
+
+#[tauri::command]
+pub fn load_git_credentials_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<Option<GitCredentialsPayload>, DomainError> {
+    let _path = resolve_repository_path(&repository_id, workspace_svc)?;
+    load_git_credentials(repository_id)
+}
+
 /// Read user.name and user.email from the repo's git config (local → global → system).
 /// Returns empty strings when the values are unset — never errors on a missing entry.
 #[tauri::command]
@@ -369,6 +809,26 @@ pub fn git_set_identity(path: String, name: String, email: String) -> Result<(),
     local.set_str("user.email", &email)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn git_get_identity_v2(
+    repository_id: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<GitIdentity, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_get_identity(path)
+}
+
+#[tauri::command]
+pub fn git_set_identity_v2(
+    repository_id: String,
+    name: String,
+    email: String,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+) -> Result<(), DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_set_identity(path, name, email)
 }
 
 #[cfg(test)]

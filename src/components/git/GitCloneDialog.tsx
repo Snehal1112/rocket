@@ -13,11 +13,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useOpenWorkspaceFromDisk, useSwitchWorkspace } from '@/lib/queries/workspace-queries';
 import {
+  type CloneDestinationGrant,
   type ClonedRepoStructure,
   type CollectionScanResult,
   detectClonedStructure,
+  type GitCredentials,
   gitClone,
-  openFolderPicker,
+  selectCloneDestination,
 } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 
@@ -31,7 +33,8 @@ interface Props {
 export function GitCloneDialog({ open, onOpenChange }: Props) {
   const [step, setStep] = useState<Step>('input');
   const [repoUrl, setRepoUrl] = useState('');
-  const [destPath, setDestPath] = useState('');
+  const [destination, setDestination] = useState<CloneDestinationGrant | null>(null);
+  const [awaitingCredentials, setAwaitingCredentials] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collections, setCollections] = useState<CollectionScanResult[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
@@ -45,7 +48,8 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
     if (open) {
       setStep('input');
       setRepoUrl('');
-      setDestPath('');
+      setDestination(null);
+      setAwaitingCredentials(false);
       setError(null);
       setCollections([]);
       setSelectedCollection(null);
@@ -94,44 +98,54 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
     [handleOpenWorkspace],
   );
 
-  // Retry clone when credentials arrive while waiting in progress step.
+  const performClone = useCallback(
+    async (creds: GitCredentials) => {
+      if (!destination) {
+        setError('Select an empty destination folder before cloning.');
+        setStep('input');
+        return;
+      }
+
+      setError(null);
+      setStep('progress');
+      try {
+        await gitClone(repoUrl.trim(), destination.capability, creds);
+        await handlePostClone(destination.displayPath);
+      } catch (e) {
+        // Capabilities are one-time, including failed clone attempts.
+        setDestination(null);
+        setError(String(e));
+        setStep('input');
+      }
+    },
+    [destination, handlePostClone, repoUrl],
+  );
+
+  // Continue exactly once when credentials arrive after the credentials dialog.
   useEffect(() => {
-    if (step === 'progress' && credentials) {
-      const doClone = async () => {
-        try {
-          await gitClone(repoUrl.trim(), destPath.trim(), credentials);
-          await handlePostClone(destPath.trim());
-        } catch (e) {
-          setError(String(e));
-          setStep('input');
-        }
-      };
-      void doClone();
+    if (awaitingCredentials && credentials) {
+      setAwaitingCredentials(false);
+      void performClone(credentials);
     }
-  }, [credentials, step, repoUrl, destPath, handlePostClone]);
+  }, [awaitingCredentials, credentials, performClone]);
 
   const handleBrowse = async () => {
-    const result = await openFolderPicker();
+    const result = await selectCloneDestination();
     if (result !== null) {
-      setDestPath(result);
+      setDestination(result);
     }
   };
 
   const handleClone = async () => {
     setError(null);
-    setStep('progress');
     const creds = useGitStore.getState().credentials;
     if (!creds) {
+      setAwaitingCredentials(true);
+      setStep('progress');
       useGitStore.getState().setShowCredentialsDialog(true);
       return;
     }
-    try {
-      await gitClone(repoUrl.trim(), destPath.trim(), creds);
-      await handlePostClone(destPath.trim());
-    } catch (e) {
-      setError(String(e));
-      setStep('input');
-    }
+    await performClone(creds);
   };
 
   const handleOpen = async (collectionPath: string) => {
@@ -241,8 +255,9 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
             <Label className='text-sm'>Destination</Label>
             <div className='flex gap-2'>
               <Input
-                value={destPath}
-                onChange={(e) => setDestPath(e.target.value)}
+                value={destination?.displayPath ?? ''}
+                readOnly
+                placeholder='Select an empty folder'
                 className='h-8 text-sm flex-1'
               />
               <Button variant='outline' size='sm' className='h-8 shrink-0' onClick={handleBrowse}>
@@ -253,7 +268,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
           {error && <p className='text-sm text-destructive wrap-break-word'>{error}</p>}
         </div>
         <DialogFooter>
-          <Button size='sm' disabled={!repoUrl.trim() || !destPath.trim()} onClick={handleClone}>
+          <Button size='sm' disabled={!repoUrl.trim() || !destination} onClick={handleClone}>
             Clone
           </Button>
         </DialogFooter>

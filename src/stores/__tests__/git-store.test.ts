@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitCredentials } from '@/lib/tauri-api';
+import * as tauriApi from '@/lib/tauri-api';
+import { createDeferred } from '@/test/deferred';
 import { useGitStore } from '../git-store';
 
 vi.mock('@/lib/tauri-api', () => ({
@@ -58,6 +60,40 @@ vi.mock('@/stores/workspace-store', () => ({
     },
   ),
 }));
+
+const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  useGitStore.setState(useGitStore.getInitialState(), true);
+
+  vi.mocked(tauriApi.gitStatus).mockResolvedValue({
+    branch: 'main',
+    files: [],
+    ahead: 0,
+    behind: 0,
+    isClean: true,
+  });
+  vi.mocked(tauriApi.gitBranches).mockResolvedValue({ current: 'main', local: [], remote: [] });
+  vi.mocked(tauriApi.gitListRemotes).mockResolvedValue([]);
+  vi.mocked(tauriApi.gitStashList).mockResolvedValue([]);
+  vi.mocked(tauriApi.gitLog).mockResolvedValue([]);
+  vi.mocked(tauriApi.gitConflicts).mockResolvedValue([]);
+  vi.mocked(tauriApi.gitCommit).mockResolvedValue({
+    id: 'abc1234',
+    fullId: 'abc1234abc1234',
+    message: 'test commit',
+    author: 'Test',
+    authorEmail: 'test@test.com',
+    timestamp: '2026-01-01',
+    filesChanged: 1,
+  });
+  vi.mocked(tauriApi.loadGitCredentials).mockResolvedValue(null);
+  vi.mocked(tauriApi.gitGetIdentity).mockResolvedValue({
+    name: 'Test User',
+    email: 'test@example.com',
+  });
+});
 
 describe('git-store clearError', () => {
   beforeEach(() => {
@@ -199,6 +235,43 @@ describe('setCollection', () => {
     await useGitStore.getState().setCollection('/test/repo');
 
     expect(useGitStore.getState().error).toContain('disk error');
+  });
+});
+
+// Phase 3 repository-scoping work will make late responses unable to overwrite the active repo.
+knownRedDescribe('known-red: setCollection repository race contracts', () => {
+  it('keeps B authoritative when delayed A resolves after B', async () => {
+    const { gitIsRepo, gitStatus } = await import('@/lib/tauri-api');
+    const repoA = createDeferred<boolean>();
+    const repoB = createDeferred<boolean>();
+
+    vi.mocked(gitIsRepo).mockImplementation((path) => {
+      if (path === '/collections/A') return repoA.promise;
+      if (path === '/collections/B') return repoB.promise;
+      throw new Error(`Unexpected repository path: ${path}`);
+    });
+    vi.mocked(gitStatus).mockImplementation(async (path) => ({
+      branch: path === '/collections/A' ? 'branch-a' : 'branch-b',
+      files: [],
+      ahead: 0,
+      behind: 0,
+      isClean: true,
+    }));
+
+    const loadA = useGitStore.getState().setCollection('/collections/A');
+    const loadB = useGitStore.getState().setCollection('/collections/B');
+
+    repoB.resolve(true);
+    await loadB;
+    repoA.resolve(true);
+    await loadA;
+
+    expect(useGitStore.getState()).toMatchObject({
+      collectionPath: '/collections/B',
+      isRepo: true,
+      status: expect.objectContaining({ branch: 'branch-b' }),
+      loading: false,
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 mod atomic_write;
 mod yaml_io;
+pub mod clone_destination_capabilities;
 pub mod scripting;
 pub mod file_watcher;
 pub(crate) mod migration;
@@ -13,6 +14,7 @@ pub mod fs_contract_repo;
 pub mod fs_cookie_repo;
 pub mod fs_environment_repo;
 pub mod fs_history_repo;
+pub mod fs_repository_path_resolver;
 pub mod fs_template_repo;
 pub mod fs_workspace_config_repo;
 pub mod fs_workspace_repo;
@@ -21,6 +23,10 @@ pub mod secret_store;
 pub mod shared_collection_environment_repo;
 pub mod shared_path_collection_repo;
 pub use atomic_write::{atomic_write, atomic_write_bulk};
+pub use clone_destination_capabilities::{
+    CloneDestinationCapabilities, CloneDestinationGrant,
+    DEFAULT_CLONE_DESTINATION_CAPABILITY_TTL, DEFAULT_CLONE_DESTINATION_MAX_ENTRIES,
+};
 pub use file_watcher::NotifyFileWatcher;
 pub use fs_audit_log_repo::FsAuditLogRepo;
 pub use fs_collection::FsCollectionRepo;
@@ -29,6 +35,7 @@ pub use fs_contract_repo::FsContractRepo;
 pub use fs_cookie_repo::FsCookieRepo;
 pub use fs_environment_repo::FsEnvironmentRepo;
 pub use fs_history_repo::FsHistoryRepo;
+pub use fs_repository_path_resolver::FsRepositoryPathResolver;
 pub use fs_template_repo::FsTemplateRepo;
 pub use fs_workspace_config_repo::FsWorkspaceConfigRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;

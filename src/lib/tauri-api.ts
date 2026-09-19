@@ -348,6 +348,12 @@ export interface GitIdentity {
   email: string;
 }
 
+export interface CloneDestinationGrant {
+  capability: string;
+  displayPath: string;
+  expiresInSeconds: number;
+}
+
 export interface Branch {
   name: string;
   isHead: boolean;
@@ -717,8 +723,11 @@ export const gitIsRepo = (collectionPath: string) =>
 
 export const gitInit = (collectionPath: string) => invoke<void>('git_init', { collectionPath });
 
-export const gitClone = (url: string, destPath: string, creds: GitCredentials) =>
-  invoke<void>('git_clone', { url, destPath, creds });
+export const selectCloneDestination = () =>
+  invoke<CloneDestinationGrant | null>('select_clone_destination');
+
+export const gitClone = (url: string, capability: string, creds: GitCredentials) =>
+  invoke<void>('git_clone', { url, capability, creds });
 
 export const gitStatus = (collectionPath: string) =>
   invoke<RepoStatus>('git_status', { collectionPath });

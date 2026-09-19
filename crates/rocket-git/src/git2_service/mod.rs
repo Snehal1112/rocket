@@ -17,6 +17,8 @@ mod conflict;
 mod helpers;
 mod remote;
 mod repo;
+#[cfg(test)]
+mod safety_contracts;
 mod staging;
 mod stash;
 mod status_diff;

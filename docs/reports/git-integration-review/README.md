@@ -521,6 +521,8 @@ Each task is intended to be independently mergeable. The OpenCollection pre-read
 
 ### Phase 0 — Freeze unsafe behavior with tests
 
+> **Implementation status (2026-09-19): Complete.** At Phase 0 completion, the default suites remained mergeable while nine backend and six frontend desired-safety contracts recorded the known-red baseline. Phase 1.1 has since promoted the five path/confinement/conflict contracts to active passing coverage; four backend Phase 2 contracts and all six frontend Phase 2/3 contracts remain quarantined. These failures are acceptance criteria for their owning phases, not regressions introduced by Phase 0.
+
 #### Task 0.1 — Backend safety regression slice
 
 - **Goal:** Encode reproduced security/data-loss defects as fail-closed, zero-mutation contracts.
@@ -550,6 +552,8 @@ Each task is intended to be independently mergeable. The OpenCollection pre-read
 ### Phase 1 — Close authority and transport vulnerabilities
 
 #### Task 1.1 — Git-relative path confinement
+
+> **Implementation status (2026-09-19): Complete.** Added a typed portable Git-relative path validator, component-by-component symlink-aware worktree inspection, exact non-pathspec staging/unstaging/discard behavior, full-batch overlap/preflight checks, live conflict membership checks, absent-side deletion semantics, and rollback-safe exact HEAD restoration. The focused safety suite now has 21 passing contracts and four intentionally ignored Phase 2 contracts. The full `rocket-git` suite has 94 passing and five ignored tests.
 
 - **Goal:** Reject unsafe file arguments before any read/write/delete.
 - **Files/layers:** Git path value/validator and diff/stage/unstage/discard/conflict call sites.
@@ -747,17 +751,17 @@ Each task is intended to be independently mergeable. The OpenCollection pre-read
 
 ## 8. Test matrix and commands
 
-### Verified baseline from source reports
+### Verified baseline after Phase 0
 
 | Layer | Verified baseline | Interpretation |
 |---|---|---|
-| Git React components | **No direct component tests found** | No rendered workflow, confirmation, focus, duplicate-click, or accessibility contract exists. |
-| Zustand Git store | **53 passing** with `yarn test src/stores/__tests__/git-store.test.ts --run` | Useful mocked choreography coverage; not IPC or real-repository integration. |
-| `rocket-git` | **71 passing, 1 ignored** with `cargo test -p rocket-git` | Strongest current layer; one ignored live-GitHub/manual test. |
+| Git React components | **1 passing characterization and 5 skipped desired-behavior contracts** in `git-failure-contracts.test.tsx` | Clone credential handoff is covered; failure-chain, retention, and duplicate-clone contracts are quarantined until their implementation phases. |
+| Zustand Git store | **54 passing, 1 skipped** with `yarn test src/stores/__tests__/git-store.test.ts --run` | The skipped A/B race contract is executable through `GIT_SAFETY_CONTRACTS=1`; mocks still do not exercise IPC or real repositories. |
+| `rocket-git` | **94 passing, 5 ignored** with `cargo test -p rocket-git` after Phase 1.1 | Path confinement and exact-path contracts are active; four Phase 2 destructive-operation contracts and the existing live-GitHub test remain ignored. |
 | `rocket-app` Git service | Targeted command runs **0 tests** (`300 filtered out`) | Event/delegation policy is untested. Do not interpret the command as a passing Git service suite. |
 | Tauri Git command tests | Test output reported **4 passing** | The prior command timed out after a long build/warm retry and did not return cleanly. Treat the four test bodies as passing, **not** the invocation as a clean completed run. |
 | TypeScript | `yarn tsc --noEmit` passed in reports 02/03 | Does not catch runtime undefined array access or IPC schema drift. |
-| Temporary backend audit probe | 10 cases reported passing, then probe deleted | Reproduced backend defects; not a retained regression suite. |
+| Retained Phase 0 safety contracts | **21 active backend safety contracts, 4 ignored backend contracts, and 6 skipped frontend contracts** | Phase 1.1 turned path, symlink, exact-path, batch-preflight, directory-target, and conflict-membership contracts green. The remaining ignored/skipped contracts record Phase 2/3 work. |
 
 No broader production test claim is made here.
 
@@ -809,9 +813,16 @@ npx playwright test e2e/git.spec.ts
 yarn check
 ```
 
-Manual/opt-in only; do not use as a normal CI gate:
+Manual/opt-in only; do not use as a normal CI gate until the owning implementation phase turns each contract green:
 
 ```bash
+# Remaining backend desired-safety contracts (currently 4 expected Phase 2 failures)
+cargo test -p rocket-git safety_contracts -- --ignored
+
+# Phase 0 frontend desired-behavior contracts (currently 6 expected failures)
+GIT_SAFETY_CONTRACTS=1 yarn test src/stores/__tests__/git-store.test.ts src/components/git/__tests__/git-failure-contracts.test.tsx --run
+
+# Existing live-network diagnostic
 cargo test -p rocket-git pull_unborn_real_github_with_untracked_workspace_yml -- --ignored --nocapture
 ```
 

@@ -4,13 +4,33 @@ use std::sync::{Arc, Mutex};
 
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_workspace::{Workspace, WorkspaceRepository, WorkspaceConfig, WorkspaceConfigRepository};
+use rocket_workspace::{
+    RepositoryId, RepositoryPathResolver, RepositorySelector, ResolvedRepository, Workspace,
+    WorkspaceConfig, WorkspaceConfigRepository, WorkspaceRepository,
+};
 
 pub struct WorkspaceService {
     repo: Box<dyn WorkspaceRepository>,
     config_repo: Box<dyn WorkspaceConfigRepository>,
+    repository_path_resolver: Box<dyn RepositoryPathResolver>,
     publisher: Box<dyn EventPublisher>,
     active_path: Arc<Mutex<PathBuf>>,
+}
+
+struct UnavailableRepositoryPathResolver;
+
+impl RepositoryPathResolver for UnavailableRepositoryPathResolver {
+    fn resolve(
+        &self,
+        _id: &RepositoryId,
+        _selector: &RepositorySelector,
+        _workspace: &Workspace,
+        _config: Option<&WorkspaceConfig>,
+    ) -> DomainResult<ResolvedRepository> {
+        Err(DomainError::Internal(
+            "Repository path resolver is not configured".into(),
+        ))
+    }
 }
 
 impl WorkspaceService {
@@ -20,7 +40,50 @@ impl WorkspaceService {
         publisher: Box<dyn EventPublisher>,
         active_path: Arc<Mutex<PathBuf>>,
     ) -> Self {
-        Self { repo, config_repo, publisher, active_path }
+        Self::new_with_repository_locator(
+            repo,
+            config_repo,
+            Box::new(UnavailableRepositoryPathResolver),
+            publisher,
+            active_path,
+        )
+    }
+
+    pub fn new_with_repository_locator(
+        repo: Box<dyn WorkspaceRepository>,
+        config_repo: Box<dyn WorkspaceConfigRepository>,
+        repository_path_resolver: Box<dyn RepositoryPathResolver>,
+        publisher: Box<dyn EventPublisher>,
+        active_path: Arc<Mutex<PathBuf>>,
+    ) -> Self {
+        Self {
+            repo,
+            config_repo,
+            repository_path_resolver,
+            publisher,
+            active_path,
+        }
+    }
+
+    pub fn resolve_repository(&self, repository_id: &str) -> DomainResult<ResolvedRepository> {
+        let id = RepositoryId::parse(repository_id)?;
+        let selector = id.selector()?;
+        let workspace_id = match &selector {
+            RepositorySelector::Workspace { workspace_id }
+            | RepositorySelector::Collection { workspace_id, .. } => workspace_id,
+        };
+
+        let registry = self.repo.load()?;
+        let workspace = registry
+            .find_by_id(workspace_id)
+            .ok_or_else(|| DomainError::NotFound(format!("Workspace '{workspace_id}'")))?;
+        let config = match &selector {
+            RepositorySelector::Workspace { .. } => None,
+            RepositorySelector::Collection { .. } => Some(self.config_repo.load(&workspace.path)?),
+        };
+
+        self.repository_path_resolver
+            .resolve(&id, &selector, workspace, config.as_ref())
     }
 
     pub fn list(&self) -> DomainResult<Vec<Workspace>> {
@@ -375,8 +438,7 @@ mod tests {
             if config_path.exists() {
                 let content = std::fs::read_to_string(&config_path)
                     .map_err(|e| DomainError::Io(e.to_string()))?;
-                serde_yaml::from_str(&content)
-                    .map_err(|e| DomainError::InvalidInput(e.to_string()))
+                serde_yaml::from_str(&content).map_err(|e| DomainError::InvalidInput(e.to_string()))
             } else {
                 let name = workspace_path.file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -404,13 +466,138 @@ mod tests {
         }
     }
 
-    fn make_service(tmp: &TempDir) -> WorkspaceService {
+    struct PassThroughRepositoryPathResolver;
+
+    impl RepositoryPathResolver for PassThroughRepositoryPathResolver {
+        fn resolve(
+            &self,
+            id: &RepositoryId,
+            selector: &RepositorySelector,
+            workspace: &Workspace,
+            config: Option<&WorkspaceConfig>,
+        ) -> DomainResult<ResolvedRepository> {
+            let (kind, path) = match selector {
+                RepositorySelector::Workspace { .. } => {
+                    if config.is_some() {
+                        return Err(DomainError::Internal(
+                            "Workspace resolution unexpectedly loaded config".into(),
+                        ));
+                    }
+                    (
+                        rocket_workspace::RepositoryKind::Workspace,
+                        workspace.path.clone(),
+                    )
+                }
+                RepositorySelector::Collection { collection_uid, .. } => {
+                    if config.is_none() {
+                        return Err(DomainError::Internal(
+                            "Collection resolution requires workspace config".into(),
+                        ));
+                    }
+                    (
+                        rocket_workspace::RepositoryKind::EmbeddedCollection,
+                        workspace.path.join("collections").join(collection_uid),
+                    )
+                }
+            };
+            Ok(ResolvedRepository {
+                id: id.clone(),
+                kind,
+                path,
+            })
+        }
+    }
+
+    type ServiceDependencies = (
+        Box<dyn WorkspaceRepository>,
+        Box<dyn WorkspaceConfigRepository>,
+        Arc<Mutex<PathBuf>>,
+    );
+
+    fn service_dependencies(tmp: &TempDir) -> ServiceDependencies {
         let default_path = tmp.path().join("default");
         std::fs::create_dir_all(&default_path).unwrap();
-        let repo = Box::new(MockWorkspaceRepo::new(default_path.clone()));
-        let config_repo = Box::new(MockWorkspaceConfigRepo);
-        let active_path = Arc::new(Mutex::new(default_path));
+        (
+            Box::new(MockWorkspaceRepo::new(default_path.clone())),
+            Box::new(MockWorkspaceConfigRepo),
+            Arc::new(Mutex::new(default_path)),
+        )
+    }
+
+    fn make_service(tmp: &TempDir) -> WorkspaceService {
+        let (repo, config_repo, active_path) = service_dependencies(tmp);
         WorkspaceService::new(repo, config_repo, Box::new(NullEventPublisher), active_path)
+    }
+
+    fn make_service_with_locator(tmp: &TempDir) -> WorkspaceService {
+        let (repo, config_repo, active_path) = service_dependencies(tmp);
+        WorkspaceService::new_with_repository_locator(
+            repo,
+            config_repo,
+            Box::new(PassThroughRepositoryPathResolver),
+            Box::new(NullEventPublisher),
+            active_path,
+        )
+    }
+
+    #[test]
+    fn resolve_repository_uses_registered_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service_with_locator(&tmp);
+
+        let resolved = svc.resolve_repository("workspace:default").unwrap();
+
+        assert_eq!(resolved.id.as_str(), "workspace:default");
+        assert_eq!(resolved.kind, rocket_workspace::RepositoryKind::Workspace);
+        assert_eq!(resolved.path, tmp.path().join("default"));
+    }
+
+    #[test]
+    fn resolve_collection_loads_owning_workspace_config() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service_with_locator(&tmp);
+
+        let resolved = svc
+            .resolve_repository("collection:default:collection-uid")
+            .unwrap();
+
+        assert_eq!(
+            resolved.kind,
+            rocket_workspace::RepositoryKind::EmbeddedCollection
+        );
+        assert_eq!(
+            resolved.path,
+            tmp.path()
+                .join("default")
+                .join("collections")
+                .join("collection-uid")
+        );
+    }
+
+    #[test]
+    fn resolve_repository_rejects_unregistered_or_malformed_ids() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service_with_locator(&tmp);
+
+        assert!(matches!(
+            svc.resolve_repository("workspace:not-registered"),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(matches!(
+            svc.resolve_repository("workspace:../outside"),
+            Err(DomainError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn legacy_constructor_fails_closed_for_repository_resolution() {
+        let tmp = TempDir::new().unwrap();
+        let svc = make_service(&tmp);
+
+        assert!(matches!(
+            svc.resolve_repository("workspace:default"),
+            Err(DomainError::Internal(_))
+        ));
     }
 
     #[test]
