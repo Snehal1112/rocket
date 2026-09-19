@@ -1,0 +1,538 @@
+# Git testing and observability review
+
+**Scope:** Git behavior across `src/components/git`, `src/stores/git-store.ts`, `src/lib/tauri-api.ts`, `src-tauri/src/commands/git.rs`, `src-tauri/src/tauri_event_bus.rs`, `src-tauri/src/tauri_tracing_layer.rs`, `crates/rocket-app/src/git_service.rs`, and `crates/rocket-git`.
+
+**Method:** Static review against `CLAUDE.md`, `crates/rocket-git/CLAUDE.md`, and `crates/rocket-app/CLAUDE.md`, plus focused execution of the existing Git test suites. No production code was changed. This report does not repeat the general frontend and security findings in `02-frontend-architecture.md` and `04-orchestration-security.md`; it identifies the tests and diagnostics most likely to catch those failures across the UI → IPC → application service → git2 path.
+
+## Executive summary
+
+The lowest layer is substantially better tested than the integration surface above it. `rocket-git` has 72 tests discovered (71 passing and one ignored live-GitHub test) and covers many real repository transitions with temporary local and bare repositories. The frontend has 53 passing Zustand tests, but they mock every Tauri API call and mostly verify call choreography. Between those layers there are only four identity/keyring-name tests in the Tauri command module and no `GitAppService` tests. There are no Git component tests and no Git browser/native end-to-end tests.
+
+The result is an inverted test pyramid: libgit2 mechanics are exercised, but the contracts that connect user actions to those mechanics are largely unverified. A command-name typo, camelCase payload mismatch, omitted command registration, wrong event mapping, stale repository result, swallowed failure, or incorrect refresh after a partially successful pull can pass every current Git test.
+
+The highest-value next work is not more isolated happy-path method tests. It is a small vertical suite built around deterministic local bare remotes that proves:
+
+1. stage → commit → push crosses IPC and advances the remote ref;
+2. fetch/pull updates ahead/behind and the checked-out worktree;
+3. a conflicting pull returns a typed conflict outcome while preserving merge state and refreshing the UI into conflict resolution;
+4. resolving all conflicts → committing completes the merge and emits the expected repository-change signal;
+5. switching workspaces/repositories cannot apply a late result to the wrong Git panel.
+
+Observability is currently weakest exactly where these workflows become multi-step. `rocket-git` functions have `#[tracing::instrument]` spans, but emit no operation events; the frontend log bridge only forwards events and does not record span fields on span creation. Consequently, the Git spans do not produce useful frontend-visible diagnostics. Errors are converted to strings, event emission failures are discarded, several frontend catches are silent, and all Git domain events are collapsed into an untyped `git-changed` notification.
+
+## Current test inventory
+
+### Frontend store and components
+
+| Area | Existing tests | What they establish | Important limitation |
+|---|---:|---|---|
+| `src/stores/__tests__/git-store.test.ts` | 53 | Basic loading, stage/unstage/discard/commit choreography, branch/stash/remote methods, credential prompting/retry, identity setup, conflict resolve/abort refreshes, and batch stash ordering | Every backend dependency is a permissive `vi.mock`; no command names, invoke payloads, serialization, real repository state, races, or rendered behavior are tested |
+| `src/components/git/**/*.tsx` | 0 | None | No user interaction, loading/error state, confirmation, focus, stale view, or duplicate-click contract is covered |
+| `src/lib/tauri-api.ts` Git wrappers | 0 | None | The TypeScript/Rust command-name and argument-name contract is untested |
+| `e2e` | 0 Git specs | None | Existing Playwright coverage is contract-feature-only and uses a browser/Tauri mock; no Git workflow reaches Rust |
+
+The 53 store tests passed with:
+
+```bash
+yarn test src/stores/__tests__/git-store.test.ts --run
+```
+
+The tests are useful as fast orchestration checks, especially the stash index ordering and credential retry cases. They are not integration tests: the suite can remain green if `git_push` is not registered, if `{ collectionPath }` becomes `{ path }` on only one side of IPC, if `ConflictResolution` serialization changes, or if git2 leaves the repository in an unexpected state.
+
+### Tauri command layer
+
+`src-tauri/src/commands/git.rs` contains four tests:
+
+- `get_identity_returns_empty_when_unset`
+- `set_and_get_identity_roundtrip`
+- `keyring_account_includes_workspace_id`
+- `set_identity_writes_to_local_config_only`
+
+These test direct helper/command calls for identity and keyring account naming. None of the main Git commands is invoked through Tauri dispatch. There are no tests for:
+
+- command registration in `src-tauri/src/lib.rs`;
+- camelCase renderer arguments generated by `#[tauri::command]`;
+- `Vec<String>` → `Vec<&str>` conversion for stage/unstage/discard;
+- credential enum deserialization for clone/fetch/pull/push;
+- conflict-resolution payload deserialization;
+- propagation of `DomainError` through IPC;
+- managed `GitAppService` state;
+- `TauriEventBus` event names or payloads;
+- failed `AppHandle::emit` behavior;
+- keyring payload round-trips for all credential variants;
+- SSH key discovery behavior.
+
+The focused command printed four passing tests, but the terminal invocation did not return cleanly within the tool timeout after a long Tauri test build:
+
+```bash
+cargo test -p rocket commands::git::tests
+```
+
+The first attempt timed out while compiling. The warm retry printed `4 passed; 0 failed` for `commands::git::tests` and `0 passed` for `main`, then the tool still reported a timeout after duplicated output. Treat the test bodies as passing, but not this invocation as a clean timing/exit validation.
+
+### Application service
+
+`crates/rocket-app/src/git_service.rs` has no `#[cfg(test)]` module and no external integration tests. The focused filter confirms zero Git application-service tests:
+
+```bash
+cargo test -p rocket-app git_service
+# running 0 tests; 300 filtered out
+```
+
+This leaves the event-publishing contract entirely unverified. It is especially important because `crates/rocket-app/CLAUDE.md` says every mutating operation publishes a `DomainEvent`, while the implementation currently has mutating methods with no event (`init`, `set_remote_url`, `delete_branch`, and `resolve_conflict`) and a remote read operation, `fetch`, with no event by design. Tests should make that policy explicit rather than allowing documentation and behavior to drift.
+
+Missing service contracts include:
+
+- exact delegation arguments and returned values;
+- publish-after-success ordering;
+- no success event after a Git error;
+- exact event variant and fields;
+- conflict detection emitted only for a non-empty conflict list;
+- whether a pull that mutates the index/worktree and then returns `DomainError::Conflict` should emit a conflict/status event;
+- whether conflict resolution, branch deletion, remote URL changes, and repository initialization must invalidate frontend state.
+
+### `rocket-git`
+
+`cargo test -p rocket-git` discovered 72 tests: 71 passed and one was ignored. The suite completed in approximately 0.12 seconds after compilation.
+
+Coverage is strongest for real local repository mechanics:
+
+- repository detection
+ and initialization;
+- modified/untracked/deleted status;
+- untracked directory expansion and staging;
+- stage/unstage/discard;
+- commit/log and identity requirements;
+- branch create/switch/delete and dirty-switch refusal;
+- fast-forward and merge-commit behavior;
+- local bare-remote push/pull round-trips and non-fast-forward rejection;
+- ahead/behind tracking and current/upstream branch selection;
+- unborn repository pulls and untracked-file collision scenarios;
+- stash save/apply/pop/drop, including untracked files;
+- remote add/list/remove/set URL and stale tracking ref cleanup;
+- merge conflicts, ours/theirs resolution, staging, and abort;
+- domain-type serialization/basic helpers.
+
+The ignored test, `pull_unborn_real_github_with_untracked_workspace_yml`, depends on a specific GitHub repository and an authorized SSH agent. It is a manual reproduction aid, not a CI contract. The deterministic local bare-remote tests beside it are the correct pattern for automated coverage.
+
+Important `rocket-git` gaps remain:
+
+1. **Fetch result contract.** Pull exercises fetch internally, but no focused test asserts `FetchResult.updated_refs`, `received_objects`, and `received_bytes`. The frontend currently discards this result, so drift would be invisible.
+2. **Successful clone contract.** Clone has invalid-URL and non-empty-destination tests, but no deterministic successful clone assertion for checked-out content, `origin`, current branch, and upstream tracking.
+3. **Documented dual status entries.** The crate documentation says a file with staged and unstaged edits yields two `FileStatus` entries. No named test locks this down, even though store grouping and diff selection depend on `staged` being distinct.
+4. **Commit diff.** `diff_commit` has no focused case for add/modify/delete across a commit, root commits, invalid OIDs, or binary/non-UTF-8 content.
+5. **Custom conflict resolution.** `Ours` and `Theirs` are covered; `Custom { content }` is not.
+6. **Failure atomicity.** Multi-step remote, checkout, merge, and conflict operations are not systematically checked for repository state after every failure point. This is critical where an error may follow a completed fetch, written index, changed HEAD, or written worktree file.
+7. **Credentials and transport.** No automated server fixture verifies credential callback selection, authentication failures, host-key/certificate rejection, or redaction. The security-sensitive unconditional certificate acceptance identified in `04-orchestration-security.md` consequently has no regression test.
+8. **Path containment.** There are no traversal, absolute-path, or symlink escape tests for diff/discard/conflict resolution. These tests should be added with the path validation remediation described in `04-orchestration-security.md`; asserting the current unsafe behavior would encode the vulnerability.
+9. **Binary and rename behavior.** Status/diff/conflict behavior for binary files, non-UTF-8 paths/content, renames, file mode changes, and nested deletion is weak or absent.
+10. **Tracing contract.** No test captures spans/events to verify operation name, outcome, duration, error class, or secret redaction.
+
+## Critical workflow and failure-mode map
+
+Priority reflects the probability and impact of a real integration regression, not raw uncovered line count.
+
+| Priority | User workflow / failure | Existing protection | Missing contract that can fail in production |
+|---:|---|---|---|
+| P0 | Stage files → commit → push | Store call assertions; real git2 stage/commit/push tests in isolation | No test crosses invoke payload → command → app service → git2. Command registration/argument drift, missing event, wrong active path, or UI clearing a failed commit can ship green |
+| P0 | Pull diverged history → conflict resolver → resolve → merge commit | Real git2 conflict tests; store separately checks pull/resolve refresh calls | No vertical test proves a pull error still leaves `MERGE_HEAD`, UI refreshes conflicts after the error, resolver receives the right ours/theirs content, all resolutions clear index conflicts, and final commit completes the merge |
+| P0 | Switch between repository A and B while A is still loading | No race test | A late `gitStatus(A)`/branches/remotes/stashes response can populate global state after `collectionPath` becomes B, showing or mutating the wrong repository; see `02-frontend-architecture.md` F-01/F-06 |
+| P0 | Reject unsafe repository/file paths and untrusted remote identity | No coverage | Renderer-to-command contracts can read/write/delete outside the repository, and transport identity can be accepted without verification; see `04-orchestration-security.md` GIT-SEC-01/02 |
+| P1 | Fresh repository → add remote → fetch/pull default branch | Several strong local `rocket-git` pull tests | No IPC/UI case covers absent remote, `undefined` default remote, unborn HEAD, credentials prompt/retry, identity requirement, and final branch/status rendering together |
+| P1 | Clone → detect repository structure → open/switch workspace | Only clone failure tests; component untested | No successful clone test and no component test for credential wait/retry, post-clone detection errors, multiple collection selection, workspace opening, or duplicate clone prevention |
+| P1 | Commit with missing identity | git2 identity failure/success and Tauri identity helpers exist separately | No component/vertical test proves identity prompt → local config write → one commit, or that a failed identity save preserves the message and does not commit |
+| P1 | Branch switch/remote checkout/merge | Store choreography and git2 mechanics are separate | No event/UI test proves the sidebar and Git panel refresh exactly once, stale diff views close, conflicts stay actionable, and repeated identical errors remain failures |
+| P1 | Non-fast-forward push/auth failure | git2 rejects non-fast-forward; one store push-error assertion | No typed error contract. The store detects auth by English substrings and can misclassify libgit2 messages; no component test proves credential replacement retries only the intended operation |
+| P1 | File has staged and unstaged edits | Implementation documents two status entries | No backend contract plus UI test proves both rows survive serialization and each opens the correct staged/unstaged diff |
+| P2 | Multi-stash apply/pop/drop with partial failure | Good store ordering and stop-on-error tests | Mocks do not model index renumbering or real worktree conflicts. No local-repo integration case proves the store’s ordering assumptions against git2 |
+| P2 | Add/remove/change remote | Store and git2 unit coverage exist | No app-event or UI persistence test; stale refs after URL/name reuse and selected/default remote behavior are not crossed through IPC |
+| P2 | Filesystem changes arrive while Git panel is open | No component test | Subscription is not repository-filtered, setup rejection is unhandled, and debounce/unlisten races are untested; a change in another collection can refresh the active panel |
+| P2 | Diff/log load fails | Diff component displays raw error; commit-diff failure is silent | No rendered tests for actionable error, retry, cancellation, or preventing an older response from replacing a newer selection |
+
+## Untested cross-layer contracts
+
+### TypeScript ↔ Tauri IPC
+
+The wrappers in `src/lib/tauri-api.ts:715-837` encode command names and argument casing as string literals. Rust unit tests call functions directly, bypassing the generated Tauri argument decoder, while store tests mock the wrappers themselves. There is therefore no test at the seam most susceptible to silent drift.
+
+A contract test should fail if any of these change on only one side:
+
+- `git_diff_staged` versus `gitDiffStaged` wrapper selection;
+- `{ collectionPath }`, `{ destPath }`, `{ workspaceId }`, and identity’s `{ path }` inconsistency;
+- tagged credential enum variants such as `sshKey` and fields such as `privateKeyPath`;
+- `ConflictResolution` shape (`{ resolution: 'custom', content }`);
+- camelCase response fields such as `isClean`, `fullId`, `filesChanged`, `updatedRefs`, and `receivedBytes`;
+- registration of every exported Git wrapper in `src-tauri/src/lib.rs`.
+
+### Tauri command ↔ application service
+
+The main command functions are one-line delegates, but that does not make them risk-free. They are the authority and serialization boundary. In particular, stage/unstage/discard allocate borrowed path slices, credential-bearing commands accept renderer-owned secrets, and all commands accept renderer-owned filesystem paths.
+
+Tests should invoke commands through a Tauri test runtime with managed state, not call `git_status(...)` directly. Direct calls do not exercise generated command dispatch, JSON decoding, state lookup, or serialized errors.
+
+### Application service ↔ domain events
+
+`GitAppService` is easy to test with a recording `GitService` and `EventPublisher`, but currently has no tests. This seam determines frontend invalidation. The absence is already allowing policy ambiguity:
+
+- successful stage/unstage/discard/commit/push/pull/branch/stash operations publish events;
+- `init`, `set_remote_url`, `delete_branch`, and `resolve_conflict` mutate state without publishing;
+- `pull` publishes only on `Ok(())`, although a conflict error intentionally leaves a changed index and merge-in-progress state;
+- `conflicts` publishes every time a non-empty list is read, potentially producing duplicate “detected” events;
+- `fetch` updates remote-tracking refs but publishes nothing.
+
+Tests must first encode the desired invalidation policy. Otherwise UI code is forced to compensate with ad hoc inline refreshes and file-watcher timing.
+
+### Domain event ↔ frontend subscription
+
+`TauriEventBus` maps all Git event variants to `git-changed`, and branch switch/merge also emit `collection-changed`. There are no event-bus tests. `onGitChanged` discards the payload and appears unused by the Git feature; `GitPanel` listens to `collection-changed`, skips branch events, and relies on store actions to refresh inline.
+
+This creates untested duplicate/missing-refresh behavior:
+
+- a branch event produces two channels;
+- event emit failures are ignored;
+- the generic channel does not communicate operation, path, success, partial mutation, or affected refs/files;
+- consumers cannot correlate an event with an initiating operation;
+- direct filesystem and Git operation refreshes can race.
+
+## Brittle mocks and misleading green tests
+
+1. **The Tauri API mock is untyped.** The factory in `src/stores/__tests__/git-store.test.ts:5-50` can return structurally invalid values without a compile-time relationship to the real exports. Its default `gitFetch` resolves `undefined` even though production returns `FetchResult`.
+2. **Mocks assert the same choreography they implement.** Most tests prove that a store action calls a mocked wrapper and then another mocked wrapper. They do not prove the refresh sees the repository transition produced by the mutation.
+3. **`vi.clearAllMocks()` does not restore implementations.** Several tests install `mockImplementation`/`mockResolvedValue` on shared module mocks. Clearing call history alone permits implementation leakage and order dependence. Use `vi.resetAllMocks()` plus explicit defaults, or construct a fresh typed fake per test.
+4. **Global Zustand state is only partially reset.** Many `beforeEach` blocks set the fields relevant to that describe block rather than restoring one canonical initial state. New fields can leak between cases unnoticed.
+5. **No deferred-promise race fakes.** All defaults resolve immediately. This hides the most dangerous singleton-store failure: out-of-order responses after repository/workspace switches or rapid file selections.
+6. **String errors stand in for typed libgit2 failures.** Tests use values such as `new Error('NotFastForward')` and inspect substrings. They do not reflect serialized `DomainError` shape or real git2 error class/code/message combinations.
+7. **Component control flow is untested.** Components infer action success from global error-string changes or call store actions that swallow failures. Store tests cannot catch message clearing after failed commit, dialog closing after repeated identical errors, silent commit-diff failure, or duplicate destructive clicks.
+8. **The ignored GitHub test is not hermetic.** It depends on a named repository, network availability, account authorization, mutable remote content, and an SSH agent. Keep it manual, but do not count it as release coverage.
+9. **No event publisher fake exists for Git service tests.** As a result, success/no-success event ordering and exact payloads are assumptions rather than executable contracts.
+10. **Coverage thresholds are zero.** `vite.config.ts:23-28` allows complete loss of Git component/store coverage without failing CI. A repository-wide high threshold may be impractical initially, but Git-critical files can have scoped thresholds once the vertical suite exists.
+
+## Observability assessment
+
+### What exists
+
+- Each concrete git2 operation is decorated with a named `#[tracing::instrument]` span. Credentials and file lists are generally skipped; repository path, branch/remote/file, count, limit, or OID are recorded depending on operation.
+- The Tauri application installs structured logging with `ROCKET_LOG`/`RUST_LOG`, pretty output in debug builds, and JSON output in release builds.
+- `tracing_log::LogTracer` bridges `log` records from dependencies.
+- `TauriTracingLayer` is intended to forward INFO-and-above backend logs over `backend-log`.
+- `FetchResult` exposes updated refs and transfer counts.
+- Domain events describe successful Git mutations at the application-service layer.
+
+### Gaps that impede Git debugging
+
+#### 1. Git spans do not produce useful frontend-visible records
+
+`rocket-git` creates spans but emits no `tracing::info!`, `warn!`, or `error!` events for operation completion/failure. `TauriTracingLayer` implements `on_event` only. It does not implement `on_new_span` to record attributes into span extensions, even though `on_event` attempts to read `HashMap<String, String>` from those extensions. Therefore:
+
+- entering/exiting `git_pull`, `git_push`, etc. does not itself emit a `backend-log` event;
+- `span_fields` is normally empty because no layer stores the instrument fields there;
+- there is no duration or outcome event;
+- a user report cannot be correlated to repository path, remote, branch, merge analysis, or libgit2 failure.
+
+A tracing capture test would reveal this immediately.
+
+#### 2. Errors lose structure at the git2 boundary
+
+Most git2 errors become `DomainError::Internal(e.to_string())`. This discards `git2::ErrorCode`, `ErrorClass`, and operation phase. The frontend then performs auth classification using English substring checks (`class=Ssh`, `authentication failed`, `Repository not found`, `Permission denied`). This is brittle across transports, libgit2 versions, operating systems, and hosting providers.
+
+Diagnostics should preserve a typed public error category and retain structured internal fields such as `git2_code`, `git2_class`, `operation`, and `phase` without exposing credentials.
+
+#### 3. Partial mutations are not observable
+
+Pull and merge are multi-phase operations. A conflict is returned as an error after fetch and index/worktree mutation. Logs/events do not distinguish:
+
+- failed before network connection;
+- fetched successfully but could not resolve a tracking ref;
+- fast-forwarded and failed checkout;
+- merge started and conflicts written;
+- merge tree created but identity/commit failed;
+- cleanup failed after commit.
+
+The same problem applies to remote checkout and custom conflict resolution. A single final error string does not reveal the repository state the user must recover from.
+
+#### 4. Event delivery is silent and lossy
+
+`TauriEventBus` ignores `AppHandle::emit` errors. `TauriTracingLayer` does the same for `backend-log`. There is no fallback counter/log and no test for a closed webview or serialization failure. All Git events share `git-changed`; `onGitChanged` discards payloads, and consumers cannot distinguish status, conflict, branch, remote, or stash changes.
+
+#### 5. Frontend catches suppress evidence
+
+Examples include:
+
+- keychain load failure in `setCollection` silently becomes no credentials;
+- conflict refresh failure silently replaces conflicts with `[]`, making an error look like resolution;
+- identity lookup/save in parts of `GitPanel` is non-blocking and silent;
+- commit-diff failure silently leaves the commits view;
+- subscription setup in `GitPanel` has no rejection handler;
+- clone post-processing and workspace switching share a single user string without phase context;
+- fetch transfer metrics are discarded.
+
+Expected optional failures can remain non-fatal, but they should produce local structured diagnostics and preserve a distinguishable UI state where absence and load failure have different meanings.
+
+#### 6. No operation correlation or telemetry contract
+
+There is no operation ID carried from renderer action through IPC, app service, git2 spans, domain events, and frontend completion. Concurrent refreshes and network operations cannot be reconstructed. There are no counters/timers for operation outcome, duration, conflict frequency, auth challenge, or retry. No external telemetry is required to improve this: a bounded local diagnostic stream with explicit opt-in export would be sufficient and better aligned with credential/repository privacy.
+
+#### 7. Sensitive fields need explicit redaction tests
+
+Credentials are skipped in remote spans, which is good, but clone spans include the full URL and Git domain events include clone/add-remote URLs. URLs may contain userinfo or tokens. Commit spans include up to 50 bytes of the commit message, and repository paths expose local usernames/project names. Before expanding diagnostics, add tests that tokens, passwords, passphrases, URL userinfo, and private-key paths never appear in logs/events. Define whether repository paths and commit messages are allowed in local logs and exported diagnostics.
+
+## Incremental test strategy
+
+The strategy below starts with deterministic seam contracts, then adds the smallest number of vertical tests needed to catch integration failures. All remote tests should use local bare repositories by default; network/host-key tests should use a disposable local SSH/HTTP server in a separate opt-in job.
+
+### Phase 1 — Lock down `rocket-git` state transitions
+
+**Target:** `crates/rocket-git/src/git2_service/mod.rs` initially; split shared fixture helpers into `crates/rocket-git/src/git2_service/test_support.rs` under `#[cfg(test)]` if the module becomes harder to navigate.
+
+**Fixtures:**
+
+- `RepoFixture`: temporary repository with deterministic `main`, local identity, helper methods to write/stage/commit, and access to OIDs/status.
+- `BareRemoteFixture`: bare remote plus a seed/work clone, helper to advance remote branches and inspect refs.
+- `DivergedFixture`: local and remote commits from a common base.
+- `ConflictFixture`: deterministic same-file divergence with expected base/ours/theirs content.
+
+**Cases:**
+
+1. `clone_local_bare_sets_origin_head_upstream_and_worktree`.
+2. `fetch_result_reports_updated_ref_and_nonzero_object_counts` and a no-op fetch case.
+3. `status_emits_distinct_staged_and_unstaged_entries_for_same_path`.
+4. `diff_commit_reports_added_modified_and_deleted_files` plus invalid/root-commit cases.
+5. `resolve_conflict_custom_writes_exact_content_stages_and_clears_conflict`.
+6. Failure-state table tests for pull/merge phases: assert HEAD, index conflicts, `MERGE_HEAD`, worktree content, and ahead/behind after each outcome.
+7. Real multi-stash tests matching store batch ordering assumptions.
+8. Binary/non-UTF-8/rename cases with an explicitly documented supported behavior.
+9. After path-validation remediation, absolute/`..`/symlink escape rejection tests for diff, discard, stage, and resolution.
+
+**Command:**
+
+```bash
+cargo test -p rocket-git
+```
+
+Use the ignored live-GitHub test only as an explicit manual diagnostic:
+
+```bash
+cargo test -p rocket-git pull_unborn_real_github_with_untracked_workspace_yml -- --ignored --nocapture
+```
+
+It should not gate CI.
+
+### Phase 2 — Make application events executable contracts
+
+**Target:** add `#[cfg(test)] mod tests` to `crates/rocket-app/src/git_service.rs`, consistent with the crate’s inline-mock convention.
+
+**Fixtures:**
+
+- `RecordingGitService` with call recording and per-method configured `DomainResult`.
+- `RecordingEventPublisher` backed by `Arc<Mutex<Vec<DomainEvent>>>`.
+- Small builders for `CommitInfo`, `ConflictFile`, and `FetchResult`.
+
+**Cases:**
+
+1. Table-driven success tests for every mutating method: exact Git call, exactly one intended event, exact payload.
+2. Table-driven failure tests: exact error propagated and no success event.
+3. `conflicts_empty_emits_nothing`; `conflicts_nonempty_emits_paths_once`.
+4. Define and test the partial-mutation policy for conflicting pull/merge. Prefer an explicit conflict/status event or typed outcome rather than a silent error-only path.
+5. Define and test invalidation for `init`, `set_remote_url`, `delete_branch`, `resolve_conflict`, and `fetch`.
+6. Assert event publication occurs only after the Git implementation returns success.
+
+**Command:**
+
+```bash
+cargo test -p rocket-app git_service
+```
+
+These tests are cheap and should be required before changing `GitAppService` or `DomainEvent`.
+
+### Phase 3 — Test IPC dispatch, registration, and serialization
+
+**Target:** `src-tauri/tests/git_commands.rs` for integration tests; keep direct identity helpers in `src-tauri/src/commands/git.rs`.
+
+**Fixture:** build a Tauri mock runtime with the production Git invoke handler subset and managed `GitAppService`. Use `Git2Service` plus a recording event publisher for the primary path; use a failing fake service where a precise serialized error is needed. Reuse local temporary repositories and bare remotes.
+
+**Cases:**
+
+1. Invoke every command by its frontend string name with JSON shaped exactly like `src/lib/tauri-api.ts`.
+2. Assert stage/unstage/discard arrays cross dispatch correctly.
+3. Round-trip all credential variants and all conflict-resolution variants without logging/echoing secret values.
+4. Assert representative response JSON casing for `RepoStatus`, `CommitInfo`, `BranchList`, `FetchResult`, and conflicts.
+5. Assert a representative `DomainError::Conflict`, invalid input, authentication error, and non-fast-forward error serialize to the intended stable IPC contract.
+6. A registration smoke table should fail if a wrapper exists but the invoke handler does not register its command.
+7. Test `TauriEventBus` mapping: exact channel and payload per Git event, with branch switch/merge’s additional collection invalidation made explicit.
+8. Add a failed-emission diagnostic test once emit failures are no longer discarded.
+
+**Command:**
+
+```bash
+cargo test -p rocket --test git_commands
+```
+
+Keep this as a focused CI target; compiling the full Tauri test binary is materially slower than `rocket-git` or frontend unit tests.
+
+### Phase 4 — Replace permissive frontend mocks with typed contract fakes
+
+**Targets:**
+
+- refactor `src/stores/__tests__/git-store.test.ts` test setup;
+- add `src/lib/__tests__/tauri-api.git.test.ts`;
+- add deferred-promise helpers under `src/test/`.
+
+**Cases:**
+
+1. Mock `@tauri-apps/api/core.invoke`, not the Git wrappers, and assert command name plus exact payload for each wrapper. This covers the TypeScript half of the IPC contract.
+2. Use `satisfies`/typed fake factories for every response and credential variant.
+3. Restore a canonical initial Zustand state before each test and reset mock implementations, not just call history.
+4. Deferred `setCollection(A)` then `setCollection(B)`: resolve B first and A last; assert B remains authoritative.
+5. Switch workspace while credential load for the prior workspace is pending; assert secrets cannot land in the new repository state.
+6. Pull conflict: mock a typed conflict after partial mutation, then return conflicted status/list; assert error and conflict UI state coexist.
+7. Missing remote: assert no invoke occurs with an undefined remote and the user receives an actionable result.
+8. Duplicate operation suppression/cancellation once operation state is modeled.
+9. Repeated identical errors remain failures; no global error-string comparison is used as a return channel.
+
+**Commands:**
+
+```bash
+yarn test src/lib/__tests__/tauri-api.git.test.ts --run
+yarn test src/stores/__tests__/git-store.test.ts --run
+```
+
+### Phase 5 — Add behavior-focused Git component tests
+
+**Targets and highest-value cases:**
+
+- `src/components/git/__tests__/GitPanel.test.tsx`
+  - loading vs not-repo vs load-error states;
+  - repository path switch race;
+  - branch change closes stale detail view;
+  - collection-change subscription rejection/cleanup/filtering;
+  - commit-diff loading failure is visible and retryable.
+- `src/components/git/__tests__/GitCommitForm.test.tsx`
+  - missing identity prompt → save → exactly one commit;
+  - identity-save failure preserves message and does not commit;
+  - commit failure preserves message;
+  - double submit is blocked.
+- `src/components/git/__tests__/GitFileList.test.tsx`
+  - staged/unstaged duplicate path opens the correct diff mode;
+  - discard confirmation and failed discard behavior;
+  - conflict refresh failure is not interpreted as no conflict.
+- `src/components/git/__tests__/ConflictResolver.test.tsx`
+  - ours/theirs/custom payloads;
+  - failed resolution leaves the resolver open with content intact;
+  - resolving the final conflict transitions to commit-ready state;
+  - abort confirmation and failure handling.
+- `src/components/git/__tests__/GitCloneDialog.test.tsx`
+  - credential prompt and one retry;
+  - successful workspace/collection/multi-collection post-clone paths;
+  - post-clone detection/open failure phase messaging;
+  - closing during an in-flight clone cannot update an unmounted workflow.
+- `src/components/git/__tests__/GitCredentialsDialog.test.tsx`
+  - all credential variants;
+  - keychain unavailable versus no saved entry;
+  - secrets remain masked and are never rendered into diagnostics.
+
+**Command:**
+
+```bash
+yarn test src/components/git --run
+```
+
+Do not snapshot entire panels. Assert user-visible state and calls/results at workflow boundaries.
+
+### Phase 6 — Add a small vertical workflow suite
+
+There are two useful levels; both are needed, but only a few cases should be native end-to-end.
+
+#### Browser workflow tests with a stateful Tauri mock
+
+**Targets:** `e2e/git.spec.ts` and a Git-capable extension of `e2e/helpers/tauri-mock.ts`/`.js`.
+
+The mock should model repository state, not return fixed values. Stage changes status; commit consumes staged files and appends log; pull can enter conflict state; resolution changes the index; branch switch changes files. This catches UI workflow regressions while remaining fast.
+
+Cases: stage/commit, credentials retry, conflict resolution, repository switch race, and clone/open flow.
+
+**Command:**
+
+```bash
+npx playwright test e2e/git.spec.ts
+```
+
+#### Native Tauri smoke tests against real git2
+
+Add the project’s chosen Tauri desktop-driver harness rather than pretending browser Playwright reaches Rust. Use one local bare-remote fixture and avoid external network:
+
+1. open fixture workspace;
+2. modify a tracked collection file through the filesystem fixture;
+3. stage and commit through the visible UI;
+4. push and assert the bare remote ref advances;
+5. advance remote from a seed clone, pull in the app, and assert worktree/UI status;
+6. create deterministic conflict, resolve through UI, and complete merge commit.
+
+Capture screenshots, frontend console, `backend-log`, Rust stdout/JSON logs, and repository diagnostics on failure. Run this small suite in a dedicated Linux CI job because desktop startup is comparatively expensive.
+
+### Phase 7 — Make observability testable
+
+**Targets:**
+
+- `crates/rocket-git/src/git2_service/*` for completion/error events;
+- `src-tauri/src/tauri_tracing_layer.rs` for span field capture;
+- `src-tauri/src/tauri_event_bus.rs` for delivery diagnostics;
+- frontend diagnostic listener/store if local support-bundle export is added.
+
+**Required fields:**
+
+- generated `operation_id`;
+- operation (`pull`, `push`, `stage`, etc.);
+- sanitized repository identifier (prefer stable hash/ID over raw path for exported diagnostics);
+- sanitized remote authority/name, never full secret-bearing URL;
+- branch/ref and file count where relevant;
+- phase (`open`, `connect`, `fetch`, `analyze`, `checkout`, `merge`, `write_index`, `commit`, `cleanup`);
+- outcome (`ok`, `conflict`, `auth_required`, `not_fast_forward`, `invalid_input`, `internal`);
+- duration;
+- git2 error code/class as structured internal fields;
+- post-operation repository state when safe (`ahead`, `behind`, conflict count, merge-in-progress).
+
+**Tests:**
+
+1. In-memory tracing subscriber captures one completion record with span fields and duration for success.
+2. Failure record includes operation/phase/error class and no credential material.
+3. Redaction corpus covers token/password/passphrase/private-key path and URL userinfo.
+4. Event-bus test proves delivery errors create a fallback warning/counter without recursive emit loops.
+5. A vertical conflict test asserts the same operation ID appears in IPC start, git2 phase records, conflict event, and frontend completion diagnostics.
+
+**Useful commands:**
+
+```bash
+ROCKET_LOG=rocket_git=debug,rocket_app=debug,rocket_lib=debug cargo test -p rocket-git -- --nocapture
+cargo test -p rocket tauri_tracing_layer
+cargo test -p rocket tauri_event_bus
+```
+
+## Recommended CI gates
+
+Introduce gates incrementally so slow native tests do not block fast feedback:
+
+1. **Every frontend/Rust change:** `yarn test src/stores/__tests__/git-store.test.ts --run` and `cargo test -p rocket-git`.
+2. **Git frontend changes:** Git wrapper/store/component Vitest suites.
+3. **Git app/domain changes:** `cargo test -p rocket-app git_service` and `cargo test -p rocket-git`.
+4. **Tauri command/event changes:** focused `cargo test -p rocket --test git_commands` plus event/tracing tests.
+5. **Pull request Git integration job:** stateful browser Git workflows and local-bare-remote IPC tests.
+6. **Dedicated platform job:** the small native Tauri smoke suite on Linux first, then macOS/Windows for keychain, SSH agent, path, and checkout differences.
+7. **Opt-in transport security job:** disposable local SSH/HTTPS servers for host-key, certificate, and credential callback tests; never rely on a mutable public repository.
+
+After the first component and IPC suites land, set non-zero scoped coverage expectations for `src/stores/git-store.ts`, `src/lib/tauri-api.ts` Git wrappers, and critical Git workflow components. Coverage percentage is secondary to the P0/P1 workflow assertions above, but a zero threshold currently permits accidental deletion of the entire frontend Git suite.
+
+## Definition of confidence
+
+The Git feature should not be considered integration-covered until all of the following are executable contracts:
+
+- frontend wrapper payloads successfully dispatch through registered Tauri commands;
+- commands use managed `GitAppService` and a real `Git2Service` against temporary repositories;
+- successful and partially successful operations publish the intended typed invalidation event;
+- UI state is repository-keyed or demonstrably resistant to out-of-order completion;
+- pull conflicts preserve and expose merge state through resolution and final commit;
+- auth, non-fast-forward, invalid path, and transport trust failures are typed rather than inferred from strings;
+- logs identify operation, phase, outcome, and correlation ID while proving secret redaction;
+- event/log delivery failures are detectable;
+- at least one native desktop smoke workflow reaches a local bare remote without an external network dependency.
+
+Until then, the current suite gives good confidence in many individual libgit2 mechanics and basic store call sequencing, but limited confidence that a real user action reaches the correct repository, survives IPC/schema drift, updates every consumer, and leaves enough evidence to diagnose failure.

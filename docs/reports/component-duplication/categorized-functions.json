@@ -1,0 +1,2760 @@
+[
+  {
+    "file": "src/components/ErrorBoundary.tsx",
+    "name": "ErrorFallback",
+    "line": 6,
+    "category": "react-component",
+    "purpose": "Renders an error fallback with the failure message and a retry action."
+  },
+  {
+    "file": "src/components/ErrorBoundary.tsx",
+    "name": "handleError",
+    "line": 31,
+    "category": "error-handling",
+    "purpose": "Logs errors and component stacks reported by the React error boundary."
+  },
+  {
+    "file": "src/components/ErrorBoundary.tsx",
+    "name": "ErrorBoundary",
+    "line": 35,
+    "category": "react-component",
+    "purpose": "Wraps child content in a resettable React error boundary."
+  },
+  {
+    "file": "src/components/SplashScreen.tsx",
+    "name": "SplashScreen",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders and coordinates the animated application splash screen."
+  },
+  {
+    "file": "src/components/audit/AuditEventRow.tsx",
+    "name": "formatRelative",
+    "line": 11,
+    "category": "date-time",
+    "purpose": "Formats date or time information for forma\u0001 \u0002elative."
+  },
+  {
+    "file": "src/components/audit/AuditEventRow.tsx",
+    "name": "summarize",
+    "line": 25,
+    "category": "formatting",
+    "purpose": "Converts a security audit event into a human-readable summary."
+  },
+  {
+    "file": "src/components/audit/AuditEventRow.tsx",
+    "name": "AuditEventRow",
+    "line": 49,
+    "category": "react-component",
+    "purpose": "Renders the audi\u0001 \u0002ven\u0001 \u0002ow interface and its related interactions."
+  },
+  {
+    "file": "src/components/audit/AuditLogTab.tsx",
+    "name": "AuditLogTab",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the audi\u0001 \u0002o\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/audit/ComplianceProfileDialog.tsx",
+    "name": "ComplianceProfileDialog",
+    "line": 40,
+    "category": "react-component",
+    "purpose": "Renders and manages the complianc\u0001 \u0002rofil\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/audit/ExportEvidenceDialog.tsx",
+    "name": "isoStartOfDay",
+    "line": 22,
+    "category": "date-time",
+    "purpose": "Converts a date string to a UTC start-of-day ISO timestamp."
+  },
+  {
+    "file": "src/components/audit/ExportEvidenceDialog.tsx",
+    "name": "isoEndOfDay",
+    "line": 25,
+    "category": "date-time",
+    "purpose": "Converts a date string to a UTC end-of-day ISO timestamp."
+  },
+  {
+    "file": "src/components/audit/ExportEvidenceDialog.tsx",
+    "name": "ExportEvidenceDialog",
+    "line": 29,
+    "category": "react-component",
+    "purpose": "Renders and manages the expor\u0001 \u0002videnc\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/collections/CollectionNode.tsx",
+    "name": "lockPinLabel",
+    "line": 57,
+    "category": "formatting",
+    "purpose": "Produces the display value for loc\u0001 \u0002i\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/collections/CollectionNode.tsx",
+    "name": "CollectionNode",
+    "line": 80,
+    "category": "react-component",
+    "purpose": "Renders the collectio\u0001 \u0002ode interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "countRequests",
+    "line": 56,
+    "category": "data-transform",
+    "purpose": "Transforms data for coun\u0001 \u0002equests."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "countFolders",
+    "line": 65,
+    "category": "data-transform",
+    "purpose": "Transforms data for coun\u0001 \u0002olders."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "plural",
+    "line": 76,
+    "category": "formatting",
+    "purpose": "Formats a count with the correct singular or plural label."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "toAuthState",
+    "line": 81,
+    "category": "http-api",
+    "purpose": "Converts persisted collection authentication into frontend authentication state."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "authStateToApi",
+    "line": 136,
+    "category": "http-api",
+    "purpose": "Converts frontend authentication state into the API persistence shape."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "toKeyValueEntries",
+    "line": 175,
+    "category": "data-transform",
+    "purpose": "Maps persisted headers to editable key-value entries with stable IDs."
+  },
+  {
+    "file": "src/components/collections/CollectionOverviewTab.tsx",
+    "name": "CollectionOverviewTab",
+    "line": 202,
+    "category": "react-component",
+    "purpose": "Renders the collectio\u0001 \u0002vervie\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/CollectionSettingsDialog.tsx",
+    "name": "CollectionSettingsDialog",
+    "line": 34,
+    "category": "react-component",
+    "purpose": "Renders and manages the collectio\u0001 \u0002etting\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/collections/CollectionVariablesEditor.tsx",
+    "name": "CollectionVariablesEditor",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders controls for editing collectio\u0001 \u0002ariable\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/collections/FolderNode.tsx",
+    "name": "FolderNode",
+    "line": 61,
+    "category": "react-component",
+    "purpose": "Renders the folde\u0001 \u0002ode interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/FolderVariablesPopover.tsx",
+    "name": "FolderVariablesPopover",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the folde\u0001 \u0002ariable\u0001 \u0002opover interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/MarkdownEditor.tsx",
+    "name": "MarkdownEditor",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders controls for editing markdow\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/collections/MarkdownRenderer.tsx",
+    "name": "useIsDark",
+    "line": 14,
+    "category": "state-hook",
+    "purpose": "Tracks whether the document currently uses the dark theme."
+  },
+  {
+    "file": "src/components/collections/MarkdownRenderer.tsx",
+    "name": "MarkdownRenderer",
+    "line": 26,
+    "category": "react-component",
+    "purpose": "Renders the markdow\u0001 \u0002enderer interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/MethodBreakdown.tsx",
+    "name": "countMethods",
+    "line": 11,
+    "category": "data-transform",
+    "purpose": "Transforms data for coun\u0001 \u0002ethods."
+  },
+  {
+    "file": "src/components/collections/MethodBreakdown.tsx",
+    "name": "MethodBreakdown",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the metho\u0001 \u0002reakdown interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/RequestList.tsx",
+    "name": "groupItems",
+    "line": 25,
+    "category": "data-transform",
+    "purpose": "Groups root and nested collection requests for list rendering."
+  },
+  {
+    "file": "src/components/collections/RequestList.tsx",
+    "name": "flattenRequests",
+    "line": 46,
+    "category": "data-transform",
+    "purpose": "Flattens nested collection folders into a request list."
+  },
+  {
+    "file": "src/components/collections/RequestList.tsx",
+    "name": "matchesFilter",
+    "line": 60,
+    "category": "validation",
+    "purpose": "Validates the condition represented by matche\u0001 \u0002ilter."
+  },
+  {
+    "file": "src/components/collections/RequestList.tsx",
+    "name": "RequestList",
+    "line": 65,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/RequestNode.tsx",
+    "name": "collectLeafGroupIds",
+    "line": 51,
+    "category": "data-transform",
+    "purpose": "Transforms data for collec\u0001 \u0002ea\u0001 \u0002rou\u0001 \u0002ds."
+  },
+  {
+    "file": "src/components/collections/RequestNode.tsx",
+    "name": "RequestNode",
+    "line": 75,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002ode interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/TagsList.tsx",
+    "name": "collectTags",
+    "line": 9,
+    "category": "data-transform",
+    "purpose": "Transforms data for collec\u0001 \u0002ags."
+  },
+  {
+    "file": "src/components/collections/TagsList.tsx",
+    "name": "TagsList",
+    "line": 33,
+    "category": "react-component",
+    "purpose": "Renders the tag\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/collections/tree-utils.ts",
+    "name": "isActiveRequest",
+    "line": 4,
+    "category": "validation",
+    "purpose": "Checks whether a pane tree contains the active request tab."
+  },
+  {
+    "file": "src/components/contract/ChangelogSummaryBar.tsx",
+    "name": "ChangelogSummaryBar",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002ummar\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ChangelogTable.tsx",
+    "name": "ChangelogTable",
+    "line": 16,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002able interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractBadge.tsx",
+    "name": "ContractBadge",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002adge interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractCard.tsx",
+    "name": "ContractCard",
+    "line": 20,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002ard interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractEmptyState.tsx",
+    "name": "ContractEmptyState",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002mpt\u0001 \u0002tate interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractForm.tsx",
+    "name": "ContractForm",
+    "line": 38,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002orm interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractLivePreview.tsx",
+    "name": "ContractLivePreview",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002iv\u0001 \u0002review interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractTab.tsx",
+    "name": "partyFromName",
+    "line": 20,
+    "category": "data-transform",
+    "purpose": "Builds a contract party record from a display name."
+  },
+  {
+    "file": "src/components/contract/ContractTab.tsx",
+    "name": "ContractTab",
+    "line": 52,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/contract/ContractTabTopBar.tsx",
+    "name": "ContractTabTopBar",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002a\u0001 \u0002o\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangeChip.tsx",
+    "name": "ChangeChip",
+    "line": 23,
+    "category": "react-component",
+    "purpose": "Renders the chang\u0001 \u0002hip interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDiffBlock.tsx",
+    "name": "ChangelogDiffBlock",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002if\u0001 \u0002lock interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawer.tsx",
+    "name": "ChangelogDrawer",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002rawer interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawer.tsx",
+    "name": "ChangelogDrawerInner",
+    "line": 41,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002rawe\u0001 \u0002nner interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerFooter.tsx",
+    "name": "csvCell",
+    "line": 14,
+    "category": "formatting",
+    "purpose": "Escapes a string for safe inclusion in a quoted CSV cell."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerFooter.tsx",
+    "name": "exportCsv",
+    "line": 18,
+    "category": "file-ops",
+    "purpose": "Builds and downloads a CSV export of contract changelog entries."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerFooter.tsx",
+    "name": "formatSince",
+    "line": 53,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002ince."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerFooter.tsx",
+    "name": "ChangelogDrawerFooter",
+    "line": 64,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002rawe\u0001 \u0002ooter interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerHeader.tsx",
+    "name": "ChangelogDrawerHeader",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002rawe\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerToolbar.tsx",
+    "name": "Pill",
+    "line": 20,
+    "category": "react-component",
+    "purpose": "Renders the pill interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogDrawerToolbar.tsx",
+    "name": "ChangelogDrawerToolbar",
+    "line": 38,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002rawe\u0001 \u0002oolbar interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogEmptyState.tsx",
+    "name": "ChangelogEmptyState",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002mpt\u0001 \u0002tate interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogEntry.tsx",
+    "name": "timeAgo",
+    "line": 17,
+    "category": "date-time",
+    "purpose": "Formats date or time information for tim\u0001 \u0002go."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogEntry.tsx",
+    "name": "KindChip",
+    "line": 35,
+    "category": "react-component",
+    "purpose": "Renders the kin\u0001 \u0002hip interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogEntry.tsx",
+    "name": "ChangelogEntry",
+    "line": 57,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002ntry interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogTimeline.tsx",
+    "name": "noop",
+    "line": 14,
+    "category": "other",
+    "purpose": "Provides supporting behavior for noop."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogTimeline.tsx",
+    "name": "TimelineDot",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the timelin\u0001 \u0002ot interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ChangelogDrawer/ChangelogTimeline.tsx",
+    "name": "ChangelogTimeline",
+    "line": 48,
+    "category": "react-component",
+    "purpose": "Renders the changelo\u0001 \u0002imeline interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ConsumerTree.tsx",
+    "name": "ContractParties",
+    "line": 32,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002arties interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "formatDate",
+    "line": 70,
+    "category": "date-time",
+    "purpose": "Formats date or time information for forma\u0001 \u0002ate."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "formatMonthDay",
+    "line": 82,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002ont\u0001 \u0002ay."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "subtitleDateLabel",
+    "line": 93,
+    "category": "date-time",
+    "purpose": "Formats date or time information for subtitl\u0001 \u0002at\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "nextVersion",
+    "line": 111,
+    "category": "ui-helpers",
+    "purpose": "Increments the final numeric segment of a version string."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "driftFooterLabel",
+    "line": 123,
+    "category": "formatting",
+    "purpose": "Produces the display value for drif\u0001 \u0002oote\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "reviewFooterLabel",
+    "line": 138,
+    "category": "formatting",
+    "purpose": "Produces the display value for revie\u0001 \u0002oote\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "isExpiringSoon",
+    "line": 151,
+    "category": "validation",
+    "purpose": "Validates the condition represented by i\u0001 \u0002xpirin\u0001 \u0002oon."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "footerLabel",
+    "line": 157,
+    "category": "formatting",
+    "purpose": "Produces the display value for foote\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/ContractCard.tsx",
+    "name": "policyLabel",
+    "line": 174,
+    "category": "formatting",
+    "purpose": "Produces the display value for polic\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/ContractCardSkeleton.tsx",
+    "name": "ContractCardSkeleton",
+    "line": 3,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002ar\u0001 \u0002keleton interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractContextMenu.tsx",
+    "name": "renderItems",
+    "line": 59,
+    "category": "ui-helpers",
+    "purpose": "Provides supporting UI behavior for rende\u0001 \u0002tems."
+  },
+  {
+    "file": "src/components/contracts/ContractContextMenu.tsx",
+    "name": "DeleteDialog",
+    "line": 177,
+    "category": "react-component",
+    "purpose": "Renders and manages the delet\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/contracts/ContractContextMenu.tsx",
+    "name": "ContractContextMenu",
+    "line": 216,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002ontex\u0001 \u0002enu interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractContextMenu.tsx",
+    "name": "ContractDropdownMenu",
+    "line": 252,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002ropdow\u0001 \u0002enu interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractDiffPane.tsx",
+    "name": "changeTypeToKind",
+    "line": 30,
+    "category": "data-transform",
+    "purpose": "Maps persisted change types to frontend change kinds."
+  },
+  {
+    "file": "src/components/contracts/ContractDiffPane.tsx",
+    "name": "truncate",
+    "line": 36,
+    "category": "formatting",
+    "purpose": "Truncates a display value to a maximum length."
+  },
+  {
+    "file": "src/components/contracts/ContractDiffPane.tsx",
+    "name": "ContractDiffPane",
+    "line": 41,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002if\u0001 \u0002ane interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractStatusChip.tsx",
+    "name": "ContractStatusChip",
+    "line": 40,
+    "category": "react-component",
+    "purpose": "Renders the contrac\u0001 \u0002tatu\u0001 \u0002hip interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsEmptyState.tsx",
+    "name": "ContractsEmptyState",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002mpt\u0001 \u0002tate interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsFilterBar.tsx",
+    "name": "getChipCount",
+    "line": 40,
+    "category": "data-transform",
+    "purpose": "Selects the contract count represented by a status filter chip."
+  },
+  {
+    "file": "src/components/contracts/ContractsFilterBar.tsx",
+    "name": "ContractsFilterBar",
+    "line": 63,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002ilte\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsGroupHeader.tsx",
+    "name": "ContractsGroupHeader",
+    "line": 6,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002rou\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsSummaryRow.tsx",
+    "name": "StatCard",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders the sta\u0001 \u0002ard interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsSummaryRow.tsx",
+    "name": "ContractsSummaryRow",
+    "line": 38,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002ummar\u0001 \u0002ow interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ContractsTab.tsx",
+    "name": "ContractsTab",
+    "line": 32,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ExportContractDialog.tsx",
+    "name": "ExportContractDialog",
+    "line": 29,
+    "category": "react-component",
+    "purpose": "Renders and manages the expor\u0001 \u0002ontrac\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/contracts/MiniChangelog.tsx",
+    "name": "railLabel",
+    "line": 18,
+    "category": "formatting",
+    "purpose": "Produces the display value for rai\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/contracts/MiniChangelog.tsx",
+    "name": "entryTimestamp",
+    "line": 25,
+    "category": "date-time",
+    "purpose": "Formats date or time information for entr\u0001 \u0002imestamp."
+  },
+  {
+    "file": "src/components/contracts/MiniChangelog.tsx",
+    "name": "formatSinceDate",
+    "line": 45,
+    "category": "date-time",
+    "purpose": "Formats date or time information for forma\u0001 \u0002inc\u0001 \u0002ate."
+  },
+  {
+    "file": "src/components/contracts/MiniChangelog.tsx",
+    "name": "SysChip",
+    "line": 56,
+    "category": "react-component",
+    "purpose": "Renders the sy\u0001 \u0002hip interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/MiniChangelog.tsx",
+    "name": "MiniChangelog",
+    "line": 64,
+    "category": "react-component",
+    "purpose": "Renders the min\u0001 \u0002hangelog interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "todayISO",
+    "line": 54,
+    "category": "date-time",
+    "purpose": "Formats date or time information for toda\u0001 \u0002so."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "slugify",
+    "line": 58,
+    "category": "formatting",
+    "purpose": "Produces the display value for slugify."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "buildParties",
+    "line": 66,
+    "category": "data-transform",
+    "purpose": "Parses comma-separated names into contract party records."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "validate",
+    "line": 74,
+    "category": "date-time",
+    "purpose": "Validates new-contract form fields and returns field-level errors."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "contractToFormState",
+    "line": 106,
+    "category": "ui-helpers",
+    "purpose": "Maps a contract into editable modal form state."
+  },
+  {
+    "file": "src/components/contracts/NewContractModal.tsx",
+    "name": "NewContractModal",
+    "line": 125,
+    "category": "react-component",
+    "purpose": "Renders and manages the ne\u0001 \u0002ontrac\u0001 \u0002odal workflow."
+  },
+  {
+    "file": "src/components/contracts/PartyAvatar.tsx",
+    "name": "PartyAvatar",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the part\u0001 \u0002vatar interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/PartyPill.tsx",
+    "name": "PartyPill",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the part\u0001 \u0002ill interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/ScopeTag.tsx",
+    "name": "ScopeTag",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the scop\u0001 \u0002ag interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/internal/MetaItem.tsx",
+    "name": "MetaItem",
+    "line": 17,
+    "category": "react-component",
+    "purpose": "Renders the met\u0001 \u0002tem interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/internal/PrimaryAction.tsx",
+    "name": "PrimaryAction",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the primar\u0001 \u0002ction interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/internal/StatusSubline.tsx",
+    "name": "StatusSubline",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the statu\u0001 \u0002ubline interface and its related interactions."
+  },
+  {
+    "file": "src/components/contracts/internal/VersionTag.tsx",
+    "name": "VersionTag",
+    "line": 2,
+    "category": "react-component",
+    "purpose": "Renders the versio\u0001 \u0002ag interface and its related interactions."
+  },
+  {
+    "file": "src/components/editor/EditorSkeleton.tsx",
+    "name": "EditorSkeleton",
+    "line": 5,
+    "category": "react-component",
+    "purpose": "Renders the edito\u0001 \u0002keleton interface and its related interactions."
+  },
+  {
+    "file": "src/components/editor/MonacoWrapper.tsx",
+    "name": "ensureDecorationStyles",
+    "line": 40,
+    "category": "editor-helper",
+    "purpose": "Injects Monaco variable-decoration styles once per document."
+  },
+  {
+    "file": "src/components/editor/MonacoWrapper.tsx",
+    "name": "MonacoWrapper",
+    "line": 59,
+    "category": "react-component",
+    "purpose": "Renders the monac\u0001 \u0002rapper interface and its related interactions."
+  },
+  {
+    "file": "src/components/editor/SingleLineEditor.tsx",
+    "name": "SingleLineEditor",
+    "line": 73,
+    "category": "react-component",
+    "purpose": "Renders controls for editing singl\u0001 \u0002in\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/editor/VariablePopover.tsx",
+    "name": "navLinkLabel",
+    "line": 27,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for na\u0001 \u0002in\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/editor/VariablePopover.tsx",
+    "name": "isEditable",
+    "line": 46,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for i\u0001 \u0002ditable."
+  },
+  {
+    "file": "src/components/editor/VariablePopover.tsx",
+    "name": "VariablePopover",
+    "line": 59,
+    "category": "react-component",
+    "purpose": "Renders the variabl\u0001 \u0002opover interface and its related interactions."
+  },
+  {
+    "file": "src/components/editor/extensions/secret-mask.ts",
+    "name": "constructor",
+    "line": 22,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for constructor."
+  },
+  {
+    "file": "src/components/editor/extensions/secret-mask.ts",
+    "name": "constructor",
+    "line": 52,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for constructor."
+  },
+  {
+    "file": "src/components/editor/extensions/secret-mask.ts",
+    "name": "buildMask",
+    "line": 63,
+    "category": "editor-helper",
+    "purpose": "Builds CodeMirror decorations that mask secret text while preserving variables."
+  },
+  {
+    "file": "src/components/editor/extensions/secret-mask.ts",
+    "name": "secretMask",
+    "line": 108,
+    "category": "editor-helper",
+    "purpose": "Creates the CodeMirror extension that visually masks secret values."
+  },
+  {
+    "file": "src/components/editor/extensions/url-tokens.ts",
+    "name": "buildUrlTokenDecorations",
+    "line": 28,
+    "category": "editor-helper",
+    "purpose": "Builds CodeMirror decorations for URL path and query tokens."
+  },
+  {
+    "file": "src/components/editor/extensions/url-tokens.ts",
+    "name": "urlTokens",
+    "line": 94,
+    "category": "editor-helper",
+    "purpose": "Creates URL token decoration and cURL-paste CodeMirror extensions."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-autocomplete.ts",
+    "name": "scopeBadge",
+    "line": 30,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for scop\u0001 \u0002adge."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-autocomplete.ts",
+    "name": "variableAutocomplete",
+    "line": 103,
+    "category": "editor-helper",
+    "purpose": "Creates CodeMirror autocomplete support for scoped variables."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-highlight.ts",
+    "name": "constructor",
+    "line": 23,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for constructor."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-highlight.ts",
+    "name": "buildDecorations",
+    "line": 39,
+    "category": "editor-helper",
+    "purpose": "Builds scope-colored decorations for variable references."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-highlight.ts",
+    "name": "variableHighlight",
+    "line": 67,
+    "category": "editor-helper",
+    "purpose": "Creates the CodeMirror extension that highlights variable references."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-popover.ts",
+    "name": "findVarTokenAt",
+    "line": 91,
+    "category": "editor-helper",
+    "purpose": "Finds the variable token containing a document position."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-popover.ts",
+    "name": "clickIsInsideToken",
+    "line": 114,
+    "category": "editor-helper",
+    "purpose": "Checks whether pointer coordinates fall inside a rendered editor token."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-popover.ts",
+    "name": "variablePopoverExtension",
+    "line": 143,
+    "category": "editor-helper",
+    "purpose": "Creates CodeMirror state, tooltip, and click handling for variable popovers."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-popover.ts",
+    "name": "closePopover",
+    "line": 192,
+    "category": "editor-helper",
+    "purpose": "Dispatches the CodeMirror effect that closes the active variable popover."
+  },
+  {
+    "file": "src/components/editor/extensions/variable-popover.ts",
+    "name": "getActivePopover",
+    "line": 199,
+    "category": "editor-helper",
+    "purpose": "Reads the active variable popover state from a CodeMirror view."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "cssVar",
+    "line": 34,
+    "category": "editor-helper",
+    "purpose": "Reads and trims a CSS custom property from the document root."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "cssVarHex",
+    "line": 40,
+    "category": "editor-helper",
+    "purpose": "Converts a CSS color custom property to a Monaco-compatible color value."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "getRocketLightTheme",
+    "line": 62,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for ge\u0001 \u0002ocke\u0001 \u0002igh\u0001 \u0002heme."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "getRocketDarkTheme",
+    "line": 231,
+    "category": "editor-helper",
+    "purpose": "Provides editor behavior for ge\u0001 \u0002ocke\u0001 \u0002ar\u0001 \u0002heme."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "defineMonacoThemes",
+    "line": 409,
+    "category": "editor-helper",
+    "purpose": "Registers Rocket light and dark themes with Monaco."
+  },
+  {
+    "file": "src/components/editor/monaco-config.ts",
+    "name": "detectLanguage",
+    "line": 415,
+    "category": "editor-helper",
+    "purpose": "Chooses a Monaco language from request body mode and content type."
+  },
+  {
+    "file": "src/components/editor/rok-types.ts",
+    "name": "ROK_TYPE_DEFS_FOR_PHASE",
+    "line": 518,
+    "category": "editor-helper",
+    "purpose": "Returns the ROK TypeScript definitions available for a script phase."
+  },
+  {
+    "file": "src/components/editor/useMonacoTheme.ts",
+    "name": "useMonacoTheme",
+    "line": 6,
+    "category": "state-hook",
+    "purpose": "Tracks the application theme and keeps Monaco themes synchronized."
+  },
+  {
+    "file": "src/components/environments/EnvironmentDialog.tsx",
+    "name": "dedupeVariables",
+    "line": 41,
+    "category": "data-transform",
+    "purpose": "Deduplicates variables by key while preserving blank rows and latest values."
+  },
+  {
+    "file": "src/components/environments/EnvironmentDialog.tsx",
+    "name": "EnvironmentDialog",
+    "line": 60,
+    "category": "react-component",
+    "purpose": "Renders and manages the environmen\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/environments/InlineEnvName.tsx",
+    "name": "InlineEnvName",
+    "line": 18,
+    "category": "react-component",
+    "purpose": "Renders the inlin\u0001 \u0002n\u0001 \u0002ame interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/BranchSelector.tsx",
+    "name": "BranchSelector",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the branc\u0001 \u0002elector interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/CommitDiffView.tsx",
+    "name": "fileDiffToDiffState",
+    "line": 14,
+    "category": "data-transform",
+    "purpose": "Maps a commit file diff into the frontend diff-view state."
+  },
+  {
+    "file": "src/components/git/CommitDiffView.tsx",
+    "name": "fileStatus",
+    "line": 25,
+    "category": "data-transform",
+    "purpose": "Derives a Git status from the presence of old and new file content."
+  },
+  {
+    "file": "src/components/git/CommitDiffView.tsx",
+    "name": "CommitDiffView",
+    "line": 31,
+    "category": "react-component",
+    "purpose": "Renders the commi\u0001 \u0002if\u0001 \u0002iew interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/ConflictResolver.tsx",
+    "name": "ConflictResolver",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders the conflic\u0001 \u0002esolver interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/DiffHeader.tsx",
+    "name": "DiffHeader",
+    "line": 16,
+    "category": "react-component",
+    "purpose": "Renders the dif\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/DiffViewForFile.tsx",
+    "name": "DiffViewForFile",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the dif\u0001 \u0002ie\u0001 \u0002o\u0001 \u0002ile interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/DiffViewer.tsx",
+    "name": "getLanguage",
+    "line": 17,
+    "category": "ui-helpers",
+    "purpose": "Selects a Monaco language from a file extension."
+  },
+  {
+    "file": "src/components/git/DiffViewer.tsx",
+    "name": "DiffViewer",
+    "line": 37,
+    "category": "react-component",
+    "purpose": "Renders the dif\u0001 \u0002iewer interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitCloneDialog.tsx",
+    "name": "GitCloneDialog",
+    "line": 31,
+    "category": "react-component",
+    "purpose": "Renders and manages the gi\u0001 \u0002lon\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/git/GitCommitForm.tsx",
+    "name": "GitCommitForm",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002ommi\u0001 \u0002orm interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitCommitLog.tsx",
+    "name": "relativeTime",
+    "line": 8,
+    "category": "date-time",
+    "purpose": "Formats date or time information for relativ\u0001 \u0002ime."
+  },
+  {
+    "file": "src/components/git/GitCommitLog.tsx",
+    "name": "GitCommitLog",
+    "line": 27,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002ommi\u0001 \u0002og interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitCredentialsDialog.tsx",
+    "name": "GitCredentialsDialog",
+    "line": 27,
+    "category": "react-component",
+    "purpose": "Renders and manages the gi\u0001 \u0002redential\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/git/GitFileList.tsx",
+    "name": "GitFileList",
+    "line": 25,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002il\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitIdentityDialog.tsx",
+    "name": "GitIdentityDialog",
+    "line": 16,
+    "category": "react-component",
+    "purpose": "Renders and manages the gi\u0001 \u0002dentit\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/git/GitLandingPanel.tsx",
+    "name": "GitLandingPanel",
+    "line": 32,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002andin\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitLinksSection.tsx",
+    "name": "GitLinksSection",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002ink\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitPanel.tsx",
+    "name": "GitPanel",
+    "line": 42,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitPanelSkeleton.tsx",
+    "name": "GitPanelSkeleton",
+    "line": 1,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002ane\u0001 \u0002keleton interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitRemotesDialog.tsx",
+    "name": "GitRemotesDialog",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders and manages the gi\u0001 \u0002emote\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/git/GitStashSection.tsx",
+    "name": "formatAge",
+    "line": 27,
+    "category": "date-time",
+    "purpose": "Formats date or time information for forma\u0001 \u0002ge."
+  },
+  {
+    "file": "src/components/git/GitStashSection.tsx",
+    "name": "GitStashSection",
+    "line": 39,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002tas\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/GitStatusBadge.tsx",
+    "name": "GitStatusBadge",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002tatu\u0001 \u0002adge interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/VisualDiffView.tsx",
+    "name": "DiffField",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the dif\u0001 \u0002ield interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/VisualDiffView.tsx",
+    "name": "KVTable",
+    "line": 82,
+    "category": "react-component",
+    "purpose": "Renders the kvtable interface and its related interactions."
+  },
+  {
+    "file": "src/components/git/VisualDiffView.tsx",
+    "name": "VisualDiffView",
+    "line": 120,
+    "category": "react-component",
+    "purpose": "Renders the visua\u0001 \u0002if\u0001 \u0002iew interface and its related interactions."
+  },
+  {
+    "file": "src/components/history/HistoryPanel.tsx",
+    "name": "formatTime",
+    "line": 27,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002ime."
+  },
+  {
+    "file": "src/components/history/HistoryPanel.tsx",
+    "name": "displayUrl",
+    "line": 39,
+    "category": "formatting",
+    "purpose": "Formats a URL as host and path for compact display."
+  },
+  {
+    "file": "src/components/history/HistoryPanel.tsx",
+    "name": "HistoryPanel",
+    "line": 48,
+    "category": "react-component",
+    "purpose": "Renders the histor\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/illustrations/RocketBook.tsx",
+    "name": "RocketBook",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002ook SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketCelebrate.tsx",
+    "name": "RocketCelebrate",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002elebrate SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketClock.tsx",
+    "name": "RocketClock",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002lock SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketCloud.tsx",
+    "name": "RocketCloud",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002loud SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketConstruction.tsx",
+    "name": "RocketConstruction",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002onstruction SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketError.tsx",
+    "name": "RocketError",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002rror SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketFolder.tsx",
+    "name": "RocketFolder",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002older SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketGroup.tsx",
+    "name": "RocketGroup",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002roup SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketIdle.tsx",
+    "name": "RocketIdle",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002dle SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketLaunch.tsx",
+    "name": "RocketLaunch",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002aunch SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketLiftoff.tsx",
+    "name": "RocketLiftOff",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002if\u0001 \u0002ff SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketLock.tsx",
+    "name": "RocketLock",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002ock SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketMinimal.tsx",
+    "name": "RocketMinimal",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002inimal SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketOrbit.tsx",
+    "name": "RocketOrbit",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002rbit SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketPlanet.tsx",
+    "name": "RocketPlanet",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002lanet SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketPlug.tsx",
+    "name": "RocketPlug",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002lug SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketSearch.tsx",
+    "name": "RocketSearch",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002earch SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketSleep.tsx",
+    "name": "RocketSleep",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002leep SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketSpeed.tsx",
+    "name": "RocketSpeed",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002peed SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketStar.tsx",
+    "name": "RocketStar",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002tar SVG illustration."
+  },
+  {
+    "file": "src/components/illustrations/RocketTelescope.tsx",
+    "name": "RocketTelescope",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002elescope SVG illustration."
+  },
+  {
+    "file": "src/components/import/ImportCollectionDialog.tsx",
+    "name": "ImportCollectionDialog",
+    "line": 45,
+    "category": "react-component",
+    "purpose": "Renders and manages the impor\u0001 \u0002ollectio\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/layout/CollectionDropdown.tsx",
+    "name": "CollectionDropdown",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders the collectio\u0001 \u0002ropdown interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/CollectionsSidebar.tsx",
+    "name": "CollectionsSidebar",
+    "line": 48,
+    "category": "react-component",
+    "purpose": "Renders the collection\u0001 \u0002idebar interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "formatTime",
+    "line": 24,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002ime."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "HttpEntryDetail",
+    "line": 34,
+    "category": "react-component",
+    "purpose": "Renders the htt\u0001 \u0002ntr\u0001 \u0002etail interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "ScriptLogRow",
+    "line": 74,
+    "category": "react-component",
+    "purpose": "Renders the scrip\u0001 \u0002o\u0001 \u0002ow interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "TestResultRow",
+    "line": 96,
+    "category": "react-component",
+    "purpose": "Renders the tes\u0001 \u0002esul\u0001 \u0002ow interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "matchesSearch",
+    "line": 122,
+    "category": "validation",
+    "purpose": "Checks whether a console entry matches a search term."
+  },
+  {
+    "file": "src/components/layout/ConsolePanel.tsx",
+    "name": "ConsolePanel",
+    "line": 134,
+    "category": "react-component",
+    "purpose": "Renders the consol\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/EnvironmentSwitcher.tsx",
+    "name": "EnvironmentSwitcher",
+    "line": 21,
+    "category": "react-component",
+    "purpose": "Renders the environmen\u0001 \u0002witcher interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/GitToolbarButton.tsx",
+    "name": "findTabGroupId",
+    "line": 10,
+    "category": "data-transform",
+    "purpose": "Finds the pane group containing a specified tab."
+  },
+  {
+    "file": "src/components/layout/GitToolbarButton.tsx",
+    "name": "findLeaf",
+    "line": 18,
+    "category": "data-transform",
+    "purpose": "Finds a leaf pane by group identifier."
+  },
+  {
+    "file": "src/components/layout/GitToolbarButton.tsx",
+    "name": "openGitPanel",
+    "line": 24,
+    "category": "event-handling",
+    "purpose": "Opens or refreshes the Git panel for the active collection."
+  },
+  {
+    "file": "src/components/layout/GitToolbarButton.tsx",
+    "name": "GitToolbarButton",
+    "line": 63,
+    "category": "react-component",
+    "purpose": "Renders the gi\u0001 \u0002oolba\u0001 \u0002utton interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/SandboxPopover.tsx",
+    "name": "SandboxPopover",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the sandbo\u0001 \u0002opover interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/StatusBar.tsx",
+    "name": "StatusBar",
+    "line": 16,
+    "category": "react-component",
+    "purpose": "Renders the statu\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/WorkspaceSection.tsx",
+    "name": "WorkspaceSection",
+    "line": 21,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/WorkspaceSecurityPopover.tsx",
+    "name": "WorkspaceSecurityPopover",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002ecurit\u0001 \u0002opover interface and its related interactions."
+  },
+  {
+    "file": "src/components/layout/WorkspaceToolbar.tsx",
+    "name": "WorkspaceToolbar",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002oolbar interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "collectionBasename",
+    "line": 61,
+    "category": "formatting",
+    "purpose": "Extracts a collection name from an absolute path."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "workspaceSectionLabel",
+    "line": 65,
+    "category": "formatting",
+    "purpose": "Produces the display value for workspac\u0001 \u0002ectio\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "collectionSectionLabel",
+    "line": 78,
+    "category": "formatting",
+    "purpose": "Produces the display value for collectio\u0001 \u0002ectio\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "collectionSectionIcon",
+    "line": 91,
+    "category": "data-transform",
+    "purpose": "Transforms data for collectio\u0001 \u0002ectio\u0001 \u0002con."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "workspaceSectionIcon",
+    "line": 104,
+    "category": "ui-helpers",
+    "purpose": "Provides supporting UI behavior for workspac\u0001 \u0002ectio\u0001 \u0002con."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "deriveSegments",
+    "line": 128,
+    "category": "data-transform",
+    "purpose": "Derives navigable breadcrumb segments for the active tab."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "SegmentButton",
+    "line": 455,
+    "category": "react-component",
+    "purpose": "Renders the segmen\u0001 \u0002utton interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/BreadcrumbBar.tsx",
+    "name": "BreadcrumbBar",
+    "line": 584,
+    "category": "react-component",
+    "purpose": "Renders the breadcrum\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/EditorGroup.tsx",
+    "name": "EmptyState",
+    "line": 57,
+    "category": "react-component",
+    "purpose": "Renders the empt\u0001 \u0002tate interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/EditorGroup.tsx",
+    "name": "EditorGroup",
+    "line": 131,
+    "category": "react-component",
+    "purpose": "Renders the edito\u0001 \u0002roup interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/PaneRenderer.tsx",
+    "name": "PaneRenderer",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the pan\u0001 \u0002enderer interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/TabBar.tsx",
+    "name": "collectLeafGroupIds",
+    "line": 36,
+    "category": "data-transform",
+    "purpose": "Transforms data for collec\u0001 \u0002ea\u0001 \u0002rou\u0001 \u0002ds."
+  },
+  {
+    "file": "src/components/panes/TabBar.tsx",
+    "name": "TabBar",
+    "line": 42,
+    "category": "react-component",
+    "purpose": "Renders the ta\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/panes/TabItem.tsx",
+    "name": "getTabTitle",
+    "line": 7,
+    "category": "formatting",
+    "purpose": "Produces the display value for ge\u0001 \u0002a\u0001 \u0002itle."
+  },
+  {
+    "file": "src/components/panes/TabItem.tsx",
+    "name": "TabItem",
+    "line": 28,
+    "category": "react-component",
+    "purpose": "Renders the ta\u0001 \u0002tem interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/AssertionsTab.tsx",
+    "name": "AssertionsTab",
+    "line": 102,
+    "category": "react-component",
+    "purpose": "Renders the assertion\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/AuthEditor.tsx",
+    "name": "AuthEditor",
+    "line": 27,
+    "category": "react-component",
+    "purpose": "Renders controls for editing aut\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/BodyEditor.tsx",
+    "name": "BodyEditor",
+    "line": 25,
+    "category": "react-component",
+    "purpose": "Renders controls for editing bod\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/CreateRequestDialog.tsx",
+    "name": "CreateRequestDialog",
+    "line": 45,
+    "category": "react-component",
+    "purpose": "Renders and manages the creat\u0001 \u0002eques\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/request/HeadersEditor.tsx",
+    "name": "HeadersEditor",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders controls for editing header\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/KeyValueEditor.tsx",
+    "name": "KeyValueEditor",
+    "line": 21,
+    "category": "react-component",
+    "purpose": "Renders controls for editing ke\u0001 \u0002alu\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/LoadTestDialog.tsx",
+    "name": "LoadTestDialog",
+    "line": 33,
+    "category": "react-component",
+    "purpose": "Renders and manages the loa\u0001 \u0002es\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/request/LoadTestDialog.tsx",
+    "name": "Stat",
+    "line": 208,
+    "category": "react-component",
+    "purpose": "Renders the stat interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/PathParamsPanel.tsx",
+    "name": "PathParamsPanel",
+    "line": 22,
+    "category": "react-component",
+    "purpose": "Renders the pat\u0001 \u0002aram\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/QueryParamsEditor.tsx",
+    "name": "QueryParamsEditor",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders controls for editing quer\u0001 \u0002aram\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/RequestDocsPanel.tsx",
+    "name": "RequestDocsPanel",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002oc\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/RequestPanel.tsx",
+    "name": "RequestPanel",
+    "line": 127,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/RequestVariablesDialog.tsx",
+    "name": "RequestVariablesDialog",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders and manages the reques\u0001 \u0002ariable\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/request/RequestVariablesPanel.tsx",
+    "name": "RequestVariablesPanel",
+    "line": 13,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002ariable\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/RocketTabBar.tsx",
+    "name": "RocketTabBar",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the rocke\u0001 \u0002a\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/SaveRequestButton.tsx",
+    "name": "authForSave",
+    "line": 16,
+    "category": "http-api",
+    "purpose": "Converts request authentication state into its persisted API shape."
+  },
+  {
+    "file": "src/components/request/SaveRequestButton.tsx",
+    "name": "buildPayloadFromTab",
+    "line": 53,
+    "category": "http-api",
+    "purpose": "Builds a persisted API request payload from request-tab state."
+  },
+  {
+    "file": "src/components/request/SaveRequestButton.tsx",
+    "name": "SaveRequestButton",
+    "line": 84,
+    "category": "react-component",
+    "purpose": "Renders the sav\u0001 \u0002eques\u0001 \u0002utton interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/SaveToCollectionDialog.tsx",
+    "name": "SaveToCollectionDialog",
+    "line": 34,
+    "category": "react-component",
+    "purpose": "Renders and manages the sav\u0001 \u0002\u0001 \u0002ollectio\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/request/ScriptSnippetSidebar.tsx",
+    "name": "SnippetItem",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the snippe\u0001 \u0002tem interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/ScriptSnippetSidebar.tsx",
+    "name": "SubGroupSection",
+    "line": 45,
+    "category": "react-component",
+    "purpose": "Renders the su\u0001 \u0002rou\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/ScriptSnippetSidebar.tsx",
+    "name": "GroupSection",
+    "line": 74,
+    "category": "react-component",
+    "purpose": "Renders the grou\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/ScriptSnippetSidebar.tsx",
+    "name": "ScriptSnippetSidebar",
+    "line": 104,
+    "category": "react-component",
+    "purpose": "Renders the scrip\u0001 \u0002nippe\u0001 \u0002idebar interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/ScriptsTab.tsx",
+    "name": "insertSnippet",
+    "line": 33,
+    "category": "editor-helper",
+    "purpose": "Inserts a script snippet at the current Monaco cursor position."
+  },
+  {
+    "file": "src/components/request/ScriptsTab.tsx",
+    "name": "ScriptsTab",
+    "line": 59,
+    "category": "react-component",
+    "purpose": "Renders the script\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/VarsTab.tsx",
+    "name": "reindexAfterRemove",
+    "line": 43,
+    "category": "data-transform",
+    "purpose": "Reindexes row-associated state after an action row is removed."
+  },
+  {
+    "file": "src/components/request/VarsTab.tsx",
+    "name": "newAction",
+    "line": 59,
+    "category": "data-transform",
+    "purpose": "Creates a default response-variable extraction action."
+  },
+  {
+    "file": "src/components/request/VarsTab.tsx",
+    "name": "VarsTab",
+    "line": 67,
+    "category": "react-component",
+    "purpose": "Renders the var\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/ConcurrencyChart.tsx",
+    "name": "ConcurrencyChart",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the concurrenc\u0001 \u0002hart from load-test metrics."
+  },
+  {
+    "file": "src/components/request/load-test/ErrorRateChart.tsx",
+    "name": "ErrorRateChart",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the erro\u0001 \u0002at\u0001 \u0002hart from load-test metrics."
+  },
+  {
+    "file": "src/components/request/load-test/ExportMenu.tsx",
+    "name": "ExportMenu",
+    "line": 19,
+    "category": "react-component",
+    "purpose": "Renders the expor\u0001 \u0002enu interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/HistogramChart.tsx",
+    "name": "HistogramChart",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the histogra\u0001 \u0002hart from load-test metrics."
+  },
+  {
+    "file": "src/components/request/load-test/LatencyChart.tsx",
+    "name": "LatencyChart",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the latenc\u0001 \u0002hart from load-test metrics."
+  },
+  {
+    "file": "src/components/request/load-test/LiveDashboard.tsx",
+    "name": "LiveDashboard",
+    "line": 22,
+    "category": "react-component",
+    "purpose": "Renders the liv\u0001 \u0002ashboard interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/LoadTestTab.tsx",
+    "name": "SectionHeader",
+    "line": 23,
+    "category": "react-component",
+    "purpose": "Renders the sectio\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/LoadTestTab.tsx",
+    "name": "IntegerField",
+    "line": 34,
+    "category": "react-component",
+    "purpose": "Renders the intege\u0001 \u0002ield interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/LoadTestTab.tsx",
+    "name": "LoadTestTab",
+    "line": 79,
+    "category": "react-component",
+    "purpose": "Renders the loa\u0001 \u0002es\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/PhaseBuilder.tsx",
+    "name": "PhaseBuilder",
+    "line": 28,
+    "category": "react-component",
+    "purpose": "Renders the phas\u0001 \u0002uilder interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/RequestLogTable.tsx",
+    "name": "RequestLogTable",
+    "line": 12,
+    "category": "react-component",
+    "purpose": "Renders the reques\u0001 \u0002o\u0001 \u0002able interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/StatBar.tsx",
+    "name": "Stat",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the stat interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/StatBar.tsx",
+    "name": "StatBar",
+    "line": 19,
+    "category": "react-component",
+    "purpose": "Renders the sta\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/load-test/ThroughputChart.tsx",
+    "name": "targetRateAt",
+    "line": 9,
+    "category": "data-transform",
+    "purpose": "Calculates the configured target request rate at an elapsed time."
+  },
+  {
+    "file": "src/components/request/load-test/ThroughputChart.tsx",
+    "name": "ThroughputChart",
+    "line": 30,
+    "category": "react-component",
+    "purpose": "Renders the throughpu\u0001 \u0002hart from load-test metrics."
+  },
+  {
+    "file": "src/components/request/load-test/chart-utils.ts",
+    "name": "makeTimeLabel",
+    "line": 8,
+    "category": "formatting",
+    "purpose": "Creates an elapsed-time formatter suited to a chart data range."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2AdditionalParams.tsx",
+    "name": "ParamList",
+    "line": 35,
+    "category": "react-component",
+    "purpose": "Renders the para\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2AdditionalParams.tsx",
+    "name": "OAuth2AdditionalParams",
+    "line": 126,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002dditiona\u0001 \u0002arams interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2AdvancedSection.tsx",
+    "name": "OAuth2AdvancedSection",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002dvance\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2AuthEditor.tsx",
+    "name": "OAuth2AuthEditor",
+    "line": 45,
+    "category": "react-component",
+    "purpose": "Renders controls for editing oauth\u0001 \u0002ut\u0001 \u0002ditor."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2ConfigSection.tsx",
+    "name": "OAuth2ConfigSection",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002onfi\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2SectionHeader.tsx",
+    "name": "OAuth2SectionHeader",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002ectio\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2SettingsSection.tsx",
+    "name": "OAuth2SettingsSection",
+    "line": 13,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002etting\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2TokenDisplay.tsx",
+    "name": "tokenExpiryDisplay",
+    "line": 14,
+    "category": "date-time",
+    "purpose": "Formats OAuth token expiry as a live human-readable countdown."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2TokenDisplay.tsx",
+    "name": "isExpired",
+    "line": 27,
+    "category": "date-time",
+    "purpose": "Checks whether an OAuth token has passed its expiry time."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2TokenDisplay.tsx",
+    "name": "formatTimestamp",
+    "line": 32,
+    "category": "date-time",
+    "purpose": "Formats date or time information for forma\u0001 \u0002imestamp."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2TokenDisplay.tsx",
+    "name": "OAuth2TokenDisplay",
+    "line": 37,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002oke\u0001 \u0002isplay interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/oauth2/OAuth2TokenSection.tsx",
+    "name": "OAuth2TokenSection",
+    "line": 22,
+    "category": "react-component",
+    "purpose": "Renders the oauth\u0001 \u0002oke\u0001 \u0002ection interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerPane.tsx",
+    "name": "RunnerPane",
+    "line": 17,
+    "category": "react-component",
+    "purpose": "Renders the runne\u0001 \u0002ane interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerRequestList.tsx",
+    "name": "RunnerRequestList",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the runne\u0001 \u0002eques\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerResultsList.tsx",
+    "name": "StatusIcon",
+    "line": 15,
+    "category": "react-component",
+    "purpose": "Renders the statu\u0001 \u0002con interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerResultsList.tsx",
+    "name": "ResultRow",
+    "line": 28,
+    "category": "react-component",
+    "purpose": "Renders the resul\u0001 \u0002ow interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerResultsList.tsx",
+    "name": "RunnerResultsList",
+    "line": 88,
+    "category": "react-component",
+    "purpose": "Renders the runne\u0001 \u0002esult\u0001 \u0002ist interface and its related interactions."
+  },
+  {
+    "file": "src/components/request/runner/RunnerSummaryHeader.tsx",
+    "name": "RunnerSummaryHeader",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the runne\u0001 \u0002ummar\u0001 \u0002eader interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "formatBody",
+    "line": 35,
+    "category": "http-api",
+    "purpose": "Pretty-prints JSON response bodies and identifies valid JSON."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "formatXml",
+    "line": 44,
+    "category": "http-api",
+    "purpose": "Formats valid XML response text into readable lines."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "getContentType",
+    "line": 60,
+    "category": "http-api",
+    "purpose": "Extracts the normalized Content-Type response header."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "detectResponseLanguage",
+    "line": 64,
+    "category": "http-api",
+    "purpose": "Chooses a response viewer language from content metadata."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "formatBytes",
+    "line": 73,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002ytes."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "formatDuration",
+    "line": 79,
+    "category": "formatting",
+    "purpose": "Produces the display value for forma\u0001 \u0002uration."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "ttfbLabel",
+    "line": 85,
+    "category": "formatting",
+    "purpose": "Produces the display value for ttf\u0001 \u0002abel."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "countJsonKeys",
+    "line": 92,
+    "category": "data-transform",
+    "purpose": "Counts root-level JSON object keys or array elements."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "TabButton",
+    "line": 104,
+    "category": "react-component",
+    "purpose": "Renders the ta\u0001 \u0002utton interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "BodySearchBar",
+    "line": 137,
+    "category": "react-component",
+    "purpose": "Renders the bod\u0001 \u0002earc\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "EmptyBody",
+    "line": 172,
+    "category": "react-component",
+    "purpose": "Renders the empt\u0001 \u0002ody interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/ResponseBodyViewer.tsx",
+    "name": "ResponseBodyViewer",
+    "line": 181,
+    "category": "react-component",
+    "purpose": "Renders the respons\u0001 \u0002od\u0001 \u0002iewer interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/ResponseHeadersTable.tsx",
+    "name": "ResponseHeadersTable",
+    "line": 19,
+    "category": "react-component",
+    "purpose": "Renders the respons\u0001 \u0002eader\u0001 \u0002able interface and its related interactions."
+  },
+  {
+    "file": "src/components/response/TestsPanel.tsx",
+    "name": "TestsPanel",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the test\u0001 \u0002anel interface and its related interactions."
+  },
+  {
+    "file": "src/components/status-bar/ContractsStatusItem.tsx",
+    "name": "ContractsStatusItem",
+    "line": 17,
+    "category": "react-component",
+    "purpose": "Renders the contract\u0001 \u0002tatu\u0001 \u0002tem interface and its related interactions."
+  },
+  {
+    "file": "src/components/title-bar/TitleBar.tsx",
+    "name": "TitleBar",
+    "line": 5,
+    "category": "react-component",
+    "purpose": "Renders the titl\u0001 \u0002ar interface and its related interactions."
+  },
+  {
+    "file": "src/components/title-bar/WindowControls.tsx",
+    "name": "WindowControls",
+    "line": 6,
+    "category": "react-component",
+    "purpose": "Renders the windo\u0001 \u0002ontrols interface and its related interactions."
+  },
+  {
+    "file": "src/components/title-bar/WorkspaceSwitcher.tsx",
+    "name": "WorkspaceSwitcher",
+    "line": 50,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002witcher interface and its related interactions."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogOverlay",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002verlay UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogContent",
+    "line": 26,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogHeader",
+    "line": 45,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002eader UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogFooter",
+    "line": 55,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002ooter UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogTitle",
+    "line": 65,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002itle UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogDescription",
+    "line": 78,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002escription UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogAction",
+    "line": 91,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002ction UI primitive."
+  },
+  {
+    "file": "src/components/ui/alert-dialog.tsx",
+    "name": "AlertDialogCancel",
+    "line": 104,
+    "category": "react-component",
+    "purpose": "Renders the styled aler\u0001 \u0002ialo\u0001 \u0002ancel UI primitive."
+  },
+  {
+    "file": "src/components/ui/badge.tsx",
+    "name": "Badge",
+    "line": 23,
+    "category": "react-component",
+    "purpose": "Renders the styled badge UI primitive."
+  },
+  {
+    "file": "src/components/ui/button.tsx",
+    "name": "Button",
+    "line": 36,
+    "category": "react-component",
+    "purpose": "Renders the styled button UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "Card",
+    "line": 4,
+    "category": "react-component",
+    "purpose": "Renders the styled card UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "CardHeader",
+    "line": 14,
+    "category": "react-component",
+    "purpose": "Renders the styled car\u0001 \u0002eader UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "CardTitle",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the styled car\u0001 \u0002itle UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "CardDescription",
+    "line": 34,
+    "category": "react-component",
+    "purpose": "Renders the styled car\u0001 \u0002escription UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "CardContent",
+    "line": 44,
+    "category": "react-component",
+    "purpose": "Renders the styled car\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/card.tsx",
+    "name": "CardFooter",
+    "line": 48,
+    "category": "react-component",
+    "purpose": "Renders the styled car\u0001 \u0002ooter UI primitive."
+  },
+  {
+    "file": "src/components/ui/checkbox.tsx",
+    "name": "Checkbox",
+    "line": 6,
+    "category": "react-component",
+    "purpose": "Renders the styled checkbox UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuSubTrigger",
+    "line": 13,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002u\u0001 \u0002rigger UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuSubContent",
+    "line": 37,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002u\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuContent",
+    "line": 53,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuItem",
+    "line": 71,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuCheckboxItem",
+    "line": 91,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002heckbo\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuRadioItem",
+    "line": 117,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002adi\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuLabel",
+    "line": 141,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002abel UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuSeparator",
+    "line": 161,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002eparator UI primitive."
+  },
+  {
+    "file": "src/components/ui/context-menu.tsx",
+    "name": "ContextMenuShortcut",
+    "line": 174,
+    "category": "react-component",
+    "purpose": "Renders the styled contex\u0001 \u0002en\u0001 \u0002hortcut UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogOverlay",
+    "line": 11,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002verlay UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogContent",
+    "line": 27,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogHeader",
+    "line": 53,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002eader UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogFooter",
+    "line": 63,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002ooter UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogTitle",
+    "line": 73,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002itle UI primitive."
+  },
+  {
+    "file": "src/components/ui/dialog.tsx",
+    "name": "DialogDescription",
+    "line": 83,
+    "category": "react-component",
+    "purpose": "Renders the styled dialo\u0001 \u0002escription UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuSubTrigger",
+    "line": 13,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002u\u0001 \u0002rigger UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuSubContent",
+    "line": 37,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002u\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuContent",
+    "line": 53,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuItem",
+    "line": 73,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuCheckboxItem",
+    "line": 93,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002heckbo\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuRadioItem",
+    "line": 119,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002adi\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuLabel",
+    "line": 143,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002abel UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuSeparator",
+    "line": 159,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002eparator UI primitive."
+  },
+  {
+    "file": "src/components/ui/dropdown-menu.tsx",
+    "name": "DropdownMenuShortcut",
+    "line": 172,
+    "category": "react-component",
+    "purpose": "Renders the styled dropdow\u0001 \u0002en\u0001 \u0002hortcut UI primitive."
+  },
+  {
+    "file": "src/components/ui/input.tsx",
+    "name": "Input",
+    "line": 4,
+    "category": "react-component",
+    "purpose": "Renders the styled input UI primitive."
+  },
+  {
+    "file": "src/components/ui/label.tsx",
+    "name": "Label",
+    "line": 5,
+    "category": "react-component",
+    "purpose": "Renders the styled label UI primitive."
+  },
+  {
+    "file": "src/components/ui/popover.tsx",
+    "name": "PopoverContent",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the styled popove\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/resizable.tsx",
+    "name": "ResizablePanelGroup",
+    "line": 6,
+    "category": "react-component",
+    "purpose": "Renders the styled resizabl\u0001 \u0002ane\u0001 \u0002roup UI primitive."
+  },
+  {
+    "file": "src/components/ui/resizable.tsx",
+    "name": "ResizableHandle",
+    "line": 18,
+    "category": "react-component",
+    "purpose": "Renders the styled resizabl\u0001 \u0002andle UI primitive."
+  },
+  {
+    "file": "src/components/ui/saved-pill.tsx",
+    "name": "SavedPill",
+    "line": 8,
+    "category": "react-component",
+    "purpose": "Renders the styled save\u0001 \u0002ill UI primitive."
+  },
+  {
+    "file": "src/components/ui/scroll-area.tsx",
+    "name": "ScrollArea",
+    "line": 5,
+    "category": "react-component",
+    "purpose": "Renders the styled scrol\u0001 \u0002rea UI primitive."
+  },
+  {
+    "file": "src/components/ui/scroll-area.tsx",
+    "name": "ScrollBar",
+    "line": 25,
+    "category": "react-component",
+    "purpose": "Renders the styled scrol\u0001 \u0002ar UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectTrigger",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002rigger UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectScrollUpButton",
+    "line": 32,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002crol\u0001 \u0002\u0001 \u0002utton UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectScrollDownButton",
+    "line": 47,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002crol\u0001 \u0002ow\u0001 \u0002utton UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectContent",
+    "line": 62,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectLabel",
+    "line": 97,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002abel UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectItem",
+    "line": 107,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/select.tsx",
+    "name": "SelectSeparator",
+    "line": 131,
+    "category": "react-component",
+    "purpose": "Renders the styled selec\u0001 \u0002eparator UI primitive."
+  },
+  {
+    "file": "src/components/ui/separator.tsx",
+    "name": "Separator",
+    "line": 5,
+    "category": "react-component",
+    "purpose": "Renders the styled separator UI primitive."
+  },
+  {
+    "file": "src/components/ui/sheet.tsx",
+    "name": "SheetOverlay",
+    "line": 10,
+    "category": "react-component",
+    "purpose": "Renders the styled shee\u0001 \u0002verlay UI primitive."
+  },
+  {
+    "file": "src/components/ui/sheet.tsx",
+    "name": "SheetContent",
+    "line": 30,
+    "category": "react-component",
+    "purpose": "Renders the styled shee\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/sheet.tsx",
+    "name": "SheetTitle",
+    "line": 56,
+    "category": "react-component",
+    "purpose": "Renders the styled shee\u0001 \u0002itle UI primitive."
+  },
+  {
+    "file": "src/components/ui/sheet.tsx",
+    "name": "SheetDescription",
+    "line": 66,
+    "category": "react-component",
+    "purpose": "Renders the styled shee\u0001 \u0002escription UI primitive."
+  },
+  {
+    "file": "src/components/ui/skeleton.tsx",
+    "name": "Skeleton",
+    "line": 3,
+    "category": "react-component",
+    "purpose": "Renders the styled skeleton UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "Table",
+    "line": 4,
+    "category": "react-component",
+    "purpose": "Renders the styled table UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableHeader",
+    "line": 16,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002eader UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableBody",
+    "line": 20,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002ody UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableFooter",
+    "line": 30,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002ooter UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableRow",
+    "line": 40,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002ow UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableHead",
+    "line": 53,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002ead UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableCell",
+    "line": 67,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002ell UI primitive."
+  },
+  {
+    "file": "src/components/ui/table.tsx",
+    "name": "TableCaption",
+    "line": 80,
+    "category": "react-component",
+    "purpose": "Renders the styled tabl\u0001 \u0002aption UI primitive."
+  },
+  {
+    "file": "src/components/ui/tabs.tsx",
+    "name": "TabsList",
+    "line": 7,
+    "category": "react-component",
+    "purpose": "Renders the styled tab\u0001 \u0002ist UI primitive."
+  },
+  {
+    "file": "src/components/ui/tabs.tsx",
+    "name": "TabsTrigger",
+    "line": 20,
+    "category": "react-component",
+    "purpose": "Renders the styled tab\u0001 \u0002rigger UI primitive."
+  },
+  {
+    "file": "src/components/ui/tabs.tsx",
+    "name": "TabsContent",
+    "line": 33,
+    "category": "react-component",
+    "purpose": "Renders the styled tab\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/textarea.tsx",
+    "name": "Textarea",
+    "line": 4,
+    "category": "react-component",
+    "purpose": "Renders the styled textarea UI primitive."
+  },
+  {
+    "file": "src/components/ui/tooltip.tsx",
+    "name": "TooltipContent",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the styled toolti\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/ui/tree.tsx",
+    "name": "Tree",
+    "line": 17,
+    "category": "react-component",
+    "purpose": "Renders the styled tree UI primitive."
+  },
+  {
+    "file": "src/components/ui/tree.tsx",
+    "name": "TreeItem",
+    "line": 49,
+    "category": "react-component",
+    "purpose": "Renders the styled tre\u0001 \u0002tem UI primitive."
+  },
+  {
+    "file": "src/components/ui/tree.tsx",
+    "name": "TreeItemContent",
+    "line": 160,
+    "category": "react-component",
+    "purpose": "Renders the styled tre\u0001 \u0002te\u0001 \u0002ontent UI primitive."
+  },
+  {
+    "file": "src/components/workspace/CreateWorkspaceDialog.tsx",
+    "name": "CreateWorkspaceDialog",
+    "line": 22,
+    "category": "react-component",
+    "purpose": "Renders and manages the creat\u0001 \u0002orkspac\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/workspace/RenameWorkspaceDialog.tsx",
+    "name": "RenameWorkspaceDialog",
+    "line": 21,
+    "category": "react-component",
+    "purpose": "Renders and manages the renam\u0001 \u0002orkspac\u0001 \u0002ialog workflow."
+  },
+  {
+    "file": "src/components/workspace/WorkspaceEnvironmentsTab.tsx",
+    "name": "WorkspaceEnvironmentsTab",
+    "line": 24,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002nvironment\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/workspace/WorkspaceGitTab.tsx",
+    "name": "WorkspaceGitTab",
+    "line": 9,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002i\u0001 \u0002ab interface and its related interactions."
+  },
+  {
+    "file": "src/components/workspace/WorkspaceOverviewTab.tsx",
+    "name": "WorkspaceOverviewTab",
+    "line": 35,
+    "category": "react-component",
+    "purpose": "Renders the workspac\u0001 \u0002vervie\u0001 \u0002ab interface and its related interactions."
+  }
+]
