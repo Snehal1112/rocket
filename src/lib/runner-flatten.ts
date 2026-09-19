@@ -2,6 +2,33 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import type { Collection, CollectionItem, Folder } from '@/lib/tauri-api';
 import type { RunnerRequestEntry } from '@/types/pane-types';
 
+export interface RunnerFolderOption {
+  path: string;
+  label: string;
+}
+
+function collectFolderOptions(
+  folder: Folder,
+  basePath: string,
+  parentLabels: string[],
+  out: RunnerFolderOption[],
+): void {
+  const folders = sortItemsFoldersFirst(folder.items).filter((item) => item.type === 'folder');
+  for (const child of folders) {
+    const segment = child.dirName ?? child.name;
+    const path = basePath ? `${basePath}/${segment}` : segment;
+    const labels = [...parentLabels, child.name];
+    out.push({ path, label: labels.join(' / ') });
+    collectFolderOptions(child, path, labels, out);
+  }
+}
+
+export function getRunnerFolderOptions(collection: Collection): RunnerFolderOption[] {
+  const out: RunnerFolderOption[] = [];
+  collectFolderOptions(collection.root, '', [], out);
+  return out;
+}
+
 // Finds the Folder at `folderPath` (relative to the collection root),
 // walking the same dirName/name formula FolderNode.tsx uses to build
 // paths while rendering the sidebar tree. Returns null if not found.

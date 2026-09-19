@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RunnerTab } from '@/types/pane-types';
 import { RunnerPane } from './RunnerPane';
@@ -7,6 +8,13 @@ import { RunnerPane } from './RunnerPane';
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return { ...actual, listCollections: vi.fn(), getCollection: vi.fn() };
+});
+
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+  HTMLElement.prototype.setPointerCapture = vi.fn();
+  HTMLElement.prototype.releasePointerCapture = vi.fn();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 
 function pickerTab(): RunnerTab {
@@ -48,6 +56,56 @@ describe('RunnerPane', () => {
     render(<RunnerPane tab={pickerTab()} groupId='g1' />);
     await waitFor(() => expect(listCollections).toHaveBeenCalled());
     expect(screen.getByText(/choose a collection/i)).toBeInTheDocument();
+  });
+
+  it('loads nested folders and opens a runner scoped to the selected folder', async () => {
+    const user = userEvent.setup();
+    const { getCollection, listCollections } = await import('@/lib/tauri-api');
+    vi.mocked(listCollections).mockResolvedValue([
+      { uid: 'c1', name: 'demo', path: '/tmp/demo', requestCount: 1 },
+    ]);
+    vi.mocked(getCollection).mockResolvedValue({
+      name: 'demo',
+      settings: { headers: [], variables: [] },
+      root: {
+        uid: 'root',
+        name: 'demo',
+        items: [
+          {
+            type: 'folder',
+            uid: 'f1',
+            name: 'Auth',
+            dirName: 'auth',
+            items: [
+              {
+                type: 'folder',
+                uid: 'f2',
+                name: 'Nested',
+                dirName: 'nested',
+                items: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const openRunnerTab = vi.fn().mockResolvedValue(undefined);
+    const closeTab = vi.fn();
+    usePaneStore.setState({ openRunnerTab, closeTab });
+
+    render(<RunnerPane tab={pickerTab()} groupId='g1' />);
+    await waitFor(() => expect(listCollections).toHaveBeenCalled());
+
+    await user.click(screen.getByRole('combobox', { name: 'Collection' }));
+    await user.click(screen.getByRole('option', { name: 'demo' }));
+    await waitFor(() => expect(getCollection).toHaveBeenCalledWith('demo'));
+
+    await user.click(screen.getByRole('combobox', { name: 'Folder' }));
+    await user.click(screen.getByRole('option', { name: 'Auth / Nested' }));
+    await user.click(screen.getByRole('button', { name: 'Load' }));
+
+    expect(openRunnerTab).toHaveBeenCalledWith('demo', 'auth/nested');
+    expect(closeTab).toHaveBeenCalledWith('blank-1', 'g1');
   });
 
   it('shows RunnerSummaryHeader and RunnerRequestList when idle with a collection set', () => {

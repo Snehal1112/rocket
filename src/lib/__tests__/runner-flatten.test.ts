@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flattenRunnerEntries } from '@/lib/runner-flatten';
+import { flattenRunnerEntries, getRunnerFolderOptions } from '@/lib/runner-flatten';
 import type { Collection } from '@/lib/tauri-api';
 
 function makeCollection(): Collection {
@@ -60,6 +60,15 @@ function makeCollection(): Collection {
     },
   };
 }
+
+describe('getRunnerFolderOptions', () => {
+  it('lists nested folders with display labels and persisted path segments', () => {
+    expect(getRunnerFolderOptions(makeCollection())).toEqual([
+      { path: 'auth', label: 'Auth' },
+      { path: 'auth/nested', label: 'Auth / Nested' },
+    ]);
+  });
+});
 
 describe('flattenRunnerEntries', () => {
   it('flattens the whole collection in tree order, folders first', () => {
