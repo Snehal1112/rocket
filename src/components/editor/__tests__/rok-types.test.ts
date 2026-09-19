@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { ROK_SNIPPETS, ROK_TYPE_DEFS_FOR_PHASE } from '../rok-types';
+import type { ScriptSnippetGroup } from '../rok-types';
+import {
+  POST_RESPONSE_SNIPPETS,
+  PRE_REQUEST_SNIPPETS,
+  ROK_SNIPPETS,
+  ROK_TYPE_DEFS_FOR_PHASE,
+} from '../rok-types';
+
+function rokItemLabels(groups: ScriptSnippetGroup[]): string[] {
+  const group = groups.find((g) => g.id === 'api-reference');
+  const sub = group?.subGroups?.find((s) => s.id === 'rok');
+  return (sub?.items ?? []).map((i) => i.label);
+}
 
 describe('ROK_SNIPPETS', () => {
   it('has a common-tests group with at least 7 items', () => {
@@ -32,6 +44,25 @@ describe('ROK_SNIPPETS', () => {
         }
       }
     }
+  });
+});
+
+describe('rok.runner.* snippet coverage', () => {
+  // setNextRequest is meaningful from any phase (spec §4: checked after every
+  // phase that ran), so it belongs in all three snippet lists.
+  it('setNextRequest appears in the tests-phase (default), pre-request, and post-response lists', () => {
+    expect(rokItemLabels(ROK_SNIPPETS)).toContain('rok.runner.setNextRequest("name")');
+    expect(rokItemLabels(PRE_REQUEST_SNIPPETS)).toContain('rok.runner.setNextRequest("name")');
+    expect(rokItemLabels(POST_RESPONSE_SNIPPETS)).toContain('rok.runner.setNextRequest("name")');
+  });
+
+  // skipRequest only has an effect when read from the before-request phase
+  // (spec §4: no HTTP call is made, so nothing later ever runs) — it must
+  // not appear in the post-response or tests snippet lists.
+  it('skipRequest appears only in the pre-request list', () => {
+    expect(rokItemLabels(PRE_REQUEST_SNIPPETS)).toContain('rok.runner.skipRequest()');
+    expect(rokItemLabels(ROK_SNIPPETS)).not.toContain('rok.runner.skipRequest()');
+    expect(rokItemLabels(POST_RESPONSE_SNIPPETS)).not.toContain('rok.runner.skipRequest()');
   });
 });
 

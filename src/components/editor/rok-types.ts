@@ -136,6 +136,11 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.interpolate("{{template}}")',
           },
+          {
+            label: 'rok.runner.setNextRequest("name")',
+            kind: 'expression',
+            code: 'rok.runner.setNextRequest("name")',
+          },
         ],
       },
       {
@@ -292,6 +297,11 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.interpolate("{{template}}")',
           },
+          {
+            label: 'rok.runner.setNextRequest("name")',
+            kind: 'expression',
+            code: 'rok.runner.setNextRequest("name")',
+          },
         ],
       },
     ],
@@ -383,6 +393,16 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.interpolate("{{template}}")',
           },
+          {
+            label: 'rok.runner.setNextRequest("name")',
+            kind: 'expression',
+            code: 'rok.runner.setNextRequest("name")',
+          },
+          {
+            label: 'rok.runner.skipRequest()',
+            kind: 'expression',
+            code: 'rok.runner.skipRequest()',
+          },
         ],
       },
     ],
@@ -416,14 +436,16 @@ declare const rok: {
   /** Resolve {{var}} tokens using the current variable context. */
   interpolate(template: string): string;
   /**
-   * Reserved for the Collection Runner (see docs/superpowers/specs/2026-09-16-collection-runner-design.md).
-   * RocketAPI has no Collection Runner yet — calling these has no effect
-   * outside a single request send.
+   * Controls the Collection Runner's sequencing (see
+   * docs/superpowers/specs/2026-09-16-collection-runner-design.md). Only
+   * has an effect when the script runs as part of a run driven by
+   * CollectionRunnerService (crates/rocket-app/src/collection_runner_service.rs)
+   * — a no-op outside a run, and outside a single request send.
    */
   runner: {
-    /** No-op until the Collection Runner ships. Jump to the named request, or pass null to stop. */
+    /** Jump to the named request next instead of the next item in sequence, or pass null to stop the run. Only meaningful during a Collection Runner run. */
     setNextRequest(name: string | null): void;
-    /** No-op until the Collection Runner ships. Skip this request in the runner. */
+    /** Skip this request during a Collection Runner run — no HTTP call is made and no later phase runs for this step. Only meaningful from the before-request phase. */
     skipRequest(): void;
   };
 };
