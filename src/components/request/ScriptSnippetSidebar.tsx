@@ -1,22 +1,25 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ScriptSnippetGroup,
   ScriptSnippetItem,
   ScriptSnippetSubGroup,
 } from '@/components/editor/rok-types';
 import { ROK_SNIPPETS } from '@/components/editor/rok-types';
+import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 interface ScriptSnippetSidebarProps {
   onInsert: (code: string) => void;
   snippets?: ScriptSnippetGroup[];
+  maxWidth?: number;
 }
 
-const MIN_WIDTH = 120;
-const MAX_WIDTH_FRACTION = 0.5;
+const MIN_WIDTH = 160;
 const DEFAULT_WIDTH = 220;
+const RESIZE_STEP = 16;
 
 function SnippetItem({
   item,
@@ -26,14 +29,16 @@ function SnippetItem({
   onInsert: (code: string) => void;
 }) {
   return (
-    <button
+    <Button
       type='button'
+      variant='ghost'
+      size='sm'
       onClick={() => onInsert(item.code)}
-      className='w-full text-left px-3 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-sm truncate'
+      className='h-auto w-full justify-start rounded-sm px-3 py-1 text-left text-xs font-normal text-muted-foreground hover:text-accent-foreground'
       title={item.code}
     >
-      {item.label}
-    </button>
+      <span className='truncate'>{item.label}</span>
+    </Button>
   );
 }
 
@@ -99,55 +104,107 @@ function GroupSection({
 export function ScriptSnippetSidebar({
   onInsert,
   snippets = ROK_SNIPPETS,
+  maxWidth = 400,
 }: ScriptSnippetSidebarProps) {
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const effectiveMaxWidth = Math.max(MIN_WIDTH, maxWidth);
+  const clampWidth = useCallback(
+    (nextWidth: number) => Math.min(effectiveMaxWidth, Math.max(MIN_WIDTH, nextWidth)),
+    [effectiveMaxWidth],
+  );
+  const [width, setWidth] = useState(() => clampWidth(DEFAULT_WIDTH));
+  const [isDragging, setIsDragging] = useState(false);
   const dragging = useRef(false);
   const startX = useRef(0);
-  const startWidth = useRef(DEFAULT_WIDTH);
+  const startWidth = useRef(width);
 
-  const onMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  useEffect(() => {
+    setWidth((currentWidth) => clampWidth(currentWidth));
+  }, [clampWidth]);
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
       dragging.current = true;
-      startX.current = e.clientX;
+      setIsDragging(true);
+      startX.current = event.clientX;
       startWidth.current = width;
-
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!dragging.current) return;
-        const delta = startX.current - ev.clientX;
-        const containerWidth = document.body.clientWidth;
-        const maxWidth = containerWidth * MAX_WIDTH_FRACTION;
-        const next = Math.min(maxWidth, Math.max(MIN_WIDTH, startWidth.current + delta));
-        setWidth(next);
-      };
-
-      const onMouseUp = () => {
-        dragging.current = false;
-        window.removeEventListener('mousemove', onMouseMove);
-        window.removeEventListener('mouseup', onMouseUp);
-      };
-
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
+      event.currentTarget.setPointerCapture(event.pointerId);
     },
     [width],
   );
 
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!dragging.current) return;
+      setWidth(clampWidth(startWidth.current + startX.current - event.clientX));
+    },
+    [clampWidth],
+  );
+
+  const stopDragging = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    dragging.current = false;
+    setIsDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      switch (event.key) {
+        case 'ArrowLeft':
+          event.preventDefault();
+          setWidth((currentWidth) => clampWidth(currentWidth - RESIZE_STEP));
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          setWidth((currentWidth) => clampWidth(currentWidth + RESIZE_STEP));
+          break;
+        case 'Home':
+          event.preventDefault();
+          setWidth(MIN_WIDTH);
+          break;
+        case 'End':
+          event.preventDefault();
+          setWidth(effectiveMaxWidth);
+          break;
+      }
+    },
+    [clampWidth, effectiveMaxWidth],
+  );
+
   return (
-    <div className='flex h-full shrink-0' style={{ width }}>
-      {/* Drag handle. */}
+    <div id='script-snippet-sidebar' className='flex shrink-0 self-stretch' style={{ width }}>
       {/* biome-ignore lint/a11y/useSemanticElements: drag splitter cannot be an <hr> */}
       <div
-        onMouseDown={onMouseDown}
-        className='w-1 shrink-0 cursor-col-resize hover:bg-primary/40 transition-colors bg-border'
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={stopDragging}
+        onPointerCancel={stopDragging}
+        onKeyDown={onKeyDown}
+        className={cn(
+          'flex w-3 shrink-0 cursor-col-resize select-none items-center justify-center border-r transition-colors',
+          'focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2',
+          isDragging
+            ? 'border-primary/50 bg-primary/15'
+            : 'border-border bg-muted/30 hover:border-primary/40 hover:bg-accent/50',
+        )}
         role='separator'
         tabIndex={0}
         aria-orientation='vertical'
-        aria-label='Resize sidebar'
-        aria-valuenow={width}
+        aria-label='Resize snippets sidebar'
+        aria-valuenow={Math.round(width)}
         aria-valuemin={MIN_WIDTH}
-        aria-valuemax={800}
-      />
-      <div className='flex flex-col flex-1 min-w-0 border-l'>
+        aria-valuemax={Math.round(effectiveMaxWidth)}
+      >
+        <div
+          className={cn(
+            'h-16 rounded-full transition-all',
+            isDragging ? 'w-1.5 bg-primary' : 'w-1 bg-muted-foreground/40',
+          )}
+        />
+      </div>
+      <div className='flex min-w-0 flex-1 flex-col border-l'>
         <div className='px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide border-b shrink-0'>
           Snippets
         </div>

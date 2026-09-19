@@ -1,11 +1,12 @@
 import { PanelRight } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
-import { lazy, Suspense, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import {
   POST_RESPONSE_SNIPPETS,
   PRE_REQUEST_SNIPPETS,
   type ScriptPhase,
 } from '@/components/editor/rok-types';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
@@ -13,6 +14,9 @@ import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
 const MonacoWrapper = lazy(() =>
   import('@/components/editor/MonacoWrapper').then((m) => ({ default: m.MonacoWrapper })),
 );
+
+const MIN_SIDEBAR_WIDTH = 160;
+const MIN_EDITOR_WIDTH = 320;
 
 interface ScriptsTabProps {
   preRequestScript: string;
@@ -68,14 +72,57 @@ export function ScriptsTab({
   );
 
   const [activeTab, setActiveTab] = useState<ScriptPhase>('pre-request');
-  const [showPreRequestSidebar, setShowPreRequestSidebar] = useState(false);
-  const [showPostResponseSidebar, setShowPostResponseSidebar] = useState(false);
+  const [snippetSidebars, setSnippetSidebars] = useState<Record<ScriptPhase, boolean>>({
+    'pre-request': false,
+    'post-response': false,
+    tests: false,
+  });
+  const scriptsContainerRef = useRef<HTMLDivElement>(null);
+  const [scriptsContainerWidth, setScriptsContainerWidth] = useState(0);
+  const sidebarMaxWidth = Math.max(
+    0,
+    Math.min(scriptsContainerWidth * 0.5, scriptsContainerWidth - MIN_EDITOR_WIDTH),
+  );
+  const canShowSidebar = sidebarMaxWidth >= MIN_SIDEBAR_WIDTH;
+  const showSidebar = canShowSidebar && snippetSidebars[activeTab];
+
+  useEffect(() => {
+    const container = scriptsContainerRef.current;
+    if (!container) return;
+
+    const updateWidth = () => setScriptsContainerWidth(container.getBoundingClientRect().width);
+    updateWidth();
+
+    const observer =
+      typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(updateWidth);
+    observer?.observe(container);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canShowSidebar) {
+      setSnippetSidebars((current) =>
+        Object.values(current).some(Boolean)
+          ? { 'pre-request': false, 'post-response': false, tests: false }
+          : current,
+      );
+    }
+  }, [canShowSidebar]);
+
+  const toggleSidebar = () => {
+    setSnippetSidebars((current) => ({ ...current, [activeTab]: !current[activeTab] }));
+  };
 
   return (
     <Tabs
+      ref={scriptsContainerRef}
       value={activeTab}
       onValueChange={(v) => setActiveTab(v as ScriptPhase)}
-      className='flex flex-col h-full'
+      className='flex h-full min-h-0 flex-col'
     >
       <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
         <TabsTrigger value='pre-request' className='text-xs'>
@@ -87,33 +134,30 @@ export function ScriptsTab({
         <TabsTrigger value='tests' className='text-xs'>
           Tests
         </TabsTrigger>
-        {activeTab === 'pre-request' && (
-          <Button
-            variant='ghost'
-            size='sm'
-            className='ml-auto h-7 gap-1 text-xs'
-            onClick={() => setShowPreRequestSidebar((v) => !v)}
-          >
-            <PanelRight className='h-3.5 w-3.5' />
-            Snippets
-          </Button>
-        )}
-        {activeTab === 'post-response' && (
-          <Button
-            variant='ghost'
-            size='sm'
-            className='ml-auto h-7 gap-1 text-xs'
-            onClick={() => setShowPostResponseSidebar((v) => !v)}
-          >
-            <PanelRight className='h-3.5 w-3.5' />
-            Snippets
-          </Button>
-        )}
+        <Button
+          variant='ghost'
+          size='sm'
+          className='ml-auto h-7 gap-1 text-xs'
+          onClick={toggleSidebar}
+          disabled={!canShowSidebar}
+          aria-pressed={showSidebar}
+          aria-controls='script-snippet-sidebar'
+          title={
+            canShowSidebar
+              ? showSidebar
+                ? 'Hide snippets'
+                : 'Show snippets'
+              : 'Not enough space to show snippets'
+          }
+        >
+          <PanelRight className='h-3.5 w-3.5' />
+          {showSidebar ? 'Hide snippets' : 'Snippets'}
+        </Button>
       </TabsList>
 
-      <TabsContent value='pre-request' className='flex-1 m-0 p-0 flex overflow-hidden'>
-        <div className='flex-1 min-w-0'>
-          <Suspense fallback={null}>
+      <TabsContent value='pre-request' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+        <div className='min-h-0 min-w-0 flex-1'>
+          <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper
               language='javascript'
               value={preRequestScript}
@@ -126,17 +170,18 @@ export function ScriptsTab({
             />
           </Suspense>
         </div>
-        {showPreRequestSidebar && (
+        {showSidebar && (
           <ScriptSnippetSidebar
+            maxWidth={sidebarMaxWidth}
             snippets={PRE_REQUEST_SNIPPETS}
             onInsert={(code) => insertSnippet(editorRefs.current['pre-request'], code)}
           />
         )}
       </TabsContent>
 
-      <TabsContent value='post-response' className='flex-1 m-0 p-0 flex overflow-hidden'>
-        <div className='flex-1 min-w-0'>
-          <Suspense fallback={null}>
+      <TabsContent value='post-response' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+        <div className='min-h-0 min-w-0 flex-1'>
+          <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper
               language='javascript'
               value={postResponseScript}
@@ -149,17 +194,18 @@ export function ScriptsTab({
             />
           </Suspense>
         </div>
-        {showPostResponseSidebar && (
+        {showSidebar && (
           <ScriptSnippetSidebar
+            maxWidth={sidebarMaxWidth}
             snippets={POST_RESPONSE_SNIPPETS}
             onInsert={(code) => insertSnippet(editorRefs.current['post-response'], code)}
           />
         )}
       </TabsContent>
 
-      <TabsContent value='tests' className='flex-1 m-0 p-0 flex overflow-hidden'>
-        <div className='flex-1 min-w-0'>
-          <Suspense fallback={null}>
+      <TabsContent value='tests' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+        <div className='min-h-0 min-w-0 flex-1'>
+          <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper
               language='javascript'
               value={testsScript}
@@ -172,7 +218,12 @@ export function ScriptsTab({
             />
           </Suspense>
         </div>
-        <ScriptSnippetSidebar onInsert={(code) => insertSnippet(editorRefs.current.tests, code)} />
+        {showSidebar && (
+          <ScriptSnippetSidebar
+            maxWidth={sidebarMaxWidth}
+            onInsert={(code) => insertSnippet(editorRefs.current.tests, code)}
+          />
+        )}
       </TabsContent>
     </Tabs>
   );

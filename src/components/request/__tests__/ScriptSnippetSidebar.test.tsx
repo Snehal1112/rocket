@@ -24,4 +24,15 @@ describe('ScriptSnippetSidebar', () => {
     expect(screen.getByText('rok.*')).toBeTruthy();
     expect(screen.getByText('expect')).toBeTruthy();
   });
+
+  it('resizes within the local maximum width from the keyboard', () => {
+    render(<ScriptSnippetSidebar onInsert={vi.fn()} maxWidth={200} />);
+    const splitter = screen.getByRole('separator', { name: 'Resize snippets sidebar' });
+
+    fireEvent.keyDown(splitter, { key: 'End' });
+    expect(splitter.getAttribute('aria-valuenow')).toBe('200');
+
+    fireEvent.keyDown(splitter, { key: 'Home' });
+    expect(splitter.getAttribute('aria-valuenow')).toBe('160');
+  });
 });
