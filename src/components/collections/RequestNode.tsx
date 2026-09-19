@@ -33,25 +33,19 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
-import { mapApiRequestToState } from '@/lib/pane-utils';
+import { collectLeafGroupIds, mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
-import type { PaneNode, RequestState, RequestTab } from '@/types/pane-types';
+import type { RequestState, RequestTab } from '@/types/pane-types';
 import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
 
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
 const EMPTY_IDS: string[] = [];
-
-// Collects all leaf groupIds from the pane tree.
-function collectLeafGroupIds(node: PaneNode): string[] {
-  if (node.type === 'leaf') return [node.groupId];
-  return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
-}
 
 interface RequestNodeProps {
   uid: string;

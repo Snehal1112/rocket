@@ -10,8 +10,8 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 
 /**
  * Status bar chip: "{n} contracts · {n} drifting · {n} breaching"
- * Shows separators before AND after (spec §9).
- * Renders nothing when no active collection or no contracts exist.
+ * Clicking opens the changelog drawer for the most recently updated contract.
+ * Renders nothing when there is no active collection or it has no contracts.
  * Self-contained — derives collection root from pane + workspace store.
  */
 export function ContractsStatusItem() {
@@ -26,66 +26,70 @@ export function ContractsStatusItem() {
       : null;
 
   const openDrawer = useDrawerStore((s) => s.open);
-  const openContractTab = usePaneStore((s) => s.openContractTab);
   const byId = useContractsStore((s) => s.byId);
   const byCollection = useContractsStore((s) => s.byCollection);
 
   const meta = useMemo(() => {
     if (!collectionRoot) return null;
-    const ids = byCollection[collectionRoot] ?? [];
-    const contracts = ids.map((id) => byId[id]).filter(Boolean);
-    if (contracts.length === 0) return null;
 
-    const mostRecentId = contracts.reduce<string | null>((best, c) => {
-      const latestAt = c.changelog[0]?.at ?? c.updatedAt;
-      if (!best) return c.id;
-      const bestContract = byId[best];
-      const bestAt = bestContract?.changelog[0]?.at ?? bestContract?.updatedAt ?? '';
-      return latestAt > bestAt ? c.id : best;
-    }, null);
+    let total = 0;
+    let driftCount = 0;
+    let breachCount = 0;
+    let mostRecentId: string | null = null;
+    let mostRecentAt = '';
 
-    return {
-      total: contracts.length,
-      driftCount: contracts.filter((c) => c.status === 'drift').length,
-      breachCount: contracts.filter((c) => c.status === 'breach').length,
-      mostRecentId,
-    };
+    for (const id of byCollection[collectionRoot] ?? []) {
+      const contract = byId[id];
+      if (!contract) continue;
+
+      total++;
+      if (contract.status === 'drift') driftCount++;
+      if (contract.status === 'breach') breachCount++;
+
+      const latestAt = contract.changelog[0]?.at ?? contract.updatedAt;
+      if (latestAt > mostRecentAt) {
+        mostRecentId = contract.id;
+        mostRecentAt = latestAt;
+      }
+    }
+
+    return total > 0 ? { total, driftCount, breachCount, mostRecentId } : null;
   }, [byId, byCollection, collectionRoot]);
 
-  if (!meta || !collectionRoot || !activeCollection) return null;
+  if (!meta?.mostRecentId) return null;
+
+  const mostRecentId = meta.mostRecentId;
+  const contractLabel = `${meta.total} contract${meta.total !== 1 ? 's' : ''}`;
+  const statusLabel = [
+    contractLabel,
+    meta.driftCount > 0 && `${meta.driftCount} drifting`,
+    meta.breachCount > 0 && `${meta.breachCount} breaching`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
-    <>
-      {/* Separator BEFORE (spec §9) */}
-      <span className='mx-1 text-muted-foreground/30 select-none' aria-hidden='true'>
-        |
-      </span>
-
+    <div className='flex h-5 items-center border-x border-statusbar-border px-1'>
       <Button
         variant='ghost'
         size='sm'
-        className='flex items-center gap-[5px] text-[11px] text-muted-foreground hover:text-foreground transition-colors'
+        className='h-5 gap-1.25 rounded-sm px-1 text-[11px] text-muted-foreground transition-colors hover:bg-statusbar-item-hover hover:text-foreground'
         onClick={() => {
-          if (meta.mostRecentId) {
-            try {
-              track('contracts.changelog_drawer_opened', {
-                contractId: meta.mostRecentId,
-                source: 'status_bar',
-              });
-            } catch {
-              /* noop */
-            }
-            openDrawer(meta.mostRecentId);
-          } else {
-            openContractTab(activeCollection, collectionRoot ?? '');
+          try {
+            track('contracts.changelog_drawer_opened', {
+              contractId: mostRecentId,
+              source: 'status_bar',
+            });
+          } catch {
+            /* noop */
           }
+          openDrawer(mostRecentId);
         }}
-        aria-label={`${meta.total} contract${meta.total !== 1 ? 's' : ''}`}
+        title='Open latest contract changes'
+        aria-label={statusLabel}
       >
-        <Lock className='w-[11px] h-[11px]' aria-hidden='true' />
-        <span>
-          {meta.total} contract{meta.total !== 1 ? 's' : ''}
-        </span>
+        <Lock className='w-2.75 h-2.75' aria-hidden='true' />
+        <span>{contractLabel}</span>
         {meta.driftCount > 0 && (
           <span className='text-[hsl(var(--warning))]'>· {meta.driftCount} drifting</span>
         )}
@@ -93,11 +97,6 @@ export function ContractsStatusItem() {
           <span className='text-[hsl(var(--destructive))]'>· {meta.breachCount} breaching</span>
         )}
       </Button>
-
-      {/* Separator AFTER (spec §9) */}
-      <span className='mx-1 text-muted-foreground/30 select-none' aria-hidden='true'>
-        |
-      </span>
-    </>
+    </div>
   );
 }

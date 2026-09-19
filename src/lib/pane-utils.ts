@@ -1,8 +1,7 @@
-import { type ApiOAuth2Auth, apiAuthToOAuth2State } from '@/lib/oauth2-mapping';
+import { fromPersistedAuth } from '@/lib/persisted-auth';
 import type { Request as ApiRequest } from '@/lib/tauri-api';
 import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import type {
-  AuthState,
   BodyState,
   LeafNode,
   PaneNode,
@@ -13,47 +12,7 @@ import type {
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
 export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
-  // Map auth from the tagged-union API type to the frontend AuthState.
-  let auth: AuthState;
-  switch (req.auth.authType) {
-    case 'basic':
-      auth = {
-        authType: 'basic',
-        basic: { username: req.auth.username, password: req.auth.password },
-      };
-      break;
-    case 'bearer':
-      auth = { authType: 'bearer', bearer: { token: req.auth.token } };
-      break;
-    case 'api-key':
-      auth = {
-        authType: 'api-key',
-        apiKey: { key: req.auth.key, value: req.auth.value, addTo: req.auth.placement },
-      };
-      break;
-    case 'o-auth2':
-      auth = {
-        authType: 'oauth2',
-        oauth2: apiAuthToOAuth2State(req.auth as unknown as ApiOAuth2Auth),
-      };
-      break;
-    case 'aws-sig-v4': {
-      const a = req.auth as Record<string, unknown>;
-      auth = {
-        authType: 'aws-sig-v4',
-        awsSigV4: {
-          accessKey: (a.accessKey as string) ?? '',
-          secretKey: (a.secretKey as string) ?? '',
-          region: (a.region as string) ?? '',
-          service: (a.service as string) ?? '',
-          sessionToken: (a.sessionToken as string) ?? '',
-        },
-      };
-      break;
-    }
-    default:
-      auth = { authType: fromCollection ? 'inherit' : 'none' };
-  }
+  const auth = fromPersistedAuth(req.auth, fromCollection ? 'inherit' : 'none');
 
   // Map body from the optional API Body to the always-present frontend BodyState.
   let body: BodyState;
@@ -171,6 +130,12 @@ export function findTabInTree(node: PaneNode, tabId: string): { leaf: LeafNode; 
 export function findFirstLeaf(node: PaneNode): LeafNode {
   if (node.type === 'leaf') return node;
   return findFirstLeaf(node.children[0]);
+}
+
+// Collects all leaf groupIds from the pane tree.
+export function collectLeafGroupIds(node: PaneNode): string[] {
+  if (node.type === 'leaf') return [node.groupId];
+  return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
 }
 
 // Returns the leaf matching activeGroupId, falling back to the first leaf.

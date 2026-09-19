@@ -1,84 +1,14 @@
 import { Check, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { toApiBody } from '@/lib/execute-request';
-import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
-import { type Request as ApiRequest, type Auth, saveRequest } from '@/lib/tauri-api';
+import { buildRequestSavePayload } from '@/lib/request-save-mapper';
+import { saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
 
 interface SaveRequestButtonProps {
   tab: RequestTab;
   groupId: string;
-}
-
-// Maps AuthState to the flat Rust Auth shape for disk persistence.
-function authForSave(auth: RequestTab['request']['auth']): Auth {
-  switch (auth.authType) {
-    case 'inherit':
-    case 'none':
-      return { authType: 'none' };
-    case 'basic':
-      return {
-        authType: 'basic',
-        username: auth.basic?.username ?? '',
-        password: auth.basic?.password ?? '',
-      };
-    case 'bearer':
-      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
-    case 'api-key':
-      return {
-        authType: 'api-key',
-        key: auth.apiKey?.key ?? '',
-        value: auth.apiKey?.value ?? '',
-        placement: auth.apiKey?.addTo ?? 'header',
-      };
-    case 'oauth2':
-      if (!auth.oauth2) return { authType: 'none' };
-      return oauth2StateToApiAuth(auth.oauth2) as Auth;
-    case 'aws-sig-v4':
-      return {
-        authType: 'aws-sig-v4',
-        accessKey: auth.awsSigV4?.accessKey ?? '',
-        secretKey: auth.awsSigV4?.secretKey ?? '',
-        region: auth.awsSigV4?.region ?? '',
-        service: auth.awsSigV4?.service ?? '',
-        sessionToken: auth.awsSigV4?.sessionToken ?? '',
-      };
-    default:
-      return { authType: 'none' };
-  }
-}
-
-function buildPayloadFromTab(tab: RequestTab): ApiRequest {
-  const body = tab.request.body;
-  const s = tab.request.settings;
-  return {
-    uid: tab.id || crypto.randomUUID(),
-    name: tab.title,
-    method: tab.request.method,
-    url: tab.request.url,
-    headers: tab.request.headers
-      .filter((h) => h.key)
-      .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
-    body: toApiBody(body),
-    auth: authForSave(tab.request.auth),
-    tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,
-    settings: s
-      ? {
-          timeout: s.timeoutMs,
-          followRedirects: s.followRedirects,
-          verifySsl: s.verifySsl,
-          maxRedirects: s.maxRedirects,
-          encodeUrl: s.encodeUrl,
-        }
-      : undefined,
-    docs: tab.request.docs ?? null,
-    preRequestScript: tab.request.preRequestScript ?? null,
-    postResponseScript: tab.request.postResponseScript ?? null,
-    tests: tab.request.testsScript ?? null,
-    assertions: tab.request.assertions ?? [],
-  };
 }
 
 export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
@@ -88,7 +18,7 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   const handleSave = useCallback(async () => {
     if (!tab.source) return;
     try {
-      await saveRequest(tab.source.collection, tab.source.path, buildPayloadFromTab(tab));
+      await saveRequest(tab.source.collection, tab.source.path, buildRequestSavePayload(tab));
       markClean(tab.id);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 2000);

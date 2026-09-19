@@ -123,6 +123,13 @@ export interface Contract {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Attachment file paths currently stored for this contract. There is no
+   * attachment UI yet, so this only exists so an update can pass the
+   * existing set back as `keptDocumentPaths` — omitting it causes the
+   * backend to delete every attachment on any edit (see contract_service.rs).
+   */
+  documentPaths: string[];
 
   // Paused-state fields (optional — only present when status === 'paused')
   pausedAt?: string;

@@ -1,24 +1,11 @@
 import { GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { findTabInTree } from '@/lib/pane-utils';
 import { listCollections } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store';
 import { usePaneStore } from '@/stores/pane-store';
-import type { GitTab, LeafNode, PaneNode } from '@/types/pane-types';
-
-/** Return the groupId of the leaf that contains a tab with the given id. */
-function findTabGroupId(node: PaneNode, tabId: string): string | null {
-  if (node.type === 'leaf') {
-    return node.tabs.some((t) => t.id === tabId) ? node.groupId : null;
-  }
-  return findTabGroupId(node.children[0], tabId) ?? findTabGroupId(node.children[1], tabId);
-}
-
-/** Return the leaf node with the given groupId. */
-function findLeaf(node: PaneNode, groupId: string): LeafNode | null {
-  if (node.type === 'leaf') return node.groupId === groupId ? node : null;
-  return findLeaf(node.children[0], groupId) ?? findLeaf(node.children[1], groupId);
-}
+import type { GitTab } from '@/types/pane-types';
 
 /** Open the git panel for the active collection. Can be called from keyboard shortcuts. */
 export async function openGitPanel(): Promise<void> {
@@ -39,12 +26,11 @@ export async function openGitPanel(): Promise<void> {
   const tabId = `git:${activeCollection}`;
 
   if (path) {
-    const groupId = findTabGroupId(root, tabId);
-    if (groupId) {
-      const leaf = findLeaf(root, groupId);
-      const existingTab = leaf?.tabs.find((t) => t.id === tabId) as GitTab | undefined;
-      if (existingTab && !existingTab.collectionPath) {
-        closeTab(tabId, groupId);
+    const found = findTabInTree(root, tabId);
+    if (found) {
+      const existingTab = found.tab as GitTab;
+      if (!existingTab.collectionPath) {
+        closeTab(tabId, found.leaf.groupId);
       }
     }
   }

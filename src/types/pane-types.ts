@@ -289,6 +289,8 @@ export interface AuthState {
     region: string;
     service: string;
     sessionToken: string;
+    /** No editor UI yet — kept so a value round-trips through save/load instead of being silently dropped. */
+    profileName?: string;
   };
 }
 

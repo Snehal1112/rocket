@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 interface InlineEnvNameProps {
   name: string;
   isSelected: boolean;
+  /** The environment currently active/applied elsewhere in the app — distinct from `isSelected`, which is just what's open for editing here. */
+  isActive?: boolean;
   existingNames: string[];
   onClick: () => void;
   onRename: (newName: string) => Promise<void>;
@@ -18,6 +20,7 @@ interface InlineEnvNameProps {
 export function InlineEnvName({
   name,
   isSelected,
+  isActive = false,
   existingNames,
   onClick,
   onRename,
@@ -100,13 +103,18 @@ export function InlineEnvName({
       onDoubleClick={enterEdit}
       title='Double-click to rename'
       className={cn(
-        'w-full justify-start px-2 h-7 text-sm font-normal rounded-sm truncate',
+        'w-full justify-start gap-1.5 px-2 h-7 text-sm font-normal rounded-sm truncate',
         isSelected
           ? 'bg-primary/10 text-primary hover:bg-primary/15 dark:bg-primary/15 dark:text-primary dark:hover:bg-primary/20'
           : 'text-foreground/80 hover:text-foreground hover:bg-muted/60',
       )}
     >
+      <span
+        className={cn('h-1.5 w-1.5 shrink-0 rounded-full bg-primary', !isActive && 'opacity-0')}
+        aria-hidden='true'
+      />
       <span className='truncate'>{name}</span>
+      {isActive && <span className='sr-only'>(active)</span>}
     </Button>
   );
 }

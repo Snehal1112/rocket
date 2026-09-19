@@ -27,16 +27,11 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
+import { collectLeafGroupIds } from '@/lib/pane-utils';
 import { usePaneStore } from '@/stores/pane-store';
-import type { LeafNode, PaneNode } from '@/types/pane-types';
+import type { LeafNode } from '@/types/pane-types';
 import { isWorkspaceTab } from '@/types/pane-types';
 import { TabItem } from './TabItem';
-
-// Collect all leaf groupIds from a pane tree recursively.
-function collectLeafGroupIds(node: PaneNode): string[] {
-  if (node.type === 'leaf') return [node.groupId];
-  return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
-}
 
 // Request tab bar matching legacy RequestTabs styling.
 export function TabBar({

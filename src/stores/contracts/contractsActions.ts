@@ -112,6 +112,10 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
     },
 
     updateContract: async (collectionId, contractId, values) => {
+      // There is no attachment UI yet, so newDocumentPaths is always empty —
+      // but keptDocumentPaths must carry the contract's EXISTING attachments
+      // forward, or the backend deletes every file not in that list on save.
+      const existingDocumentPaths = get().byId[contractId]?.documentPaths ?? [];
       const raw = await api.updateContract(collectionId, {
         contractId,
         title: values.name,
@@ -123,7 +127,7 @@ export function contractsActions(set: Set, get: Get): ContractsActions {
         // biome-ignore lint/suspicious/noExplicitAny: bridging domain ContractPolicy→IPC ContractPolicy
         policy: values.policy as unknown as any,
         newDocumentPaths: [],
-        keptDocumentPaths: [],
+        keptDocumentPaths: existingDocumentPaths,
       });
       const contract = adaptIpcContract(raw);
       // Reload changelog so the Recent Changes panel reflects updated entries.
@@ -420,5 +424,6 @@ function adaptIpcContract(raw: api.Contract): Contract {
     createdBy: raw.createdBy ?? '',
     createdAt: raw.createdAt ?? '',
     updatedAt: raw.updatedAt ?? '',
+    documentPaths: raw.documentPaths ?? [],
   };
 }

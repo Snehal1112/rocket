@@ -36,6 +36,7 @@ const baseContract: Contract = {
   createdBy: 'user1',
   createdAt: '2025-01-01T00:00:00Z',
   updatedAt: '2025-01-01T00:00:00Z',
+  documentPaths: [],
 };
 
 describe('useChangelogEntries', () => {

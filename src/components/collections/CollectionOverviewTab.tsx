@@ -15,11 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSaveButton } from '@/hooks/use-save-button';
-import {
-  type ApiOAuth2Auth,
-  apiAuthToOAuth2State,
-  oauth2StateToApiAuth,
-} from '@/lib/oauth2-mapping';
+import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
+import { toPersistedHeaders } from '@/lib/persisted-headers';
 import {
   useEnvironments,
   useGlobalEnvironment,
@@ -27,7 +24,6 @@ import {
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
 import {
-  type Auth,
   type Collection,
   type CollectionItem,
   type CollectionVariable,
@@ -75,101 +71,6 @@ function countFolders(items: CollectionItem[]): number {
 
 function plural(n: number, singular: string, pluralForm: string): string {
   return `${n} ${n === 1 ? singular : pluralForm}`;
-}
-
-// Convert flat Rust Auth (from API) to nested frontend AuthState.
-function toAuthState(auth: Collection['settings']['auth']): AuthState {
-  if (!auth) return { authType: 'none' };
-  const a = auth as Record<string, unknown>;
-  const authType = a.authType as string;
-
-  // Rust uses "o-auth2" authType and OAuth2Flow shape: { flow, credentials, accessTokenUrl }.
-  if (authType === 'o-auth2' || authType === 'oauth2') {
-    return {
-      authType: 'oauth2' as const,
-      oauth2: apiAuthToOAuth2State(auth as unknown as ApiOAuth2Auth),
-    };
-  }
-
-  if (authType === 'aws-sig-v4') {
-    return {
-      authType: 'aws-sig-v4',
-      awsSigV4: {
-        accessKey: (a.accessKey as string) ?? '',
-        secretKey: (a.secretKey as string) ?? '',
-        region: (a.region as string) ?? '',
-        service: (a.service as string) ?? '',
-        sessionToken: (a.sessionToken as string) ?? '',
-      },
-    };
-  }
-
-  if (authType === 'basic') {
-    return {
-      authType: 'basic',
-      basic: {
-        username: (a.username as string) ?? '',
-        password: (a.password as string) ?? '',
-      },
-    };
-  }
-
-  if (authType === 'bearer') {
-    return { authType: 'bearer', bearer: { token: (a.token as string) ?? '' } };
-  }
-
-  if (authType === 'api-key') {
-    return {
-      authType: 'api-key',
-      apiKey: {
-        key: (a.key as string) ?? '',
-        value: (a.value as string) ?? '',
-        addTo: ((a.placement as string) ?? 'header') as 'header' | 'query',
-      },
-    };
-  }
-
-  return { authType: 'none' };
-}
-
-// Convert nested frontend AuthState back to flat Rust Auth for persistence.
-function authStateToApi(auth: AuthState): Auth | undefined {
-  switch (auth.authType) {
-    case 'none':
-    case 'inherit':
-      return undefined;
-    case 'basic':
-      return {
-        authType: 'basic',
-        username: auth.basic?.username ?? '',
-        password: auth.basic?.password ?? '',
-      };
-    case 'bearer':
-      return { authType: 'bearer', token: auth.bearer?.token ?? '' };
-    case 'api-key':
-      return {
-        authType: 'api-key',
-        key: auth.apiKey?.key ?? '',
-        value: auth.apiKey?.value ?? '',
-        placement: auth.apiKey?.addTo ?? 'header',
-      };
-    case 'oauth2':
-      if (!auth.oauth2) return undefined;
-      return oauth2StateToApiAuth(auth.oauth2) as Auth;
-    case 'aws-sig-v4': {
-      const a = auth.awsSigV4;
-      return {
-        authType: 'aws-sig-v4',
-        accessKey: a?.accessKey ?? '',
-        secretKey: a?.secretKey ?? '',
-        region: a?.region ?? '',
-        service: a?.service ?? '',
-        sessionToken: a?.sessionToken || undefined,
-      } as unknown as Auth;
-    }
-    default:
-      return undefined;
-  }
 }
 
 function toKeyValueEntries(
@@ -303,7 +204,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
         // Load auth from disk. For OAuth2 flows the access/refresh tokens are never
         // written to disk, so restore them from the in-memory store if available.
-        const diskAuth = toAuthState(s.auth);
+        const diskAuth = fromPersistedAuth(s.auth);
         const cachedAuth = useCollectionAuthStore.getState().getCollectionAuth(collectionName);
         if (
           diskAuth.authType === 'oauth2' &&
@@ -350,14 +251,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Persist all settings to disk (no auto-save).
   const saveSettings = useCallback(async () => {
     await saveCollectionSettings(collectionName, {
-      auth: authStateToApi(auth),
-      headers: headers
-        .filter((h) => h.key)
-        .map((h) => ({
-          key: h.key,
-          value: h.value,
-          enabled: h.enabled,
-        })),
+      auth: toPersistedAuth(auth),
+      headers: toPersistedHeaders(headers),
       docs: docs || undefined,
       variables,
     });
@@ -451,7 +346,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const isDocDirty = docs !== persistedDocs;
 
   return (
-    <div className='flex h-full flex-col overflow-hidden'>
+    <div className='collection-overview-workbench flex h-full flex-col overflow-hidden'>
       {/* Collection header — shadow appears when overview left panel is scrolled. */}
       <div
         className={cn(
@@ -510,14 +405,14 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               ref={overviewScrollRef}
               className='flex-1 min-w-0 border-r border-border overflow-y-auto'
             >
-              <div className='p-6 flex flex-col gap-6'>
+              <div className='p-4 flex flex-col gap-4'>
                 <MethodBreakdown items={items} />
 
                 <Card>
-                  <CardHeader className='pb-3 pt-5 px-5'>
+                  <CardHeader className='pb-2 pt-4 px-4'>
                     <span className='text-sm font-semibold'>Default Headers</span>
                   </CardHeader>
-                  <CardContent className='px-5 pb-5'>
+                  <CardContent className='px-4 pb-4'>
                     <HeadersEditor
                       headers={headers}
                       onChange={(v) => {
@@ -546,19 +441,19 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                 </Card>
 
                 <Card>
-                  <CardHeader className='pb-3 pt-5 px-5'>
+                  <CardHeader className='pb-2 pt-4 px-4'>
                     <span className='text-sm font-semibold'>Requests</span>
                   </CardHeader>
-                  <CardContent className='px-5 pb-5'>
+                  <CardContent className='px-4 pb-4'>
                     <RequestList items={items} collectionName={collectionName} />
                   </CardContent>
                 </Card>
 
                 <Card>
-                  <CardHeader className='pb-3 pt-5 px-5'>
+                  <CardHeader className='pb-2 pt-4 px-4'>
                     <span className='text-sm font-semibold'>Tags</span>
                   </CardHeader>
-                  <CardContent className='px-5 pb-5'>
+                  <CardContent className='px-4 pb-4'>
                     <TagsList collection={collection} />
                   </CardContent>
                 </Card>

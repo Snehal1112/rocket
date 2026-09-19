@@ -1,25 +1,22 @@
 // src/components/workspace/WorkspaceEnvironmentsTab.tsx
 
-import { Check, Eye, EyeOff, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { InlineEnvName } from '@/components/environments/InlineEnvName';
+import { EnvironmentSidebar } from '@/components/environments/EnvironmentSidebar';
+import { VariableTable } from '@/components/environments/VariableTable';
 import { RocketIdle } from '@/components/illustrations';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSaveButton } from '@/hooks/use-save-button';
 import {
   useDeleteGlobalEnvironment,
   useGlobalEnvironmentName,
   useGlobalEnvironments,
+  useProcessEnvVars,
   useSaveGlobalEnvironment,
   useSetGlobalEnvironment,
 } from '@/lib/queries/environment-queries';
 import type { Variable } from '@/lib/tauri-api';
 import { deleteGlobalEnvironment, saveGlobalEnvironment } from '@/lib/tauri-api';
-import { cn } from '@/lib/utils';
+import { buildScopedContext } from '@/lib/url-variables';
 
 export function WorkspaceEnvironmentsTab() {
   const { data: environments = [] } = useGlobalEnvironments();
@@ -30,8 +27,6 @@ export function WorkspaceEnvironmentsTab() {
 
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editingVars, setEditingVars] = useState<Variable[]>([]);
-  const [isAddingEnv, setIsAddingEnv] = useState(false);
-  const [newEnvName, setNewEnvName] = useState('');
   const [isDirty, setIsDirty] = useState(false);
 
   const saveSettings = useCallback(async () => {
@@ -88,22 +83,17 @@ export function WorkspaceEnvironmentsTab() {
     [selectedName],
   );
 
-  const handleAddEnv = useCallback(async () => {
-    const trimmed = newEnvName.trim();
-    if (!trimmed) {
-      setIsAddingEnv(false);
-      setNewEnvName('');
-      return;
-    }
-    try {
-      await saveMutation.mutateAsync({ name: trimmed, variables: [] });
-      setSelectedName(trimmed);
-    } catch (err) {
-      console.error('[WorkspaceEnvironmentsTab] failed to create environment', err);
-    }
-    setIsAddingEnv(false);
-    setNewEnvName('');
-  }, [newEnvName, saveMutation]);
+  const handleAddEnv = useCallback(
+    async (name: string) => {
+      try {
+        await saveMutation.mutateAsync({ name, variables: [] });
+        setSelectedName(name);
+      } catch (err) {
+        console.error('[WorkspaceEnvironmentsTab] failed to create environment', err);
+      }
+    },
+    [saveMutation],
+  );
 
   const handleDeleteEnv = useCallback(async () => {
     if (!selectedName) return;
@@ -136,174 +126,43 @@ export function WorkspaceEnvironmentsTab() {
     [environments, saveMutation, globalEnvName, setGlobalEnvMutation],
   );
 
+  const { data: processEnvVars = {} } = useProcessEnvVars();
+
+  const variableContext = useMemo(() => {
+    const envVars: Record<string, string> = {};
+    for (const v of editingVars) if (v.enabled) envVars[v.key] = v.value;
+    return buildScopedContext({
+      envVars,
+      envLabel: selectedName ?? undefined,
+      processEnvVars,
+    });
+  }, [editingVars, selectedName, processEnvVars]);
+
   return (
     <div className='h-full flex'>
-      {/* Left panel: environment list. */}
-      <div className='w-52 border-r border-border flex flex-col bg-card/50'>
-        <div className='px-3 pt-3 pb-1.5'>
-          <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-            Environments
-          </p>
-        </div>
-        <ScrollArea className='flex-1 px-2'>
-          <div className='pb-2 space-y-0.5'>
-            {environments.map((env) => (
-              <InlineEnvName
-                key={env.name}
-                name={env.name}
-                isSelected={selectedName === env.name}
-                existingNames={environments.map((e) => e.name)}
-                onClick={() => setSelectedName(env.name)}
-                onRename={(newName) => handleRenameEnv(env.name, newName)}
-              />
-            ))}
-            {isAddingEnv && (
-              <Input
-                autoFocus
-                className='h-7 text-sm'
-                placeholder='Environment name'
-                value={newEnvName}
-                onChange={(e) => setNewEnvName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleAddEnv();
-                  if (e.key === 'Escape') {
-                    setIsAddingEnv(false);
-                    setNewEnvName('');
-                  }
-                }}
-                onBlur={() => void handleAddEnv()}
-              />
-            )}
-          </div>
-        </ScrollArea>
-        <div className='p-2 flex gap-1'>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='h-7 w-7'
-            onClick={() => setIsAddingEnv(true)}
-            title='Add environment'
-          >
-            <Plus className='h-3.5 w-3.5' />
-          </Button>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='h-7 w-7 text-destructive hover:text-destructive'
-            onClick={() => void handleDeleteEnv()}
-            disabled={!selectedName}
-            title='Delete environment'
-          >
-            <Trash2 className='h-3.5 w-3.5' />
-          </Button>
-        </div>
-      </div>
+      <EnvironmentSidebar
+        environments={environments}
+        selectedName={selectedName}
+        activeName={globalEnvName}
+        onSelect={setSelectedName}
+        onRename={handleRenameEnv}
+        onAdd={handleAddEnv}
+        onDelete={() => void handleDeleteEnv()}
+        canDelete={!!selectedName}
+      />
 
-      {/* Right panel: variable editor. */}
       <div className='flex-1 flex flex-col min-w-0'>
         {selectedName ? (
-          <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
-            <div className='p-0 flex flex-col h-full'>
-              <div
-                className='grid items-center gap-1.5 px-3 pt-3 pb-1.5 shrink-0'
-                style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}
-              >
-                <div />
-                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-                  Key
-                </p>
-                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-                  Value
-                </p>
-                <div />
-              </div>
-              <ScrollArea className='flex-1'>
-                <div className='px-3 pt-2 pb-1 space-y-1'>
-                  {editingVars.map((variable, idx) => (
-                    <div
-                      // biome-ignore lint/suspicious/noArrayIndexKey: env variables may share keys; index is the correct identity
-                      key={idx}
-                      className={cn(
-                        'grid items-center gap-1.5 h-8 group',
-                        !variable.enabled && 'opacity-50',
-                      )}
-                      style={{ gridTemplateColumns: '20px 1fr 1fr 52px' }}
-                    >
-                      <Checkbox
-                        checked={variable.enabled}
-                        onCheckedChange={(checked) => updateVar(idx, { enabled: !!checked })}
-                        aria-label={variable.enabled ? 'Disable variable' : 'Enable variable'}
-                        className='shrink-0'
-                      />
-                      <Input
-                        placeholder='Key'
-                        value={variable.key}
-                        onChange={(e) => updateVar(idx, { key: e.target.value })}
-                        className='text-xs h-7 font-mono'
-                      />
-                      <Input
-                        placeholder='Value'
-                        type={variable.secret ? 'password' : 'text'}
-                        value={variable.value}
-                        onChange={(e) => updateVar(idx, { value: e.target.value })}
-                        className='text-xs h-7 font-mono'
-                      />
-                      <div className='flex items-center gap-1 justify-end'>
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                          onClick={() => updateVar(idx, { secret: !variable.secret })}
-                          title={variable.secret ? 'Show value' : 'Hide value'}
-                        >
-                          {variable.secret ? (
-                            <EyeOff className='h-3.5 w-3.5 text-muted-foreground' />
-                          ) : (
-                            <Eye className='h-3.5 w-3.5 text-muted-foreground' />
-                          )}
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity'
-                          onClick={() => removeVar(idx)}
-                          title='Delete variable'
-                        >
-                          <X className='h-3.5 w-3.5 text-muted-foreground hover:text-destructive' />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-              <div className='px-3 py-2 border-t border-border/40 shrink-0 flex items-center justify-between'>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={addVar}
-                  className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
-                >
-                  <Plus className='h-3.5 w-3.5' />
-                  Add Variable
-                </Button>
-                <Button
-                  size='sm'
-                  onClick={() => void triggerSave()}
-                  disabled={!isDirty || saveState !== 'idle'}
-                  className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                >
-                  {saveState === 'saving' ? (
-                    <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                  ) : saveState === 'success' ? (
-                    <Check className='h-3.5 w-3.5' />
-                  ) : (
-                    <Save className='h-3.5 w-3.5' />
-                  )}
-                  {saveState === 'success' ? 'Saved' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <VariableTable
+            variables={editingVars}
+            onChange={updateVar}
+            onAdd={addVar}
+            onRemove={removeVar}
+            onSave={() => void triggerSave()}
+            isDirty={isDirty}
+            saveState={saveState}
+            variableContext={variableContext}
+          />
         ) : (
           <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-linear-to-b from-background to-card/60'>
             <RocketIdle className='w-36 h-36 opacity-70' />

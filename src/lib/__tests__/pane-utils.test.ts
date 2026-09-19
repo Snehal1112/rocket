@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LeafNode, PaneNode, RequestTab } from '@/types/pane-types';
 import {
+  collectLeafGroupIds,
   createDefaultLeaf,
   createDefaultRequest,
   findActiveLeaf,
@@ -73,6 +74,16 @@ describe('pane-utils', () => {
 
   it('findTabInTree returns null for unknown tabId', () => {
     expect(findTabInTree(splitTree, 'no-such-tab')).toBeNull();
+  });
+
+  // --- collectLeafGroupIds ---
+
+  it('collectLeafGroupIds returns all leaf groupIds in a split tree', () => {
+    expect(collectLeafGroupIds(splitTree)).toEqual(['g1', 'g2']);
+  });
+
+  it('collectLeafGroupIds returns a single-element array for a lone leaf', () => {
+    expect(collectLeafGroupIds(leaf1)).toEqual(['g1']);
   });
 
   // --- updateLeaf ---

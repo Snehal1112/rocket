@@ -1,5 +1,6 @@
-import { toApiAuth, toApiBody } from '@/lib/execute-request';
-import { oauth2StateToApiAuth } from '@/lib/oauth2-mapping';
+import { toApiBody } from '@/lib/execute-request';
+import { toPersistedAuth } from '@/lib/persisted-auth';
+import { toPersistedHeaders } from '@/lib/persisted-headers';
 import { type Request, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
@@ -7,11 +8,6 @@ import type { RequestState } from '@/types/pane-types';
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function toApiRequest(uid: string, name: string, request: RequestState): Request {
-  const auth =
-    request.auth.authType === 'oauth2' && request.auth.oauth2
-      ? oauth2StateToApiAuth(request.auth.oauth2)
-      : toApiAuth(request.auth);
-
   const s = request.settings;
 
   return {
@@ -19,11 +15,9 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
     name,
     method: request.method,
     url: request.url,
-    headers: request.headers
-      .filter((h) => h.enabled)
-      .map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
+    headers: toPersistedHeaders(request.headers),
     body: toApiBody(request.body),
-    auth,
+    auth: toPersistedAuth(request.auth),
     tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
     preRequestScript: request.preRequestScript ?? null,
     postResponseScript: request.postResponseScript ?? null,
