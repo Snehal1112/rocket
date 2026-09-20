@@ -178,7 +178,20 @@ export function createGitStore(): StoreApi<GitState> {
     // Set the active repository and check if it is a git repo.
     setRepository: async (repositoryId: string) => {
       const myGeneration = ++loadGeneration;
-      set({ repositoryId, loading: true, error: null, loadStatus: 'loading' });
+      set({
+        repositoryId,
+        loading: true,
+        error: null,
+        loadStatus: 'loading',
+        isRepo: false,
+        status: null,
+        branches: null,
+        remotes: [],
+        stashes: [],
+        commitLog: [],
+        conflicts: [],
+        credentials: null,
+      });
       try {
         const isRepo = await gitIsRepo(repositoryId);
         if (myGeneration !== loadGeneration) return;

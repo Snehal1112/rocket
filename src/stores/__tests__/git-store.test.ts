@@ -352,6 +352,42 @@ describe('setRepository', () => {
   });
 });
 
+describe('git-store setRepository clears stale data synchronously', () => {
+  it('clears prior repository data the instant a new load starts, before the new load resolves', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    await store.getState().setRepository('repo-a');
+    // Sanity: repo-a actually loaded some data.
+    expect(store.getState().isRepo).toBe(true);
+
+    store.setState({
+      status: { branch: 'repo-a-branch', files: [], ahead: 3, behind: 0, isClean: true },
+      branches: { current: 'repo-a-branch', local: [], remote: [] },
+      remotes: [{ name: 'origin', url: 'https://a.example.com' }],
+      stashes: [{ index: 0, message: 'wip', timestamp: '2026-01-01', filesChanged: 1, insertions: 1, deletions: 0, changedFiles: ['a'], branch: 'repo-a-branch' }],
+      commitLog: [{ id: 'abc', fullId: 'abc123', message: 'm', author: 'a', authorEmail: 'a@a.com', timestamp: '2026-01-01', filesChanged: 1 }],
+      credentials: { type: 'token', token: 'repo-a-secret' },
+    });
+
+    const deferredIsRepo = createDeferred<boolean>();
+    vi.mocked(tauriApi.gitIsRepo).mockReturnValue(deferredIsRepo.promise);
+
+    const loadPromise = store.getState().setRepository('repo-b');
+
+    // Before repo-b's gitIsRepo call even resolves, all of repo-a's data must
+    // already be gone — not left visible until repo-b's refreshes complete.
+    expect(store.getState().status).toBeNull();
+    expect(store.getState().branches).toBeNull();
+    expect(store.getState().remotes).toEqual([]);
+    expect(store.getState().stashes).toEqual([]);
+    expect(store.getState().commitLog).toEqual([]);
+    expect(store.getState().credentials).toBeNull();
+    expect(store.getState().isRepo).toBe(false);
+
+    deferredIsRepo.resolve(false);
+    await loadPromise;
+  });
+});
+
 // Phase 3 repository-scoping work will make late responses unable to overwrite the active repo.
 knownRedDescribe('known-red: setRepository repository race contracts', () => {
   it('keeps B authoritative when delayed A resolves after B', async () => {
