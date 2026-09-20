@@ -151,7 +151,12 @@ impl CollectionService {
     }
 
     pub fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
-        self.repo.reorder_items(collection, folder_path, ordered_names)
+        self.repo.reorder_items(collection, folder_path, ordered_names)?;
+        self.events.publish(DomainEvent::ItemsReordered {
+            collection: collection.to_string(),
+            folder_path: folder_path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
@@ -163,7 +168,9 @@ impl CollectionService {
         name: &str,
         settings: &rocket_collection::CollectionSettings,
     ) -> DomainResult<()> {
-        self.repo.save_settings(name, settings)
+        self.repo.save_settings(name, settings)?;
+        self.events.publish(DomainEvent::CollectionSettingsSaved { collection: name.to_string() });
+        Ok(())
     }
 
     pub fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
@@ -175,7 +182,12 @@ impl CollectionService {
     }
 
     pub fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
-        self.repo.save_folder_variables(collection, folder_path, vars)
+        self.repo.save_folder_variables(collection, folder_path, vars)?;
+        self.events.publish(DomainEvent::FolderVariablesSaved {
+            collection: collection.to_string(),
+            folder_path: folder_path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
@@ -183,7 +195,12 @@ impl CollectionService {
     }
 
     pub fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
-        self.repo.save_request_variables(collection, request_path, vars)
+        self.repo.save_request_variables(collection, request_path, vars)?;
+        self.events.publish(DomainEvent::RequestVariablesSaved {
+            collection: collection.to_string(),
+            request_path: request_path.to_string(),
+        });
+        Ok(())
     }
 }
 
@@ -580,6 +597,78 @@ mod tests {
                 DomainEvent::FolderDeleted { collection, path } if collection == "my-api" && path == "auth"
             )),
             "expected FolderDeleted, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn reorder_items_emits_items_reordered() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.reorder_items("my-api", "auth", &["login.yml".to_string(), "logout.yml".to_string()]).expect("reorder_items");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ItemsReordered { collection, folder_path } if collection == "my-api" && folder_path == "auth"
+            )),
+            "expected ItemsReordered, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn save_settings_emits_collection_settings_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.save_settings("my-api", &rocket_collection::CollectionSettings::default()).expect("save_settings");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::CollectionSettingsSaved { collection } if collection == "my-api"
+            )),
+            "expected CollectionSettingsSaved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn save_folder_variables_emits_folder_variables_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.save_folder_variables("my-api", "auth", vec![]).expect("save_folder_variables");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::FolderVariablesSaved { collection, folder_path } if collection == "my-api" && folder_path == "auth"
+            )),
+            "expected FolderVariablesSaved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn save_request_variables_emits_request_variables_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.save_request_variables("my-api", "users.yml", vec![]).expect("save_request_variables");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::RequestVariablesSaved { collection, request_path } if collection == "my-api" && request_path == "users.yml"
+            )),
+            "expected RequestVariablesSaved, got {:?}", *published
         );
     }
 
