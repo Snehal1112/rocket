@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitStore } from '@/stores/git-store-context';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 interface Props {
   open: boolean;
@@ -13,9 +13,9 @@ interface Props {
 }
 
 export function GitRemotesDialog({ open, onOpenChange }: Props) {
-  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes } = useGitStore(
-    (state) => state,
-  );
+  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes, error, clearError } =
+    useGitStore((state) => state);
+  const gitStoreApi = useGitStoreApi();
 
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
@@ -37,9 +37,12 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
     !remotes.some((r) => r.name === newName.trim());
 
   const handleAdd = async () => {
+    clearError();
     await addRemote(newName.trim(), newUrl.trim());
-    setNewName('');
-    setNewUrl('');
+    if (!gitStoreApi.getState().error) {
+      setNewName('');
+      setNewUrl('');
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -63,6 +66,22 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
         <TooltipProvider delayDuration={300}>
           <div className='space-y-3 min-w-0'>
+            {error && (
+              <div className='flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+                <span role='alert' className='flex-1 wrap-break-word'>
+                  {error}
+                </span>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-4 w-4 shrink-0'
+                  onClick={clearError}
+                  aria-label='Dismiss error'
+                >
+                  <X className='h-3 w-3' />
+                </Button>
+              </div>
+            )}
             {remotes.length === 0 ? (
               <p className='text-sm text-muted-foreground text-center py-4'>
                 No remotes configured.
