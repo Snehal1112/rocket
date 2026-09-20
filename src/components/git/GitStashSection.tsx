@@ -23,20 +23,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/relative-time';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
-
-/** Format a UTC timestamp string into a concise relative label. */
-function formatAge(timestamp: string): string {
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
 
 export function GitStashSection() {
   const [message, setMessage] = useState('');
@@ -284,7 +272,7 @@ export function GitStashSection() {
 
                   <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
                   <span className='text-[10px] text-muted-foreground/50 shrink-0'>
-                    {formatAge(stash.timestamp)}
+                    {formatRelativeTime(stash.timestamp)}
                   </span>
                 </div>
               </div>
