@@ -1,6 +1,6 @@
 import '@/components/editor/monaco-setup';
 import Editor from '@monaco-editor/react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import {
@@ -148,14 +148,15 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
           <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
             <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
             <span className='flex-1 wrap-break-word'>{error}</span>
-            <button
-              type='button'
-              className='shrink-0 hover:opacity-70 leading-none'
+            <Button
+              variant='ghost'
+              size='icon'
+              className='h-4 w-4 shrink-0'
               onClick={clearError}
               aria-label='Dismiss error'
             >
-              ×
-            </button>
+              <X className='h-3 w-3' />
+            </Button>
           </div>
         )}
         <div className='flex-1'>
@@ -194,14 +195,15 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
         <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
           <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
           <span className='flex-1 wrap-break-word'>{error}</span>
-          <button
-            type='button'
-            className='shrink-0 hover:opacity-70 leading-none'
+          <Button
+            variant='ghost'
+            size='icon'
+            className='h-4 w-4 shrink-0'
             onClick={clearError}
             aria-label='Dismiss error'
           >
-            ×
-          </button>
+            <X className='h-3 w-3' />
+          </Button>
         </div>
       )}
       <div className='flex flex-1 min-h-0'>

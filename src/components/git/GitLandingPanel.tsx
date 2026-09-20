@@ -9,6 +9,7 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import { useState } from 'react';
 import gitIcon from '@/assets/git-icon.svg';
@@ -307,14 +308,15 @@ export function GitLandingPanel() {
             <div className='flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
               <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
               <span className='flex-1 wrap-break-word'>{error}</span>
-              <button
-                type='button'
-                className='shrink-0 hover:opacity-70 leading-none'
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-4 w-4 shrink-0'
                 onClick={clearError}
                 aria-label='Dismiss error'
               >
-                ×
-              </button>
+                <X className='h-3 w-3' />
+              </Button>
             </div>
           )}
 
