@@ -2,6 +2,7 @@ use super::*;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
+use rocket_collection::settings::SandboxMode;
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionVariable};
 use rocket_shared::types::HttpMethod;
 use tempfile::TempDir;
@@ -122,6 +123,7 @@ fn settings_roundtrip() {
         auth: Some(Auth::Bearer { token: "tok_abc".into() }),
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
+        sandbox_mode: SandboxMode::Safe,
     };
     repo.save_settings("my-api", &original).unwrap();
     let loaded = repo.get_settings("my-api").unwrap();
@@ -141,6 +143,7 @@ fn settings_file_not_counted_as_request() {
         auth: Some(Auth::None),
         headers: vec![],
         variables: vec![],
+        sandbox_mode: SandboxMode::Safe,
     };
     repo.save_settings("my-api", &settings).unwrap();
 
@@ -160,6 +163,7 @@ fn settings_stored_in_opencollection_yml() {
         auth: Some(Auth::Bearer { token: "tok".into() }),
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
+        sandbox_mode: SandboxMode::Safe,
     };
     repo.save_settings("my-api", &settings).unwrap();
 
@@ -175,6 +179,59 @@ fn settings_stored_in_opencollection_yml() {
     assert_eq!(loaded.auth, settings.auth);
     assert_eq!(loaded.headers.len(), 1);
     assert_eq!(loaded.docs, Some("My API docs".into()));
+}
+
+#[test]
+fn settings_sandbox_mode_developer_roundtrips() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    let settings = CollectionSettings {
+        sandbox_mode: SandboxMode::Developer,
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings).expect("save settings");
+
+    let loaded = repo.get_settings("my-api").expect("get settings");
+    assert_eq!(loaded.sandbox_mode, SandboxMode::Developer);
+}
+
+#[test]
+fn settings_sandbox_mode_defaults_to_safe_without_rocketapi_extension() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    // Write an opencollection.yml with no `extensions` key at all.
+    let path = dir.path().join("my-api/opencollection.yml");
+    fs::write(&path, "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\n").expect("write fixture");
+
+    let loaded = repo.get_settings("my-api").expect("get settings");
+    assert_eq!(loaded.sandbox_mode, SandboxMode::Safe);
+}
+
+#[test]
+fn save_settings_preserves_unrelated_extensions_data() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    // Write a fixture with unrelated data under `extensions`.
+    let path = dir.path().join("my-api/opencollection.yml");
+    fs::write(
+        &path,
+        "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\nextensions:\n  someOtherTool:\n    foo: bar\n",
+    )
+    .expect("write fixture");
+
+    let settings = CollectionSettings {
+        sandbox_mode: SandboxMode::Developer,
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings).expect("save settings");
+
+    let content = fs::read_to_string(&path).expect("read back opencollection.yml");
+    assert!(content.contains("someOtherTool"));
+    assert!(content.contains("foo: bar"));
+    assert!(content.contains("sandboxMode: developer"));
 }
 
 #[test]

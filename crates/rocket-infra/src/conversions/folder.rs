@@ -1,7 +1,7 @@
 use crate::oc::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
-use rocket_collection::settings::{CollectionSettings, CollectionVariable};
+use rocket_collection::settings::{CollectionSettings, CollectionVariable, SandboxMode};
 use rocket_shared::types::{Auth, Header};
 
 use super::request::{oc_http_request_to_request, request_to_oc_http_request};
@@ -214,6 +214,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
                 .into_iter()
                 .map(CollectionVariable::from)
                 .collect(),
+            sandbox_mode: SandboxMode::Safe,
         }
     } else {
         CollectionSettings {
