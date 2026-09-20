@@ -365,6 +365,7 @@ describe('git-store setRepository clears stale data synchronously', () => {
       remotes: [{ name: 'origin', url: 'https://a.example.com' }],
       stashes: [{ index: 0, message: 'wip', timestamp: '2026-01-01', filesChanged: 1, insertions: 1, deletions: 0, changedFiles: ['a'], branch: 'repo-a-branch' }],
       commitLog: [{ id: 'abc', fullId: 'abc123', message: 'm', author: 'a', authorEmail: 'a@a.com', timestamp: '2026-01-01', filesChanged: 1 }],
+      conflicts: [{ path: 'config.yml', ours: 'version: 1', theirs: 'version: 2', ancestor: 'version: 0' }],
       credentials: { type: 'token', token: 'repo-a-secret' },
     });
 
@@ -380,6 +381,7 @@ describe('git-store setRepository clears stale data synchronously', () => {
     expect(store.getState().remotes).toEqual([]);
     expect(store.getState().stashes).toEqual([]);
     expect(store.getState().commitLog).toEqual([]);
+    expect(store.getState().conflicts).toEqual([]);
     expect(store.getState().credentials).toBeNull();
     expect(store.getState().isRepo).toBe(false);
 
