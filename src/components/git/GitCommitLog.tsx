@@ -55,7 +55,10 @@ export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
             className='flex items-start gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer'
             onClick={() => onCommitClick(commit)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') onCommitClick(commit);
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onCommitClick(commit);
+              }
             }}
           >
             <TooltipProvider delayDuration={300}>

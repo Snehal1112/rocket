@@ -149,7 +149,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                   className='git-file-row flex w-full items-center px-2 py-1 rounded-md hover:bg-muted/50 cursor-pointer gap-1.5 text-left'
                   onClick={() => onFileClick(file)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') onFileClick(file);
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onFileClick(file);
+                    }
                   }}
                 >
                   <span className='text-sm truncate flex-1 min-w-0'>{file.path}</span>
@@ -246,6 +249,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
                     if (isConflicted) {
                       void handleConflictClick(file);
                     } else {

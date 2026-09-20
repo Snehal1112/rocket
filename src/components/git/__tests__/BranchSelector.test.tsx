@@ -222,3 +222,32 @@ describe('BranchSelector error announcements', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('checkout failed');
   });
 });
+
+describe('BranchSelector keyboard behavior', () => {
+  it('prevents the default Space-scroll behavior when activating a local branch row', async () => {
+    const switchBranch = vi.fn();
+    const store = renderWithStore({
+      switchBranch,
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    // Find the 'develop' branch row (a div with role='button')
+    const developRow = screen.getByText('develop').closest('div[role="button"]');
+    expect(developRow).toBeInTheDocument();
+
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    developRow!.dispatchEvent(event);
+
+    expect(switchBranch).toHaveBeenCalledWith('develop');
+    expect(event.defaultPrevented).toBe(true);
+  });
+});

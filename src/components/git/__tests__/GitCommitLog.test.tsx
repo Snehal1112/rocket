@@ -40,3 +40,34 @@ describe('GitCommitLog store subscription', () => {
     expect(onRender.mock.calls.length).toBe(rendersAfterMount);
   });
 });
+
+describe('GitCommitLog keyboard behavior', () => {
+  it('prevents the default Space-scroll behavior when activating a row', () => {
+    const store = createGitStore();
+    store.setState({
+      commitLog: [
+        {
+          id: 'abc1234',
+          fullId: 'abc1234full',
+          message: 'initial commit',
+          author: 'Test',
+          authorEmail: 'test@test.com',
+          timestamp: new Date().toISOString(),
+          filesChanged: 1,
+        },
+      ],
+    });
+    const onCommitClick = vi.fn();
+    render(
+      <GitStoreProvider store={store}>
+        <GitCommitLog onCommitClick={onCommitClick} />
+      </GitStoreProvider>,
+    );
+    const row = screen.getByRole('button', { name: /initial commit/ });
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    row.dispatchEvent(event);
+
+    expect(onCommitClick).toHaveBeenCalledWith(expect.objectContaining({ id: 'abc1234' }));
+    expect(event.defaultPrevented).toBe(true);
+  });
+});

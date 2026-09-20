@@ -27,6 +27,51 @@ function renderWithStore(patch: Partial<GitState> = {}) {
   return { discardFiles: store.getState().discardFiles };
 }
 
+describe('GitFileList keyboard behavior', () => {
+  it('prevents the default Space-scroll behavior when activating an unstaged file row', () => {
+    const store = createGitStore();
+    store.setState({ status: baseStatus });
+    const onFileClick = vi.fn();
+    const onConflictClick = vi.fn();
+    render(
+      <GitStoreProvider store={store}>
+        <GitFileList onFileClick={onFileClick} onConflictClick={onConflictClick} />
+      </GitStoreProvider>,
+    );
+    const row = screen.getByRole('button', { name: /notes.txt/ });
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    row.dispatchEvent(event);
+
+    expect(onFileClick).toHaveBeenCalledWith(expect.objectContaining({ path: 'notes.txt' }));
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('prevents the default Space-scroll behavior when activating a staged file row', () => {
+    const store = createGitStore();
+    const stagedStatus: RepoStatus = {
+      branch: 'main',
+      isClean: false,
+      ahead: 0,
+      behind: 0,
+      files: [{ path: 'staged-file.txt', status: 'modified', staged: true }],
+    };
+    store.setState({ status: stagedStatus });
+    const onFileClick = vi.fn();
+    const onConflictClick = vi.fn();
+    render(
+      <GitStoreProvider store={store}>
+        <GitFileList onFileClick={onFileClick} onConflictClick={onConflictClick} />
+      </GitStoreProvider>,
+    );
+    const row = screen.getByRole('button', { name: /staged-file.txt/ });
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    row.dispatchEvent(event);
+
+    expect(onFileClick).toHaveBeenCalledWith(expect.objectContaining({ path: 'staged-file.txt' }));
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
 describe('GitFileList individual discard confirmation', () => {
   it('does not call discardFiles until the confirmation dialog is confirmed', async () => {
     const { discardFiles } = renderWithStore();

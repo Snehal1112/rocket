@@ -190,6 +190,7 @@ export function BranchSelector() {
               }}
               onKeyDown={(e) => {
                 if ((e.key === 'Enter' || e.key === ' ') && !switchingTo) {
+                  e.preventDefault();
                   if (!branch.isHead) void handleSwitch(branch.name);
                   else setOpen(false);
                 }
