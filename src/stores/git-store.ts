@@ -718,6 +718,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? get().remotes[0]?.name;
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitPush(repositoryId, resolvedRemote, credentials);
@@ -737,6 +741,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? get().remotes[0]?.name;
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitPull(repositoryId, resolvedRemote, credentials);
@@ -763,6 +771,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? get().remotes[0]?.name;
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitFetch(repositoryId, resolvedRemote, credentials);

@@ -288,6 +288,7 @@ describe('git-store pull refreshes the commit log', () => {
       repositoryId: 'repo-1',
       isRepo: true,
       credentials: { type: 'token', token: 'tok' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
     vi.mocked(tauriApi.gitPull).mockResolvedValue(undefined);
     vi.mocked(tauriApi.gitLog).mockResolvedValue([]);
@@ -1202,5 +1203,34 @@ describe('setRepository generation guard', () => {
     await firstCall;
     expect(store.getState().repositoryId).toBe('repo-b');
     expect(store.getState().branches?.current).toBe('main-b');
+  });
+});
+
+describe('git-store network actions with no remote configured', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repo-1',
+      isRepo: true,
+      credentials: { type: 'token', token: 'tok' },
+      remotes: [],
+    });
+  });
+
+  it('push sets an error and never calls gitPush', async () => {
+    await store.getState().push();
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
+  });
+
+  it('pull sets an error and never calls gitPull', async () => {
+    await store.getState().pull();
+    expect(tauriApi.gitPull).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
+  });
+
+  it('fetch sets an error and never calls gitFetch', async () => {
+    await store.getState().fetch();
+    expect(tauriApi.gitFetch).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
   });
 });
