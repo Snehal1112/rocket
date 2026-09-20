@@ -94,7 +94,9 @@ describe('GitPanel remount on repositoryId change', () => {
 
     // Open the credentials dialog for repo-b and confirm it never shows repo-a's
     // loaded credentials — this proves the store instance was not reused.
-    await userEvent.click(screen.getByRole('button', { name: /change ssh credentials|set credentials/i }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /change ssh credentials|set credentials/i }),
+    );
     const tokenField = screen.queryByLabelText(/token/i);
     // repo-b has no saved credentials and the dialog defaults to SSH Key, so the
     // token field may not even be present; when it is, it must be empty.
