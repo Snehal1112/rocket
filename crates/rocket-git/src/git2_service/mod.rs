@@ -135,8 +135,14 @@ impl GitService for Git2Service {
         staging::log(path, limit)
     }
 
-    fn push(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<()> {
-        remote::push(path, remote_name, creds, self.known_hosts_path())
+    fn push(
+        &self,
+        path: &str,
+        remote_name: &str,
+        creds: &GitCredentials,
+        force: bool,
+    ) -> DomainResult<()> {
+        remote::push(path, remote_name, creds, self.known_hosts_path(), force)
     }
 
     fn pull(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<()> {
@@ -160,8 +166,13 @@ impl GitService for Git2Service {
         branch::switch_branch(path, name)
     }
 
-    fn checkout_remote_branch(&self, path: &str, remote_branch: &str) -> DomainResult<()> {
-        branch::checkout_remote_branch(path, remote_branch)
+    fn checkout_remote_branch(
+        &self,
+        path: &str,
+        remote_branch: &str,
+        force: bool,
+    ) -> DomainResult<()> {
+        branch::checkout_remote_branch(path, remote_branch, force)
     }
 
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
@@ -219,6 +230,7 @@ mod tests {
     use super::*;
     use crate::service::GitService;
     use crate::status::GitStatus;
+    use rocket_shared::error::DomainError;
     use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
@@ -333,6 +345,7 @@ mod tests {
             &local_path,
             "origin",
             &crate::credentials::GitCredentials::SshAgent,
+            false,
         );
         assert!(result.is_ok(), "push failed: {:?}", result);
 
@@ -761,8 +774,8 @@ mod tests {
         svc.fetch(&path, "origin", &creds).unwrap();
 
         // Checkout the remote branch.
-        svc.checkout_remote_branch(&path, "origin/feature-x")
-            .unwrap();
+        svc.checkout_remote_branch(&path, "origin/feature-x", false)
+            .expect("checkout remote branch");
 
         // Verify local branch exists and is checked out.
         let status = svc.status(&path).unwrap();
@@ -776,6 +789,562 @@ mod tests {
             .find(|b| b.name == "feature-x")
             .unwrap();
         assert_eq!(local.upstream.as_deref(), Some("origin/feature-x"));
+    }
+
+    /// Build a bare remote carrying a `main` branch with the given files,
+    /// seeded from a throwaway repository. Both temp dirs are returned so the
+    /// caller keeps them alive for the duration of the test.
+    fn bare_remote_with_main(files: &[(&str, &str)]) -> (TempDir, TempDir) {
+        let bare_dir = TempDir::new().expect("create bare remote directory");
+        let bare_path = bare_dir.path().to_string_lossy().to_string();
+        Repository::init_bare(&bare_path).expect("init bare remote");
+
+        let seed_dir = TempDir::new().expect("create seed directory");
+        let seed = Repository::init(seed_dir.path()).expect("init seed repository");
+        seed.set_head("refs/heads/main").expect("set seed HEAD");
+
+        let sig = git2::Signature::now("Test", "test@test.com").expect("seed signature");
+        let mut index = seed.index().expect("open seed index");
+        for (name, content) in files {
+            fs::write(seed_dir.path().join(name), content).expect("write seed file");
+            index.add_path(Path::new(name)).expect("stage seed file");
+        }
+        index.write().expect("write seed index");
+        let tree_id = index.write_tree().expect("write seed tree");
+        {
+            let tree = seed.find_tree(tree_id).expect("find seed tree");
+            seed.commit(Some("refs/heads/main"), &sig, &sig, "seed", &tree, &[])
+                .expect("create seed commit");
+        }
+
+        seed.remote("origin", &bare_path)
+            .expect("add seed remote")
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .expect("push seed main");
+
+        (bare_dir, seed_dir)
+    }
+
+    fn empty_creds() -> GitCredentials {
+        GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+
+    fn branch_oid(path: &str, name: &str) -> git2::Oid {
+        Repository::open(path)
+            .expect("open repository")
+            .find_branch(name, git2::BranchType::Local)
+            .expect("find local branch")
+            .get()
+            .target()
+            .expect("branch must be a direct reference")
+    }
+
+    fn remote_tracking_oid(path: &str, remote_branch: &str) -> git2::Oid {
+        Repository::open(path)
+            .expect("open repository")
+            .find_reference(&format!("refs/remotes/{remote_branch}"))
+            .expect("find remote-tracking reference")
+            .peel_to_commit()
+            .expect("peel remote-tracking reference")
+            .id()
+    }
+
+    fn upstream_of(svc: &Git2Service, path: &str, name: &str) -> Option<String> {
+        svc.branches(path)
+            .expect("list branches")
+            .local
+            .into_iter()
+            .find(|b| b.name == name)
+            .expect("local branch must be listed")
+            .upstream
+    }
+
+    /// Forced reset of the branch that is currently checked out: the ref, the
+    /// worktree, and the upstream all move to the other remote's content.
+    #[test]
+    fn force_checkout_resets_current_branch_to_other_remote() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // A local commit on main that no remote carries.
+        fs::write(dir.path().join("local-only.txt"), "local work\n").expect("write local file");
+        svc.stage(&path, &["local-only.txt"]).expect("stage local file");
+        svc.commit(&path, "local only").expect("commit local work");
+        let original_main = branch_oid(&path, "main");
+
+        // An unrelated second remote with its own main.
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&path, "other", &empty_creds())
+            .expect("fetch second remote");
+        let target = remote_tracking_oid(&path, "other/main");
+
+        svc.checkout_remote_branch(&path, "other/main", true)
+            .expect("forced reset to other/main");
+
+        assert_eq!(
+            branch_oid(&path, "main"),
+            target,
+            "main must now point at other/main's commit"
+        );
+        assert_ne!(
+            branch_oid(&path, "main"),
+            original_main,
+            "main must have moved off its original commit"
+        );
+        assert_eq!(
+            upstream_of(&svc, &path, "main").as_deref(),
+            Some("other/main"),
+            "main must now track other/main"
+        );
+
+        let status = svc.status(&path).expect("read status");
+        assert_eq!(status.branch, "main", "HEAD must stay on main");
+        assert!(
+            status.files.is_empty(),
+            "worktree and index must be clean after the reset: {:?}",
+            status.files
+        );
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("other.txt")).expect("read other remote file"),
+            "from other\n"
+        );
+        assert!(
+            !dir.path().join("local-only.txt").exists(),
+            "the discarded local commit's file must be gone from the worktree"
+        );
+        assert!(
+            !dir.path().join("test.bru").exists(),
+            "files absent from the target tree must be removed"
+        );
+    }
+
+    /// Forced reset of a local branch that is NOT checked out: only the ref
+    /// and its upstream move; nothing on disk changes.
+    #[test]
+    fn force_checkout_resets_non_current_branch_without_touching_worktree() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // Move HEAD off main so main exists but is not the current branch.
+        svc.create_branch(&path, "scratch").expect("create scratch");
+        fs::write(dir.path().join("scratch.txt"), "scratch work\n").expect("write scratch file");
+        svc.stage(&path, &["scratch.txt"]).expect("stage scratch file");
+        svc.commit(&path, "scratch work").expect("commit on scratch");
+
+        let original_main = branch_oid(&path, "main");
+        let original_scratch = branch_oid(&path, "scratch");
+
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&path, "other", &empty_creds())
+            .expect("fetch second remote");
+        let target = remote_tracking_oid(&path, "other/main");
+
+        svc.checkout_remote_branch(&path, "other/main", true)
+            .expect("forced reset of the non-current main");
+
+        assert_eq!(
+            branch_oid(&path, "main"),
+            target,
+            "main must now point at other/main's commit"
+        );
+        assert_ne!(branch_oid(&path, "main"), original_main);
+        assert_eq!(
+            upstream_of(&svc, &path, "main").as_deref(),
+            Some("other/main"),
+            "main must now track other/main"
+        );
+
+        // The checked-out branch and everything on disk stay untouched.
+        let status = svc.status(&path).expect("read status");
+        assert_eq!(status.branch, "scratch", "HEAD must stay on scratch");
+        assert_eq!(
+            branch_oid(&path, "scratch"),
+            original_scratch,
+            "the current branch must not move"
+        );
+        assert!(
+            status.files.is_empty(),
+            "the worktree must stay clean: {:?}",
+            status.files
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("test.bru")).expect("read tracked file"),
+            "meta { name: Test }"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("scratch.txt")).expect("read scratch file"),
+            "scratch work\n"
+        );
+        assert!(
+            !dir.path().join("other.txt").exists(),
+            "resetting a non-current branch must not check anything out"
+        );
+    }
+
+    /// Read a branch tip straight out of a bare remote, for before/after
+    /// snapshots that prove a rejected push left the remote untouched.
+    fn bare_branch_oid(bare_path: &str, branch: &str) -> git2::Oid {
+        Repository::open_bare(bare_path)
+            .expect("open bare remote")
+            .find_reference(&format!("refs/heads/{branch}"))
+            .expect("find bare remote branch")
+            .peel_to_commit()
+            .expect("peel bare remote branch")
+            .id()
+    }
+
+    /// Clone `bare_path` into a fresh temp dir and give it a committer
+    /// identity, so service operations that write reflogs or commits work.
+    fn clone_with_identity(bare_path: &str) -> (TempDir, String) {
+        let dir = TempDir::new().expect("create clone directory");
+        let path = dir.path().to_string_lossy().to_string();
+        let repo = git2::build::RepoBuilder::new()
+            .clone(bare_path, dir.path())
+            .expect("clone bare remote");
+        let cfg = repo.config().expect("open clone config");
+        let mut local = cfg
+            .open_level(git2::ConfigLevel::Local)
+            .expect("open local config level");
+        local.set_str("user.name", "Test").expect("set user.name");
+        local
+            .set_str("user.email", "test@test.com")
+            .expect("set user.email");
+        drop(local);
+        drop(cfg);
+        drop(repo);
+        (dir, path)
+    }
+
+    /// Commit a file directly in `path` and return the new commit's oid.
+    fn commit_file_raw(dir: &TempDir, path: &str, name: &str, content: &str) -> git2::Oid {
+        let repo = Repository::open(path).expect("open repository");
+        fs::write(dir.path().join(name), content).expect("write file");
+        let mut index = repo.index().expect("open index");
+        index.add_path(Path::new(name)).expect("stage file");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let sig = git2::Signature::now("Test", "test@test.com").expect("signature");
+        let head = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .expect("resolve HEAD commit");
+        repo.commit(Some("HEAD"), &sig, &sig, "work", &tree, &[&head])
+            .expect("create commit")
+    }
+
+    /// The remote has not moved since this clone last fetched, so the lease
+    /// holds and the diverged local history is allowed to overwrite it —
+    /// where a plain push is correctly refused as a non-fast-forward.
+    #[test]
+    fn force_push_succeeds_when_remote_has_not_moved() {
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        let (_dir, path) = clone_with_identity(&origin_path);
+        let svc = Git2Service::new();
+
+        // Diverge local main by force-resetting it to an unrelated remote's
+        // main — the already-shipped scenario this force-push serves.
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&path, "other", &empty_creds())
+            .expect("fetch second remote");
+        svc.checkout_remote_branch(&path, "other/main", true)
+            .expect("forced reset to other/main");
+
+        let diverged = branch_oid(&path, "main");
+        assert_ne!(
+            diverged,
+            bare_branch_oid(&origin_path, "main"),
+            "local main must have diverged from origin for this test to mean anything"
+        );
+
+        // A plain push must still be refused — existing behaviour, unchanged.
+        let plain = svc.push(&path, "origin", &empty_creds(), false);
+        assert!(
+            plain.is_err(),
+            "a non-fast-forward push must still fail without force"
+        );
+        assert_eq!(
+            bare_branch_oid(&origin_path, "main"),
+            remote_tracking_oid(&path, "origin/main"),
+            "the refused plain push must not have moved the remote"
+        );
+
+        // The lease holds: nothing else pushed to origin since the clone.
+        svc.push(&path, "origin", &empty_creds(), true)
+            .expect("force-push must succeed when the remote has not moved");
+
+        assert_eq!(
+            bare_branch_oid(&origin_path, "main"),
+            diverged,
+            "the bare remote's main must now carry the force-pushed commit"
+        );
+    }
+
+    /// Someone else pushed to the remote and this clone has not fetched since.
+    /// The lease check must refuse before any write, leaving their commits —
+    /// which this user has never seen — intact on the remote.
+    #[test]
+    fn force_push_rejects_when_remote_has_moved_since_last_fetch() {
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        let (ours_dir, ours_path) = clone_with_identity(&origin_path);
+        let svc = Git2Service::new();
+
+        // A local commit of our own, so we have something to push.
+        commit_file_raw(&ours_dir, &ours_path, "ours.txt", "our work\n");
+
+        // A second clone pushes to origin behind our back — our
+        // refs/remotes/origin/main is now stale.
+        let (theirs_dir, theirs_path) = clone_with_identity(&origin_path);
+        let theirs_commit =
+            commit_file_raw(&theirs_dir, &theirs_path, "theirs.txt", "their work\n");
+        Repository::open(&theirs_path)
+            .expect("open their repository")
+            .find_remote("origin")
+            .expect("find their origin")
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .expect("their push must land");
+
+        let before = bare_branch_oid(&origin_path, "main");
+        assert_eq!(before, theirs_commit, "the remote must carry their commit");
+        assert_ne!(
+            before,
+            remote_tracking_oid(&ours_path, "origin/main"),
+            "our remote-tracking ref must be stale for this test to mean anything"
+        );
+
+        let result = svc.push(&ours_path, "origin", &empty_creds(), true);
+
+        let error = result.expect_err("force-push must be refused when the remote has moved");
+        match &error {
+            DomainError::Conflict(message) => {
+                let lower = message.to_lowercase();
+                assert!(
+                    lower.contains("fetch") || lower.contains("new commits"),
+                    "the refusal must tell the user to fetch: {message}"
+                );
+            }
+            other => panic!("expected DomainError::Conflict, got {other:?}"),
+        }
+
+        assert_eq!(
+            bare_branch_oid(&origin_path, "main"),
+            before,
+            "a refused force-push must leave the remote completely untouched"
+        );
+    }
+
+    /// Without a remote-tracking ref there is no lease to check against, so
+    /// the force-push is refused rather than guessed at.
+    #[test]
+    fn force_push_rejects_when_no_local_remote_tracking_ref_exists() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        // A remote that is added but never fetched from: no
+        // refs/remotes/origin/main exists locally.
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("origin", &origin_path)
+            .expect("add remote");
+        assert!(
+            Repository::open(&path)
+                .expect("open repository")
+                .find_reference("refs/remotes/origin/main")
+                .is_err(),
+            "the remote-tracking ref must be absent for this test to mean anything"
+        );
+
+        commit_file_raw(&dir, &path, "local.txt", "local work\n");
+        let before = bare_branch_oid(&origin_path, "main");
+
+        let result = svc.push(&path, "origin", &empty_creds(), true);
+
+        let error = result.expect_err("force-push must be refused without a lease to check");
+        match &error {
+            DomainError::Conflict(message) => assert!(
+                message.to_lowercase().contains("fetch"),
+                "the refusal must tell the user to fetch: {message}"
+            ),
+            other => panic!("expected DomainError::Conflict, got {other:?}"),
+        }
+
+        assert_eq!(
+            bare_branch_oid(&origin_path, "main"),
+            before,
+            "a refused force-push must leave the remote completely untouched"
+        );
+    }
+
+    /// The branch this repo knows about via its remote-tracking ref may have
+    /// been deleted on the remote entirely since the last fetch — the same
+    /// class of surprise as it having moved, and it must be refused the same
+    /// way rather than silently recreating it.
+    #[test]
+    fn force_push_rejects_when_branch_vanished_from_remote() {
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        let (dir, path) = clone_with_identity(&origin_path);
+        let svc = Git2Service::new();
+
+        commit_file_raw(&dir, &path, "local.txt", "local work\n");
+
+        // Delete main directly on the bare remote, simulating another actor
+        // deleting the branch after this repo's last fetch. A sibling branch
+        // is created first so this test targets one scenario (the branch is
+        // gone but the remote still advertises something else) separately
+        // from the zero-refs scenario covered by
+        // `force_push_rejects_when_remote_has_zero_advertisable_refs` below.
+        {
+            let bare_repo = Repository::open(&origin_path).expect("open bare remote");
+            let main_oid = bare_branch_oid(&origin_path, "main");
+            let commit = bare_repo
+                .find_commit(main_oid)
+                .expect("find main's commit on the bare remote");
+            bare_repo
+                .branch("keep-alive", &commit, false)
+                .expect("create a sibling branch so the remote is never fully empty");
+            let mut branch_ref = bare_repo
+                .find_reference("refs/heads/main")
+                .expect("bare remote must have main before deletion");
+            branch_ref.delete().expect("delete main on bare remote");
+        }
+        assert!(
+            Repository::open(&origin_path)
+                .expect("open bare remote")
+                .find_reference("refs/heads/main")
+                .is_err(),
+            "main must actually be gone from the bare remote for this test to mean anything"
+        );
+
+        let result = svc.push(&path, "origin", &empty_creds(), true);
+
+        let error = result.expect_err("force-push must be refused when the branch vanished");
+        match &error {
+            DomainError::Conflict(message) => assert!(
+                message.to_lowercase().contains("fetch"),
+                "the refusal must tell the user to fetch: {message}"
+            ),
+            other => panic!("expected DomainError::Conflict, got {other:?}"),
+        }
+
+        assert!(
+            Repository::open(&origin_path)
+                .expect("open bare remote")
+                .find_reference("refs/heads/main")
+                .is_err(),
+            "a refused force-push must not recreate the branch on the remote"
+        );
+    }
+
+    #[test]
+    fn force_push_rejects_when_remote_has_zero_advertisable_refs() {
+        // Regression test for the git2 0.19.0 `Remote::list()` bug (fixed in
+        // 0.21.0, https://github.com/rust-lang/git2-rs/pull/1250): the raw
+        // `git_remote_ls` call can return a null pointer with size 0 when the
+        // remote has nothing at all to advertise, and the old binding fed
+        // that straight into `slice::from_raw_parts`, aborting the whole
+        // process. Unlike `force_push_rejects_when_branch_vanished_from_remote`
+        // above, this test deletes the remote's ONLY branch with no sibling
+        // kept alive, so `verify_force_with_lease`'s `connection.list()` call
+        // sees a genuinely empty advertisement. It must return a normal
+        // `DomainError::Conflict`, not crash the test process.
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        let (dir, path) = clone_with_identity(&origin_path);
+        let svc = Git2Service::new();
+
+        commit_file_raw(&dir, &path, "local.txt", "local work\n");
+
+        {
+            let bare_repo = Repository::open(&origin_path).expect("open bare remote");
+            let mut branch_ref = bare_repo
+                .find_reference("refs/heads/main")
+                .expect("bare remote must have main before deletion");
+            branch_ref.delete().expect("delete main on bare remote");
+        }
+        assert!(
+            Repository::open(&origin_path)
+                .expect("open bare remote")
+                .references()
+                .expect("list refs")
+                .next()
+                .is_none(),
+            "the bare remote must have zero refs for this test to mean anything"
+        );
+
+        let result = svc.push(&path, "origin", &empty_creds(), true);
+
+        let error = result.expect_err("force-push must be refused, not crash the process");
+        match &error {
+            DomainError::Conflict(message) => assert!(
+                message.to_lowercase().contains("fetch"),
+                "the refusal must tell the user to fetch: {message}"
+            ),
+            other => panic!("expected DomainError::Conflict, got {other:?}"),
+        }
+    }
+
+    /// The default path is unchanged: a non-fast-forward push is still
+    /// refused and still leaves the remote exactly as it was.
+    #[test]
+    fn push_force_false_is_unchanged() {
+        let (origin_bare, _origin_seed) = bare_remote_with_main(&[("base.txt", "base\n")]);
+        let origin_path = origin_bare.path().to_string_lossy().to_string();
+        let (ours_dir, ours_path) = clone_with_identity(&origin_path);
+        let svc = Git2Service::new();
+
+        // A plain push of a fast-forwarding commit still succeeds.
+        let ours = commit_file_raw(&ours_dir, &ours_path, "ours.txt", "our work\n");
+        svc.push(&ours_path, "origin", &empty_creds(), false)
+            .expect("a fast-forward push must still succeed");
+        assert_eq!(bare_branch_oid(&origin_path, "main"), ours);
+
+        // A diverged history is still refused, and the remote is untouched.
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&ours_path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&ours_path, "other", &empty_creds())
+            .expect("fetch second remote");
+        svc.checkout_remote_branch(&ours_path, "other/main", true)
+            .expect("forced reset to other/main");
+
+        let before = bare_branch_oid(&origin_path, "main");
+        assert!(
+            svc.push(&ours_path, "origin", &empty_creds(), false)
+                .is_err(),
+            "a non-fast-forward push must still be refused without force"
+        );
+        assert_eq!(
+            bare_branch_oid(&origin_path, "main"),
+            before,
+            "the refused push must not have moved the remote"
+        );
     }
 
     #[test]
@@ -1855,7 +2424,7 @@ mod tests {
             username: String::new(),
             password: String::new(),
         };
-        svc.push(&path, "origin", &creds).unwrap();
+        svc.push(&path, "origin", &creds, false).unwrap();
 
         // Verify the bare remote HEAD now matches the new local commit.
         let remote_repo = Repository::open(&remote_path).unwrap();
@@ -1933,14 +2502,14 @@ mod tests {
                 &[&head2],
             )
             .unwrap();
-        svc.push(&path_a, "origin", &creds).unwrap();
+        svc.push(&path_a, "origin", &creds, false).unwrap();
 
         // Clone B makes a commit on its stale base and tries to push — must fail.
         fs::write(dir_b.path().join("b_extra.txt"), "from B").unwrap();
         svc.stage(&path_b, &["b_extra.txt"]).unwrap();
         svc.commit(&path_b, "B commit on stale base").unwrap();
 
-        let result = svc.push(&path_b, "origin", &creds);
+        let result = svc.push(&path_b, "origin", &creds, false);
         assert!(result.is_err(), "non-fast-forward push must return Err");
     }
 
@@ -2236,7 +2805,7 @@ mod tests {
         let creds = GitCredentials::SshAgent;
 
         // First push local main to remote so remote has a commit.
-        svc.push(&local_path, "origin", &creds).unwrap();
+        svc.push(&local_path, "origin", &creds, false).unwrap();
 
         // Add a commit directly to the bare remote via a second clone.
         let clone2_dir = TempDir::new().unwrap();
@@ -2284,7 +2853,7 @@ mod tests {
         let creds = GitCredentials::SshAgent;
 
         // Push local main to remote.
-        svc.push(&local_path, "origin", &creds).unwrap();
+        svc.push(&local_path, "origin", &creds, false).unwrap();
 
         // Clone the remote into a second local dir.
         let clone2_dir = TempDir::new().unwrap();

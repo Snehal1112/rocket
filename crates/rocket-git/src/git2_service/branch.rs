@@ -49,16 +49,13 @@ pub(super) fn branches(path: &str) -> DomainResult<BranchList> {
     })
 }
 
-#[tracing::instrument(name = "git_switch_branch", fields(repo_path = %path, branch = %name))]
-pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
-    let repo = open_repo(path)?;
-
-    // Pre-flight: refuse if any tracked file has staged or working-tree changes.
-    // Untracked files (WT_NEW) are intentionally excluded — a branch switch
-    // cannot overwrite them.
+/// Returns true if any tracked file has staged or working-tree changes.
+/// Untracked files (WT_NEW) are intentionally excluded — neither a branch
+/// switch nor a branch reset can overwrite them.
+fn has_dirty_tracked_files(repo: &git2::Repository) -> DomainResult<bool> {
     let mut status_opts = git2::StatusOptions::new();
     status_opts.include_untracked(false);
-    let dirty = repo
+    Ok(repo
         .statuses(Some(&mut status_opts))
         .map_err(|e| DomainError::Internal(e.to_string()))?
         .iter()
@@ -74,8 +71,15 @@ pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
                     | git2::Status::WT_RENAMED
                     | git2::Status::WT_TYPECHANGE,
             )
-        });
-    if dirty {
+        }))
+}
+
+#[tracing::instrument(name = "git_switch_branch", fields(repo_path = %path, branch = %name))]
+pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
+    let repo = open_repo(path)?;
+
+    // Pre-flight: refuse if any tracked file has staged or working-tree changes.
+    if has_dirty_tracked_files(&repo)? {
         return Err(DomainError::InvalidInput(
             "You have uncommitted changes that would be overwritten by switching branches. \
              Please commit or stash your changes first."
@@ -84,7 +88,7 @@ pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
     }
 
     // Save the current HEAD ref for rollback if checkout fails.
-    let old_head = repo.head().ok().and_then(|r| r.name().map(String::from));
+    let old_head = repo.head().ok().and_then(|r| r.name().ok().map(String::from));
 
     repo.set_head(&format!("refs/heads/{name}"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -102,8 +106,93 @@ pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
     Ok(())
 }
 
-#[tracing::instrument(name = "git_checkout_remote_branch", fields(repo_path = %path, remote_branch = %remote_branch))]
-pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainResult<()> {
+/// Point an existing local branch at `commit`, the tip of `remote_branch`.
+///
+/// This discards any local commits the branch carried that are absent from
+/// that remote, so it is only ever reachable through the opt-in `force` flag
+/// of [`checkout_remote_branch`]. The working tree and index are touched only
+/// when the branch is the one currently checked out; otherwise nothing on
+/// disk needs to change and only the ref and its upstream move.
+fn reset_local_branch_to_commit<'repo>(
+    repo: &'repo git2::Repository,
+    mut existing: git2::Branch<'repo>,
+    local_name: &str,
+    commit: &git2::Commit<'repo>,
+    tree: &git2::Tree<'repo>,
+    remote_branch: &str,
+) -> DomainResult<()> {
+    let is_current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().ok().map(String::from))
+        == Some(local_name.to_string());
+
+    if is_current {
+        // Second safety layer, independent of any confirmation the UI showed.
+        // That confirmation only warns about losing *committed* history; this
+        // guard protects *uncommitted* working-tree changes, which must never
+        // be discarded silently.
+        if has_dirty_tracked_files(repo)? {
+            return Err(DomainError::InvalidInput(
+                "You have uncommitted changes that would be overwritten by resetting this \
+                 branch. Please commit or stash your changes first."
+                    .to_string(),
+            ));
+        }
+
+        // Adopt any untracked file whose content already matches the target,
+        // so checkout doesn't reject a harmless pre-existing copy.
+        clear_matching_untracked_paths(repo, tree)?;
+
+        // Preflight: a safe (never forced) checkout of the target tree must
+        // succeed BEFORE the branch ref moves, so a rejected checkout leaves
+        // refs, the index, and the worktree completely untouched.
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.safe();
+        repo.checkout_tree(commit.as_object(), Some(&mut checkout))
+            .map_err(|e| {
+                DomainError::Conflict(format!(
+                    "cannot check out '{remote_branch}': {e}. \
+                     Resolve the conflicting local file(s) first."
+                ))
+            })?;
+    }
+
+    // Retarget the branch ref first, then its upstream. This applies whether
+    // or not the branch is checked out; when it is, HEAD follows it
+    // symbolically. Order matters: if the upstream write below failed after
+    // the ref move, the branch would still be left consistent (pointing at
+    // real, valid content) rather than in a half-updated intermediate state.
+    existing
+        .get_mut()
+        .set_target(commit.id(), "reset to remote branch")
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    existing
+        .set_upstream(Some(remote_branch))
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    if is_current {
+        // Sync the index to the tree that was just checked out.
+        let mut index = repo
+            .index()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .read_tree(tree)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .write()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(name = "git_checkout_remote_branch", fields(repo_path = %path, remote_branch = %remote_branch, force = %force))]
+pub(super) fn checkout_remote_branch(
+    path: &str,
+    remote_branch: &str,
+    force: bool,
+) -> DomainResult<()> {
     let repo = open_repo(path)?;
 
     // remote_branch is e.g. "origin/feature-x".
@@ -119,12 +208,12 @@ pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainR
         )));
     }
 
-    // Reject up front if the local branch already exists, before anything
-    // else is touched.
-    if repo
-        .find_branch(&local_name, git2::BranchType::Local)
-        .is_ok()
-    {
+    let existing_local = repo.find_branch(&local_name, git2::BranchType::Local).ok();
+
+    // Default behaviour: reject up front if the local branch already exists,
+    // before anything else is touched. Only an explicit force opts into
+    // resetting that branch to the remote's content.
+    if existing_local.is_some() && !force {
         return Err(DomainError::InvalidInput(format!(
             "local branch '{local_name}' already exists"
         )));
@@ -141,6 +230,19 @@ pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainR
     let tree = commit
         .tree()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    if let Some(existing) = existing_local {
+        // Only reachable with force == true; the check above already returned
+        // otherwise.
+        return reset_local_branch_to_commit(
+            &repo,
+            existing,
+            &local_name,
+            &commit,
+            &tree,
+            remote_branch,
+        );
+    }
 
     // Adopt any untracked file whose content already matches the target,
     // so checkout doesn't reject a harmless pre-existing copy.

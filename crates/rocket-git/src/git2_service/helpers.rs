@@ -546,7 +546,7 @@ pub(super) fn count_commit_files(repo: &Repository, commit: &git2::Commit) -> us
 pub(super) fn branch_name(repo: &Repository) -> String {
     repo.head()
         .ok()
-        .and_then(|r| r.shorthand().map(String::from))
+        .and_then(|r| r.shorthand().ok().map(String::from))
         .unwrap_or_else(|| "main".to_string())
 }
 
@@ -577,7 +577,7 @@ pub(super) fn ahead_behind(repo: &Repository) -> (usize, usize) {
         // Fall back to refs/remotes/<remote>/<branch> for each configured remote.
         .or_else(|| {
             let remotes = repo.remotes().ok()?;
-            remotes.iter().flatten().find_map(|remote_name| {
+            remotes.iter().flatten().flatten().find_map(|remote_name| {
                 let refname = format!("refs/remotes/{}/{}", remote_name, branch_name);
                 repo.find_reference(&refname).ok().and_then(|r| r.target())
             })
@@ -618,7 +618,7 @@ pub(super) fn clear_matching_untracked_paths(
             if entry.kind() != Some(git2::ObjectType::Blob) {
                 return git2::TreeWalkResult::Ok;
             }
-            let Some(name) = entry.name() else {
+            let Some(name) = entry.name().ok() else {
                 return git2::TreeWalkResult::Ok;
             };
             let relative = format!("{dir}{name}");
