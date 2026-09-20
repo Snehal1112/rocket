@@ -98,11 +98,13 @@ export function GitLandingPanel() {
     setShowStashDialog(false);
     setPulling(true);
     try {
+      clearError();
       await saveStash('Auto-stash before pull');
       if (gitStoreApi.getState().error) {
         // Stash itself failed — nothing changed, nothing to pull or pop.
         return;
       }
+      clearError();
       await pull();
       if (gitStoreApi.getState().error) {
         // Pull failed outright (network/auth/etc.) — leave the stash in place
