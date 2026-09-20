@@ -171,8 +171,9 @@ impl GitService for Git2Service {
         path: &str,
         remote_branch: &str,
         force: bool,
+        as_name: Option<&str>,
     ) -> DomainResult<()> {
-        branch::checkout_remote_branch(path, remote_branch, force)
+        branch::checkout_remote_branch(path, remote_branch, force, as_name)
     }
 
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
@@ -774,7 +775,7 @@ mod tests {
         svc.fetch(&path, "origin", &creds).unwrap();
 
         // Checkout the remote branch.
-        svc.checkout_remote_branch(&path, "origin/feature-x", false)
+        svc.checkout_remote_branch(&path, "origin/feature-x", false, None)
             .expect("checkout remote branch");
 
         // Verify local branch exists and is checked out.
@@ -886,7 +887,7 @@ mod tests {
             .expect("fetch second remote");
         let target = remote_tracking_oid(&path, "other/main");
 
-        svc.checkout_remote_branch(&path, "other/main", true)
+        svc.checkout_remote_branch(&path, "other/main", true, None)
             .expect("forced reset to other/main");
 
         assert_eq!(
@@ -953,7 +954,7 @@ mod tests {
             .expect("fetch second remote");
         let target = remote_tracking_oid(&path, "other/main");
 
-        svc.checkout_remote_branch(&path, "other/main", true)
+        svc.checkout_remote_branch(&path, "other/main", true, None)
             .expect("forced reset of the non-current main");
 
         assert_eq!(
@@ -993,6 +994,88 @@ mod tests {
             !dir.path().join("other.txt").exists(),
             "resetting a non-current branch must not check anything out"
         );
+    }
+
+    /// The non-destructive alternative to force: checking out under an
+    /// explicit `as_name` that differs from the colliding derived name
+    /// creates a brand-new, distinct branch and leaves the colliding local
+    /// branch completely untouched.
+    #[test]
+    fn checkout_remote_branch_with_as_name_creates_distinct_branch_without_touching_collision() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        let original_main = branch_oid(&path, "main");
+
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&path, "other", &empty_creds())
+            .expect("fetch second remote");
+        let target = remote_tracking_oid(&path, "other/main");
+
+        svc.checkout_remote_branch(&path, "other/main", false, Some("other/main"))
+            .expect("checkout under an explicit, non-colliding as_name must succeed");
+
+        // The colliding local "main" branch must be completely untouched.
+        assert_eq!(
+            branch_oid(&path, "main"),
+            original_main,
+            "the pre-existing local main branch must not have moved"
+        );
+
+        // A new, distinct local branch literally named "other/main" now exists.
+        assert_eq!(
+            branch_oid(&path, "other/main"),
+            target,
+            "the new branch must point at the second remote's tip"
+        );
+        assert_eq!(
+            upstream_of(&svc, &path, "other/main").as_deref(),
+            Some("other/main"),
+            "the new branch must track other/main"
+        );
+
+        // HEAD moved onto the newly created branch.
+        let status = svc.status(&path).expect("read status");
+        assert_eq!(
+            status.branch, "other/main",
+            "HEAD must switch onto the newly created branch"
+        );
+    }
+
+    /// The collision check still applies to a caller-supplied `as_name`: if it
+    /// names an existing local branch, the same "already exists" error is
+    /// returned unless `force` is set, exactly as for the derived name.
+    #[test]
+    fn checkout_remote_branch_as_name_that_also_collides_still_requires_force() {
+        let (_dir, path) = setup_repo();
+        let svc = Git2Service::new();
+
+        let (other_bare, _other_seed) = bare_remote_with_main(&[("other.txt", "from other\n")]);
+        let other_path = other_bare.path().to_string_lossy().to_string();
+        Repository::open(&path)
+            .expect("open repository")
+            .remote("other", &other_path)
+            .expect("add second remote");
+        svc.fetch(&path, "other", &empty_creds())
+            .expect("fetch second remote");
+
+        let result = svc.checkout_remote_branch(&path, "other/main", false, Some("main"));
+
+        let error = result.expect_err("an as_name colliding with an existing branch must fail");
+        match &error {
+            DomainError::InvalidInput(message) => {
+                assert!(
+                    message.contains("already exists"),
+                    "expected an 'already exists' message, got: {message}"
+                );
+            }
+            other => panic!("expected DomainError::InvalidInput, got {other:?}"),
+        }
     }
 
     /// Read a branch tip straight out of a bare remote, for before/after
@@ -1067,7 +1150,7 @@ mod tests {
             .expect("add second remote");
         svc.fetch(&path, "other", &empty_creds())
             .expect("fetch second remote");
-        svc.checkout_remote_branch(&path, "other/main", true)
+        svc.checkout_remote_branch(&path, "other/main", true, None)
             .expect("forced reset to other/main");
 
         let diverged = branch_oid(&path, "main");
@@ -1331,7 +1414,7 @@ mod tests {
             .expect("add second remote");
         svc.fetch(&ours_path, "other", &empty_creds())
             .expect("fetch second remote");
-        svc.checkout_remote_branch(&ours_path, "other/main", true)
+        svc.checkout_remote_branch(&ours_path, "other/main", true, None)
             .expect("forced reset to other/main");
 
         let before = bare_branch_oid(&origin_path, "main");

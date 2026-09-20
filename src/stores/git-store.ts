@@ -91,7 +91,7 @@ export interface GitState {
   popStashMany: (indices: number[]) => Promise<void>;
   dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
-  checkoutRemoteBranch: (name: string, force?: boolean) => Promise<void>;
+  checkoutRemoteBranch: (name: string, force?: boolean, asName?: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -526,11 +526,11 @@ export function createGitStore(): StoreApi<GitState> {
     // Check out a remote branch as a new local tracking branch. When `force`
     // is set, a colliding local branch is reset to match the remote branch's
     // content instead of being rejected.
-    checkoutRemoteBranch: async (name, force = false) => {
+    checkoutRemoteBranch: async (name, force = false, asName) => {
       const { repositoryId } = get();
       if (!repositoryId) return;
       try {
-        await gitCheckoutRemoteBranch(repositoryId, name, force);
+        await gitCheckoutRemoteBranch(repositoryId, name, force, asName);
         await get().refreshStatus();
         await get().refreshBranches();
       } catch (e) {

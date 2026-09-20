@@ -28,6 +28,8 @@ export function BranchSelector() {
   // Full remote branch name (e.g. "collections/main") awaiting confirmation
   // to force-reset a colliding local branch onto it.
   const [pendingForceCheckout, setPendingForceCheckout] = useState<string | null>(null);
+  // Name typed into the "Checkout as New" field on the collision dialog.
+  const [checkoutAsName, setCheckoutAsName] = useState('');
   const {
     branches,
     switchBranch,
@@ -83,7 +85,7 @@ export function BranchSelector() {
     }
   };
 
-  const handleCheckoutRemote = async (name: string, force = false) => {
+  const handleCheckoutRemote = async (name: string, force = false, asName?: string) => {
     setSwitchError(null);
     // Clear any stale error before measuring — otherwise a second, identical
     // collision (e.g. cancel the force dialog, then click the same remote
@@ -93,7 +95,7 @@ export function BranchSelector() {
     gitStoreApi.getState().clearError();
     setCheckingOutRemote(name);
     try {
-      await checkoutRemoteBranch(name, force);
+      await checkoutRemoteBranch(name, force, asName);
       const nextError = gitStoreApi.getState().error;
       if (nextError) {
         // A non-forced collision with an existing local branch is not a
@@ -101,6 +103,7 @@ export function BranchSelector() {
         // remote branch's content instead of just showing the error.
         if (!force && nextError.includes('already exists')) {
           setPendingForceCheckout(name);
+          setCheckoutAsName(name);
         } else {
           setSwitchError(nextError);
         }
@@ -116,6 +119,15 @@ export function BranchSelector() {
     const name = pendingForceCheckout;
     setPendingForceCheckout(null);
     if (name) void handleCheckoutRemote(name, true);
+  };
+
+  // Check out the remote branch under a brand-new local branch name instead
+  // of resetting the branch that collided, leaving that branch untouched.
+  const handleCheckoutAsNew = () => {
+    const remoteName = pendingForceCheckout;
+    const targetName = checkoutAsName.trim();
+    setPendingForceCheckout(null);
+    if (remoteName && targetName) void handleCheckoutRemote(remoteName, false, targetName);
   };
 
   // Short local-branch name that collided (e.g. "main" from "collections/main").
@@ -338,7 +350,10 @@ export function BranchSelector() {
       <AlertDialog
         open={pendingForceCheckout !== null}
         onOpenChange={(v) => {
-          if (!v) setPendingForceCheckout(null);
+          if (!v) {
+            setPendingForceCheckout(null);
+            setCheckoutAsName('');
+          }
         }}
       >
         <AlertDialogContent>
@@ -359,6 +374,35 @@ export function BranchSelector() {
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className='pb-2 space-y-1.5'>
+            <p className='text-xs text-muted-foreground'>
+              Or check out as a new branch, leaving{' '}
+              <span className='font-mono'>{pendingLocalName}</span> untouched:
+            </p>
+            <div className='flex gap-2'>
+              <Input
+                value={checkoutAsName}
+                onChange={(e) => setCheckoutAsName(e.target.value)}
+                className='h-8 text-sm'
+                aria-label='New local branch name'
+                disabled={checkingOutRemote !== null}
+              />
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                className='shrink-0'
+                disabled={
+                  checkingOutRemote !== null ||
+                  !checkoutAsName.trim() ||
+                  checkoutAsName.trim() === pendingLocalName
+                }
+                onClick={handleCheckoutAsNew}
+              >
+                Checkout as New
+              </Button>
+            </div>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={checkingOutRemote !== null}>Cancel</AlertDialogCancel>
             <AlertDialogAction

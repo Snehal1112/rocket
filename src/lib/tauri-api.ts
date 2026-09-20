@@ -891,8 +891,12 @@ export const gitBranches = (repositoryId: string) =>
 export const gitSwitchBranch = (repositoryId: string, name: string) =>
   invoke<void>('git_switch_branch_v2', { repositoryId, name });
 
-export const gitCheckoutRemoteBranch = (repositoryId: string, name: string, force = false) =>
-  invoke<void>('git_checkout_remote_branch_v2', { repositoryId, name, force });
+export const gitCheckoutRemoteBranch = (
+  repositoryId: string,
+  name: string,
+  force = false,
+  asName?: string,
+) => invoke<void>('git_checkout_remote_branch_v2', { repositoryId, name, force, asName });
 
 export const gitCreateBranch = (repositoryId: string, name: string) =>
   invoke<void>('git_create_branch_v2', { repositoryId, name });

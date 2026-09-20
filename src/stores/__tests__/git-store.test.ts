@@ -593,9 +593,23 @@ describe('branches', () => {
       'repository-test',
       'origin/feature',
       false,
+      undefined,
     );
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
+  });
+
+  it('checkoutRemoteBranch passes asName through to the api when provided', async () => {
+    const { gitCheckoutRemoteBranch } = await import('@/lib/tauri-api');
+
+    await store.getState().checkoutRemoteBranch('collections/main', false, 'collections/main');
+
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith(
+      'repository-test',
+      'collections/main',
+      false,
+      'collections/main',
+    );
   });
 });
 

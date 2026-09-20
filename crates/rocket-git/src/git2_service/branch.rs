@@ -192,15 +192,21 @@ pub(super) fn checkout_remote_branch(
     path: &str,
     remote_branch: &str,
     force: bool,
+    as_name: Option<&str>,
 ) -> DomainResult<()> {
     let repo = open_repo(path)?;
 
-    // remote_branch is e.g. "origin/feature-x".
-    let local_name = remote_branch
-        .split('/')
-        .skip(1)
-        .collect::<Vec<_>>()
-        .join("/");
+    // remote_branch is e.g. "origin/feature-x". A caller-supplied `as_name`
+    // overrides the derived local name, so checking out under a distinct,
+    // non-colliding name is possible without touching an existing branch.
+    let local_name = match as_name.map(str::trim) {
+        Some(name) if !name.is_empty() => name.to_string(),
+        _ => remote_branch
+            .split('/')
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("/"),
+    };
 
     if local_name.is_empty() {
         return Err(DomainError::InvalidInput(format!(

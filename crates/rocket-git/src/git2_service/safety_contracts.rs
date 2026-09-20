@@ -908,7 +908,8 @@ fn remote_checkout_collision_rejects_without_refs_index_or_worktree_mutation() {
     .expect("write colliding untracked file");
 
     let before = snapshot(local_dir.path());
-    let result = Git2Service::new().checkout_remote_branch(&local_path, "origin/feature", false);
+    let result =
+        Git2Service::new().checkout_remote_branch(&local_path, "origin/feature", false, None);
     let after = snapshot(local_dir.path());
 
     assert_eq!(
@@ -960,7 +961,7 @@ fn forced_remote_branch_reset_rejects_dirty_worktree_without_mutation() {
     .expect("dirty a tracked file");
 
     let before = snapshot(local_dir.path());
-    let result = service.checkout_remote_branch(&local_path, "other/main", true);
+    let result = service.checkout_remote_branch(&local_path, "other/main", true, None);
     let after = snapshot(local_dir.path());
 
     assert!(

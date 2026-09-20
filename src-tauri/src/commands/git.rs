@@ -293,9 +293,10 @@ pub fn git_checkout_remote_branch(
     collection_path: String,
     name: String,
     force: bool,
+    as_name: Option<String>,
     svc: State<'_, GitAppService>,
 ) -> Result<(), DomainError> {
-    svc.checkout_remote_branch(&collection_path, &name, force)
+    svc.checkout_remote_branch(&collection_path, &name, force, as_name.as_deref())
 }
 
 pub fn git_create_branch(
@@ -619,11 +620,12 @@ pub fn git_checkout_remote_branch_v2(
     repository_id: String,
     name: String,
     force: bool,
+    as_name: Option<String>,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
 ) -> Result<(), DomainError> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_checkout_remote_branch(path, name, force, svc)
+    git_checkout_remote_branch(path, name, force, as_name, svc)
 }
 
 #[tauri::command]

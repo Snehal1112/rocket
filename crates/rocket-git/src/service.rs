@@ -65,12 +65,16 @@ pub trait GitService: Send + Sync {
     /// tracking branch. If a local branch with the same short name already
     /// exists this is rejected, unless `force` is set — which resets that
     /// existing branch to the remote's tip, discarding any local commits it
-    /// carried that are absent from that remote.
+    /// carried that are absent from that remote. `as_name`, when non-empty,
+    /// overrides the derived local branch name, letting the caller avoid the
+    /// destructive reset path entirely by checking out under a distinct,
+    /// non-colliding name instead.
     fn checkout_remote_branch(
         &self,
         path: &str,
         remote_branch: &str,
         force: bool,
+        as_name: Option<&str>,
     ) -> DomainResult<()>;
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()>;
     fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()>;
