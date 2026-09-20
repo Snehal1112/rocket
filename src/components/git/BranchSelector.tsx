@@ -209,7 +209,7 @@ export function BranchSelector() {
                           size='icon'
                           className='h-5 w-5'
                           aria-label='Merge into current'
-                          disabled={mergingName === branch.name || deletingName === branch.name}
+                          disabled={mergingName !== null || deletingName !== null}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleMerge(branch.name);
@@ -227,7 +227,7 @@ export function BranchSelector() {
                           size='icon'
                           className='h-5 w-5 text-destructive'
                           aria-label='Delete branch'
-                          disabled={mergingName === branch.name || deletingName === branch.name}
+                          disabled={mergingName !== null || deletingName !== null}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleDelete(branch.name);

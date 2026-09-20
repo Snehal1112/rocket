@@ -142,10 +142,9 @@ describe('GitStashSection busy state', () => {
       </GitStoreProvider>,
     );
     const user = userEvent.setup();
-    // Note: the stash message Input has no accessible label (no aria-label,
-    // id, or associated <label>) in the current markup, so it cannot be
-    // queried via getByLabelText as in the task brief. Falling back to its
-    // placeholder text, which uniquely identifies it.
+    // The stash message Input does have an accessible label ('Stash message',
+    // see the "accessible names" describe block below), but placeholder text
+    // is used here since it uniquely identifies the input just as well.
     await user.type(screen.getByPlaceholderText('Describe your stash…'), 'wip');
     const stashButton = screen.getByRole('button', { name: /stash/i });
     await user.click(stashButton);

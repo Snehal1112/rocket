@@ -178,9 +178,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             // React Context (`@/stores/git-store-context`) and throws
             // outside a `GitStoreProvider` ancestor. This render site has no
             // such ancestor. It is currently unreachable — nothing in this
-            // codebase creates a conflict tab (`openConflictTab` in
-            // `pane-store.ts` has no callers) — but if that ever changes,
-            // this render will crash until it's wrapped in a
+            // codebase creates a conflict tab (`openConflictTab`, which used
+            // to create one, was removed as dead code) — but if that ever
+            // changes, this render will crash until it's wrapped in a
             // `GitStoreProvider` for the tab's own repository.
             <Suspense fallback={<EditorSkeleton />}>
               <ConflictResolver conflictState={activeTab.conflictState} />
