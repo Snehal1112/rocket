@@ -137,6 +137,7 @@ export function GitStashSection() {
       <div className='flex gap-1.5 px-3 pb-2'>
         <Input
           placeholder='Describe your stash…'
+          aria-label='Stash message'
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           className='h-7 text-xs flex-1'
@@ -297,7 +298,12 @@ export function GitStashSection() {
                   onOpenChange={(open) => setOpenStashIndex(open ? stash.index : null)}
                 >
                   <DropdownMenuTrigger asChild>
-                    <Button variant='ghost' size='icon' className='h-6 w-6'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-6 w-6'
+                      aria-label='Stash actions'
+                    >
                       <MoreHorizontal className='h-3.5 w-3.5' />
                     </Button>
                   </DropdownMenuTrigger>

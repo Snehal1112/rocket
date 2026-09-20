@@ -238,6 +238,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
             <div className='flex items-center gap-2'>
               <Input
                 placeholder='name'
+                aria-label='Remote name'
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 className='h-8 text-sm flex-[2] min-w-0'
@@ -247,6 +248,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
               />
               <Input
                 placeholder='https://github.com/...'
+                aria-label='Remote URL'
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
                 className='h-8 text-sm flex-[5] min-w-0'

@@ -96,4 +96,10 @@ describe('GitCloneDialog stale completion', () => {
     expect(openFromDiskMock).not.toHaveBeenCalled();
     expect(switchWorkspaceMock).not.toHaveBeenCalled();
   });
+
+  it('gives the URL and destination fields accessible names', () => {
+    renderDialog(vi.fn(), true);
+    expect(screen.getByLabelText('Repository URL')).toBeInTheDocument();
+    expect(screen.getByLabelText('Destination')).toBeInTheDocument();
+  });
 });

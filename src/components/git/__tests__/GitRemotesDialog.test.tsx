@@ -141,4 +141,12 @@ describe('GitRemotesDialog duplicate-action guards', () => {
     await vi.waitFor(() => expect(addButton).not.toBeDisabled());
     expect(addRemote).toHaveBeenCalledTimes(1);
   });
+
+  it('gives the new-remote name and url fields accessible names', () => {
+    const store = createGitStore();
+    store.setState({ remotes: [], refreshRemotes: vi.fn().mockResolvedValue(undefined) });
+    renderDialog(store);
+    expect(screen.getByLabelText('Remote name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Remote URL')).toBeInTheDocument();
+  });
 });

@@ -251,3 +251,23 @@ describe('BranchSelector keyboard behavior', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 });
+
+describe('BranchSelector accessible names', () => {
+  it('gives the per-branch Merge and Delete icon buttons accessible names', async () => {
+    renderWithStore({
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /main/ }));
+
+    expect(screen.getByRole('button', { name: 'Merge into current' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete branch' })).toBeInTheDocument();
+  });
+});

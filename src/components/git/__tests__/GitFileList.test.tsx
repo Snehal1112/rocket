@@ -77,7 +77,7 @@ describe('GitFileList individual discard confirmation', () => {
     const { discardFiles } = renderWithStore();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /discard/i }));
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
     expect(discardFiles).not.toHaveBeenCalled();
     expect(screen.getByText('Discard Changes?')).toBeInTheDocument();
 
@@ -89,7 +89,7 @@ describe('GitFileList individual discard confirmation', () => {
     const { discardFiles } = renderWithStore();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /discard/i }));
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(discardFiles).not.toHaveBeenCalled();
   });
@@ -142,5 +142,27 @@ describe('GitFileList duplicate-action guards', () => {
 
     deferred.resolve();
     await vi.waitFor(() => expect(stageFiles).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('GitFileList accessible names', () => {
+  it('gives the bulk stage/unstage/discard controls accessible names', () => {
+    renderWithStore({
+      status: {
+        branch: 'main',
+        files: [
+          { path: 'staged.txt', staged: true, status: 'modified' },
+          { path: 'unstaged.txt', staged: false, status: 'modified' },
+        ],
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+      },
+    });
+    expect(screen.getByRole('button', { name: 'Unstage all' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage all' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard all unstaged' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unstage' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage' })).toBeInTheDocument();
   });
 });

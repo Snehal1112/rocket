@@ -122,3 +122,30 @@ describe('GitStashSection busy state', () => {
     await vi.waitFor(() => expect(stashButton).toHaveAttribute('aria-busy', 'false'));
   });
 });
+
+describe('GitStashSection accessible names', () => {
+  it('gives the stash actions-menu trigger and message input accessible names', () => {
+    const store = createGitStore();
+    store.setState({
+      stashes: [
+        {
+          index: 0,
+          message: 'wip',
+          timestamp: new Date().toISOString(),
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+          changedFiles: ['a.txt'],
+          branch: 'main',
+        },
+      ],
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <GitStashSection />
+      </GitStoreProvider>,
+    );
+    expect(screen.getByLabelText('Stash message')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stash actions' })).toBeInTheDocument();
+  });
+});

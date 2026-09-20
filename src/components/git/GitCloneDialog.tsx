@@ -264,6 +264,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
             <Label className='text-sm'>Repository URL</Label>
             <Input
               placeholder='https://github.com/user/repo.git'
+              aria-label='Repository URL'
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
               className='h-8 text-sm'
@@ -275,6 +276,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
               <Input
                 value={destination?.displayPath ?? ''}
                 readOnly
+                aria-label='Destination'
                 placeholder='Select an empty folder'
                 className='h-8 text-sm flex-1'
               />

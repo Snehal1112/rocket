@@ -128,6 +128,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                         variant='ghost'
                         size='icon'
                         className='h-5 w-5'
+                        aria-label='Unstage all'
                         onClick={handleUnstageAll}
                         disabled={bulkBusy !== null}
                       >
@@ -168,6 +169,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5'
+                          aria-label='Unstage'
                           disabled={busyPaths.has(file.path)}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -196,6 +198,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     variant='ghost'
                     size='icon'
                     className='h-5 w-5'
+                    aria-label='Discard all unstaged'
                     onClick={handleDiscardAll}
                     disabled={discardableFiles.length === 0 || bulkBusy !== null}
                   >
