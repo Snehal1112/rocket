@@ -61,16 +61,18 @@ export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type='button'
-                    className='shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors'
+                    variant='ghost'
+                    size='sm'
+                    className='shrink-0 h-auto px-1 py-0.5 font-mono text-[10px] bg-muted rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                     onClick={(e) => {
                       e.stopPropagation();
                       navigator.clipboard.writeText(commit.fullId);
                     }}
                   >
                     {commit.id}
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>{commit.fullId} (click to copy)</p>
