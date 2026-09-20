@@ -57,9 +57,11 @@ export function DiffViewer({
     editorRef.current = editor;
   };
 
-  // Persist mode preference across sessions.
+  // Persist mode preference across sessions. Validate the stored value —
+  // it's user/session-editable localStorage, not a value this code controls.
   const [mode, setMode] = useState<'text' | 'visual'>(() => {
-    return (localStorage.getItem('git-diff-mode') as 'text' | 'visual') ?? 'text';
+    const stored = localStorage.getItem('git-diff-mode');
+    return stored === 'text' || stored === 'visual' ? stored : 'text';
   });
 
   const handleModeChange = useCallback((m: 'text' | 'visual') => {
@@ -86,7 +88,7 @@ export function DiffViewer({
     [diffState.repositoryId, diffState.filePath],
   );
 
-  // Visual mode is only available for JSON request files.
+  // Visual mode is only available for .yml collection files.
   const canShowVisual = diffState.filePath.endsWith('.yml');
   const language = getLanguage(diffState.filePath);
 
