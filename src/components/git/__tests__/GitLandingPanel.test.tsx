@@ -34,7 +34,7 @@ describe('GitLandingPanel workflow guards', () => {
     const store = createGitStore();
     store.setState({
       credentials: { type: 'token', token: 'tok' },
-      status: { branch: 'main', files: [], ahead: 1, behind: 1, isClean: true },
+      status: { branch: 'main', files: [], ahead: 1, behind: 0, isClean: true },
       push,
       fetch: async () => {
         store.setState({ error: 'auth failed' });
