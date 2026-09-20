@@ -85,3 +85,35 @@ describe('BranchSelector createBranch result handling', () => {
     expect(await screen.findByLabelText('New branch name')).toHaveValue('');
   });
 });
+
+describe('BranchSelector switchBranch result handling', () => {
+  it('treats a repeated identical switch error as a failure', async () => {
+    const store = renderWithStore({
+      switchBranch: async () => {
+        store.setState({ error: 'uncommitted changes would be overwritten' });
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    // `main` is head; click a non-head local branch row instead — the fixture
+    // only has `main` as local, so extend the fixture's local branches for
+    // this test via a second store patch.
+    store.setState({
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+    });
+
+    await user.click(await screen.findByText('develop'));
+    expect(await screen.findByText('uncommitted changes would be overwritten')).toBeInTheDocument();
+
+    await user.click(screen.getByText('develop'));
+    expect(await screen.findByText('uncommitted changes would be overwritten')).toBeInTheDocument();
+  });
+});

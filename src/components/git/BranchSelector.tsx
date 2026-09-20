@@ -56,10 +56,10 @@ export function BranchSelector() {
 
   const handleSwitch = async (name: string) => {
     setSwitchError(null);
-    const prevError = gitStoreApi.getState().error;
+    clearError();
     await switchBranch(name);
     const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
+    if (nextError) {
       setSwitchError(nextError);
     } else {
       setOpen(false);
@@ -70,10 +70,10 @@ export function BranchSelector() {
     setSwitchError(null);
     setCheckingOutRemote(name);
     try {
-      const prevError = gitStoreApi.getState().error;
+      clearError();
       await checkoutRemoteBranch(name);
       const nextError = gitStoreApi.getState().error;
-      if (nextError && nextError !== prevError) {
+      if (nextError) {
         setSwitchError(nextError);
       } else {
         setOpen(false);
