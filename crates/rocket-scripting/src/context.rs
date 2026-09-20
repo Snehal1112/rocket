@@ -25,6 +25,21 @@ impl ExecutionMode {
     }
 }
 
+/// JS sandbox capability level for the collection this script belongs to.
+///
+/// Mirrors `rocket_collection::settings::SandboxMode` — kept as a separate
+/// type deliberately, to avoid `rocket-scripting` depending on
+/// `rocket-collection`. `rocket-app` maps one to the other when building a
+/// `ScriptContext`. Never serialized — this never crosses the JS boundary
+/// directly; it only decides which `deno_core` extensions `rocket-infra`
+/// registers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SandboxMode {
+    #[default]
+    Safe,
+    Developer,
+}
+
 /// Everything the JS sandbox needs to read at execution time.
 ///
 /// This is a snapshot — immutable once constructed. The engine returns
@@ -54,6 +69,9 @@ pub struct ScriptContext {
 
     /// `"runner"` when executing inside a collection run, `"standalone"` otherwise.
     pub execution_mode: String,
+
+    /// JS sandbox capability level — defaults to `Safe` on every constructor.
+    pub sandbox_mode: SandboxMode,
 
     /// Always `"app"` for the desktop app.
     pub execution_platform: String,
@@ -88,6 +106,7 @@ impl ScriptContext {
             response: None,
             env_name,
             execution_mode: "standalone".into(),
+            sandbox_mode: SandboxMode::Safe,
             execution_platform: "app".into(),
             request_name,
             request_tags,
@@ -115,6 +134,7 @@ impl ScriptContext {
             response: Some(response),
             env_name,
             execution_mode: "standalone".into(),
+            sandbox_mode: SandboxMode::Safe,
             execution_platform: "app".into(),
             request_name,
             request_tags,
@@ -142,6 +162,7 @@ impl ScriptContext {
             response: Some(response),
             env_name,
             execution_mode: "standalone".into(),
+            sandbox_mode: SandboxMode::Safe,
             execution_platform: "app".into(),
             request_name,
             request_tags,
@@ -154,6 +175,13 @@ impl ScriptContext {
     /// builds, so `req.getExecutionMode()` reports the truth.
     pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
         self.execution_mode = mode.as_str().to_string();
+        self
+    }
+
+    /// Overrides the sandbox mode. Defaults to `Safe`; `rocket-app` sets this
+    /// from the collection's `sandbox_mode` setting for every phase.
+    pub fn with_sandbox_mode(mut self, mode: SandboxMode) -> Self {
+        self.sandbox_mode = mode;
         self
     }
 }
@@ -272,5 +300,34 @@ mod tests {
         )
         .with_execution_mode(ExecutionMode::Runner);
         assert_eq!(ctx.execution_mode, "runner");
+    }
+
+    #[test]
+    fn sandbox_mode_defaults_to_safe() {
+        let ctx = ScriptContext::before_request(
+            String::new(),
+            VariableContext::default(),
+            stub_request(),
+            None,
+            String::new(),
+            vec![],
+            vec![],
+        );
+        assert_eq!(ctx.sandbox_mode, SandboxMode::Safe);
+    }
+
+    #[test]
+    fn with_sandbox_mode_overrides_the_safe_default() {
+        let ctx = ScriptContext::before_request(
+            String::new(),
+            VariableContext::default(),
+            stub_request(),
+            None,
+            String::new(),
+            vec![],
+            vec![],
+        )
+        .with_sandbox_mode(SandboxMode::Developer);
+        assert_eq!(ctx.sandbox_mode, SandboxMode::Developer);
     }
 }

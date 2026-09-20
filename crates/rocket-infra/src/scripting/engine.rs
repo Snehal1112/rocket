@@ -297,7 +297,7 @@ fn run_script(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_scripting::{ScriptContext, ScriptPhase};
+    use rocket_scripting::{ScriptContext, ScriptPhase, context::SandboxMode};
     use rocket_environment::VariableContext;
     use rocket_http::HttpRequest;
     use rocket_shared::types::HttpMethod;
@@ -315,6 +315,7 @@ mod tests {
             request_name: String::new(),
             request_tags: vec![],
             path_params: vec![],
+            sandbox_mode: SandboxMode::Safe,
         }
     }
 
