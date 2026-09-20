@@ -744,12 +744,14 @@ export function createGitStore(): StoreApi<GitState> {
       } catch (e) {
         set(networkErrorPatch(e, 'pull'));
       }
-      // Always refresh status and conflicts after a pull attempt — whether it
-      // succeeded or produced merge conflicts — so the UI reflects the real
-      // repo state (behind count, conflict files, etc.).
+      // Always refresh status, conflicts, branches, and the commit log after a
+      // pull attempt — whether it succeeded or produced merge conflicts — so
+      // the UI reflects the real repo state (behind count, conflict files,
+      // incoming commits, etc.).
       await get().refreshStatus();
       await get().refreshConflicts();
       await get().refreshBranches();
+      await get().refreshLog();
     },
 
     // Fetch remote refs without merging, prompting for credentials if needed.

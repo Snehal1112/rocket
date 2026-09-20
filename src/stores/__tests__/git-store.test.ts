@@ -282,6 +282,22 @@ describe('git-store SSH trust failures', () => {
   });
 });
 
+describe('git-store pull refreshes the commit log', () => {
+  it('calls refreshLog after a successful pull', async () => {
+    store.setState({
+      repositoryId: 'repo-1',
+      isRepo: true,
+      credentials: { type: 'token', token: 'tok' },
+    });
+    vi.mocked(tauriApi.gitPull).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.gitLog).mockResolvedValue([]);
+
+    await store.getState().pull();
+
+    expect(tauriApi.gitLog).toHaveBeenCalledWith('repo-1', 50);
+  });
+});
+
 describe('setRepository', () => {
   beforeEach(() => {
     store.setState({
@@ -363,9 +379,32 @@ describe('git-store setRepository clears stale data synchronously', () => {
       status: { branch: 'repo-a-branch', files: [], ahead: 3, behind: 0, isClean: true },
       branches: { current: 'repo-a-branch', local: [], remote: [] },
       remotes: [{ name: 'origin', url: 'https://a.example.com' }],
-      stashes: [{ index: 0, message: 'wip', timestamp: '2026-01-01', filesChanged: 1, insertions: 1, deletions: 0, changedFiles: ['a'], branch: 'repo-a-branch' }],
-      commitLog: [{ id: 'abc', fullId: 'abc123', message: 'm', author: 'a', authorEmail: 'a@a.com', timestamp: '2026-01-01', filesChanged: 1 }],
-      conflicts: [{ path: 'config.yml', ours: 'version: 1', theirs: 'version: 2', ancestor: 'version: 0' }],
+      stashes: [
+        {
+          index: 0,
+          message: 'wip',
+          timestamp: '2026-01-01',
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+          changedFiles: ['a'],
+          branch: 'repo-a-branch',
+        },
+      ],
+      commitLog: [
+        {
+          id: 'abc',
+          fullId: 'abc123',
+          message: 'm',
+          author: 'a',
+          authorEmail: 'a@a.com',
+          timestamp: '2026-01-01',
+          filesChanged: 1,
+        },
+      ],
+      conflicts: [
+        { path: 'config.yml', ours: 'version: 1', theirs: 'version: 2', ancestor: 'version: 0' },
+      ],
       credentials: { type: 'token', token: 'repo-a-secret' },
     });
 
