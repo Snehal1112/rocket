@@ -219,10 +219,11 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
             <>
               <div className='space-y-1'>
                 {collections.map((col) => (
-                  <button
+                  <Button
                     key={col.path}
                     type='button'
-                    className='flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm w-full text-left'
+                    variant='ghost'
+                    className='flex items-center gap-2 px-2 py-1.5 h-auto rounded justify-start font-normal hover:bg-muted/50 text-sm w-full text-left'
                     onClick={() => setSelectedCollection(col.path)}
                   >
                     <Check
@@ -232,7 +233,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
                       }}
                     />
                     <span className='truncate'>{col.name}</span>
-                  </button>
+                  </Button>
                 ))}
               </div>
               <DialogFooter>

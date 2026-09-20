@@ -246,11 +246,12 @@ export function BranchSelector() {
                 const localName = branch.name.split('/').slice(1).join('/');
                 const isCheckingOutThis = checkingOutRemote === branch.name;
                 return (
-                  <button
+                  <Button
                     key={branch.name}
                     type='button'
+                    variant='ghost'
                     disabled={checkingOutRemote !== null}
-                    className='flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed'
+                    className='flex w-full h-auto items-center gap-1.5 rounded px-2 py-1 justify-start font-normal hover:bg-muted/50 text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed'
                     onClick={() => {
                       void handleCheckoutRemote(branch.name);
                     }}
@@ -261,7 +262,7 @@ export function BranchSelector() {
                       <span className='w-3.5' />
                     )}
                     <span className='truncate flex-1 text-muted-foreground'>{localName}</span>
-                  </button>
+                  </Button>
                 );
               })}
             </>
