@@ -59,7 +59,9 @@ export function GitLandingPanel() {
     setFetching(true);
     try {
       await fetch();
-      setLastFetched(new Date().toLocaleTimeString());
+      if (!gitStoreApi.getState().error) {
+        setLastFetched(new Date().toLocaleTimeString());
+      }
     } finally {
       setFetching(false);
     }
@@ -82,7 +84,9 @@ export function GitLandingPanel() {
     setPulling(true);
     try {
       await pull();
-      setLastFetched(new Date().toLocaleTimeString());
+      if (!gitStoreApi.getState().error) {
+        setLastFetched(new Date().toLocaleTimeString());
+      }
     } finally {
       setPulling(false);
     }
@@ -115,7 +119,9 @@ export function GitLandingPanel() {
     setPulling(true);
     try {
       await pull();
-      setLastFetched(new Date().toLocaleTimeString());
+      if (!gitStoreApi.getState().error) {
+        setLastFetched(new Date().toLocaleTimeString());
+      }
     } finally {
       setPulling(false);
     }
@@ -148,11 +154,11 @@ export function GitLandingPanel() {
     setPushing(true);
     try {
       await fetch();
+      if (gitStoreApi.getState().error) return;
       setLastFetched(new Date().toLocaleTimeString());
       // Re-check status after fetch — if now behind, abort push.
       const { status: freshStatus } = gitStoreApi.getState();
       if (freshStatus && freshStatus.behind > 0) {
-        setPushing(false);
         return;
       }
       await push();
