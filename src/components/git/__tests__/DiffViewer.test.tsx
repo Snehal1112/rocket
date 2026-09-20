@@ -1,7 +1,15 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DiffViewer } from '@/components/git/DiffViewer';
+import * as tauriApi from '@/lib/tauri-api';
+import { createDeferred } from '@/test/deferred';
 import type { DiffState } from '@/types/pane-types';
+
+vi.mock('@/lib/tauri-api', async () => {
+  const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
+  return { ...actual, gitDiff: vi.fn(), gitDiffStaged: vi.fn() };
+});
 
 // jsdom does not implement window.matchMedia. useMonacoTheme calls it to track OS dark-mode changes.
 beforeAll(() => {
@@ -59,5 +67,56 @@ describe('DiffViewer persisted mode validation', () => {
     localStorage.setItem('git-diff-mode', 'visual');
     render(<DiffViewer diffState={diffState} />);
     expect(screen.getByRole('tab', { name: 'Visual' })).toHaveAttribute('data-state', 'active');
+  });
+});
+
+describe('DiffViewer toggle resilience', () => {
+  it('keeps the newer response when an older toggle resolves out of order', async () => {
+    const deferredStaged = createDeferred<tauriApi.FileDiff>();
+    const deferredWorking = createDeferred<tauriApi.FileDiff>();
+    vi.mocked(tauriApi.gitDiffStaged).mockReturnValue(deferredStaged.promise);
+    vi.mocked(tauriApi.gitDiff).mockReturnValue(deferredWorking.promise);
+
+    render(<DiffViewer diffState={{ ...diffState, filePath: 'plain.ts' }} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: 'Staged' }));
+    await user.click(screen.getByRole('tab', { name: 'Working' }));
+
+    // The newer (working) request resolves first, the stale (staged) request
+    // resolves after — the stale one must be discarded.
+    deferredWorking.resolve({
+      path: 'plain.ts',
+      oldContent: 'old-working',
+      newContent: 'new-working',
+      hunks: [],
+    });
+    await vi.waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Working' })).toHaveAttribute('data-state', 'active'),
+    );
+    deferredStaged.resolve({
+      path: 'plain.ts',
+      oldContent: 'old-staged',
+      newContent: 'new-staged',
+      hunks: [],
+    });
+    await Promise.resolve();
+
+    expect(screen.getByRole('tab', { name: 'Working' })).toHaveAttribute('data-state', 'active');
+  });
+
+  it('disables the toggle while a request is in flight and shows an error on failure', async () => {
+    const deferred = createDeferred<tauriApi.FileDiff>();
+    vi.mocked(tauriApi.gitDiffStaged).mockReturnValue(deferred.promise);
+
+    render(<DiffViewer diffState={{ ...diffState, filePath: 'plain.ts' }} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: 'Staged' }));
+    expect(screen.getByRole('tab', { name: 'Working' })).toBeDisabled();
+
+    deferred.reject(new Error('diff unavailable'));
+    expect(await screen.findByText(/diff unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Working' })).not.toBeDisabled();
   });
 });

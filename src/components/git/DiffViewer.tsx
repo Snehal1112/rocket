@@ -69,20 +69,31 @@ export function DiffViewer({
     localStorage.setItem('git-diff-mode', m);
   }, []);
 
+  const [toggling, setToggling] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const toggleRequestIdRef = useRef(0);
+
   const handleToggleStaged = useCallback(
     async (isStaged: boolean) => {
+      const myRequestId = ++toggleRequestIdRef.current;
+      setToggling(true);
+      setToggleError(null);
       try {
         const diff = isStaged
           ? await gitDiffStaged(diffState.repositoryId, diffState.filePath)
           : await gitDiff(diffState.repositoryId, diffState.filePath);
+        if (toggleRequestIdRef.current !== myRequestId) return;
         setDiffState((prev) => ({
           ...prev,
           oldContent: diff.oldContent ?? '',
           newContent: diff.newContent ?? '',
           isStaged,
         }));
-      } catch {
-        // Keep current state on error.
+      } catch (e) {
+        if (toggleRequestIdRef.current !== myRequestId) return;
+        setToggleError(String(e));
+      } finally {
+        if (toggleRequestIdRef.current === myRequestId) setToggling(false);
       }
     },
     [diffState.repositoryId, diffState.filePath],
@@ -101,7 +112,16 @@ export function DiffViewer({
         onModeChange={handleModeChange}
         canShowVisual={canShowVisual}
         hideStageToggle={hideStageToggle}
+        stageToggleDisabled={toggling}
       />
+      {toggleError && (
+        <div
+          role='alert'
+          className='px-3 py-1.5 text-xs text-destructive border-b bg-destructive/10'
+        >
+          {toggleError}
+        </div>
+      )}
       {mode === 'visual' && canShowVisual ? (
         <VisualDiffView oldContent={diffState.oldContent} newContent={diffState.newContent} />
       ) : (
