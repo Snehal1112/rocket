@@ -35,6 +35,21 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
 
   const [showDiscardAllDialog, setShowDiscardAllDialog] = useState(false);
   const [discardingFile, setDiscardingFile] = useState<FileStatus | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<'stage' | 'unstage' | 'discard' | null>(null);
+  const [busyPaths, setBusyPaths] = useState<Set<string>>(new Set());
+
+  const withPathBusy = async (path: string, action: () => Promise<void>) => {
+    setBusyPaths((prev) => new Set(prev).add(path));
+    try {
+      await action();
+    } finally {
+      setBusyPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  };
 
   const staged = status?.files.filter((f) => f.staged) ?? [];
   const unstaged = status?.files.filter((f) => !f.staged && f.status !== 'unchanged') ?? [];
@@ -46,25 +61,44 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
     setShowDiscardAllDialog(true);
   };
 
-  const handleConfirmDiscardAll = () => {
-    discardFiles(discardableFiles.map((f) => f.path));
+  const handleConfirmDiscardAll = async () => {
+    if (bulkBusy) return;
+    setBulkBusy('discard');
     setShowDiscardAllDialog(false);
+    try {
+      await discardFiles(discardableFiles.map((f) => f.path));
+    } finally {
+      setBulkBusy(null);
+    }
   };
 
   const handleConfirmDiscardFile = () => {
     if (!discardingFile) return;
-    discardFiles([discardingFile.path]);
+    const path = discardingFile.path;
     setDiscardingFile(null);
+    void withPathBusy(path, () => discardFiles([path]));
   };
 
-  const handleStageAll = (e: React.MouseEvent) => {
+  const handleStageAll = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    stageAll();
+    if (bulkBusy) return;
+    setBulkBusy('stage');
+    try {
+      await stageAll();
+    } finally {
+      setBulkBusy(null);
+    }
   };
 
-  const handleUnstageAll = (e: React.MouseEvent) => {
+  const handleUnstageAll = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    unstageAll();
+    if (bulkBusy) return;
+    setBulkBusy('unstage');
+    try {
+      await unstageAll();
+    } finally {
+      setBulkBusy(null);
+    }
   };
 
   const handleConflictClick = async (file: FileStatus) => {
@@ -95,6 +129,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                         size='icon'
                         className='h-5 w-5'
                         onClick={handleUnstageAll}
+                        disabled={bulkBusy !== null}
                       >
                         <Minus className='h-3.5 w-3.5' />
                       </Button>
@@ -130,9 +165,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5'
+                          disabled={busyPaths.has(file.path)}
                           onClick={(e) => {
                             e.stopPropagation();
-                            unstageFiles([file.path]);
+                            void withPathBusy(file.path, () => unstageFiles([file.path]));
                           }}
                         >
                           <Minus className='h-3.5 w-3.5' />
@@ -158,7 +194,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                     size='icon'
                     className='h-5 w-5'
                     onClick={handleDiscardAll}
-                    disabled={discardableFiles.length === 0}
+                    disabled={discardableFiles.length === 0 || bulkBusy !== null}
                   >
                     <Trash2 className='h-3.5 w-3.5' />
                   </Button>
@@ -167,7 +203,14 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant='ghost' size='icon' className='h-5 w-5' onClick={handleStageAll}>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='h-5 w-5'
+                    aria-label='Stage all'
+                    onClick={handleStageAll}
+                    disabled={bulkBusy !== null}
+                  >
                     <Plus className='h-3.5 w-3.5' />
                   </Button>
                 </TooltipTrigger>
@@ -229,6 +272,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           size='icon'
                           className='h-5 w-5'
                           aria-label='Discard'
+                          disabled={busyPaths.has(file.path)}
                           onClick={(e) => {
                             e.stopPropagation();
                             setDiscardingFile(file);
@@ -246,9 +290,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           size='icon'
                           className='h-5 w-5'
                           aria-label='Stage'
+                          disabled={busyPaths.has(file.path)}
                           onClick={(e) => {
                             e.stopPropagation();
-                            stageFiles([file.path]);
+                            void withPathBusy(file.path, () => stageFiles([file.path]));
                           }}
                         >
                           <Plus className='h-3.5 w-3.5' />
