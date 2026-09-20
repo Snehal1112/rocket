@@ -116,11 +116,21 @@ impl CollectionService {
     }
 
     pub fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.create_folder(collection, path)
+        self.repo.create_folder(collection, path)?;
+        self.events.publish(DomainEvent::FolderCreated {
+            collection: collection.to_string(),
+            path: path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.delete_folder(collection, path)
+        self.repo.delete_folder(collection, path)?;
+        self.events.publish(DomainEvent::FolderDeleted {
+            collection: collection.to_string(),
+            path: path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn move_item(
@@ -268,8 +278,8 @@ mod tests {
             }
             Ok(())
         }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
         fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
@@ -534,6 +544,42 @@ mod tests {
                         && dst_collection == "other-api" && dst_path == "users.yml"
             )),
             "expected ItemMoved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn create_folder_emits_folder_created() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.create_folder("my-api", "auth").expect("create_folder");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::FolderCreated { collection, path } if collection == "my-api" && path == "auth"
+            )),
+            "expected FolderCreated, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn delete_folder_emits_folder_deleted() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.delete_folder("my-api", "auth").expect("delete_folder");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::FolderDeleted { collection, path } if collection == "my-api" && path == "auth"
+            )),
+            "expected FolderDeleted, got {:?}", *published
         );
     }
 
