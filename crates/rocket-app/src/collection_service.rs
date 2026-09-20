@@ -5,26 +5,30 @@ use rocket_audit::{
 use rocket_collection::{Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
+use rocket_shared::events::{DomainEvent, EventPublisher};
 use std::sync::Arc;
 
 pub struct CollectionService {
     repo: Box<dyn CollectionRepository>,
+    events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
 }
 
 impl CollectionService {
-    pub fn new(repo: Box<dyn CollectionRepository>) -> Self {
+    pub fn new(repo: Box<dyn CollectionRepository>, events: Box<dyn EventPublisher>) -> Self {
         Self {
             repo,
+            events,
             audit: Arc::new(NullSecurityAuditPublisher),
         }
     }
 
     pub fn new_with_audit(
         repo: Box<dyn CollectionRepository>,
+        events: Box<dyn EventPublisher>,
         audit: Arc<dyn SecurityAuditPublisher>,
     ) -> Self {
-        Self { repo, audit }
+        Self { repo, events, audit }
     }
 
     pub fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
@@ -42,7 +46,9 @@ impl CollectionService {
 
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
-        self.repo.create(name)
+        let collection = self.repo.create(name)?;
+        self.events.publish(DomainEvent::CollectionCreated { name: name.to_string() });
+        Ok(collection)
     }
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
@@ -52,12 +58,18 @@ impl CollectionService {
             None,
             AuditEventKind::CollectionDeleted { collection: name.to_string() },
         );
+        self.events.publish(DomainEvent::CollectionDeleted { name: name.to_string() });
         Ok(())
     }
 
     pub fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
         Collection::validate_name(new_name)?;
-        self.repo.rename(old_name, new_name)
+        self.repo.rename(old_name, new_name)?;
+        self.events.publish(DomainEvent::CollectionRenamed {
+            old_name: old_name.to_string(),
+            new_name: new_name.to_string(),
+        });
+        Ok(())
     }
 
     pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
@@ -144,7 +156,8 @@ impl CollectionService {
 mod tests {
     use super::*;
     use rocket_shared::error::{DomainError, DomainResult};
-    use std::sync::Mutex;
+    use rocket_shared::events::{DomainEvent, EventPublisher, NullEventPublisher};
+    use std::sync::{Arc, Mutex};
 
     struct MockCollectionRepo {
         collections: Mutex<Vec<Collection>>,
@@ -225,7 +238,7 @@ mod tests {
     }
 
     fn make_service() -> CollectionService {
-        CollectionService::new(Box::new(MockCollectionRepo::new()))
+        CollectionService::new(Box::new(MockCollectionRepo::new()), Box::new(NullEventPublisher))
     }
 
     #[test]
@@ -298,11 +311,77 @@ mod tests {
         }
     }
 
+    struct RecordingEventPublisher {
+        events: Mutex<Vec<DomainEvent>>,
+    }
+    impl EventPublisher for RecordingEventPublisher {
+        fn publish(&self, event: DomainEvent) {
+            self.events.lock().expect("lock").push(event);
+        }
+    }
+    struct SharedEventPublisher(Arc<RecordingEventPublisher>);
+    impl EventPublisher for SharedEventPublisher {
+        fn publish(&self, event: DomainEvent) {
+            self.0.publish(event);
+        }
+    }
+
+    #[test]
+    fn create_emits_collection_created() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.create("my-api").expect("create");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(e, DomainEvent::CollectionCreated { name } if name == "my-api")),
+            "expected CollectionCreated, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn delete_emits_collection_deleted() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.create("temp").expect("create");
+        svc.delete("temp").expect("delete");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(e, DomainEvent::CollectionDeleted { name } if name == "temp")),
+            "expected CollectionDeleted, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn rename_emits_collection_renamed() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.create("old").expect("create");
+        svc.rename("old", "new").expect("rename");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::CollectionRenamed { old_name, new_name } if old_name == "old" && new_name == "new"
+            )),
+            "expected CollectionRenamed, got {:?}", *published
+        );
+    }
+
     #[test]
     fn delete_emits_security_audit_event() {
         let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
         let svc = CollectionService::new_with_audit(
             Box::new(MockCollectionRepo::new()),
+            Box::new(NullEventPublisher),
             publisher.clone(),
         );
         svc.create("victim").unwrap();
