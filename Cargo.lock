@@ -4684,6 +4684,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "git2",
+ "openssl",
  "rocket-shared",
  "serde",
  "serde_json",

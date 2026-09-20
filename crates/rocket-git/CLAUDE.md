@@ -39,14 +39,24 @@ cargo test -p rocket-git -- --nocapture
 | `conflict` | `conflicts`, `resolve_conflict`, `abort_merge` |
 | `helpers` | shared internals: `open_repo`, `build_callbacks`, `map_git2_status`, `build_simple_diff`, `ahead_behind`, path/worktree helpers |
 | `ssh_host_verification` | offline SSH host-key classification against a `known_hosts` file: `classify_remote_host`, `classify_known_host`, `parse_ssh_endpoint`, `openssh_sha256_fingerprint` |
+| `tls_certificate_verification` | diagnostic-only HTTPS certificate classification: `classify_tls_certificate`, `https_port`, `sha256_fingerprint` |
+| `trust_store` | the `SshTrustStore` trait plus `SystemSshTrustStore`/`FixedPathSshTrustStore` |
+| `tls_verification_contracts` (`#[cfg(test)]`) | local, no-network integration fixture: a real self-signed-cert HTTPS listener exercised through an actual `clone_repo` call |
 
 These submodule files share their names with the top-level domain-type modules (`crate::branch`, `crate::stash`, ...) declared in `lib.rs` — that's intentional, not duplication: the top-level module owns the domain **type** (e.g. `crate::branch::Branch`), the `git2_service` submodule of the same name owns the libgit2-backed **implementation** of the operations on that type.
 
 All methods take a `path: &str` argument — the repository root on disk. There is no persistent repository handle; `Repository::open()` is called per-operation.
 
-### SSH host verification
+### SSH host and TLS certificate verification
 
-`Git2Service` is no longer a unit struct — it carries an injectable `Arc<dyn SshTrustStore>` (`Git2Service::new()` uses `~/.ssh/known_hosts` via `SystemSshTrustStore`; `Git2Service::with_trust_store(...)` / `with_known_hosts_path(...)` inject an alternative, e.g. for tests). `helpers::build_callbacks` uses the trust store with `ssh_host_verification::classify_remote_host` to classify SSH host-key failures purely for diagnostics — the accept/reject decision is always delegated back to libgit2/libssh2 itself via `CertificateCheckStatus::CertificatePassthrough`. Classification only enriches the resulting `git2::Error` (when its code is `Certificate`) into a typed `DomainError::SshUnknownHost` / `SshHostKeyChanged` / `SshHostVerificationUnavailable`, carrying host/port/algorithm/fingerprint from `remote_verification::SshHostFailure`.
+`Git2Service` is no longer a unit struct — it carries an injectable `Arc<dyn SshTrustStore>` (`Git2Service::new()` uses `~/.ssh/known_hosts` via `SystemSshTrustStore`; `Git2Service::with_trust_store(...)` / `with_known_hosts_path(...)` inject an alternative, e.g. for tests). `helpers::build_callbacks` registers a single `certificate_check` callback that branches on `cert.as_hostkey()` (SSH) vs `cert.as_x509()` (HTTPS): SSH failures go through `ssh_host_verification::classify_remote_host` against the trust store; TLS failures go through `tls_certificate_verification::classify_tls_certificate`. Both are diagnostic-only — the accept/reject decision is always delegated back to libgit2/libssh2/OpenSSL via `CertificateCheckStatus::CertificatePassthrough`, and neither ever writes a trust decision to disk (no trust-on-first-use).
+
+`RemoteVerificationState::map_error` enriches the resulting `git2::Error` into a typed `DomainError::SshUnknownHost` / `SshHostKeyChanged` / `SshHostVerificationUnavailable` / `TlsCertificateInvalid`, but the two transports do **not** report a rejected certificate the same way and the mapping is gated accordingly:
+
+- **SSH** (`ssh_libssh2.c`) preserves `GIT_ECERTIFICATE` through to the caller — enrichment is gated on `error.code() == ErrorCode::Certificate`.
+- **HTTPS** (`httpclient.c::check_certificate`, libgit2 1.8.1) does **not** preserve it — a rejected cert restores the original "SSL certificate is invalid" error under a generic error code, so only its class (`ErrorClass::Ssl`) survives. Enrichment for the TLS branch is gated on that class instead.
+
+Either way, enrichment only ever fires when the callback actually recorded a failure for that connection attempt, so a stale/unrelated error is never misattributed. This asymmetry was only discovered by the real end-to-end fixture in `tls_verification_contracts` — a synthetic `git2::Error::new(ErrorCode::Certificate, ...)` unit test alone would have hidden it.
 
 ### Domain types
 

@@ -530,12 +530,18 @@ fn leaf_symlink_is_staged_as_symlink_but_not_followed_by_diff_or_discard() {
         .expect("find staged symlink");
     assert_eq!(entry.mode, 0o120000, "index entry must retain symlink mode");
 
+    // The symlink is now staged, so "discard" (restore unstaged changes)
+    // must restore from the INDEX, not delete it — the worktree already
+    // matches what's staged, so this is a no-op that leaves the symlink
+    // entry itself in place without ever following it.
     service
         .discard(fixture.path(), &["link.txt"])
-        .expect("discard untracked symlink");
+        .expect("discard restores the staged symlink entry");
+    let restored = fs::symlink_metadata(fixture.repo_path.join("link.txt"))
+        .expect("discard must leave the staged symlink entry in place");
     assert!(
-        fs::symlink_metadata(fixture.repo_path.join("link.txt")).is_err(),
-        "discard must remove the link itself"
+        restored.file_type().is_symlink(),
+        "discard must not replace the symlink with a regular file"
     );
     assert_eq!(
         read_optional(&fixture.outside_path()),
@@ -853,7 +859,6 @@ fn deleted_tracked_file_remains_stageable() {
 }
 
 #[test]
-#[ignore = "Phase 2 safety contract: unstaged discard must restore from and preserve the index"]
 fn discard_unstaged_preserves_staged_index_blob_and_restores_worktree() {
     let fixture = RepoFixture::new();
     let service = Git2Service::new();
@@ -883,7 +888,6 @@ fn discard_unstaged_preserves_staged_index_blob_and_restores_worktree() {
 }
 
 #[test]
-#[ignore = "Phase 2 safety contract: remote checkout must reject differing untracked collisions atomically"]
 fn remote_checkout_collision_rejects_without_refs_index_or_worktree_mutation() {
     let (bare_dir, _seed_dir) = create_remote_with_branch_files(
         &[("base.txt", "base\n")],
@@ -917,7 +921,6 @@ fn remote_checkout_collision_rejects_without_refs_index_or_worktree_mutation() {
 }
 
 #[test]
-#[ignore = "Phase 2 safety contract: pull must reject differing untracked collisions atomically"]
 fn pull_collision_rejects_without_refs_index_or_worktree_mutation() {
     let (bare_dir, _seed_dir) =
         create_remote_with_branch_files(&[("clash.txt", "remote content\n")], &[]);
@@ -1041,8 +1044,60 @@ fn resolve_modify_delete_conflict_with_deleted_side_removes_file() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-#[ignore = "Phase 2 safety contract: abort outside a merge must reject and preserve dirty work"]
+fn resolve_conflict_theirs_preserves_executable_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = RepoFixture::new();
+    let service = Git2Service::new();
+    let script_path = fixture.repo_path.join(TRACKED_FILE);
+
+    service
+        .create_branch(fixture.path(), "exec-branch")
+        .expect("create exec branch");
+    fs::write(&script_path, "executable version\n").expect("write executable version");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+        .expect("make executable");
+    service
+        .stage(fixture.path(), &[TRACKED_FILE])
+        .expect("stage executable version");
+    service
+        .commit(fixture.path(), "make executable")
+        .expect("commit executable version");
+
+    service
+        .switch_branch(fixture.path(), "main")
+        .expect("return to main");
+    fs::write(&script_path, "main version\n").expect("modify on main");
+    service
+        .stage(fixture.path(), &[TRACKED_FILE])
+        .expect("stage main modification");
+    service
+        .commit(fixture.path(), "modify on main")
+        .expect("commit main modification");
+
+    assert!(
+        service.merge_branch(fixture.path(), "exec-branch").is_err(),
+        "fixture must create a modify/modify conflict"
+    );
+
+    service
+        .resolve_conflict(fixture.path(), TRACKED_FILE, &ConflictResolution::Theirs)
+        .expect("accept the executable side");
+
+    let mode = fs::metadata(&script_path)
+        .expect("inspect resolved file")
+        .permissions()
+        .mode();
+    assert_ne!(
+        mode & 0o111,
+        0,
+        "resolving to the executable side must preserve the executable bit"
+    );
+}
+
+#[test]
 fn abort_outside_merge_rejects_and_preserves_dirty_index_and_worktree() {
     let fixture = RepoFixture::new();
     let service = Git2Service::new();

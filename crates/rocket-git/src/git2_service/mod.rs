@@ -25,32 +25,13 @@ mod ssh_host_verification;
 mod staging;
 mod stash;
 mod status_diff;
+mod tls_certificate_verification;
+#[cfg(test)]
+mod tls_verification_contracts;
+mod trust_store;
 
-/// Read-only source for the OpenSSH `known_hosts` file used to classify SSH
-/// certificate failures.
-pub trait SshTrustStore: Send + Sync {
-    fn known_hosts_path(&self) -> Option<PathBuf>;
-}
-
-#[derive(Debug, Default)]
-pub struct SystemSshTrustStore;
-
-impl SshTrustStore for SystemSshTrustStore {
-    fn known_hosts_path(&self) -> Option<PathBuf> {
-        ssh_host_verification::default_known_hosts_path()
-    }
-}
-
-#[derive(Debug)]
-struct FixedPathSshTrustStore {
-    path: PathBuf,
-}
-
-impl SshTrustStore for FixedPathSshTrustStore {
-    fn known_hosts_path(&self) -> Option<PathBuf> {
-        Some(self.path.clone())
-    }
-}
+use trust_store::FixedPathSshTrustStore;
+pub use trust_store::{SshTrustStore, SystemSshTrustStore};
 
 /// Git service backed by libgit2.
 pub struct Git2Service {
@@ -98,12 +79,7 @@ impl GitService for Git2Service {
         repo::init(path)
     }
 
-    fn clone_repo(
-        &self,
-        url: &str,
-        dest_path: &str,
-        creds: &GitCredentials,
-    ) -> DomainResult<()> {
+    fn clone_repo(&self, url: &str, dest_path: &str, creds: &GitCredentials) -> DomainResult<()> {
         repo::clone_repo(url, dest_path, creds, self.known_hosts_path())
     }
 
@@ -167,7 +143,12 @@ impl GitService for Git2Service {
         remote::pull(path, remote_name, creds, self.known_hosts_path())
     }
 
-    fn fetch(&self, path: &str, remote_name: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
+    fn fetch(
+        &self,
+        path: &str,
+        remote_name: &str,
+        creds: &GitCredentials,
+    ) -> DomainResult<FetchResult> {
         remote::fetch(path, remote_name, creds, self.known_hosts_path())
     }
 
@@ -295,7 +276,8 @@ mod tests {
         index.write().unwrap();
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[]).unwrap();
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
 
         // Point HEAD at the main branch.
         repo.set_head("refs/heads/main").unwrap();
@@ -334,7 +316,8 @@ mod tests {
         idx.write().unwrap();
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         repo.set_head("refs/heads/main").unwrap();
 
         (local_dir, local_path, remote_dir, remote_path)
@@ -346,7 +329,11 @@ mod tests {
         let svc = Git2Service::new();
 
         // Local file-path remotes don't invoke the credential callback.
-        let result = svc.push(&local_path, "origin", &crate::credentials::GitCredentials::SshAgent);
+        let result = svc.push(
+            &local_path,
+            "origin",
+            &crate::credentials::GitCredentials::SshAgent,
+        );
         assert!(result.is_ok(), "push failed: {:?}", result);
 
         // Verify the ref landed in the bare remote.
@@ -374,12 +361,10 @@ mod tests {
         fs::write(dir.path().join("test.bru"), "meta { name: Changed }").unwrap();
         let status = Git2Service::new().status(&path).unwrap();
         assert_eq!(status.branch, "main");
-        assert!(
-            status
-                .files
-                .iter()
-                .any(|f| f.path == "test.bru" && f.status == GitStatus::Modified)
-        );
+        assert!(status
+            .files
+            .iter()
+            .any(|f| f.path == "test.bru" && f.status == GitStatus::Modified));
     }
 
     #[test]
@@ -387,12 +372,10 @@ mod tests {
         let (dir, path) = setup_repo();
         fs::write(dir.path().join("new.bru"), "new").unwrap();
         let status = Git2Service::new().status(&path).unwrap();
-        assert!(
-            status
-                .files
-                .iter()
-                .any(|f| f.path == "new.bru" && f.status == GitStatus::Untracked)
-        );
+        assert!(status
+            .files
+            .iter()
+            .any(|f| f.path == "new.bru" && f.status == GitStatus::Untracked));
     }
 
     #[test]
@@ -413,10 +396,16 @@ mod tests {
         let svc = Git2Service::new();
         svc.stage(&path, &["test.bru"]).unwrap();
         let status = svc.status(&path).unwrap();
-        assert!(status.files.iter().any(|f| f.path == "test.bru" && f.staged));
+        assert!(status
+            .files
+            .iter()
+            .any(|f| f.path == "test.bru" && f.staged));
         svc.unstage(&path, &["test.bru"]).unwrap();
         let status2 = svc.status(&path).unwrap();
-        assert!(status2.files.iter().any(|f| f.path == "test.bru" && !f.staged));
+        assert!(status2
+            .files
+            .iter()
+            .any(|f| f.path == "test.bru" && !f.staged));
     }
 
     #[test]
@@ -426,11 +415,17 @@ mod tests {
         // Delete a tracked file.
         fs::remove_file(Path::new(&path).join("test.bru")).unwrap();
         let status = svc.status(&path).unwrap();
-        assert!(status.files.iter().any(|f| f.path == "test.bru" && !f.staged));
+        assert!(status
+            .files
+            .iter()
+            .any(|f| f.path == "test.bru" && !f.staged));
         // Stage the deletion.
         svc.stage(&path, &["test.bru"]).unwrap();
         let status2 = svc.status(&path).unwrap();
-        assert!(status2.files.iter().any(|f| f.path == "test.bru" && f.staged));
+        assert!(status2
+            .files
+            .iter()
+            .any(|f| f.path == "test.bru" && f.staged));
     }
 
     #[test]
@@ -448,13 +443,18 @@ mod tests {
         for f in &status.files {
             assert!(
                 !f.path.ends_with('/'),
-                "status returned directory entry: '{}'", f.path
+                "status returned directory entry: '{}'",
+                f.path
             );
         }
         // The file inside the directory must appear.
         assert!(
-            status.files.iter().any(|f| f.path == "collections/e4a-rest/get-users.yml"),
-            "expected file entry not found; got: {:?}", status.files.iter().map(|f| &f.path).collect::<Vec<_>>()
+            status
+                .files
+                .iter()
+                .any(|f| f.path == "collections/e4a-rest/get-users.yml"),
+            "expected file entry not found; got: {:?}",
+            status.files.iter().map(|f| &f.path).collect::<Vec<_>>()
         );
     }
 
@@ -469,9 +469,10 @@ mod tests {
         let paths: Vec<&str> = status.files.iter().map(|f| f.path.as_str()).collect();
         svc.stage(&path, &paths).unwrap();
         let status2 = svc.status(&path).unwrap();
-        assert!(
-            status2.files.iter().any(|f| f.path.contains("get-users.yml") && f.staged)
-        );
+        assert!(status2
+            .files
+            .iter()
+            .any(|f| f.path.contains("get-users.yml") && f.staged));
     }
 
     #[test]
@@ -504,7 +505,11 @@ mod tests {
         let (dir, path) = setup_repo();
         let svc = Git2Service::new();
         for i in 0..5 {
-            fs::write(dir.path().join(format!("f{}.bru", i)), format!("content {}", i)).unwrap();
+            fs::write(
+                dir.path().join(format!("f{}.bru", i)),
+                format!("content {}", i),
+            )
+            .unwrap();
             svc.stage(&path, &[&format!("f{}.bru", i)]).unwrap();
             svc.commit(&path, &format!("commit {}", i)).unwrap();
         }
@@ -566,7 +571,10 @@ mod tests {
         // Create a brand-new file that has never been staged or committed.
         let new_file = dir.path().join("untracked.bru");
         fs::write(&new_file, "new request content").unwrap();
-        assert!(new_file.exists(), "precondition: untracked file should exist before stash");
+        assert!(
+            new_file.exists(),
+            "precondition: untracked file should exist before stash"
+        );
 
         // Stash should capture the untracked file.
         svc.stash_save(&path, "capture untracked").unwrap();
@@ -610,7 +618,8 @@ mod tests {
     fn add_and_list_remote() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git")
+            .unwrap();
         let remotes = svc.list_remotes(&path).unwrap();
         assert_eq!(remotes.len(), 1);
         assert_eq!(remotes[0].name, "origin");
@@ -621,8 +630,10 @@ mod tests {
     fn add_multiple_remotes() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
-        svc.add_remote(&path, "upstream", "https://github.com/upstream/repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git")
+            .unwrap();
+        svc.add_remote(&path, "upstream", "https://github.com/upstream/repo.git")
+            .unwrap();
         let remotes = svc.list_remotes(&path).unwrap();
         assert_eq!(remotes.len(), 2);
         let names: Vec<&str> = remotes.iter().map(|r| r.name.as_str()).collect();
@@ -634,7 +645,8 @@ mod tests {
     fn remove_remote() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git")
+            .unwrap();
         svc.remove_remote(&path, "origin").unwrap();
         let remotes = svc.list_remotes(&path).unwrap();
         assert!(remotes.is_empty());
@@ -644,8 +656,10 @@ mod tests {
     fn set_remote_url() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://github.com/user/old.git").unwrap();
-        svc.set_remote_url(&path, "origin", "https://github.com/user/new.git").unwrap();
+        svc.add_remote(&path, "origin", "https://github.com/user/old.git")
+            .unwrap();
+        svc.set_remote_url(&path, "origin", "https://github.com/user/new.git")
+            .unwrap();
         let remotes = svc.list_remotes(&path).unwrap();
         assert_eq!(remotes.len(), 1);
         assert_eq!(remotes[0].url, "https://github.com/user/new.git");
@@ -655,7 +669,8 @@ mod tests {
     fn add_duplicate_remote_fails() {
         let (_dir, path) = setup_repo();
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://github.com/user/repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://github.com/user/repo.git")
+            .unwrap();
         let result = svc.add_remote(&path, "origin", "https://github.com/user/other.git");
         assert!(result.is_err());
     }
@@ -739,11 +754,15 @@ mod tests {
 
         // Fetch in our original repo so we get origin/feature-x.
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
         svc.fetch(&path, "origin", &creds).unwrap();
 
         // Checkout the remote branch.
-        svc.checkout_remote_branch(&path, "origin/feature-x").unwrap();
+        svc.checkout_remote_branch(&path, "origin/feature-x")
+            .unwrap();
 
         // Verify local branch exists and is checked out.
         let status = svc.status(&path).unwrap();
@@ -751,7 +770,11 @@ mod tests {
 
         // Verify upstream is set.
         let branches = svc.branches(&path).unwrap();
-        let local = branches.local.iter().find(|b| b.name == "feature-x").unwrap();
+        let local = branches
+            .local
+            .iter()
+            .find(|b| b.name == "feature-x")
+            .unwrap();
         assert_eq!(local.upstream.as_deref(), Some("origin/feature-x"));
     }
 
@@ -832,7 +855,9 @@ mod tests {
         idx.write().unwrap();
         let tid = idx.write_tree().unwrap();
         let tree = local_repo.find_tree(tid).unwrap();
-        local_repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[]).unwrap();
+        local_repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         drop(tree);
         let mut r = local_repo.remote("origin", &remote_path).unwrap();
         r.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
@@ -850,13 +875,28 @@ mod tests {
         let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
         {
             let otree = other_repo.find_tree(otid).unwrap();
-            other_repo.commit(Some("refs/heads/main"), &sig, &sig, "remote commit", &otree, &[&ohead]).unwrap();
+            other_repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "remote commit",
+                    &otree,
+                    &[&ohead],
+                )
+                .unwrap();
         }
-        other_repo.find_remote("origin").unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        other_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         // Fetch so ahead_behind has fresh tracking data.
         svc.fetch(&local_path, "origin", &creds).unwrap();
@@ -893,7 +933,9 @@ mod tests {
         let tid = idx.write_tree().unwrap();
         {
             let t = local_repo.find_tree(tid).unwrap();
-            local_repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &t, &[]).unwrap();
+            local_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "init", &t, &[])
+                .unwrap();
         }
         let mut r = local_repo.remote("origin", &remote_path).unwrap();
         r.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
@@ -911,14 +953,29 @@ mod tests {
         let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
         {
             let otree = other_repo.find_tree(otid).unwrap();
-            other_repo.commit(Some("refs/heads/main"), &sig, &sig, "remote commit", &otree, &[&ohead]).unwrap();
+            other_repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "remote commit",
+                    &otree,
+                    &[&ohead],
+                )
+                .unwrap();
         }
-        other_repo.find_remote("origin").unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        other_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         // NOTE: no explicit svc.fetch call here — simulates user clicking pull directly.
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         // Pull should succeed without a prior explicit fetch.
         let result = svc.pull(&local_path, "origin", &creds);
@@ -955,31 +1012,46 @@ mod tests {
             let base_oid = {
                 let tid = si.write_tree().unwrap();
                 let t = seed_repo.find_tree(tid).unwrap();
-                seed_repo.commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[]).unwrap()
+                seed_repo
+                    .commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[])
+                    .unwrap()
             };
 
             // Push main's base to remote.
-            seed_repo.find_remote("origin").unwrap()
-                .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+            seed_repo
+                .find_remote("origin")
+                .unwrap()
+                .push(&["refs/heads/main:refs/heads/main"], None)
+                .unwrap();
 
             // Create feature branch from base and push it.
             {
                 let base_commit = seed_repo.find_commit(base_oid).unwrap();
-                seed_repo.branch("feature/database-migration", &base_commit, false).unwrap();
+                seed_repo
+                    .branch("feature/database-migration", &base_commit, false)
+                    .unwrap();
             }
             fs::write(seed_dir.path().join("feature.txt"), "feature work").unwrap();
             let mut fi = seed_repo.index().unwrap();
             fi.add_path(Path::new("feature.txt")).unwrap();
             fi.write().unwrap();
-            seed_repo.set_head("refs/heads/feature/database-migration").ok();
+            seed_repo
+                .set_head("refs/heads/feature/database-migration")
+                .ok();
             {
                 let tid = fi.write_tree().unwrap();
                 let t = seed_repo.find_tree(tid).unwrap();
                 let base_c = seed_repo.find_commit(base_oid).unwrap();
-                seed_repo.commit(
-                    Some("refs/heads/feature/database-migration"),
-                    &sig, &sig, "feature commit", &t, &[&base_c],
-                ).unwrap();
+                seed_repo
+                    .commit(
+                        Some("refs/heads/feature/database-migration"),
+                        &sig,
+                        &sig,
+                        "feature commit",
+                        &t,
+                        &[&base_c],
+                    )
+                    .unwrap();
             }
             seed_repo.find_remote("origin").unwrap()
                 .push(&["refs/heads/feature/database-migration:refs/heads/feature/database-migration"], None).unwrap();
@@ -1000,13 +1072,22 @@ mod tests {
                 let tid = ri.write_tree().unwrap();
                 let t = other_repo.find_tree(tid).unwrap();
                 let h = other_repo.head().unwrap().peel_to_commit().unwrap();
-                other_repo.commit(
-                    Some("refs/heads/main"), &sig, &sig,
-                    &format!("remote main {i}"), &t, &[&h],
-                ).unwrap();
+                other_repo
+                    .commit(
+                        Some("refs/heads/main"),
+                        &sig,
+                        &sig,
+                        &format!("remote main {i}"),
+                        &t,
+                        &[&h],
+                    )
+                    .unwrap();
             }
-            other_repo.find_remote("origin").unwrap()
-                .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+            other_repo
+                .find_remote("origin")
+                .unwrap()
+                .push(&["refs/heads/main:refs/heads/main"], None)
+                .unwrap();
         }
 
         // Local: clone, reset to base (1 behind main), add local commit (ahead).
@@ -1024,7 +1105,9 @@ mod tests {
             }
             {
                 let base_c = local_repo.find_commit(base_oid).unwrap();
-                local_repo.reset(base_c.as_object(), git2::ResetType::Hard, None).unwrap();
+                local_repo
+                    .reset(base_c.as_object(), git2::ResetType::Hard, None)
+                    .unwrap();
             }
             fs::write(local_dir.path().join("local.txt"), "local").unwrap();
             let mut li = local_repo.index().unwrap();
@@ -1034,18 +1117,33 @@ mod tests {
                 let tid = li.write_tree().unwrap();
                 let t = local_repo.find_tree(tid).unwrap();
                 let h = local_repo.head().unwrap().peel_to_commit().unwrap();
-                local_repo.commit(Some("refs/heads/main"), &sig, &sig, "local commit", &t, &[&h]).unwrap();
+                local_repo
+                    .commit(
+                        Some("refs/heads/main"),
+                        &sig,
+                        &sig,
+                        "local commit",
+                        &t,
+                        &[&h],
+                    )
+                    .unwrap();
             }
         } // local_repo dropped here
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         // Fetch — populates FETCH_HEAD with both branches.
         svc.fetch(&local_path, "origin", &creds).unwrap();
 
         let before = svc.status(&local_path).unwrap();
-        println!("before pull: ahead={} behind={}", before.ahead, before.behind);
+        println!(
+            "before pull: ahead={} behind={}",
+            before.ahead, before.behind
+        );
         assert!(before.behind > 0, "should be behind main before pull");
 
         // Pull must merge origin/main, NOT origin/feature/database-migration.
@@ -1054,11 +1152,20 @@ mod tests {
 
         let after = svc.status(&local_path).unwrap();
         println!("after pull: ahead={} behind={}", after.ahead, after.behind);
-        assert_eq!(after.behind, 0, "behind must be 0 — pull must have merged origin/main");
+        assert_eq!(
+            after.behind, 0,
+            "behind must be 0 — pull must have merged origin/main"
+        );
 
         // remote main files must be present; feature file must NOT be.
-        assert!(local_dir.path().join("remote1.txt").exists(), "remote1.txt from origin/main must be present");
-        assert!(!local_dir.path().join("feature.txt").exists(), "feature.txt from wrong branch must NOT be present");
+        assert!(
+            local_dir.path().join("remote1.txt").exists(),
+            "remote1.txt from origin/main must be present"
+        );
+        assert!(
+            !local_dir.path().join("feature.txt").exists(),
+            "feature.txt from wrong branch must NOT be present"
+        );
     }
 
     #[test]
@@ -1090,7 +1197,9 @@ mod tests {
         {
             let tid = idx.write_tree().unwrap();
             let t = local_repo.find_tree(tid).unwrap();
-            local_repo.commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[]).unwrap();
+            local_repo
+                .commit(Some("refs/heads/main"), &sig, &sig, "base", &t, &[])
+                .unwrap();
         }
         // Push base to remote.
         let mut r = local_repo.remote("origin", &remote_path).unwrap();
@@ -1106,7 +1215,16 @@ mod tests {
             let tid = idx.write_tree().unwrap();
             let t = local_repo.find_tree(tid).unwrap();
             let head = local_repo.head().unwrap().peel_to_commit().unwrap();
-            local_repo.commit(Some("refs/heads/main"), &sig, &sig, &format!("local {i}"), &t, &[&head]).unwrap();
+            local_repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    &format!("local {i}"),
+                    &t,
+                    &[&head],
+                )
+                .unwrap();
         }
         drop(local_repo);
 
@@ -1121,14 +1239,29 @@ mod tests {
             let otid = oi.write_tree().unwrap();
             let otree = other_repo.find_tree(otid).unwrap();
             let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
-            other_repo.commit(Some("refs/heads/main"), &sig, &sig, &format!("remote {i}"), &otree, &[&ohead]).unwrap();
+            other_repo
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    &format!("remote {i}"),
+                    &otree,
+                    &[&ohead],
+                )
+                .unwrap();
         }
-        other_repo.find_remote("origin").unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        other_repo
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         // Fetch to establish refs/remotes/origin/main so status shows ahead:2, behind:8.
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
         svc.fetch(&local_path, "origin", &creds).unwrap();
 
         let before = svc.status(&local_path).unwrap();
@@ -1161,7 +1294,11 @@ mod tests {
         let seed_dir = TempDir::new().unwrap();
         let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
         seed_repo.set_head("refs/heads/main").ok();
-        fs::write(seed_dir.path().join("workspace.yml"), "name: remote-workspace\n").unwrap();
+        fs::write(
+            seed_dir.path().join("workspace.yml"),
+            "name: remote-workspace\n",
+        )
+        .unwrap();
         let mut si = seed_repo.index().unwrap();
         si.add_path(Path::new("workspace.yml")).unwrap();
         si.write().unwrap();
@@ -1169,7 +1306,14 @@ mod tests {
         {
             let t = seed_repo.find_tree(stid).unwrap();
             seed_repo
-                .commit(Some("refs/heads/main"), &sig, &sig, "remote initial", &t, &[])
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "remote initial",
+                    &t,
+                    &[],
+                )
                 .unwrap();
         }
         seed_repo
@@ -1184,7 +1328,11 @@ mod tests {
         let local_path = local_dir.path().to_string_lossy().to_string();
         let local_repo = Repository::init(&local_path).unwrap();
         local_repo.set_head("refs/heads/main").ok();
-        fs::write(local_dir.path().join("workspace.yml"), "name: local-workspace\n").unwrap();
+        fs::write(
+            local_dir.path().join("workspace.yml"),
+            "name: local-workspace\n",
+        )
+        .unwrap();
         let mut li = local_repo.index().unwrap();
         li.add_path(Path::new("workspace.yml")).unwrap();
         li.write().unwrap();
@@ -1192,13 +1340,23 @@ mod tests {
         {
             let t = local_repo.find_tree(ltid).unwrap();
             local_repo
-                .commit(Some("refs/heads/main"), &sig, &sig, "local initial", &t, &[])
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    "local initial",
+                    &t,
+                    &[],
+                )
                 .unwrap();
         }
         drop(local_repo);
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         svc.add_remote(&local_path, "origin", &remote_path).unwrap();
         svc.fetch(&local_path, "origin", &creds).unwrap();
@@ -1209,7 +1367,10 @@ mod tests {
         // Pull MUST return an error because workspace.yml has a merge conflict
         // (both sides added it independently with no common ancestor).
         let result = svc.pull(&local_path, "origin", &creds);
-        assert!(result.is_err(), "pull must return error when there are merge conflicts");
+        assert!(
+            result.is_err(),
+            "pull must return error when there are merge conflicts"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("merge conflict"),
@@ -1236,20 +1397,26 @@ mod tests {
 
         // Manually plant a stale tracking ref (simulates what a prior fetch would do).
         let head_oid = repo.head().unwrap().target().unwrap();
-        repo.reference("refs/remotes/origin/main", head_oid, false, "planted").unwrap();
+        repo.reference("refs/remotes/origin/main", head_oid, false, "planted")
+            .unwrap();
         assert!(repo.find_reference("refs/remotes/origin/main").is_ok());
 
         let svc = Git2Service::new();
-        svc.add_remote(&path, "origin", "https://example.com/repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://example.com/repo.git")
+            .unwrap();
         svc.remove_remote(&path, "origin").unwrap();
-        svc.add_remote(&path, "origin", "https://example.com/new-repo.git").unwrap();
+        svc.add_remote(&path, "origin", "https://example.com/new-repo.git")
+            .unwrap();
 
         // The stale ref should be GONE after remove — currently it is NOT (bug).
         let repo2 = Repository::open(&path).unwrap();
         let ref_exists = repo2.find_reference("refs/remotes/origin/main").is_ok();
         println!("stale tracking ref still exists after remove+readd: {ref_exists}");
         // This assertion currently FAILS if remove_remote doesn't prune refs.
-        assert!(!ref_exists, "stale refs/remotes/origin/* must be deleted by remove_remote");
+        assert!(
+            !ref_exists,
+            "stale refs/remotes/origin/* must be deleted by remove_remote"
+        );
     }
 
     /// End-to-end integration test against the real GitHub remote used in bug
@@ -1270,7 +1437,11 @@ mod tests {
         local_repo.set_head("refs/heads/main").ok();
 
         // 2. workspace.yml is created by the app (shows as dirty in Git UI)
-        fs::write(local_dir.path().join("workspace.yml"), "name: test-workspace\n").unwrap();
+        fs::write(
+            local_dir.path().join("workspace.yml"),
+            "name: test-workspace\n",
+        )
+        .unwrap();
 
         // 3. User stages and commits workspace.yml (it's shown as dirty, they commit it)
         let mut idx = local_repo.index().unwrap();
@@ -1279,7 +1450,14 @@ mod tests {
         let tid = idx.write_tree().unwrap();
         let tree = local_repo.find_tree(tid).unwrap();
         local_repo
-            .commit(Some("refs/heads/main"), &sig, &sig, "initial: workspace.yml", &tree, &[])
+            .commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "initial: workspace.yml",
+                &tree,
+                &[],
+            )
             .unwrap();
         drop(tree);
         drop(local_repo);
@@ -1289,13 +1467,24 @@ mod tests {
         let creds = GitCredentials::SshAgent;
 
         // 4. Add remote and fetch.
-        svc.add_remote(&local_path, "origin", "git@github.com:Snehal1112/test-42.git")
-            .unwrap();
+        svc.add_remote(
+            &local_path,
+            "origin",
+            "git@github.com:Snehal1112/test-42.git",
+        )
+        .unwrap();
         svc.fetch(&local_path, "origin", &creds).unwrap();
 
         let before = svc.status(&local_path).unwrap();
-        println!("before pull: ahead={} behind={}", before.ahead, before.behind);
-        assert!(before.behind > 0, "should be behind before pull; got behind={}", before.behind);
+        println!(
+            "before pull: ahead={} behind={}",
+            before.ahead, before.behind
+        );
+        assert!(
+            before.behind > 0,
+            "should be behind before pull; got behind={}",
+            before.behind
+        );
 
         // Pull will produce a merge conflict because local committed workspace.yml
         // from an unrelated history (no common ancestor with remote).  The
@@ -1349,7 +1538,11 @@ mod tests {
         let seed_dir = TempDir::new().unwrap();
         let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
         seed_repo.set_head("refs/heads/main").ok();
-        fs::write(seed_dir.path().join("workspace.yml"), "name: test-workspace\nversion: 1\n").unwrap();
+        fs::write(
+            seed_dir.path().join("workspace.yml"),
+            "name: test-workspace\nversion: 1\n",
+        )
+        .unwrap();
         fs::write(seed_dir.path().join("request.bru"), "meta { name: Ping }").unwrap();
         let mut idx = seed_repo.index().unwrap();
         idx.add_path(Path::new("workspace.yml")).unwrap();
@@ -1385,7 +1578,10 @@ mod tests {
         drop(local_repo);
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         svc.add_remote(&local_path, "origin", &remote_path).unwrap();
         svc.fetch(&local_path, "origin", &creds).unwrap();
@@ -1444,7 +1640,14 @@ mod tests {
             };
             let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
             seed_repo
-                .commit(Some("refs/heads/main"), &sig, &sig, &format!("commit {i}"), &tree, &parent_refs)
+                .commit(
+                    Some("refs/heads/main"),
+                    &sig,
+                    &sig,
+                    &format!("commit {i}"),
+                    &tree,
+                    &parent_refs,
+                )
                 .unwrap();
         }
         seed_repo
@@ -1462,10 +1665,17 @@ mod tests {
         local_repo.set_head("refs/heads/main").ok();
 
         // workspace.yml is present but NOT committed (mimics the user's scenario).
-        fs::write(local_dir.path().join("workspace.yml"), "name: test-workspace\n").unwrap();
+        fs::write(
+            local_dir.path().join("workspace.yml"),
+            "name: test-workspace\n",
+        )
+        .unwrap();
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         // Add remote and fetch.
         svc.add_remote(&local_path, "origin", &remote_path).unwrap();
@@ -1477,18 +1687,31 @@ mod tests {
         assert_eq!(status_before.branch, "main");
         // workspace.yml should appear as untracked.
         assert!(
-            status_before.files.iter().any(|f| f.path == "workspace.yml"),
+            status_before
+                .files
+                .iter()
+                .any(|f| f.path == "workspace.yml"),
             "workspace.yml should be listed as untracked"
         );
 
         // Pull must succeed even though HEAD is unborn (no local commits yet).
         let result = svc.pull(&local_path, "origin", &creds);
-        assert!(result.is_ok(), "pull into unborn repo must succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "pull into unborn repo must succeed: {:?}",
+            result.err()
+        );
 
         // After pull, status.behind must be 0 and the remote files must be checked out.
         let status_after = svc.status(&local_path).unwrap();
-        assert_eq!(status_after.behind, 0, "behind must be 0 after pull into unborn repo");
-        assert_eq!(status_after.ahead, 0, "ahead must be 0 after pull into unborn repo");
+        assert_eq!(
+            status_after.behind, 0,
+            "behind must be 0 after pull into unborn repo"
+        );
+        assert_eq!(
+            status_after.ahead, 0,
+            "ahead must be 0 after pull into unborn repo"
+        );
         assert!(
             local_dir.path().join("file3.txt").exists(),
             "remote files must be checked out after pull"
@@ -1615,7 +1838,9 @@ mod tests {
         Repository::init_bare(&remote_path).unwrap();
         let repo = Repository::open(&path).unwrap();
         let mut origin = repo.remote("origin", &remote_path).unwrap();
-        origin.push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        origin
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
         drop(origin);
         drop(repo);
 
@@ -1626,7 +1851,10 @@ mod tests {
         let commit_info = svc.commit(&path, "new commit").unwrap();
 
         // Push via the service.
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
         svc.push(&path, "origin", &creds).unwrap();
 
         // Verify the bare remote HEAD now matches the new local commit.
@@ -1659,10 +1887,15 @@ mod tests {
         idx.write().unwrap();
         let tid = idx.write_tree().unwrap();
         let tree = repo_a.find_tree(tid).unwrap();
-        repo_a.commit(Some("refs/heads/main"), &sig, &sig, "base", &tree, &[]).unwrap();
+        repo_a
+            .commit(Some("refs/heads/main"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
         drop(tree);
-        repo_a.remote("origin", &remote_path).unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        repo_a
+            .remote("origin", &remote_path)
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         // Clone B: starts from the same base.
         let dir_b = TempDir::new().unwrap();
@@ -1676,7 +1909,10 @@ mod tests {
         drop(repo_b);
 
         let svc = Git2Service::new();
-        let creds = GitCredentials::UserPass { username: String::new(), password: String::new() };
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
 
         // Clone A pushes a second commit — remote is now 1 ahead of B's base.
         let repo_a2 = Repository::open(&path_a).unwrap();
@@ -1687,7 +1923,16 @@ mod tests {
         let tid2 = idx2.write_tree().unwrap();
         let tree2 = repo_a2.find_tree(tid2).unwrap();
         let head2 = repo_a2.head().unwrap().peel_to_commit().unwrap();
-        repo_a2.commit(Some("refs/heads/main"), &sig, &sig, "A second", &tree2, &[&head2]).unwrap();
+        repo_a2
+            .commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "A second",
+                &tree2,
+                &[&head2],
+            )
+            .unwrap();
         svc.push(&path_a, "origin", &creds).unwrap();
 
         // Clone B makes a commit on its stale base and tries to push — must fail.
@@ -1705,7 +1950,11 @@ mod tests {
         let svc = Git2Service::new();
         fs::write(dir.path().join("test.bru"), "stash this").unwrap();
         svc.stash_save(&path, "drop me").unwrap();
-        assert_eq!(svc.stash_list(&path).unwrap().len(), 1, "stash must exist before drop");
+        assert_eq!(
+            svc.stash_list(&path).unwrap().len(),
+            1,
+            "stash must exist before drop"
+        );
         svc.stash_drop(&path, 0).unwrap();
         assert!(
             svc.stash_list(&path).unwrap().is_empty(),
@@ -1719,7 +1968,10 @@ mod tests {
         let svc = Git2Service::new();
         // No stashes — index 99 must error.
         let result = svc.stash_drop(&path, 99);
-        assert!(result.is_err(), "stash_drop with out-of-range index must fail");
+        assert!(
+            result.is_err(),
+            "stash_drop with out-of-range index must fail"
+        );
     }
 
     #[test]
@@ -1744,7 +1996,10 @@ mod tests {
         let _ = svc.merge_branch(&path, "conflict-branch");
 
         let conflicts = svc.conflicts(&path).unwrap();
-        assert!(!conflicts.is_empty(), "conflicts must be non-empty after a conflicting merge");
+        assert!(
+            !conflicts.is_empty(),
+            "conflicts must be non-empty after a conflicting merge"
+        );
         assert!(
             conflicts.iter().any(|c| c.path == "test.bru"),
             "test.bru must appear in the conflict list"
@@ -1770,10 +2025,14 @@ mod tests {
 
         let _ = svc.merge_branch(&path, "conflict-branch");
 
-        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours).unwrap();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours)
+            .unwrap();
 
         let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
-        assert_eq!(content, "ours content", "Ours resolution must keep main branch content");
+        assert_eq!(
+            content, "ours content",
+            "Ours resolution must keep main branch content"
+        );
     }
 
     #[test]
@@ -1795,10 +2054,14 @@ mod tests {
 
         let _ = svc.merge_branch(&path, "conflict-branch");
 
-        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs).unwrap();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs)
+            .unwrap();
 
         let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
-        assert_eq!(content, "theirs content", "Theirs resolution must keep incoming branch content");
+        assert_eq!(
+            content, "theirs content",
+            "Theirs resolution must keep incoming branch content"
+        );
     }
 
     #[test]
@@ -1809,7 +2072,10 @@ mod tests {
         svc.switch_branch(&path, "feature-x").unwrap();
         // feature-x is now checked out — deleting it must fail.
         let result = svc.delete_branch(&path, "feature-x");
-        assert!(result.is_err(), "deleting the currently checked-out branch must fail");
+        assert!(
+            result.is_err(),
+            "deleting the currently checked-out branch must fail"
+        );
     }
 
     #[test]
@@ -1822,7 +2088,8 @@ mod tests {
         // Switch back to main first (create_branch switches HEAD).
         let repo = git2::Repository::open(&path).unwrap();
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
 
         // Now dirty the working tree on main.
         std::fs::write(dir.path().join("test.bru"), "dirty content").unwrap();
@@ -1830,8 +2097,12 @@ mod tests {
         // Attempting to switch to 'other' must fail with InvalidInput, not silently discard the change.
         let result = svc.switch_branch(&path, "other");
         assert!(
-            matches!(result, Err(rocket_shared::error::DomainError::InvalidInput(_))),
-            "expected InvalidInput when dirty, got: {:?}", result
+            matches!(
+                result,
+                Err(rocket_shared::error::DomainError::InvalidInput(_))
+            ),
+            "expected InvalidInput when dirty, got: {:?}",
+            result
         );
 
         // The dirty file must still be there — not discarded.
@@ -1847,7 +2118,8 @@ mod tests {
         svc.create_branch(&path, "other").unwrap();
         let repo = git2::Repository::open(&path).unwrap();
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
 
         // Stage a new file without committing.
         std::fs::write(dir.path().join("staged.bru"), "staged content").unwrap();
@@ -1857,8 +2129,12 @@ mod tests {
 
         let result = svc.switch_branch(&path, "other");
         assert!(
-            matches!(result, Err(rocket_shared::error::DomainError::InvalidInput(_))),
-            "expected InvalidInput for staged changes, got: {:?}", result
+            matches!(
+                result,
+                Err(rocket_shared::error::DomainError::InvalidInput(_))
+            ),
+            "expected InvalidInput for staged changes, got: {:?}",
+            result
         );
     }
 
@@ -1878,11 +2154,13 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "feature commit", &tree, &[&head]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature commit", &tree, &[&head])
+            .unwrap();
 
         // Switch back to main and make a conflicting change to the same file.
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
         std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
         let mut idx2 = repo.index().unwrap();
         idx2.add_path(std::path::Path::new("test.bru")).unwrap();
@@ -1890,18 +2168,30 @@ mod tests {
         let tree_id2 = idx2.write_tree().unwrap();
         let tree2 = repo.find_tree(tree_id2).unwrap();
         let head2 = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "main conflicting commit", &tree2, &[&head2]).unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "main conflicting commit",
+            &tree2,
+            &[&head2],
+        )
+        .unwrap();
 
         // Now try to merge 'feature' into main — must conflict.
         let result = svc.merge_branch(&path, "feature");
         assert!(
             matches!(result, Err(rocket_shared::error::DomainError::Conflict(_))),
-            "expected Conflict error, got: {:?}", result
+            "expected Conflict error, got: {:?}",
+            result
         );
 
         // Conflicts must be readable after the call (index was written).
         let conflicts = svc.conflicts(&path).unwrap();
-        assert!(!conflicts.is_empty(), "expected at least one conflict file in index");
+        assert!(
+            !conflicts.is_empty(),
+            "expected at least one conflict file in index"
+        );
         assert!(conflicts.iter().any(|c| c.path == "test.bru"));
     }
 
@@ -1918,7 +2208,11 @@ mod tests {
         idx.write().unwrap();
 
         let info = svc.commit(&path, "add new.bru").unwrap();
-        assert_eq!(info.files_changed, 1, "expected 1 file changed, got {}", info.files_changed);
+        assert_eq!(
+            info.files_changed, 1,
+            "expected 1 file changed, got {}",
+            info.files_changed
+        );
     }
 
     #[test]
@@ -1928,7 +2222,11 @@ mod tests {
         let log = svc.log(&path, 10).unwrap();
         // The initial commit in setup_repo() adds test.bru — files_changed should be 1.
         assert!(!log.is_empty());
-        assert_eq!(log[0].files_changed, 1, "expected 1 file in initial commit, got {}", log[0].files_changed);
+        assert_eq!(
+            log[0].files_changed, 1,
+            "expected 1 file in initial commit, got {}",
+            log[0].files_changed
+        );
     }
 
     #[test]
@@ -1950,14 +2248,20 @@ mod tests {
         let sig = git2::Signature::now("T", "t@t.com").unwrap();
         std::fs::write(clone2_dir.path().join("remote_change.bru"), "from remote").unwrap();
         let mut idx = clone2.index().unwrap();
-        idx.add_path(std::path::Path::new("remote_change.bru")).unwrap();
+        idx.add_path(std::path::Path::new("remote_change.bru"))
+            .unwrap();
         idx.write().unwrap();
         let tree_id = idx.write_tree().unwrap();
         let tree = clone2.find_tree(tree_id).unwrap();
         let head = clone2.head().unwrap().peel_to_commit().unwrap();
-        clone2.commit(Some("HEAD"), &sig, &sig, "remote commit", &tree, &[&head]).unwrap();
-        clone2.find_remote("origin").unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        clone2
+            .commit(Some("HEAD"), &sig, &sig, "remote commit", &tree, &[&head])
+            .unwrap();
+        clone2
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         // Pull into the original local repo — should fast-forward.
         let result = svc.pull(&local_path, "origin", &creds);
@@ -1998,9 +2302,21 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = clone2.find_tree(tree_id).unwrap();
         let head = clone2.head().unwrap().peel_to_commit().unwrap();
-        clone2.commit(Some("HEAD"), &sig, &sig, "roundtrip commit", &tree, &[&head]).unwrap();
-        clone2.find_remote("origin").unwrap()
-            .push(&["refs/heads/main:refs/heads/main"], None).unwrap();
+        clone2
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "roundtrip commit",
+                &tree,
+                &[&head],
+            )
+            .unwrap();
+        clone2
+            .find_remote("origin")
+            .unwrap()
+            .push(&["refs/heads/main:refs/heads/main"], None)
+            .unwrap();
 
         // Pull in local1 and verify the file arrived.
         svc.pull(&local_path, "origin", &creds).unwrap();
@@ -2029,10 +2345,12 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head])
+            .unwrap();
 
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
         std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
         let mut idx2 = repo.index().unwrap();
         idx2.add_path(std::path::Path::new("test.bru")).unwrap();
@@ -2040,15 +2358,21 @@ mod tests {
         let tree_id2 = idx2.write_tree().unwrap();
         let tree2 = repo.find_tree(tree_id2).unwrap();
         let head2 = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2])
+            .unwrap();
         svc.merge_branch(&path, "feature").unwrap_err(); // produces conflict
 
         // Resolve using Ours strategy.
-        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours).unwrap();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Ours)
+            .unwrap();
 
         // File on disk must contain the local (main) version.
         let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
-        assert_eq!(content.trim(), "main version", "expected 'main version', got: {content}");
+        assert_eq!(
+            content.trim(),
+            "main version",
+            "expected 'main version', got: {content}"
+        );
 
         // File must be staged (no longer in conflict list).
         let conflicts = svc.conflicts(&path).unwrap();
@@ -2073,10 +2397,12 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head])
+            .unwrap();
 
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
         std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
         let mut idx2 = repo.index().unwrap();
         idx2.add_path(std::path::Path::new("test.bru")).unwrap();
@@ -2084,13 +2410,19 @@ mod tests {
         let tree_id2 = idx2.write_tree().unwrap();
         let tree2 = repo.find_tree(tree_id2).unwrap();
         let head2 = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2])
+            .unwrap();
         svc.merge_branch(&path, "feature").unwrap_err();
 
-        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs).unwrap();
+        svc.resolve_conflict(&path, "test.bru", &ConflictResolution::Theirs)
+            .unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
-        assert_eq!(content.trim(), "feature version", "expected 'feature version', got: {content}");
+        assert_eq!(
+            content.trim(),
+            "feature version",
+            "expected 'feature version', got: {content}"
+        );
 
         let conflicts = svc.conflicts(&path).unwrap();
         assert!(
@@ -2114,10 +2446,12 @@ mod tests {
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "feature", &tree, &[&head])
+            .unwrap();
 
         repo.set_head("refs/heads/main").unwrap();
-        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force())).unwrap();
+        repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
         std::fs::write(dir.path().join("test.bru"), "main version").unwrap();
         let mut idx2 = repo.index().unwrap();
         idx2.add_path(std::path::Path::new("test.bru")).unwrap();
@@ -2125,16 +2459,24 @@ mod tests {
         let tree_id2 = idx2.write_tree().unwrap();
         let tree2 = repo.find_tree(tree_id2).unwrap();
         let head2 = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main", &tree2, &[&head2])
+            .unwrap();
         svc.merge_branch(&path, "feature").unwrap_err();
 
         svc.abort_merge(&path).unwrap();
 
         let conflicts = svc.conflicts(&path).unwrap();
-        assert!(conflicts.is_empty(), "conflicts should be empty after abort");
+        assert!(
+            conflicts.is_empty(),
+            "conflicts should be empty after abort"
+        );
 
         let content = std::fs::read_to_string(dir.path().join("test.bru")).unwrap();
-        assert_eq!(content.trim(), "main version", "file not restored after abort");
+        assert_eq!(
+            content.trim(),
+            "main version",
+            "file not restored after abort"
+        );
     }
 
     #[test]
@@ -2154,7 +2496,8 @@ mod tests {
             idx.write().unwrap();
             let tree_id = idx.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
             repo.set_head("refs/heads/main").unwrap();
         }
 
@@ -2164,7 +2507,11 @@ mod tests {
 
         // Commit should fail — no identity in git config, no fallback.
         let result = Git2Service::new().commit(&path, "second commit");
-        assert!(result.is_err(), "expected error when identity is missing, got: {:?}", result);
+        assert!(
+            result.is_err(),
+            "expected error when identity is missing, got: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -2191,7 +2538,8 @@ mod tests {
             idx.write().unwrap();
             let tree_id = idx.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[]).unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
             repo.set_head("refs/heads/main").unwrap();
         }
 
@@ -2236,7 +2584,14 @@ mod tests {
             let tree_id = idx.write_tree().unwrap();
             let tree = local_repo.find_tree(tree_id).unwrap();
             local_repo
-                .commit(Some("refs/heads/main"), &setup_sig, &setup_sig, "base", &tree, &[])
+                .commit(
+                    Some("refs/heads/main"),
+                    &setup_sig,
+                    &setup_sig,
+                    "base",
+                    &tree,
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -2258,7 +2613,14 @@ mod tests {
             let tree2 = local_repo.find_tree(tree_id2).unwrap();
             let head = local_repo.head().unwrap().peel_to_commit().unwrap();
             local_repo
-                .commit(Some("refs/heads/main"), &setup_sig, &setup_sig, "local", &tree2, &[&head])
+                .commit(
+                    Some("refs/heads/main"),
+                    &setup_sig,
+                    &setup_sig,
+                    "local",
+                    &tree2,
+                    &[&head],
+                )
                 .unwrap();
         }
         drop(local_repo);
@@ -2283,7 +2645,14 @@ mod tests {
         let ohead = other_repo.head().unwrap().peel_to_commit().unwrap();
         let other_sig = git2::Signature::now("Other", "other@test.com").unwrap();
         other_repo
-            .commit(Some("refs/heads/main"), &other_sig, &other_sig, "remote", &otree, &[&ohead])
+            .commit(
+                Some("refs/heads/main"),
+                &other_sig,
+                &other_sig,
+                "remote",
+                &otree,
+                &[&ohead],
+            )
             .unwrap();
         other_repo
             .find_remote("origin")

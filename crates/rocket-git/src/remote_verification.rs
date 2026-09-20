@@ -45,9 +45,63 @@ impl fmt::Display for SshHostFailure {
     }
 }
 
+/// Details of a TLS/HTTPS certificate that failed native verification.
+///
+/// Unlike SSH host keys, X.509 verification has no offline "known" state to
+/// classify against here — native verification (OS/OpenSSL trust store) is
+/// the sole authority, so this carries only the identifying details needed
+/// to display and diagnose the rejected certificate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TlsCertificateFailure {
+    pub host: String,
+    pub port: u16,
+    /// SHA-256 fingerprint of the DER-encoded certificate, formatted like
+    /// `SshHostFailure::fingerprint`.
+    pub fingerprint: String,
+}
+
+impl fmt::Display for TlsCertificateFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "invalid TLS certificate for {}:{} (fingerprint {})",
+            self.host, self.port, self.fingerprint
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tls_certificate_failure_serializes_with_camel_case_names() {
+        let failure = TlsCertificateFailure {
+            host: "git.example.com".to_owned(),
+            port: 443,
+            fingerprint: "SHA256:abc".to_owned(),
+        };
+
+        let value = serde_json::to_value(failure).expect("failure should serialize");
+        assert_eq!(value["host"], "git.example.com");
+        assert_eq!(value["port"], 443);
+        assert_eq!(value["fingerprint"], "SHA256:abc");
+    }
+
+    #[test]
+    fn tls_certificate_failure_display_contains_actionable_details() {
+        let failure = TlsCertificateFailure {
+            host: "git.example.com".to_owned(),
+            port: 443,
+            fingerprint: "SHA256:abc".to_owned(),
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "invalid TLS certificate for git.example.com:443 (fingerprint SHA256:abc)"
+        );
+    }
 
     #[test]
     fn serializes_with_camel_case_names_and_kind() {

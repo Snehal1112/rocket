@@ -3,7 +3,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::branch::{Branch, BranchList};
 
-use super::helpers::{branch_name, open_repo};
+use super::helpers::{branch_name, open_repo, clear_matching_untracked_paths};
 
 #[tracing::instrument(name = "git_branches", fields(repo_path = %path))]
 pub(super) fn branches(path: &str) -> DomainResult<BranchList> {
@@ -119,6 +119,17 @@ pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainR
         )));
     }
 
+    // Reject up front if the local branch already exists, before anything
+    // else is touched.
+    if repo
+        .find_branch(&local_name, git2::BranchType::Local)
+        .is_ok()
+    {
+        return Err(DomainError::InvalidInput(format!(
+            "local branch '{local_name}' already exists"
+        )));
+    }
+
     // Resolve the remote-tracking ref to a commit.
     let remote_ref = format!("refs/remotes/{remote_branch}");
     let reference = repo
@@ -127,12 +138,33 @@ pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainR
     let commit = reference
         .peel_to_commit()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
-
-    // Create a local branch pointing at the same commit.
-    repo.branch(&local_name, &commit, false)
+    let tree = commit
+        .tree()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-    // Set upstream tracking.
+    // Adopt any untracked file whose content already matches the target,
+    // so checkout doesn't reject a harmless pre-existing copy.
+    clear_matching_untracked_paths(&repo, &tree)?;
+
+    // Preflight: verify a safe (non-forced) checkout of the target tree
+    // succeeds BEFORE creating the local branch or moving HEAD, so a
+    // rejected checkout (e.g. a colliding untracked file) leaves refs, the
+    // index, and the worktree completely untouched. libgit2's safe checkout
+    // detects all such conflicts before applying any change.
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe();
+    repo.checkout_tree(commit.as_object(), Some(&mut checkout))
+        .map_err(|e| {
+            DomainError::Conflict(format!(
+                "cannot check out '{remote_branch}': {e}. \
+                 Resolve the conflicting local file(s) first."
+            ))
+        })?;
+
+    // Checkout succeeded — now safe to create the local branch, track
+    // upstream, sync the index to the checked-out tree, and move HEAD.
+    repo.branch(&local_name, &commit, false)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
     let mut local_branch = repo
         .find_branch(&local_name, git2::BranchType::Local)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -140,10 +172,17 @@ pub(super) fn checkout_remote_branch(path: &str, remote_branch: &str) -> DomainR
         .set_upstream(Some(remote_branch))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-    // Switch HEAD to the new local branch.
-    repo.set_head(&format!("refs/heads/{local_name}"))
+    let mut index = repo
+        .index()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
-    repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+    index
+        .read_tree(&tree)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    index
+        .write()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    repo.set_head(&format!("refs/heads/{local_name}"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     Ok(())

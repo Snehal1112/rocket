@@ -8,58 +8,89 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::credentials::GitCredentials;
 use crate::diff::{DiffHunk, DiffLine, LineType};
 use crate::status::GitStatus;
-use crate::{SshHostFailure, SshHostFailureKind};
+use crate::{SshHostFailure, SshHostFailureKind, TlsCertificateFailure};
 
 use super::ssh_host_verification::{
     classify_remote_host, openssh_sha256_fingerprint, SshHostClassification,
 };
+use super::tls_certificate_verification::classify_tls_certificate;
+
+/// A diagnostic recorded from a rejected certificate, keyed by which
+/// transport produced it. Recording is diagnostic-only — see
+/// `certificate_failure_policy`.
+#[derive(Clone)]
+enum CertificateFailure {
+    Ssh(SshHostFailure),
+    Tls(TlsCertificateFailure),
+}
 
 #[derive(Clone, Default)]
 pub(super) struct RemoteVerificationState {
-    ssh_failure: Arc<Mutex<Option<SshHostFailure>>>,
+    failure: Arc<Mutex<Option<CertificateFailure>>>,
 }
 
 impl RemoteVerificationState {
+    /// Map a failed clone/fetch/push/pull to a domain error, enriching it
+    /// with the classification our own `certificate_check` callback
+    /// recorded — if any — for the transport that produced this error.
+    ///
+    /// The two transports do not report a rejected certificate the same
+    /// way: SSH (`ssh_libssh2.c`) preserves `GIT_ECERTIFICATE` through to
+    /// the caller, but libgit2's OpenSSL HTTPS stream
+    /// (`httpclient.c::check_certificate`) does not — it restores the
+    /// original "SSL certificate is invalid" error under a generic error
+    /// code, only its class (`Ssl`) survives. So SSH enrichment is gated on
+    /// the code exactly matching `Certificate`; TLS enrichment on the
+    /// class matching `Ssl`. Either way, enrichment only ever fires when
+    /// our callback actually recorded a failure for this connection
+    /// attempt, so a recorded TLS failure never gets attached to an
+    /// unrelated error.
     pub(super) fn map_error(&self, error: git2::Error) -> DomainError {
-        if error.code() == git2::ErrorCode::Certificate {
-            let failure = self
-                .ssh_failure
-                .lock()
-                .ok()
-                .and_then(|failure| failure.clone());
-            if let Some(failure) = failure {
-                let SshHostFailure {
-                    kind,
+        let failure = self.failure.lock().ok().and_then(|failure| failure.clone());
+        match failure {
+            Some(CertificateFailure::Ssh(SshHostFailure {
+                kind,
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            })) if error.code() == git2::ErrorCode::Certificate => match kind {
+                SshHostFailureKind::UnknownHost => DomainError::SshUnknownHost {
                     host,
                     port,
                     algorithm,
                     fingerprint,
-                } = failure;
-                return match kind {
-                    SshHostFailureKind::UnknownHost => DomainError::SshUnknownHost {
+                },
+                SshHostFailureKind::ChangedHost => DomainError::SshHostKeyChanged {
+                    host,
+                    port,
+                    algorithm,
+                    fingerprint,
+                },
+                SshHostFailureKind::VerificationUnavailable => {
+                    DomainError::SshHostVerificationUnavailable {
                         host,
                         port,
                         algorithm,
                         fingerprint,
-                    },
-                    SshHostFailureKind::ChangedHost => DomainError::SshHostKeyChanged {
-                        host,
-                        port,
-                        algorithm,
-                        fingerprint,
-                    },
-                    SshHostFailureKind::VerificationUnavailable => {
-                        DomainError::SshHostVerificationUnavailable {
-                            host,
-                            port,
-                            algorithm,
-                            fingerprint,
-                        }
                     }
-                };
+                }
+            },
+            Some(CertificateFailure::Tls(TlsCertificateFailure {
+                host,
+                port,
+                fingerprint,
+            })) if error.code() == git2::ErrorCode::Certificate
+                || error.class() == git2::ErrorClass::Ssl =>
+            {
+                DomainError::TlsCertificateInvalid {
+                    host,
+                    port,
+                    fingerprint,
+                }
             }
+            _ => DomainError::Internal(error.to_string()),
         }
-        DomainError::Internal(error.to_string())
     }
 }
 
@@ -75,7 +106,7 @@ pub(super) fn build_callbacks(
 ) -> (git2::RemoteCallbacks<'static>, RemoteVerificationState) {
     let mut callbacks = git2::RemoteCallbacks::new();
     let verification = RemoteVerificationState::default();
-    let failure_slot = Arc::clone(&verification.ssh_failure);
+    let failure_slot = Arc::clone(&verification.failure);
     let remote_url = remote_url.to_owned();
     // This callback is invoked only after libgit2's HTTPS certificate or SSH
     // host-key verification fails. Classification is diagnostic only, and
@@ -107,8 +138,15 @@ pub(super) fn build_callbacks(
             if let SshHostClassification::Failure(failure) = classification {
                 if let Ok(mut slot) = failure_slot.lock() {
                     if slot.is_none() {
-                        *slot = Some(failure);
+                        *slot = Some(CertificateFailure::Ssh(failure));
                     }
+                }
+            }
+        } else if let Some(x509) = cert.as_x509() {
+            let failure = classify_tls_certificate(&remote_url, host, x509.data());
+            if let Ok(mut slot) = failure_slot.lock() {
+                if slot.is_none() {
+                    *slot = Some(CertificateFailure::Tls(failure));
                 }
             }
         }
@@ -551,10 +589,87 @@ pub(super) fn ahead_behind(repo: &Repository) -> (usize, usize) {
     }
 }
 
+/// Remove any untracked worktree file whose content is byte-identical to
+/// what `target_tree` specifies at that path, so a subsequent checkout can
+/// recreate it fresh instead of libgit2 flagging the pre-existing file as a
+/// conflict — matching real git's tolerance for adopting untracked files
+/// that already match (checkout classifies any pre-existing workdir file at
+/// a path a checkout wants to *add* as a conflict regardless of content, so
+/// staging it into the index first does not help; only clearing it does).
+/// If any untracked plain file collides with a *different*-content target
+/// entry, nothing is removed and this returns a `Conflict` error, so a mixed
+/// batch (some matching, some genuinely colliding) never leaves a partial
+/// mutation behind — either all matches are cleared, or none are.
+pub(super) fn clear_matching_untracked_paths(
+    repo: &Repository,
+    target_tree: &git2::Tree,
+) -> DomainResult<()> {
+    let baseline = repo
+        .index()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| DomainError::Internal("repository has no worktree".into()))?;
+
+    let mut matches = Vec::new();
+    let mut mismatches = Vec::new();
+    target_tree
+        .walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+            if entry.kind() != Some(git2::ObjectType::Blob) {
+                return git2::TreeWalkResult::Ok;
+            }
+            let Some(name) = entry.name() else {
+                return git2::TreeWalkResult::Ok;
+            };
+            let relative = format!("{dir}{name}");
+            if baseline.get_path(Path::new(&relative), 0).is_some() {
+                // Already tracked at this path — not an untracked collision.
+                return git2::TreeWalkResult::Ok;
+            }
+            let full_path = workdir.join(&relative);
+            let on_disk = match fs::symlink_metadata(&full_path) {
+                Ok(metadata) if metadata.is_file() => fs::read(&full_path).ok(),
+                // Not a plain file (missing, directory, symlink, ...) — leave
+                // it for the real checkout to classify.
+                _ => None,
+            };
+            let Some(on_disk) = on_disk else {
+                return git2::TreeWalkResult::Ok;
+            };
+            let Ok(object) = entry.to_object(repo) else {
+                return git2::TreeWalkResult::Ok;
+            };
+            let Some(blob) = object.as_blob() else {
+                return git2::TreeWalkResult::Ok;
+            };
+            if blob.content() == on_disk.as_slice() {
+                matches.push(full_path);
+            } else {
+                mismatches.push(relative);
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    if !mismatches.is_empty() {
+        return Err(DomainError::Conflict(format!(
+            "untracked file(s) would be overwritten with different content: {}",
+            mismatches.join(", ")
+        )));
+    }
+
+    for full_path in matches {
+        fs::remove_file(&full_path).map_err(|e| DomainError::Io(e.to_string()))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{certificate_failure_policy, GitRelativePath, RemoteVerificationState};
-    use crate::{SshHostFailure, SshHostFailureKind};
+    use super::{
+        certificate_failure_policy, CertificateFailure, GitRelativePath, RemoteVerificationState,
+    };
+    use crate::{SshHostFailure, SshHostFailureKind, TlsCertificateFailure};
     use rocket_shared::error::DomainError;
     use std::sync::{Arc, Mutex};
 
@@ -568,13 +683,25 @@ mod tests {
 
     fn verification_state(kind: SshHostFailureKind) -> RemoteVerificationState {
         RemoteVerificationState {
-            ssh_failure: Arc::new(Mutex::new(Some(SshHostFailure {
+            failure: Arc::new(Mutex::new(Some(CertificateFailure::Ssh(SshHostFailure {
                 kind,
                 host: "git.example.com".into(),
                 port: 22,
                 algorithm: "ssh-ed25519".into(),
                 fingerprint: "SHA256:abc".into(),
-            }))),
+            })))),
+        }
+    }
+
+    fn tls_verification_state() -> RemoteVerificationState {
+        RemoteVerificationState {
+            failure: Arc::new(Mutex::new(Some(CertificateFailure::Tls(
+                TlsCertificateFailure {
+                    host: "git.example.com".into(),
+                    port: 443,
+                    fingerprint: "SHA256:abc".into(),
+                },
+            )))),
         }
     }
 
@@ -608,6 +735,55 @@ mod tests {
                 .map_error(certificate_error()),
             DomainError::SshHostVerificationUnavailable { .. }
         ));
+    }
+
+    #[test]
+    fn certificate_error_maps_recorded_tls_failure_to_domain_variant() {
+        assert!(matches!(
+            tls_verification_state().map_error(certificate_error()),
+            DomainError::TlsCertificateInvalid {
+                ref host,
+                port: 443,
+                ref fingerprint,
+            } if host == "git.example.com" && fingerprint == "SHA256:abc"
+        ));
+    }
+
+    /// libgit2's OpenSSL stream backend does not preserve `GIT_ECERTIFICATE`
+    /// through to the caller for a rejected HTTPS certificate — the error
+    /// that actually reaches Rust has `ErrorCode::GenericError` with
+    /// `ErrorClass::Ssl` (confirmed against libgit2 1.8.1's
+    /// `httpclient.c::check_certificate`, which returns a raw `-1` here
+    /// rather than `GIT_ECERTIFICATE`). The mapping must still use the
+    /// classification our own callback recorded, not just the error code.
+    #[test]
+    fn generic_ssl_class_error_still_maps_recorded_tls_failure() {
+        let error = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Ssl,
+            "the SSL certificate is invalid",
+        );
+        assert!(matches!(
+            tls_verification_state().map_error(error),
+            DomainError::TlsCertificateInvalid {
+                ref host,
+                port: 443,
+                ref fingerprint,
+            } if host == "git.example.com" && fingerprint == "SHA256:abc"
+        ));
+    }
+
+    #[test]
+    fn generic_ssl_class_error_without_a_recorded_failure_stays_internal() {
+        let error = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Ssl,
+            "connection reset",
+        );
+        let mapped = RemoteVerificationState::default()
+            .map_error(error)
+            .to_string();
+        assert!(mapped.contains("connection reset"));
     }
 
     #[test]

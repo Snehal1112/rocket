@@ -6,7 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::credentials::GitCredentials;
 use crate::remote::{FetchResult, RemoteInfo};
 
-use super::helpers::{branch_name, build_callbacks, open_repo};
+use super::helpers::{branch_name, build_callbacks, open_repo, clear_matching_untracked_paths};
 
 #[tracing::instrument(name = "git_list_remotes", fields(repo_path = %path))]
 pub(super) fn list_remotes(path: &str) -> DomainResult<Vec<RemoteInfo>> {
@@ -232,6 +232,31 @@ pub(super) fn pull(
 
     if analysis.is_fast_forward() {
         let ref_name = format!("refs/heads/{}", branch_name(&repo));
+        let target_commit = repo
+            .find_commit(fetch_commit.id())
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        let target_tree = target_commit
+            .tree()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+        // Adopt any untracked file whose content already matches the target,
+        // so checkout doesn't reject a harmless pre-existing copy.
+        clear_matching_untracked_paths(&repo, &target_tree)?;
+
+        // Preflight: verify a safe (non-forced) checkout of the target tree
+        // succeeds BEFORE moving the branch ref or HEAD, so a rejected
+        // fast-forward (e.g. a colliding untracked file) leaves refs, the
+        // index, and the worktree completely untouched.
+        let mut checkout = CheckoutBuilder::new();
+        checkout.safe();
+        repo.checkout_tree(target_tree.as_object(), Some(&mut checkout))
+            .map_err(|e| {
+                DomainError::Conflict(format!(
+                    "cannot fast-forward pull: {e}. \
+                     Resolve the conflicting local file(s) first."
+                ))
+            })?;
+
         // In an unborn repo (fresh `git init`, no commits yet) the local
         // branch ref (`refs/heads/main`) does not exist — create it
         // instead of trying to update a non-existent reference.
@@ -253,8 +278,19 @@ pub(super) fn pull(
         }
         repo.set_head(&ref_name)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
+
+        // Sync the index to the checked-out tree (checkout_tree above only
+        // materializes the worktree; it does not update the index).
+        let mut index = repo
+            .index()
             .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .read_tree(&target_tree)
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        index
+            .write()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+
         return Ok(());
     }
 

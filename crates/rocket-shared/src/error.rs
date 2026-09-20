@@ -54,6 +54,13 @@ pub enum DomainError {
         algorithm: String,
         fingerprint: String,
     },
+
+    #[error("Invalid TLS certificate for {host}:{port} (fingerprint {fingerprint})")]
+    TlsCertificateInvalid {
+        host: String,
+        port: u16,
+        fingerprint: String,
+    },
 }
 
 impl From<std::io::Error> for DomainError {
@@ -100,6 +107,20 @@ mod tests {
         let err = DomainError::NotFound("test".into());
         let json = serde_json::to_string(&err).unwrap();
         assert_eq!(json, "\"Not found: test\"");
+    }
+
+    #[test]
+    fn tls_certificate_error_displays_actionable_verification_details() {
+        let error = DomainError::TlsCertificateInvalid {
+            host: "git.example.com".into(),
+            port: 443,
+            fingerprint: "SHA256:invalid".into(),
+        };
+
+        let display = error.to_string();
+        assert!(display.contains("git.example.com"));
+        assert!(display.contains("443"));
+        assert!(display.contains("fingerprint SHA256:invalid"));
     }
 
     #[test]

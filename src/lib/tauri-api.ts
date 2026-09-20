@@ -412,6 +412,13 @@ export type GitNetworkError =
       algorithm: string;
       fingerprint: string;
     }
+  | {
+      code: 'tlsCertificateInvalid';
+      message: string;
+      host: string;
+      port: number;
+      fingerprint: string;
+    }
   | { code: 'generic'; message: string };
 
 /** The three SSH host-trust failure variants of {@link GitNetworkError}. */
@@ -471,9 +478,35 @@ export function parseGitNetworkError(error: unknown): GitNetworkError {
         };
       }
     }
+    if (candidate.code === 'tlsCertificateInvalid') {
+      const tls = error as {
+        code: string;
+        message: string;
+        host?: unknown;
+        port?: unknown;
+        fingerprint?: unknown;
+      };
+      if (
+        typeof tls.host === 'string' &&
+        typeof tls.port === 'number' &&
+        typeof tls.fingerprint === 'string'
+      ) {
+        return {
+          code: 'tlsCertificateInvalid',
+          message: tls.message,
+          host: tls.host,
+          port: tls.port,
+          fingerprint: tls.fingerprint,
+        };
+      }
+    }
     if (candidate.code === 'generic') {
       return { code: 'generic', message: candidate.message };
     }
+    // A recognized error shape (has code + message) that failed its
+    // specific field validation above — prefer the original message over
+    // stringifying the whole object.
+    return { code: 'generic', message: candidate.message };
   }
   return { code: 'generic', message: String(error) };
 }

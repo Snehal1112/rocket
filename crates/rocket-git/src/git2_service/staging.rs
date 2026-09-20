@@ -89,7 +89,14 @@ pub(super) fn unstage(path: &str, files: &[&str]) -> DomainResult<()> {
 pub(super) fn discard(path: &str, files: &[&str]) -> DomainResult<()> {
     let repo = open_repo(path)?;
     let inspected = inspect_batch(&repo, files)?;
-    let head_index = optional_head_index(&repo)?;
+    // Discard reverts unstaged (working-tree) changes only, so the restore
+    // source is the current INDEX, not HEAD — a file with staged changes
+    // must keep those staged changes, not be reverted all the way to HEAD.
+    // Reading the live index (rather than HEAD's tree) also makes this work
+    // correctly on an unborn repo, where there is no HEAD to read from yet.
+    let index = repo
+        .index()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
     let preflight = inspected
         .into_iter()
         .map(|path| {
@@ -99,22 +106,20 @@ pub(super) fn discard(path: &str, files: &[&str]) -> DomainResult<()> {
                     path.relative().as_str()
                 )));
             }
-            let head_entry = head_index
-                .as_ref()
-                .and_then(|index| index.get_path(path.relative().as_path(), 0));
-            let destination_exists = head_entry
+            let indexed_entry = index.get_path(path.relative().as_path(), 0);
+            let destination_exists = indexed_entry
                 .as_ref()
                 .map(|_| validate_replaceable_destination(path.full_path()))
                 .transpose()?;
-            Ok((path, head_entry, destination_exists))
+            Ok((path, indexed_entry, destination_exists))
         })
         .collect::<DomainResult<Vec<_>>>()?;
 
-    for (path, head_entry, destination_exists) in preflight {
-        if let Some(head_entry) = head_entry {
-            checkout_exact_head_entry(
+    for (path, indexed_entry, destination_exists) in preflight {
+        if let Some(indexed_entry) = indexed_entry {
+            checkout_exact_index_entry(
                 &repo,
-                &head_entry,
+                &indexed_entry,
                 &path,
                 destination_exists.unwrap_or(false),
             )?;
@@ -150,25 +155,7 @@ fn inspect_batch(repo: &Repository, files: &[&str]) -> DomainResult<Vec<Inspecte
         .collect()
 }
 
-fn optional_head_index(repo: &Repository) -> DomainResult<Option<Index>> {
-    let head = match repo.head() {
-        Ok(reference) => reference,
-        Err(_) => return Ok(None),
-    };
-    let commit = head
-        .peel_to_commit()
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
-    let tree = commit
-        .tree()
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
-    let mut index = Index::new().map_err(|e| DomainError::Internal(e.to_string()))?;
-    index
-        .read_tree(&tree)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
-    Ok(Some(index))
-}
-
-fn checkout_exact_head_entry(
+fn checkout_exact_index_entry(
     repo: &Repository,
     entry: &IndexEntry,
     destination: &InspectedWorktreePath,

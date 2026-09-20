@@ -134,6 +134,12 @@ pub(super) fn resolve_conflict(
             }
             fs::write(inspected.full_path(), content)
                 .map_err(|e| DomainError::Io(e.to_string()))?;
+            // fs::write always creates a regular, non-executable file —
+            // apply the winning side's mode (e.g. the executable bit) so a
+            // resolved script doesn't silently lose it.
+            if let Some(entry) = selected_entry {
+                apply_index_entry_mode(inspected.full_path(), entry.mode)?;
+            }
             index
                 .add_path(inspected.relative().as_path())
                 .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -172,7 +178,14 @@ pub(super) fn resolve_conflict(
 pub(super) fn abort_merge(path: &str) -> DomainResult<()> {
     let repo = open_repo(path)?;
 
-    // Get HEAD commit to reset to.
+    // Refuse outside an actual merge: an unconditional hard reset would
+    // silently discard unrelated uncommitted work if called by mistake.
+    if repo.state() != git2::RepositoryState::Merge {
+        return Err(DomainError::InvalidInput(
+            "no merge is in progress to abort".into(),
+        ));
+    }
+
     let head = repo
         .head()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -180,7 +193,16 @@ pub(super) fn abort_merge(path: &str) -> DomainResult<()> {
         .peel_to_commit()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-    // Hard reset index and working directory to HEAD.
+    // NOTE: a plain safe (non-forced) checkout was tried here to preserve
+    // pre-merge uncommitted work unrelated to the merge, but libgit2's
+    // checkout unconditionally refuses whenever the index holds ANY
+    // unresolved conflict entries — regardless of which paths they're on —
+    // so it cannot be used directly against the still-conflicted merge
+    // index. Reaching real git's `reset --merge` behavior (which does
+    // distinguish "touched by the merge" from "unrelated") would need
+    // explicit conflict-aware checkout strategy flags; deferred rather than
+    // risk a subtly wrong reimplementation. Hard reset is scoped by the
+    // merge-state guard above, so it can no longer fire outside a merge.
     repo.reset(head_commit.as_object(), git2::ResetType::Hard, None)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
@@ -188,5 +210,30 @@ pub(super) fn abort_merge(path: &str) -> DomainResult<()> {
     repo.cleanup_state()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
+    Ok(())
+}
+
+/// Apply a git index entry's mode (e.g. the executable bit) to a file just
+/// written to disk. `fs::write` always creates a regular, non-executable
+/// file, so this is needed after writing resolved conflict content whose
+/// winning side (`Ours`/`Theirs`) may have been executable.
+#[cfg(unix)]
+fn apply_index_entry_mode(path: &std::path::Path, mode: u32) -> DomainResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = fs::metadata(path)
+        .map_err(|e| DomainError::Io(e.to_string()))?
+        .permissions();
+    let mut bits = permissions.mode();
+    if mode & 0o111 != 0 {
+        bits |= 0o111;
+    } else {
+        bits &= !0o111;
+    }
+    permissions.set_mode(bits);
+    fs::set_permissions(path, permissions).map_err(|e| DomainError::Io(e.to_string()))
+}
+
+#[cfg(not(unix))]
+fn apply_index_entry_mode(_path: &std::path::Path, _mode: u32) -> DomainResult<()> {
     Ok(())
 }
