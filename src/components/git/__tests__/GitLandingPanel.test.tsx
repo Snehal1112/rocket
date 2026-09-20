@@ -54,4 +54,58 @@ describe('GitLandingPanel workflow guards', () => {
     expect(await screen.findByText('auth failed')).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();
   });
+
+  it('does not pull after a failed auto-stash, and does not pop after a failed pull', async () => {
+    const pull = vi.fn().mockResolvedValue(undefined);
+    const popStash = vi.fn().mockResolvedValue(undefined);
+    const store = createGitStore();
+    store.setState({
+      credentials: { type: 'token', token: 'tok' },
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
+      saveStash: async () => {
+        store.setState({ error: 'could not create stash' });
+      },
+      pull,
+      popStash,
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /^pull/i }));
+    await user.click(screen.getByRole('button', { name: /stash & pull/i }));
+
+    expect(await screen.findByText('could not create stash')).toBeInTheDocument();
+    expect(pull).not.toHaveBeenCalled();
+    expect(popStash).not.toHaveBeenCalled();
+  });
+
+  it('does not pop the auto-stash after an outright pull failure', async () => {
+    const popStash = vi.fn().mockResolvedValue(undefined);
+    const store = createGitStore();
+    store.setState({
+      credentials: { type: 'token', token: 'tok' },
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
+      saveStash: vi.fn().mockResolvedValue(undefined),
+      pull: async () => {
+        store.setState({ error: 'authentication failed' });
+      },
+      popStash,
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /^pull/i }));
+    await user.click(screen.getByRole('button', { name: /stash & pull/i }));
+
+    expect(await screen.findByText('authentication failed')).toBeInTheDocument();
+    expect(popStash).not.toHaveBeenCalled();
+  });
 });

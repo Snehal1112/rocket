@@ -97,7 +97,16 @@ export function GitLandingPanel() {
     setPulling(true);
     try {
       await saveStash('Auto-stash before pull');
+      if (gitStoreApi.getState().error) {
+        // Stash itself failed — nothing changed, nothing to pull or pop.
+        return;
+      }
       await pull();
+      if (gitStoreApi.getState().error) {
+        // Pull failed outright (network/auth/etc.) — leave the stash in place
+        // rather than popping it on top of an unknown working-tree state.
+        return;
+      }
       // After pull, check whether it produced merge conflicts.
       // If so, do NOT restore the stash — applying it on top of a conflicted
       // index would corrupt the working tree with doubled conflicts.
@@ -106,9 +115,9 @@ export function GitLandingPanel() {
         return;
       }
       await popStash(0);
-      setLastFetched(new Date().toLocaleTimeString());
-    } catch {
-      // If pop fails (e.g. stash itself conflicts), stash is preserved for manual resolution.
+      if (!gitStoreApi.getState().error) {
+        setLastFetched(new Date().toLocaleTimeString());
+      }
     } finally {
       setPulling(false);
     }
