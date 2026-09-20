@@ -14,6 +14,10 @@ export function BranchSelector() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [checkingOutRemote, setCheckingOutRemote] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [mergingName, setMergingName] = useState<string | null>(null);
+  const [deletingName, setDeletingName] = useState<string | null>(null);
   const {
     branches,
     switchBranch,
@@ -42,27 +46,38 @@ export function BranchSelector() {
   });
 
   const handleCreate = async () => {
-    if (!newBranchName.trim()) return;
+    if (!newBranchName.trim() || creating) return;
+    setCreating(true);
     setCreateError(null);
     clearError();
-    await createBranch(newBranchName.trim());
-    const nextError = gitStoreApi.getState().error;
-    if (nextError) {
-      setCreateError(nextError);
-    } else {
-      setNewBranchName('');
+    try {
+      await createBranch(newBranchName.trim());
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        setCreateError(nextError);
+      } else {
+        setNewBranchName('');
+      }
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleSwitch = async (name: string) => {
+    if (switchingTo) return;
+    setSwitchingTo(name);
     setSwitchError(null);
     clearError();
-    await switchBranch(name);
-    const nextError = gitStoreApi.getState().error;
-    if (nextError) {
-      setSwitchError(nextError);
-    } else {
-      setOpen(false);
+    try {
+      await switchBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        setSwitchError(nextError);
+      } else {
+        setOpen(false);
+      }
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
@@ -88,28 +103,40 @@ export function BranchSelector() {
   // - On conflict: close the popover so the conflict resolver is visible.
   // - On other error: keep the popover open and show the error inline.
   const handleMerge = async (name: string) => {
+    if (mergingName) return;
+    setMergingName(name);
     setSwitchError(null);
     clearError();
-    await mergeBranch(name);
-    const nextError = gitStoreApi.getState().error;
-    if (nextError) {
-      if (nextError.toLowerCase().includes('conflict')) {
-        setOpen(false);
+    try {
+      await mergeBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        if (nextError.toLowerCase().includes('conflict')) {
+          setOpen(false);
+        } else {
+          setSwitchError(nextError);
+        }
       } else {
-        setSwitchError(nextError);
+        setOpen(false);
       }
-    } else {
-      setOpen(false);
+    } finally {
+      setMergingName(null);
     }
   };
 
   const handleDelete = async (name: string) => {
+    if (deletingName) return;
+    setDeletingName(name);
     setSwitchError(null);
     clearError();
-    await deleteBranch(name);
-    const nextError = gitStoreApi.getState().error;
-    if (nextError) {
-      setSwitchError(nextError);
+    try {
+      await deleteBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        setSwitchError(nextError);
+      }
+    } finally {
+      setDeletingName(null);
     }
   };
 
@@ -156,11 +183,12 @@ export function BranchSelector() {
               tabIndex={0}
               className='branch-row flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left'
               onClick={() => {
+                if (switchingTo) return;
                 if (!branch.isHead) void handleSwitch(branch.name);
                 else setOpen(false);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if ((e.key === 'Enter' || e.key === ' ') && !switchingTo) {
                   if (!branch.isHead) void handleSwitch(branch.name);
                   else setOpen(false);
                 }
@@ -179,6 +207,7 @@ export function BranchSelector() {
                           size='icon'
                           className='h-5 w-5'
                           aria-label='Merge into current'
+                          disabled={mergingName === branch.name || deletingName === branch.name}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleMerge(branch.name);
@@ -196,6 +225,7 @@ export function BranchSelector() {
                           size='icon'
                           className='h-5 w-5 text-destructive'
                           aria-label='Delete branch'
+                          disabled={mergingName === branch.name || deletingName === branch.name}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleDelete(branch.name);
@@ -258,7 +288,7 @@ export function BranchSelector() {
               size='sm'
               className='h-7 shrink-0'
               onClick={handleCreate}
-              disabled={!newBranchName.trim()}
+              disabled={!newBranchName.trim() || creating}
               aria-label='Create branch'
             >
               <Plus className='h-3.5 w-3.5' />

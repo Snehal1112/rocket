@@ -5,6 +5,7 @@ import { BranchSelector } from '@/components/git/BranchSelector';
 import type { BranchList } from '@/lib/tauri-api';
 import { createGitStore, type GitState } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
+import { createDeferred } from '@/test/deferred';
 
 const branches: BranchList = {
   current: 'main',
@@ -170,5 +171,31 @@ describe('BranchSelector mergeBranch/deleteBranch result handling', () => {
     expect(
       await screen.findByText('cannot delete the currently checked-out branch'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('BranchSelector duplicate-action guards', () => {
+  it('disables Create while a create is in flight and only calls createBranch once', async () => {
+    const deferred = createDeferred<void>();
+    const createBranch = vi.fn(() => deferred.promise);
+    renderWithStore({ createBranch });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    await user.type(screen.getByLabelText('New branch name'), 'feature-x');
+    const createButton = screen.getByLabelText('Create branch');
+    await user.click(createButton);
+
+    expect(createButton).toBeDisabled();
+    await user.click(createButton); // no-op — button is disabled
+
+    deferred.resolve();
+    // On success the input clears (pre-existing behavior), which independently
+    // disables the button via `!newBranchName.trim()`. Retype a name to isolate
+    // the guard's own `creating` flag and confirm it was reset, not left stuck.
+    await vi.waitFor(() => expect(screen.getByLabelText('New branch name')).toHaveValue(''));
+    await user.type(screen.getByLabelText('New branch name'), 'another-branch');
+    await vi.waitFor(() => expect(createButton).not.toBeDisabled());
+    expect(createBranch).toHaveBeenCalledTimes(1);
   });
 });
