@@ -130,7 +130,14 @@ impl CollectionService {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        self.repo.move_item(src_collection, src_path, dst_collection, dst_path)
+        self.repo.move_item(src_collection, src_path, dst_collection, dst_path)?;
+        self.events.publish(DomainEvent::ItemMoved {
+            src_collection: src_collection.to_string(),
+            src_path: src_path.to_string(),
+            dst_collection: dst_collection.to_string(),
+            dst_path: dst_path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
@@ -263,7 +270,7 @@ mod tests {
         }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
         fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
             Ok(rocket_collection::CollectionSettings::default())
@@ -507,6 +514,26 @@ mod tests {
                 DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
             )),
             "expected RequestSaved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn move_item_emits_item_moved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.move_item("my-api", "users.yml", "other-api", "users.yml").expect("move_item");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::ItemMoved { src_collection, src_path, dst_collection, dst_path }
+                    if src_collection == "my-api" && src_path == "users.yml"
+                        && dst_collection == "other-api" && dst_path == "users.yml"
+            )),
+            "expected ItemMoved, got {:?}", *published
         );
     }
 
