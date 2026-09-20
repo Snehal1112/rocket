@@ -109,7 +109,6 @@ export interface GitState {
   setRemoteUrl: (name: string, url: string) => Promise<void>;
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
-  clearPendingNetworkOp: () => void;
   push: (remote?: string) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
@@ -679,8 +678,6 @@ export function createGitStore(): StoreApi<GitState> {
     // Show or hide the credentials dialog.
     setShowCredentialsDialog: (show) =>
       set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
-
-    clearPendingNetworkOp: () => set({ pendingNetworkOp: null }),
 
     activatePendingCredentials: () => {
       const { pendingCredentialsForIdentitySetup, pendingNetworkOp } = get();
