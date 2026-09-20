@@ -20,6 +20,9 @@ vi.mock('@/lib/tauri-api', async () => {
     loadGitCredentials: vi.fn().mockResolvedValue(null),
     // biome-ignore lint/suspicious/noEmptyBlockStatements: unlisten stub for onCollectionChanged.
     onCollectionChanged: vi.fn().mockResolvedValue(() => {}),
+    gitDiff: vi.fn(),
+    gitDiffStaged: vi.fn(),
+    gitStage: vi.fn(),
   };
 });
 
@@ -159,5 +162,57 @@ describe('GitPanel collection-changed listener cleanup', () => {
     await Promise.resolve();
 
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('GitPanel diff view invalidation', () => {
+  it('reflects the staged/unstaged status of the currently open file after it changes', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    vi.mocked(tauriApi.gitBranches).mockResolvedValue({ current: 'main', local: [], remote: [] });
+    vi.mocked(tauriApi.gitStashList).mockResolvedValue([]);
+
+    let staged = false;
+    vi.mocked(tauriApi.gitStatus).mockImplementation(async () => ({
+      branch: 'main',
+      files: [{ path: 'a.txt', staged, status: 'modified' }],
+      ahead: 0,
+      behind: 0,
+      isClean: false,
+    }));
+    vi.mocked(tauriApi.gitDiff).mockResolvedValue({
+      path: 'a.txt',
+      oldContent: 'old',
+      newContent: 'new-working',
+      hunks: [],
+    });
+    vi.mocked(tauriApi.gitDiffStaged).mockResolvedValue({
+      path: 'a.txt',
+      oldContent: 'old',
+      newContent: 'new-staged',
+      hunks: [],
+    });
+    vi.mocked(tauriApi.gitStage).mockImplementation(async () => {
+      staged = true;
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <GitPanel repositoryId='repo-a' repositoryLabel='Repo A' />
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('a.txt'));
+    // Confirm the working-tree diff loaded for the file the user clicked.
+    await vi.waitFor(() => expect(tauriApi.gitDiff).toHaveBeenCalledWith('repo-a', 'a.txt'));
+
+    // Stage the file from elsewhere in the UI (the file-list row's Stage button).
+    await user.click(screen.getByRole('button', { name: 'Stage' }));
+
+    // The diff view must now load the staged variant for the same file, proving
+    // it re-derived the open file from fresh status instead of the stale snapshot
+    // captured when the user first clicked it.
+    await vi.waitFor(() => expect(tauriApi.gitDiffStaged).toHaveBeenCalledWith('repo-a', 'a.txt'));
   });
 });

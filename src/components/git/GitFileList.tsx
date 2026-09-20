@@ -245,6 +245,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5'
+                          aria-label='Stage'
                           onClick={(e) => {
                             e.stopPropagation();
                             stageFiles([file.path]);

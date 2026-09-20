@@ -23,14 +23,14 @@ import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { CommitInfo, ConflictFile, FileDiff, FileStatus } from '@/lib/tauri-api';
+import type { CommitInfo, ConflictFile, FileDiff } from '@/lib/tauri-api';
 import { gitDiffCommit, gitSetIdentity, onCollectionChanged } from '@/lib/tauri-api';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
 
 type RightPanelView =
   | { kind: 'landing' }
-  | { kind: 'diff'; file: FileStatus }
+  | { kind: 'diff'; filePath: string }
   | { kind: 'conflict'; conflictFile: ConflictFile }
   | { kind: 'commits' }
   | { kind: 'commitDiff'; commit: CommitInfo; diffs: FileDiff[] }
@@ -247,7 +247,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
 
             {/* File list */}
             <GitFileList
-              onFileClick={(file) => setRightPanel({ kind: 'diff', file })}
+              onFileClick={(file) => setRightPanel({ kind: 'diff', filePath: file.path })}
               onConflictClick={(conflictFile) => setRightPanel({ kind: 'conflict', conflictFile })}
             />
 
@@ -303,7 +303,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                 </Button>
                 <Separator orientation='vertical' className='h-4' />
                 <span className='text-xs text-muted-foreground truncate'>
-                  {rightPanel.kind === 'diff' && rightPanel.file.path}
+                  {rightPanel.kind === 'diff' && rightPanel.filePath}
                   {rightPanel.kind === 'conflict' && rightPanel.conflictFile.path}
                   {rightPanel.kind === 'commits' && 'Commit History'}
                   {rightPanel.kind === 'commitDiff' &&
@@ -316,13 +316,24 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
             {/* Right panel content. */}
             <div className='flex-1 overflow-hidden'>
               {rightPanel.kind === 'landing' && <GitLandingPanel />}
-              {rightPanel.kind === 'diff' && (
-                <DiffViewForFile
-                  file={rightPanel.file}
-                  repositoryId={repositoryId}
-                  repositoryLabel={repositoryLabel}
-                />
-              )}
+              {rightPanel.kind === 'diff' &&
+                (() => {
+                  const file = status?.files.find((f) => f.path === rightPanel.filePath);
+                  if (!file) {
+                    return (
+                      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
+                        This file no longer has changes.
+                      </div>
+                    );
+                  }
+                  return (
+                    <DiffViewForFile
+                      file={file}
+                      repositoryId={repositoryId}
+                      repositoryLabel={repositoryLabel}
+                    />
+                  );
+                })()}
               {rightPanel.kind === 'conflict' && (
                 <Suspense fallback={null}>
                   <ConflictResolver
