@@ -22,6 +22,9 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
   const [editingRemote, setEditingRemote] = useState<string | null>(null);
   const [editUrl, setEditUrl] = useState('');
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   // Refresh the remote list each time the dialog opens.
   useEffect(() => {
@@ -37,29 +40,45 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
     !remotes.some((r) => r.name === newName.trim());
 
   const handleAdd = async () => {
+    if (adding) return;
+    setAdding(true);
     clearError();
-    await addRemote(newName.trim(), newUrl.trim());
-    if (!gitStoreApi.getState().error) {
-      setNewName('');
-      setNewUrl('');
+    try {
+      await addRemote(newName.trim(), newUrl.trim());
+      if (!gitStoreApi.getState().error) {
+        setNewName('');
+        setNewUrl('');
+      }
+    } finally {
+      setAdding(false);
     }
   };
 
   const handleSaveEdit = async () => {
-    if (!editingRemote) return;
+    if (!editingRemote || savingEdit) return;
+    setSavingEdit(true);
     clearError();
-    await setRemoteUrl(editingRemote, editUrl.trim());
-    if (!gitStoreApi.getState().error) {
-      setEditingRemote(null);
+    try {
+      await setRemoteUrl(editingRemote, editUrl.trim());
+      if (!gitStoreApi.getState().error) {
+        setEditingRemote(null);
+      }
+    } finally {
+      setSavingEdit(false);
     }
   };
 
   const handleConfirmDelete = async () => {
-    if (!deletingRemote) return;
+    if (!deletingRemote || removing) return;
+    setRemoving(true);
     clearError();
-    await removeRemote(deletingRemote);
-    if (!gitStoreApi.getState().error) {
-      setDeletingRemote(null);
+    try {
+      await removeRemote(deletingRemote);
+      if (!gitStoreApi.getState().error) {
+        setDeletingRemote(null);
+      }
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -108,6 +127,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='destructive'
                           className='h-7 text-xs'
+                          disabled={removing}
                           onClick={handleConfirmDelete}
                         >
                           Remove
@@ -144,6 +164,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0 shrink-0'
+                          disabled={savingEdit}
                           onClick={handleSaveEdit}
                         >
                           <Check className='h-3.5 w-3.5' />
@@ -228,7 +249,12 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                   if (e.key === 'Enter' && canAdd) handleAdd();
                 }}
               />
-              <Button size='sm' className='h-8 shrink-0' disabled={!canAdd} onClick={handleAdd}>
+              <Button
+                size='sm'
+                className='h-8 shrink-0'
+                disabled={!canAdd || adding}
+                onClick={handleAdd}
+              >
                 <Plus className='h-3.5 w-3.5 mr-1' /> Add
               </Button>
             </div>

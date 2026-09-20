@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
+import { createDeferred } from '@/test/deferred';
 
 function renderDialog(store: ReturnType<typeof createGitStore>) {
   return render(
@@ -102,5 +103,42 @@ describe('GitRemotesDialog failure handling', () => {
     expect(await screen.findByText('could not remove remote')).toBeInTheDocument();
     expect(screen.getByText(/Remove/, { selector: 'span' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^remove$/i })).toBeInTheDocument();
+  });
+});
+
+describe('GitRemotesDialog duplicate-action guards', () => {
+  it('disables Add while an add is in flight and only calls addRemote once', async () => {
+    const deferred = createDeferred<void>();
+    const addRemote = vi.fn(() => deferred.promise);
+    const store = createGitStore();
+    store.setState({
+      remotes: [],
+      refreshRemotes: vi.fn().mockResolvedValue(undefined),
+      addRemote,
+    });
+    renderDialog(store);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByPlaceholderText('name'), 'origin');
+    await user.type(
+      screen.getByPlaceholderText('https://github.com/...'),
+      'https://example.com/repo.git',
+    );
+    const addButton = screen.getByRole('button', { name: /add/i });
+    await user.click(addButton);
+
+    expect(addButton).toBeDisabled();
+    deferred.resolve();
+    // On success the name/url fields clear (pre-existing behavior), which
+    // independently disables the button via `!canAdd`. Retype both fields to
+    // isolate the guard's own `adding` flag and confirm it was reset, not left stuck.
+    await vi.waitFor(() => expect(screen.getByPlaceholderText('name')).toHaveValue(''));
+    await user.type(screen.getByPlaceholderText('name'), 'upstream');
+    await user.type(
+      screen.getByPlaceholderText('https://github.com/...'),
+      'https://example.com/repo2.git',
+    );
+    await vi.waitFor(() => expect(addButton).not.toBeDisabled());
+    expect(addRemote).toHaveBeenCalledTimes(1);
   });
 });
