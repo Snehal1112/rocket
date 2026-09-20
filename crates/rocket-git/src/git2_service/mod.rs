@@ -547,6 +547,72 @@ mod tests {
     }
 
     #[test]
+    fn switch_branch_restores_full_working_tree_and_leaves_status_clean() {
+        let (dir, path) = setup_repo();
+        let sig = git2::Signature::now("Test", "test@test.com").expect("signature");
+
+        // Add a file that only exists on main.
+        fs::write(dir.path().join("only_main.bru"), "main only").expect("write only_main");
+        {
+            let repo = git2::Repository::open(&path).expect("open repo");
+            let mut index = repo.index().expect("index");
+            index.add_path(Path::new("only_main.bru")).expect("add only_main");
+            index.write().expect("write index");
+            let tree_id = index.write_tree().expect("write tree");
+            let tree = repo.find_tree(tree_id).expect("find tree");
+            let head = repo.head().expect("head").peel_to_commit().expect("head commit");
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "add only_main", &tree, &[&head])
+                .expect("commit only_main");
+        }
+
+        let svc = Git2Service::new();
+        svc.create_branch(&path, "feature").expect("create feature branch");
+
+        // On feature: modify the shared file, remove only_main.bru, add only_feature.bru.
+        fs::write(dir.path().join("test.bru"), "meta { name: Feature }").expect("modify test.bru");
+        fs::remove_file(dir.path().join("only_main.bru")).expect("remove only_main");
+        fs::write(dir.path().join("only_feature.bru"), "feature only").expect("write only_feature");
+        {
+            let repo = git2::Repository::open(&path).expect("open repo");
+            let mut index = repo.index().expect("index");
+            index.add_path(Path::new("test.bru")).expect("add test.bru");
+            index.remove_path(Path::new("only_main.bru")).expect("remove only_main from index");
+            index.add_path(Path::new("only_feature.bru")).expect("add only_feature");
+            index.write().expect("write index");
+            let tree_id = index.write_tree().expect("write tree");
+            let tree = repo.find_tree(tree_id).expect("find tree");
+            let head = repo.head().expect("head").peel_to_commit().expect("head commit");
+            repo.commit(Some("refs/heads/feature"), &sig, &sig, "feature changes", &tree, &[&head])
+                .expect("commit feature changes");
+        }
+
+        // Switch back to main — this is the operation under test.
+        svc.switch_branch(&path, "main").expect("switch to main");
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("test.bru")).expect("read test.bru"),
+            "meta { name: Test }",
+            "shared file should be restored to main's content"
+        );
+        assert!(
+            dir.path().join("only_main.bru").exists(),
+            "file tracked only on main should be restored"
+        );
+        assert!(
+            !dir.path().join("only_feature.bru").exists(),
+            "file tracked only on feature should be removed"
+        );
+
+        let status = svc.status(&path).expect("status");
+        assert_eq!(status.branch, "main");
+        assert!(
+            status.files.is_empty(),
+            "expected clean status immediately after switch, got {:?}",
+            status.files
+        );
+    }
+
+    #[test]
     fn merge_branch_fast_forward() {
         let (dir, path) = setup_repo();
         let svc = Git2Service::new();

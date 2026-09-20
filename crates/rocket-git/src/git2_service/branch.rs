@@ -87,21 +87,51 @@ pub(super) fn switch_branch(path: &str, name: &str) -> DomainResult<()> {
         ));
     }
 
-    // Save the current HEAD ref for rollback if checkout fails.
-    let old_head = repo.head().ok().and_then(|r| r.name().ok().map(String::from));
+    let target_branch = repo
+        .find_branch(name, BranchType::Local)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let commit = target_branch
+        .get()
+        .peel_to_commit()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let tree = commit
+        .tree()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    // Adopt any untracked file whose content already matches the target,
+    // so checkout doesn't reject a harmless pre-existing copy.
+    clear_matching_untracked_paths(&repo, &tree)?;
+
+    // Preflight: a safe (never forced) checkout of the target tree must
+    // succeed BEFORE HEAD moves. checkout_head() resolves its baseline from
+    // HEAD too — if HEAD had already moved, baseline == target and every
+    // delta reads as unmodified, turning a "safe" checkout into a silent
+    // no-op that leaves the working tree on the old branch while HEAD and
+    // the index point at the new one. Checking out the explicit target tree
+    // first, then moving HEAD only after it succeeds, avoids that and
+    // matches checkout_remote_branch/reset_local_branch_to_commit below.
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe();
+    repo.checkout_tree(commit.as_object(), Some(&mut checkout))
+        .map_err(|e| {
+            DomainError::Conflict(format!(
+                "cannot switch to '{name}': {e}. Resolve the conflicting local file(s) first."
+            ))
+        })?;
+
+    // Sync the index to the tree that was just checked out.
+    let mut index = repo
+        .index()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    index
+        .read_tree(&tree)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    index
+        .write()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
 
     repo.set_head(&format!("refs/heads/{name}"))
         .map_err(|e| DomainError::Internal(e.to_string()))?;
-
-    // Safe checkout as a second-layer guard (TOCTOU window defence).
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().safe()))
-        .map_err(|e| {
-            // Best-effort rollback — restore HEAD to its previous ref.
-            if let Some(ref original) = old_head {
-                let _ = repo.set_head(original);
-            }
-            DomainError::Internal(e.to_string())
-        })?;
 
     Ok(())
 }
