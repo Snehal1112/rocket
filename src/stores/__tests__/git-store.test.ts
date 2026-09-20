@@ -92,6 +92,38 @@ beforeEach(() => {
   });
 });
 
+describe('git-store loadStatus', () => {
+  it('sets loadStatus to "error" (not "not-repo") when gitIsRepo itself fails', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockRejectedValue(new Error('disk unreadable'));
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('error');
+    expect(store.getState().error).toBe('Error: disk unreadable');
+    expect(store.getState().isRepo).toBe(false);
+  });
+
+  it('sets loadStatus to "ready" (not "error") when the repo loads but a later refresh fails', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    vi.mocked(tauriApi.gitStatus).mockRejectedValue(new Error('status unavailable'));
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('ready');
+    expect(store.getState().isRepo).toBe(true);
+    expect(store.getState().error).toBe('Error: status unavailable');
+  });
+
+  it('sets loadStatus to "not-repo" when gitIsRepo cleanly resolves false', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(false);
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('not-repo');
+    expect(store.getState().error).toBeNull();
+  });
+});
+
 describe('git-store clearError', () => {
   beforeEach(() => {
     store.setState({
@@ -143,6 +175,54 @@ describe('git-store clearError', () => {
     expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, true);
   });
 
+  it("push targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      // "collections" is listed first, but the current branch tracks "origin" —
+      // pushing to remotes[0] here would silently push to the wrong remote.
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, false);
+  });
+
+  it('push falls back to the first configured remote when the current branch has no upstream', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false }],
+        remote: [],
+      },
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'collections', creds, false);
+  });
+
   it('pull clears stale error before executing', async () => {
     const { gitPull } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
@@ -157,6 +237,29 @@ describe('git-store clearError', () => {
     await store.getState().pull();
 
     expect(store.getState().error).toBeNull();
+  });
+
+  it("pull targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitPull } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().pull();
+    expect(gitPull).toHaveBeenLastCalledWith('repository-test', 'origin', creds);
   });
 
   it('fetch clears stale error before executing', async () => {
@@ -177,6 +280,33 @@ describe('git-store clearError', () => {
     await store.getState().fetch();
 
     expect(store.getState().error).toBeNull();
+  });
+
+  it("fetch targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitFetch } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: [],
+      receivedObjects: 0,
+      receivedBytes: 0,
+    });
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().fetch();
+    expect(gitFetch).toHaveBeenLastCalledWith('repository-test', 'origin', creds);
   });
 
   it('push sets error when operation fails', async () => {
@@ -335,6 +465,63 @@ describe('setRepository', () => {
     expect(gitInit).toHaveBeenCalledWith('repository-test');
     expect(gitIsRepo).toHaveBeenCalledWith('repository-test');
     expect(store.getState().repositoryId).toBe('repository-test');
+  });
+});
+
+describe('git-store setRepository clears stale data synchronously', () => {
+  it('clears prior repository data the instant a new load starts, before the new load resolves', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    await store.getState().setRepository('repo-a');
+    // Sanity: repo-a actually loaded some data.
+    expect(store.getState().isRepo).toBe(true);
+
+    store.setState({
+      status: { branch: 'repo-a-branch', files: [], ahead: 3, behind: 0, isClean: true },
+      branches: { current: 'repo-a-branch', local: [], remote: [] },
+      remotes: [{ name: 'origin', url: 'https://a.example.com' }],
+      stashes: [
+        {
+          index: 0,
+          message: 'wip',
+          timestamp: '2026-01-01',
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+          changedFiles: ['a'],
+          branch: 'repo-a-branch',
+        },
+      ],
+      commitLog: [
+        {
+          id: 'abc',
+          fullId: 'abc123',
+          message: 'm',
+          author: 'a',
+          authorEmail: 'a@a.com',
+          timestamp: '2026-01-01',
+          filesChanged: 1,
+        },
+      ],
+      credentials: { type: 'token', token: 'repo-a-secret' },
+    });
+
+    const deferredIsRepo = createDeferred<boolean>();
+    vi.mocked(tauriApi.gitIsRepo).mockReturnValue(deferredIsRepo.promise);
+
+    const loadPromise = store.getState().setRepository('repo-b');
+
+    // Before repo-b's gitIsRepo call even resolves, all of repo-a's data must
+    // already be gone — not left visible until repo-b's refreshes complete.
+    expect(store.getState().status).toBeNull();
+    expect(store.getState().branches).toBeNull();
+    expect(store.getState().remotes).toEqual([]);
+    expect(store.getState().stashes).toEqual([]);
+    expect(store.getState().commitLog).toEqual([]);
+    expect(store.getState().credentials).toBeNull();
+    expect(store.getState().isRepo).toBe(false);
+
+    deferredIsRepo.resolve(false);
+    await loadPromise;
   });
 });
 

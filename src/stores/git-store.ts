@@ -136,6 +136,24 @@ function networkErrorPatch(
   };
 }
 
+/**
+ * Resolve which remote push/pull/fetch should target when no remote is
+ * given explicitly, and which remote the UI should display as that target.
+ * Prefers the current branch's actual tracked remote (its upstream) over
+ * just the first configured remote — with more than one remote configured,
+ * the tracked remote and `remotes[0]` are not necessarily the same, and
+ * defaulting to `remotes[0]` risks silently operating on the wrong remote.
+ * Falls back to `remotes[0]` for a branch with no upstream (e.g. never pushed).
+ */
+export function resolveActiveRemote(state: Pick<GitState, 'branches' | 'remotes'>) {
+  const currentBranch = state.branches?.local.find((b) => b.isHead);
+  const upstreamRemote = currentBranch?.upstream?.split('/')[0];
+  if (upstreamRemote && state.remotes.some((r) => r.name === upstreamRemote)) {
+    return upstreamRemote;
+  }
+  return state.remotes[0]?.name;
+}
+
 export function createGitStore(): StoreApi<GitState> {
   // Guards setRepository against a slower, superseded call applying its
   // result after a newer call has already started. For example, the user
@@ -680,7 +698,7 @@ export function createGitStore(): StoreApi<GitState> {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'push' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       set({ error: null });
       try {
         await gitPush(repositoryId, resolvedRemote, credentials, force);
@@ -699,7 +717,7 @@ export function createGitStore(): StoreApi<GitState> {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       set({ error: null });
       try {
         await gitPull(repositoryId, resolvedRemote, credentials);
@@ -723,7 +741,7 @@ export function createGitStore(): StoreApi<GitState> {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       set({ error: null });
       try {
         await gitFetch(repositoryId, resolvedRemote, credentials);

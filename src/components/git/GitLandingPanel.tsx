@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -30,10 +31,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { resolveActiveRemote } from '@/stores/git-store';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 export function GitLandingPanel() {
@@ -48,7 +51,9 @@ export function GitLandingPanel() {
   const credentials = useGitStore((s) => s.credentials);
   const setShowCredentialsDialog = useGitStore((s) => s.setShowCredentialsDialog);
   const remotes = useGitStore((s) => s.remotes);
+  const branches = useGitStore((s) => s.branches);
   const gitStoreApi = useGitStoreApi();
+  const activeRemote = resolveActiveRemote({ branches, remotes });
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -275,12 +280,15 @@ export function GitLandingPanel() {
             </p>
           </div>
 
-          {/* Fetch / Pull / Push actions — flex-1 so buttons fill evenly */}
-          <div className='flex gap-2'>
+          {/* Fetch / Pull / Push actions — grid-cols-3 so all three columns stay
+            equal width; flex-1 on a nested flex child (the Push+chevron group)
+            gets squeezed narrower than its siblings because the chevron button's
+            own min-content width eats into that column's fair share. */}
+          <div className='grid grid-cols-3 gap-2'>
             <Button
               variant='outline'
               size='sm'
-              className='flex-1'
+              className='w-full'
               onClick={handleFetch}
               disabled={fetching}
             >
@@ -294,7 +302,7 @@ export function GitLandingPanel() {
             <Button
               variant='outline'
               size='sm'
-              className='flex-1'
+              className='w-full'
               onClick={handlePull}
               disabled={pulling}
             >
@@ -305,7 +313,7 @@ export function GitLandingPanel() {
               )}
               Pull{behind > 0 ? ` ↓${behind}` : ''}
             </Button>
-            <div className='flex flex-1'>
+            <div className='flex w-full'>
               <Button
                 variant={ahead > 0 ? 'default' : 'outline'}
                 size='sm'
@@ -333,11 +341,19 @@ export function GitLandingPanel() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='end'>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className='text-destructive focus:text-destructive'
                     onClick={handleForcePushClick}
+                    disabled={pushing || hasConflicts}
                   >
-                    <ArrowUp className='h-3.5 w-3.5 mr-2 shrink-0' /> Force Push
+                    <AlertTriangle className='h-3.5 w-3.5 mr-2 shrink-0 text-destructive' /> Force
+                    Push
+                    {hasConflicts && (
+                      <span className='ml-auto pl-2 text-[10px] text-muted-foreground'>
+                        resolve conflicts first
+                      </span>
+                    )}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -433,7 +449,7 @@ export function GitLandingPanel() {
             <AlertDialogDescription>
               This will overwrite{' '}
               <span className='font-mono'>
-                {remotes[0]?.name ?? 'the remote'}/{status?.branch ?? 'this branch'}
+                {activeRemote ?? 'the remote'}/{status?.branch ?? 'this branch'}
               </span>
               's history to match your local <span className='font-mono'>{status?.branch}</span>.
               Anyone else who has fetched this branch may lose commits you don't have. This cannot
