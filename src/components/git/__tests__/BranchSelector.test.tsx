@@ -226,7 +226,7 @@ describe('BranchSelector error announcements', () => {
 describe('BranchSelector keyboard behavior', () => {
   it('prevents the default Space-scroll behavior when activating a local branch row', async () => {
     const switchBranch = vi.fn();
-    const store = renderWithStore({
+    renderWithStore({
       switchBranch,
       branches: {
         current: 'main',
