@@ -192,13 +192,15 @@ pub fn run() {
                 audit_bridge::ServiceBackedAuditPublisher::new(audit_svc.clone()),
             );
 
-            // Application services — no event publishing.
-            // The file watcher is the single source of truth for sidebar updates.
             // SharedPathCollectionRepo resolves the base directory from
             // active_workspace_path at call time, so switching workspaces
-            // automatically redirects all collection reads/writes.
+            // automatically redirects all collection reads/writes. The file
+            // watcher (started further below) remains a fallback for changes
+            // made outside the app; this service publishes its own events for
+            // deterministic, immediate sidebar/tree refresh on success.
             let collection_svc = CollectionService::new_with_audit(
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
             );
             let history_svc = HistoryService::new(

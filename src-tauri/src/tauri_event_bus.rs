@@ -30,6 +30,12 @@ impl EventPublisher for TauriEventBus {
                 "collection-changed"
             }
             DomainEvent::ItemMoved { .. } => "collection-changed",
+            DomainEvent::FolderCreated { .. }
+            | DomainEvent::FolderDeleted { .. }
+            | DomainEvent::ItemsReordered { .. }
+            | DomainEvent::CollectionSettingsSaved { .. }
+            | DomainEvent::FolderVariablesSaved { .. }
+            | DomainEvent::RequestVariablesSaved { .. } => "collection-changed",
             DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
                 "environment-changed"
