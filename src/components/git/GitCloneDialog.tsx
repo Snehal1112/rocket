@@ -21,7 +21,7 @@ import {
   gitClone,
   selectCloneDestination,
 } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 type Step = 'input' | 'progress' | 'picker';
 
@@ -40,6 +40,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
 
   const credentials = useGitStore((s) => s.credentials);
+  const gitStoreApi = useGitStoreApi();
   const openFromDiskMutation = useOpenWorkspaceFromDisk();
   const switchWorkspaceMutation = useSwitchWorkspace();
 
@@ -138,11 +139,11 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   const handleClone = async () => {
     setError(null);
-    const creds = useGitStore.getState().credentials;
+    const creds = gitStoreApi.getState().credentials;
     if (!creds) {
       setAwaitingCredentials(true);
       setStep('progress');
-      useGitStore.getState().setShowCredentialsDialog(true);
+      gitStoreApi.getState().setShowCredentialsDialog(true);
       return;
     }
     await performClone(creds);

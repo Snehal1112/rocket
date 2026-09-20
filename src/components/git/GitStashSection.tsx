@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 /** Format a UTC timestamp string into a concise relative label. */
 function formatAge(timestamp: string): string {
@@ -55,7 +55,8 @@ export function GitStashSection() {
     dropStashMany,
     error,
     clearError,
-  } = useGitStore();
+  } = useGitStore((state) => state);
+  const gitStoreApi = useGitStoreApi();
 
   const isSelecting = selectedIndices.size > 0;
 
@@ -66,7 +67,7 @@ export function GitStashSection() {
     try {
       await saveStash(message.trim());
       // Only clear input if the save succeeded.
-      if (!useGitStore.getState().error) {
+      if (!gitStoreApi.getState().error) {
         setMessage('');
       }
     } finally {
@@ -90,7 +91,7 @@ export function GitStashSection() {
     clearError();
     try {
       await applyStashMany([...selectedIndices]);
-      if (!useGitStore.getState().error) clearSelection();
+      if (!gitStoreApi.getState().error) clearSelection();
     } finally {
       setIsBatchRunning(false);
     }
@@ -101,7 +102,7 @@ export function GitStashSection() {
     clearError();
     try {
       await popStashMany([...selectedIndices]);
-      if (!useGitStore.getState().error) clearSelection();
+      if (!gitStoreApi.getState().error) clearSelection();
     } finally {
       setIsBatchRunning(false);
     }
@@ -112,7 +113,7 @@ export function GitStashSection() {
     clearError();
     try {
       await dropStashMany([...selectedIndices]);
-      if (!useGitStore.getState().error) clearSelection();
+      if (!gitStoreApi.getState().error) clearSelection();
     } finally {
       setIsBatchRunning(false);
     }

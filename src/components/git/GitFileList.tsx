@@ -15,7 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { GIT_STATUS_CONFIG } from '@/lib/colors';
 import type { ConflictFile, FileStatus } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 interface GitFileListProps {
   onFileClick: (file: FileStatus) => void;
@@ -23,18 +23,18 @@ interface GitFileListProps {
 }
 
 export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) {
-  const {
-    status,
-    refreshConflicts,
-    refreshStatus,
-    stageFiles,
-    stageAll,
-    unstageFiles,
-    unstageAll,
-    discardFiles,
-  } = useGitStore();
+  const status = useGitStore((s) => s.status);
+  const refreshConflicts = useGitStore((s) => s.refreshConflicts);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const stageFiles = useGitStore((s) => s.stageFiles);
+  const stageAll = useGitStore((s) => s.stageAll);
+  const unstageFiles = useGitStore((s) => s.unstageFiles);
+  const unstageAll = useGitStore((s) => s.unstageAll);
+  const discardFiles = useGitStore((s) => s.discardFiles);
+  const gitStoreApi = useGitStoreApi();
 
   const [showDiscardAllDialog, setShowDiscardAllDialog] = useState(false);
+  const [discardingFile, setDiscardingFile] = useState<FileStatus | null>(null);
 
   const staged = status?.files.filter((f) => f.staged) ?? [];
   const unstaged = status?.files.filter((f) => !f.staged && f.status !== 'unchanged') ?? [];
@@ -51,6 +51,12 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
     setShowDiscardAllDialog(false);
   };
 
+  const handleConfirmDiscardFile = () => {
+    if (!discardingFile) return;
+    discardFiles([discardingFile.path]);
+    setDiscardingFile(null);
+  };
+
   const handleStageAll = (e: React.MouseEvent) => {
     e.stopPropagation();
     stageAll();
@@ -64,7 +70,7 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
   const handleConflictClick = async (file: FileStatus) => {
     await refreshConflicts();
     // Read fresh state — the `conflicts` binding captured at render-time is stale after the await.
-    const conflictFile = useGitStore.getState().conflicts.find((c) => c.path === file.path);
+    const conflictFile = gitStoreApi.getState().conflicts.find((c) => c.path === file.path);
     if (conflictFile) {
       onConflictClick(conflictFile);
     } else {
@@ -222,9 +228,10 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5'
+                          aria-label='Discard'
                           onClick={(e) => {
                             e.stopPropagation();
-                            discardFiles([file.path]);
+                            setDiscardingFile(file);
                           }}
                         >
                           <Trash2 className='h-3.5 w-3.5' />
@@ -269,6 +276,36 @@ export function GitFileList({ onFileClick, onConflictClick }: GitFileListProps) 
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDiscardAll}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Individual-discard confirmation dialog */}
+      <AlertDialog
+        open={discardingFile !== null}
+        onOpenChange={(open) => !open && setDiscardingFile(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard Changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {discardingFile?.status === 'untracked' ? (
+                <>
+                  This will permanently delete the untracked file{' '}
+                  <span className='font-mono'>{discardingFile?.path}</span>. This cannot be undone.
+                </>
+              ) : (
+                <>
+                  This will discard unstaged changes to{' '}
+                  <span className='font-mono'>{discardingFile?.path}</span>, restoring it to its
+                  last staged or committed content. This cannot be undone.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDiscardFile}>Discard</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

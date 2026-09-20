@@ -19,7 +19,7 @@ import {
   loadGitCredentials,
   saveGitCredentials,
 } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore } from '@/stores/git-store-context';
 
 type AuthType = 'sshKey' | 'sshAgent' | 'userPass' | 'token';
 

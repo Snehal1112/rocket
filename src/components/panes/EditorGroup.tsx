@@ -174,6 +174,14 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       <div className='flex-1 overflow-hidden'>
         {activeTab ? (
           isConflictTab(activeTab) ? (
+            // `ConflictResolver` reads the git store via the per-`GitPanel`
+            // React Context (`@/stores/git-store-context`) and throws
+            // outside a `GitStoreProvider` ancestor. This render site has no
+            // such ancestor. It is currently unreachable — nothing in this
+            // codebase creates a conflict tab (`openConflictTab` in
+            // `pane-store.ts` has no callers) — but if that ever changes,
+            // this render will crash until it's wrapped in a
+            // `GitStoreProvider` for the tab's own repository.
             <Suspense fallback={<EditorSkeleton />}>
               <ConflictResolver conflictState={activeTab.conflictState} />
             </Suspense>

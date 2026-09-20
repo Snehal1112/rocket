@@ -1,34 +1,107 @@
 import '@/components/editor/monaco-setup';
 import Editor from '@monaco-editor/react';
 import { AlertCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 import type { ConflictState } from '@/types/pane-types';
 
 interface ConflictResolverProps {
   conflictState: ConflictState;
+  /** Called after a resolve completes without error — lets the parent
+   *  return to a landing view instead of leaving this resolver mounted
+   *  and re-armed against a conflict that no longer exists. */
+  onResolved?: () => void;
 }
 
-export function ConflictResolver({ conflictState }: ConflictResolverProps) {
+export function ConflictResolver({ conflictState, onResolved }: ConflictResolverProps) {
   const [manualMode, setManualMode] = useState(false);
   const [manualContent, setManualContent] = useState(conflictState.ours);
-  const { resolveConflict, abortMerge, error, clearError } = useGitStore();
+  const [busy, setBusy] = useState(false);
+  const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+  const resolveConflict = useGitStore((s) => s.resolveConflict);
+  const abortMerge = useGitStore((s) => s.abortMerge);
+  const error = useGitStore((s) => s.error);
+  const clearError = useGitStore((s) => s.clearError);
+  const gitStoreApi = useGitStoreApi();
   const { themeName } = useMonacoTheme();
 
-  const handleAbort = async () => {
-    await abortMerge();
+  // Reset manual-editing state whenever the target conflict changes — without
+  // this, selecting a different conflicted file while in manual mode kept
+  // editing the previous file's content and could save it into the new one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: filePath is the intentional trigger — ours alone could coincidentally match across two different conflicted files and fail to reset.
+  useEffect(() => {
+    setManualMode(false);
+    setManualContent(conflictState.ours);
+  }, [conflictState.filePath, conflictState.ours]);
+
+  const handleConfirmAbort = async () => {
+    if (busy) return;
+    setShowAbortConfirm(false);
+    setBusy(true);
+    try {
+      await abortMerge();
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleResolve = async (resolution: 'ours' | 'theirs' | 'custom', content?: string) => {
-    const res =
-      resolution === 'custom'
-        ? { resolution: 'custom' as const, content: content ?? '' }
-        : { resolution };
-    await resolveConflict(conflictState.filePath, res);
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res =
+        resolution === 'custom'
+          ? { resolution: 'custom' as const, content: content ?? '' }
+          : { resolution };
+      clearError();
+      await resolveConflict(conflictState.filePath, res);
+      // resolveConflict never throws — a failed resolve surfaces as `error`
+      // state instead. Only leave the resolver (via onResolved) when the
+      // call actually succeeded, so a failure — including a repeat of the
+      // exact same error as before — doesn't navigate the user away from
+      // the error they need to see.
+      if (!gitStoreApi.getState().error) {
+        onResolved?.();
+      }
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const abortConfirmDialog = (
+    <AlertDialog open={showAbortConfirm} onOpenChange={setShowAbortConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Abort Merge?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This resets the working tree and index to <span className='font-mono'>HEAD</span>,
+            discarding any staged or unstaged tracked changes made since the merge started,
+            including any conflict resolutions you've already saved. Untracked files are not
+            affected. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmAbort} disabled={busy}>
+            Confirm Abort
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   if (manualMode) {
     return (
@@ -43,7 +116,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
               variant='outline'
               size='sm'
               className='h-6 text-sm text-destructive'
-              onClick={handleAbort}
+              onClick={() => setShowAbortConfirm(true)}
+              disabled={busy}
             >
               Abort Merge
             </Button>
@@ -52,6 +126,7 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
               size='sm'
               className='h-6 text-sm'
               onClick={() => setManualMode(false)}
+              disabled={busy}
             >
               Back
             </Button>
@@ -59,6 +134,7 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
               size='sm'
               className='h-6 text-sm'
               onClick={() => handleResolve('custom', manualContent)}
+              disabled={busy}
             >
               Save Resolution
             </Button>
@@ -86,6 +162,7 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
           />
         </div>
+        {abortConfirmDialog}
       </div>
     );
   }
@@ -102,7 +179,8 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
             variant='outline'
             size='sm'
             className='h-6 text-sm text-destructive'
-            onClick={handleAbort}
+            onClick={() => setShowAbortConfirm(true)}
+            disabled={busy}
           >
             Abort Merge
           </Button>
@@ -155,16 +233,17 @@ export function ConflictResolver({ conflictState }: ConflictResolverProps) {
         </div>
       </div>
       <div className='flex items-center gap-2 border-t px-3 py-2'>
-        <Button variant='outline' size='sm' onClick={() => handleResolve('ours')}>
+        <Button variant='outline' size='sm' onClick={() => handleResolve('ours')} disabled={busy}>
           Accept Ours
         </Button>
-        <Button variant='outline' size='sm' onClick={() => handleResolve('theirs')}>
+        <Button variant='outline' size='sm' onClick={() => handleResolve('theirs')} disabled={busy}>
           Accept Theirs
         </Button>
-        <Button variant='secondary' size='sm' onClick={() => setManualMode(true)}>
+        <Button variant='secondary' size='sm' onClick={() => setManualMode(true)} disabled={busy}>
           Edit Manually
         </Button>
       </div>
+      {abortConfirmDialog}
     </div>
   );
 }

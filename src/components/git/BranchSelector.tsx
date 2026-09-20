@@ -1,11 +1,11 @@
-import { AlertCircle, Check, GitBranch, GitMerge, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, GitBranch, GitMerge, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 export function BranchSelector() {
   const [open, setOpen] = useState(false);
@@ -13,6 +13,7 @@ export function BranchSelector() {
   const [newBranchName, setNewBranchName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [checkingOutRemote, setCheckingOutRemote] = useState<string | null>(null);
   const {
     branches,
     switchBranch,
@@ -21,7 +22,8 @@ export function BranchSelector() {
     mergeBranch,
     checkoutRemoteBranch,
     status,
-  } = useGitStore();
+  } = useGitStore((state) => state);
+  const gitStoreApi = useGitStoreApi();
 
   if (!branches) return null;
 
@@ -41,9 +43,9 @@ export function BranchSelector() {
   const handleCreate = async () => {
     if (!newBranchName.trim()) return;
     setCreateError(null);
-    const prevError = useGitStore.getState().error;
+    const prevError = gitStoreApi.getState().error;
     await createBranch(newBranchName.trim());
-    const nextError = useGitStore.getState().error;
+    const nextError = gitStoreApi.getState().error;
     if (nextError && nextError !== prevError) {
       setCreateError(nextError);
     } else {
@@ -53,9 +55,9 @@ export function BranchSelector() {
 
   const handleSwitch = async (name: string) => {
     setSwitchError(null);
-    const prevError = useGitStore.getState().error;
+    const prevError = gitStoreApi.getState().error;
     await switchBranch(name);
-    const nextError = useGitStore.getState().error;
+    const nextError = gitStoreApi.getState().error;
     if (nextError && nextError !== prevError) {
       setSwitchError(nextError);
     } else {
@@ -65,13 +67,18 @@ export function BranchSelector() {
 
   const handleCheckoutRemote = async (name: string) => {
     setSwitchError(null);
-    const prevError = useGitStore.getState().error;
-    await checkoutRemoteBranch(name);
-    const nextError = useGitStore.getState().error;
-    if (nextError && nextError !== prevError) {
-      setSwitchError(nextError);
-    } else {
-      setOpen(false);
+    setCheckingOutRemote(name);
+    try {
+      const prevError = gitStoreApi.getState().error;
+      await checkoutRemoteBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError && nextError !== prevError) {
+        setSwitchError(nextError);
+      } else {
+        setOpen(false);
+      }
+    } finally {
+      setCheckingOutRemote(null);
     }
   };
 
@@ -81,9 +88,9 @@ export function BranchSelector() {
   // - On other error: keep the popover open and show the error inline.
   const handleMerge = async (name: string) => {
     setSwitchError(null);
-    const prevError = useGitStore.getState().error;
+    const prevError = gitStoreApi.getState().error;
     await mergeBranch(name);
-    const nextError = useGitStore.getState().error;
+    const nextError = gitStoreApi.getState().error;
     if (nextError && nextError !== prevError) {
       if (nextError.toLowerCase().includes('conflict')) {
         setOpen(false);
@@ -196,16 +203,22 @@ export function BranchSelector() {
               <div className='px-2 py-1 text-xs text-muted-foreground font-medium mt-1'>Remote</div>
               {filteredRemote.map((branch) => {
                 const localName = branch.name.split('/').slice(1).join('/');
+                const isCheckingOutThis = checkingOutRemote === branch.name;
                 return (
                   <button
                     key={branch.name}
                     type='button'
-                    className='flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left'
+                    disabled={checkingOutRemote !== null}
+                    className='flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed'
                     onClick={() => {
                       void handleCheckoutRemote(branch.name);
                     }}
                   >
-                    <span className='w-3.5' />
+                    {isCheckingOutThis ? (
+                      <Loader2 className='w-3.5 h-3.5 animate-spin shrink-0' />
+                    ) : (
+                      <span className='w-3.5' />
+                    )}
                     <span className='truncate flex-1 text-muted-foreground'>{localName}</span>
                   </button>
                 );

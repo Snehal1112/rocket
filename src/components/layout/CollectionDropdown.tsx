@@ -5,7 +5,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { type CollectionSummary, listCollections } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
-import { useGitStore } from '@/stores/git-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
@@ -38,7 +37,6 @@ export function CollectionDropdown() {
 
   const handleSelect = (summary: CollectionSummary) => {
     switchCollection(summary.name);
-    void useGitStore.getState().setRepository(summary.repositoryId);
     setOpen(false);
   };
 

@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StoreApi } from 'zustand/vanilla';
 import * as tauriApi from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { createGitStore, type GitState } from '@/stores/git-store';
+import { GitStoreProvider } from '@/stores/git-store-context';
 import { createDeferred } from '@/test/deferred';
 import { GitCloneDialog } from '../GitCloneDialog';
 import { GitCommitForm } from '../GitCommitForm';
@@ -18,7 +20,11 @@ vi.mock('@/lib/queries/workspace-queries', () => ({
   useSwitchWorkspace: () => ({ mutate: workspaceQueries.switchWorkspace }),
 }));
 
-vi.mock('@/lib/tauri-api', () => ({
+vi.mock('@/lib/tauri-api', async (importOriginal) => ({
+  // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
+  // so push/pull/fetch failure handling exercises actual parsing logic, matching
+  // the convention in src/stores/__tests__/git-store.test.ts.
+  ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
   detectClonedStructure: vi.fn(),
   gitAbortMerge: vi.fn(),
   gitAddRemote: vi.fn(),
@@ -66,8 +72,10 @@ const cleanStatus: tauriApi.RepoStatus = {
   isClean: true,
 };
 
-function setRepositoryState(overrides: Partial<ReturnType<typeof useGitStore.getState>> = {}) {
-  useGitStore.setState({
+let store: StoreApi<GitState>;
+
+function setRepositoryState(overrides: Partial<GitState> = {}) {
+  store.setState({
     repositoryId: 'collection:default:active',
     isRepo: true,
     credentials: { type: 'sshAgent' },
@@ -92,7 +100,7 @@ async function fillCloneForm() {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  useGitStore.setState(useGitStore.getInitialState(), true);
+  store = createGitStore();
 
   vi.mocked(tauriApi.gitStatus).mockResolvedValue(cleanStatus);
   vi.mocked(tauriApi.gitBranches).mockResolvedValue({ current: 'main', local: [], remote: [] });
@@ -122,12 +130,16 @@ knownRedDescribe('known-red: Git UI failure-chain contracts', () => {
   it('failed stash prevents pull', async () => {
     vi.mocked(tauriApi.gitStashSave).mockRejectedValueOnce(new Error('stash failed'));
     setRepositoryState({ status: { ...cleanStatus, isClean: false } });
-    render(<GitLandingPanel />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^pull/i }));
     fireEvent.click(await screen.findByRole('button', { name: 'Stash & Pull' }));
 
-    await waitFor(() => expect(useGitStore.getState().error).toContain('stash failed'));
+    await waitFor(() => expect(store.getState().error).toContain('stash failed'));
     await waitFor(() => expect(screen.getByRole('button', { name: /^pull/i })).toBeEnabled());
     expect(tauriApi.gitPull).not.toHaveBeenCalled();
   });
@@ -135,12 +147,16 @@ knownRedDescribe('known-red: Git UI failure-chain contracts', () => {
   it('failed fetch prevents push', async () => {
     vi.mocked(tauriApi.gitFetch).mockRejectedValueOnce(new Error('fetch failed'));
     setRepositoryState();
-    render(<GitLandingPanel />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /^push/i }));
     fireEvent.click(await screen.findByRole('button', { name: 'Fetch & Push' }));
 
-    await waitFor(() => expect(useGitStore.getState().error).toContain('fetch failed'));
+    await waitFor(() => expect(store.getState().error).toContain('fetch failed'));
     await waitFor(() => expect(screen.getByRole('button', { name: /^push/i })).toBeEnabled());
     expect(tauriApi.gitPush).not.toHaveBeenCalled();
   });
@@ -154,13 +170,17 @@ knownRedDescribe('known-red: Git UI failure-chain contracts', () => {
         files: [{ path: 'request.yml', status: 'modified', staged: true }],
       },
     });
-    render(<GitCommitForm />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitCommitForm />
+      </GitStoreProvider>,
+    );
 
     const message = screen.getByRole('textbox', { name: 'Commit message' });
     fireEvent.change(message, { target: { value: 'Preserve this message' } });
     fireEvent.click(screen.getByRole('button', { name: 'Commit 1 file' }));
 
-    await waitFor(() => expect(useGitStore.getState().error).toContain('commit failed'));
+    await waitFor(() => expect(store.getState().error).toContain('commit failed'));
     expect(message).toHaveValue('Preserve this message');
   });
 
@@ -168,7 +188,11 @@ knownRedDescribe('known-red: Git UI failure-chain contracts', () => {
     vi.mocked(tauriApi.gitSetRemoteUrl).mockRejectedValueOnce(new Error('remote edit failed'));
     setRepositoryState();
     const onOpenChange = vi.fn();
-    render(<GitRemotesDialog open onOpenChange={onOpenChange} />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitRemotesDialog open onOpenChange={onOpenChange} />
+      </GitStoreProvider>,
+    );
 
     const remoteRow = screen.getByText('origin').closest('.remote-row');
     if (!(remoteRow instanceof HTMLElement)) throw new Error('Remote row not found');
@@ -180,7 +204,7 @@ knownRedDescribe('known-red: Git UI failure-chain contracts', () => {
     if (!editRow) throw new Error('Remote edit row not found');
     fireEvent.click(within(editRow).getAllByRole('button')[0]);
 
-    await waitFor(() => expect(useGitStore.getState().error).toContain('remote edit failed'));
+    await waitFor(() => expect(store.getState().error).toContain('remote edit failed'));
     expect(screen.getByRole('dialog', { name: 'Manage Remotes' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('git@example.com:team/new-repo.git')).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
@@ -192,7 +216,11 @@ describe('Git clone ownership contract', () => {
     const clone = createDeferred<void>();
     vi.mocked(tauriApi.gitClone).mockReturnValue(clone.promise);
     setRepositoryState();
-    render(<GitCloneDialog open onOpenChange={vi.fn()} />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitCloneDialog open onOpenChange={vi.fn()} />
+      </GitStoreProvider>,
+    );
     await fillCloneForm();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
@@ -213,7 +241,11 @@ describe('Git clone credential handoff characterization', () => {
   it('starts clone exactly once after credential submission', async () => {
     const clone = createDeferred<void>();
     vi.mocked(tauriApi.gitClone).mockReturnValue(clone.promise);
-    render(<GitCloneDialog open onOpenChange={vi.fn()} />);
+    render(
+      <GitStoreProvider store={store}>
+        <GitCloneDialog open onOpenChange={vi.fn()} />
+      </GitStoreProvider>,
+    );
     await fillCloneForm();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clone' }));
@@ -221,7 +253,7 @@ describe('Git clone credential handoff characterization', () => {
     expect(tauriApi.gitClone).not.toHaveBeenCalled();
 
     act(() => {
-      useGitStore.getState().setCredentials({ type: 'sshAgent' });
+      store.getState().setCredentials({ type: 'sshAgent' });
     });
 
     await waitFor(() => expect(tauriApi.gitClone).toHaveBeenCalledTimes(1));

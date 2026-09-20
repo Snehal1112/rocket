@@ -27,21 +27,20 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 export function GitLandingPanel() {
-  const {
-    status,
-    push,
-    pull,
-    fetch,
-    saveStash,
-    popStash,
-    error,
-    clearError,
-    credentials,
-    setShowCredentialsDialog,
-  } = useGitStore();
+  const status = useGitStore((s) => s.status);
+  const push = useGitStore((s) => s.push);
+  const pull = useGitStore((s) => s.pull);
+  const fetch = useGitStore((s) => s.fetch);
+  const saveStash = useGitStore((s) => s.saveStash);
+  const popStash = useGitStore((s) => s.popStash);
+  const error = useGitStore((s) => s.error);
+  const clearError = useGitStore((s) => s.clearError);
+  const credentials = useGitStore((s) => s.credentials);
+  const setShowCredentialsDialog = useGitStore((s) => s.setShowCredentialsDialog);
+  const gitStoreApi = useGitStoreApi();
 
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
@@ -51,7 +50,7 @@ export function GitLandingPanel() {
   const [showFetchFirstDialog, setShowFetchFirstDialog] = useState(false);
 
   const handleFetch = async () => {
-    const { credentials } = useGitStore.getState();
+    const { credentials } = gitStoreApi.getState();
     if (!credentials) {
       // Store will open the credentials dialog; skip timestamp update.
       fetch();
@@ -67,14 +66,14 @@ export function GitLandingPanel() {
   };
 
   const handlePull = async () => {
-    const { credentials } = useGitStore.getState();
+    const { credentials } = gitStoreApi.getState();
     if (!credentials) {
       pull();
       return;
     }
 
     // Check if working tree has uncommitted changes.
-    const { status: currentStatus } = useGitStore.getState();
+    const { status: currentStatus } = gitStoreApi.getState();
     if (currentStatus && !currentStatus.isClean) {
       setShowStashDialog(true);
       return;
@@ -98,7 +97,7 @@ export function GitLandingPanel() {
       // After pull, check whether it produced merge conflicts.
       // If so, do NOT restore the stash — applying it on top of a conflicted
       // index would corrupt the working tree with doubled conflicts.
-      if (useGitStore.getState().hasConflicts()) {
+      if (gitStoreApi.getState().hasConflicts()) {
         // Leave the stash in place; the user can pop it after resolving conflicts.
         return;
       }
@@ -123,14 +122,14 @@ export function GitLandingPanel() {
   };
 
   const handlePush = async () => {
-    const { credentials } = useGitStore.getState();
+    const { credentials } = gitStoreApi.getState();
     if (!credentials) {
       push();
       return;
     }
 
     // Suggest fetching first if never fetched this session or behind remote.
-    const { status: currentStatus } = useGitStore.getState();
+    const { status: currentStatus } = gitStoreApi.getState();
     if (!lastFetched || (currentStatus && currentStatus.behind > 0)) {
       setShowFetchFirstDialog(true);
       return;
@@ -151,7 +150,7 @@ export function GitLandingPanel() {
       await fetch();
       setLastFetched(new Date().toLocaleTimeString());
       // Re-check status after fetch — if now behind, abort push.
-      const { status: freshStatus } = useGitStore.getState();
+      const { status: freshStatus } = gitStoreApi.getState();
       if (freshStatus && freshStatus.behind > 0) {
         setPushing(false);
         return;

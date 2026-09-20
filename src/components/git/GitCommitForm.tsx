@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { gitGetIdentity, gitSetIdentity } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 import { GitIdentityDialog } from './GitIdentityDialog';
 
 export function GitCommitForm() {
@@ -13,6 +13,7 @@ export function GitCommitForm() {
   const status = useGitStore((state) => state.status);
   const commitChanges = useGitStore((state) => state.commitChanges);
   const repositoryId = useGitStore((state) => state.repositoryId);
+  const gitStoreApi = useGitStoreApi();
 
   const stagedCount = status?.files.filter((f) => f.staged).length ?? 0;
 
@@ -53,7 +54,7 @@ export function GitCommitForm() {
     try {
       await gitSetIdentity(repositoryId, name, email);
     } catch (e) {
-      useGitStore.setState({ error: `Failed to save git identity: ${String(e)}` });
+      gitStoreApi.setState({ error: `Failed to save git identity: ${String(e)}` });
       return;
     }
     await doCommit();

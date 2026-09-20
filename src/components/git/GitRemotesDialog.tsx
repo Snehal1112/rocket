@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore } from '@/stores/git-store-context';
 
 interface Props {
   open: boolean;
@@ -13,7 +13,9 @@ interface Props {
 }
 
 export function GitRemotesDialog({ open, onOpenChange }: Props) {
-  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes } = useGitStore();
+  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes } = useGitStore(
+    (state) => state,
+  );
 
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');

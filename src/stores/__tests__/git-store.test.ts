@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StoreApi } from 'zustand/vanilla';
 import type { GitCredentials } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
-import { useGitStore } from '../git-store';
+import { createGitStore, type GitState } from '../git-store';
 
-vi.mock('@/lib/tauri-api', () => ({
+vi.mock('@/lib/tauri-api', async (importOriginal) => ({
+  // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
+  // so push/pull/fetch failure handling exercises actual parsing logic.
+  ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
   gitIsRepo: vi.fn(),
   gitInit: vi.fn().mockResolvedValue(undefined),
   gitStatus: vi.fn().mockResolvedValue({
@@ -54,9 +58,11 @@ vi.mock('@/lib/tauri-api', () => ({
 
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
 
+let store: StoreApi<GitState>;
+
 beforeEach(() => {
   vi.resetAllMocks();
-  useGitStore.setState(useGitStore.getInitialState(), true);
+  store = createGitStore();
 
   vi.mocked(tauriApi.gitStatus).mockResolvedValue({
     branch: 'main',
@@ -88,7 +94,7 @@ beforeEach(() => {
 
 describe('git-store clearError', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       error: null,
       repositoryId: null,
       credentials: null,
@@ -98,41 +104,41 @@ describe('git-store clearError', () => {
   });
 
   it('clearError sets error to null', () => {
-    useGitStore.setState({ error: 'previous error' });
-    useGitStore.getState().clearError();
-    expect(useGitStore.getState().error).toBeNull();
+    store.setState({ error: 'previous error' });
+    store.getState().clearError();
+    expect(store.getState().error).toBeNull();
   });
 
   it('push clears stale error before executing', async () => {
     const { gitPush } = await import('@/lib/tauri-api');
     vi.mocked(gitPush).mockResolvedValueOnce(undefined);
 
-    useGitStore.setState({
+    store.setState({
       error: 'stale error',
       repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
 
-    await useGitStore.getState().push();
+    await store.getState().push();
 
-    expect(useGitStore.getState().error).toBeNull();
+    expect(store.getState().error).toBeNull();
   });
 
   it('pull clears stale error before executing', async () => {
     const { gitPull } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
 
-    useGitStore.setState({
+    store.setState({
       error: 'stale error',
       repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
 
-    await useGitStore.getState().pull();
+    await store.getState().pull();
 
-    expect(useGitStore.getState().error).toBeNull();
+    expect(store.getState().error).toBeNull();
   });
 
   it('fetch clears stale error before executing', async () => {
@@ -143,37 +149,110 @@ describe('git-store clearError', () => {
       receivedBytes: 0,
     });
 
-    useGitStore.setState({
+    store.setState({
       error: 'stale error',
       repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
 
-    await useGitStore.getState().fetch();
+    await store.getState().fetch();
 
-    expect(useGitStore.getState().error).toBeNull();
+    expect(store.getState().error).toBeNull();
   });
 
   it('push sets error when operation fails', async () => {
     const { gitPush } = await import('@/lib/tauri-api');
     vi.mocked(gitPush).mockRejectedValueOnce(new Error('NotFastForward'));
 
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       credentials: { type: 'sshAgent' },
       remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
     });
 
-    await useGitStore.getState().push();
+    await store.getState().push();
 
-    expect(useGitStore.getState().error).toContain('NotFastForward');
+    expect(store.getState().error).toContain('NotFastForward');
+  });
+});
+
+describe('git-store SSH trust failures', () => {
+  beforeEach(() => {
+    store.setState({
+      error: null,
+      trustFailure: null,
+      repositoryId: 'repository-test',
+      credentials: { type: 'sshAgent' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+      pendingNetworkOp: null,
+    });
+    vi.clearAllMocks();
+  });
+
+  it('push sets trustFailure (not pendingNetworkOp) for an unknown SSH host', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockRejectedValueOnce({
+      code: 'sshUnknownHost',
+      message:
+        'Unknown SSH host git.example.com:22 (algorithm ssh-ed25519, fingerprint SHA256:abc)',
+      host: 'git.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      fingerprint: 'SHA256:abc',
+    });
+
+    await store.getState().push();
+
+    expect(store.getState().trustFailure).toEqual({
+      code: 'sshUnknownHost',
+      message:
+        'Unknown SSH host git.example.com:22 (algorithm ssh-ed25519, fingerprint SHA256:abc)',
+      host: 'git.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      fingerprint: 'SHA256:abc',
+    });
+    expect(store.getState().error).toContain('Unknown SSH host');
+    // Never treated as a retriable auth error.
+    expect(store.getState().pendingNetworkOp).toBeNull();
+  });
+
+  it('pull clears a stale trustFailure once the operation succeeds', async () => {
+    const { gitPull } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    store.setState({
+      trustFailure: {
+        code: 'sshHostKeyChanged',
+        message: 'stale',
+        host: 'git.example.com',
+        port: 22,
+        algorithm: 'ssh-ed25519',
+        fingerprint: 'SHA256:stale',
+      },
+    });
+
+    await store.getState().pull();
+
+    expect(store.getState().trustFailure).toBeNull();
+  });
+
+  it('fetch still treats a real auth failure as retriable', async () => {
+    const { gitFetch } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockRejectedValueOnce(
+      new Error('authentication failed: check credentials'),
+    );
+
+    await store.getState().fetch();
+
+    expect(store.getState().trustFailure).toBeNull();
+    expect(store.getState().pendingNetworkOp).toBe('fetch');
   });
 });
 
 describe('setRepository', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: null,
       isRepo: false,
       error: null,
@@ -189,16 +268,16 @@ describe('setRepository', () => {
   it('non-repository ID sets isRepo=false and status=null', async () => {
     const { gitIsRepo } = await import('@/lib/tauri-api');
     // Seed non-default state so assertions are meaningful.
-    useGitStore.setState({
+    store.setState({
       isRepo: true,
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
     });
     vi.mocked(gitIsRepo).mockResolvedValueOnce(false);
 
-    await useGitStore.getState().setRepository('repository-not-git');
+    await store.getState().setRepository('repository-not-git');
 
-    expect(useGitStore.getState().isRepo).toBe(false);
-    expect(useGitStore.getState().status).toBeNull();
+    expect(store.getState().isRepo).toBe(false);
+    expect(store.getState().status).toBeNull();
   });
 
   it('valid repository ID loads status, branches, remotes, and stashes', async () => {
@@ -207,25 +286,25 @@ describe('setRepository', () => {
     );
     vi.mocked(gitIsRepo).mockResolvedValueOnce(true);
 
-    await useGitStore.getState().setRepository('repository-test');
+    await store.getState().setRepository('repository-test');
 
-    expect(useGitStore.getState().isRepo).toBe(true);
+    expect(store.getState().isRepo).toBe(true);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
     expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
     expect(gitStashList).toHaveBeenCalledWith('repository-test');
     // Verify state was actually stored, not just that functions were called.
-    expect(useGitStore.getState().status).not.toBeNull();
-    expect(useGitStore.getState().loading).toBe(false);
+    expect(store.getState().status).not.toBeNull();
+    expect(store.getState().loading).toBe(false);
   });
 
   it('gitIsRepo throwing sets error state', async () => {
     const { gitIsRepo } = await import('@/lib/tauri-api');
     vi.mocked(gitIsRepo).mockRejectedValueOnce(new Error('disk error'));
 
-    await useGitStore.getState().setRepository('repository-test');
+    await store.getState().setRepository('repository-test');
 
-    expect(useGitStore.getState().error).toContain('disk error');
+    expect(store.getState().error).toContain('disk error');
   });
 
   it('initRepo initializes and selects the repository ID', async () => {
@@ -233,11 +312,11 @@ describe('setRepository', () => {
     vi.mocked(gitInit).mockResolvedValueOnce(undefined);
     vi.mocked(gitIsRepo).mockResolvedValueOnce(true);
 
-    await useGitStore.getState().initRepo('repository-test');
+    await store.getState().initRepo('repository-test');
 
     expect(gitInit).toHaveBeenCalledWith('repository-test');
     expect(gitIsRepo).toHaveBeenCalledWith('repository-test');
-    expect(useGitStore.getState().repositoryId).toBe('repository-test');
+    expect(store.getState().repositoryId).toBe('repository-test');
   });
 });
 
@@ -261,15 +340,15 @@ knownRedDescribe('known-red: setRepository repository race contracts', () => {
       isClean: true,
     }));
 
-    const loadA = useGitStore.getState().setRepository('repository-a');
-    const loadB = useGitStore.getState().setRepository('repository-b');
+    const loadA = store.getState().setRepository('repository-a');
+    const loadB = store.getState().setRepository('repository-b');
 
     repoB.resolve(true);
     await loadB;
     repoA.resolve(true);
     await loadA;
 
-    expect(useGitStore.getState()).toMatchObject({
+    expect(store.getState()).toMatchObject({
       repositoryId: 'repository-b',
       isRepo: true,
       status: expect.objectContaining({ branch: 'branch-b' }),
@@ -280,7 +359,7 @@ knownRedDescribe('known-red: setRepository repository race contracts', () => {
 
 describe('pendingNetworkOp and setCredentials', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       credentials: null,
@@ -295,64 +374,64 @@ describe('pendingNetworkOp and setCredentials', () => {
   });
 
   it('pull without credentials opens dialog and sets pendingNetworkOp=pull', async () => {
-    await useGitStore.getState().pull();
+    await store.getState().pull();
 
-    expect(useGitStore.getState().showCredentialsDialog).toBe(true);
-    expect(useGitStore.getState().pendingNetworkOp).toBe('pull');
+    expect(store.getState().showCredentialsDialog).toBe(true);
+    expect(store.getState().pendingNetworkOp).toBe('pull');
   });
 
   it('setCredentials auto-retries pull and clears pendingNetworkOp', async () => {
     const { gitPull } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
 
-    useGitStore.setState({ pendingNetworkOp: 'pull' });
+    store.setState({ pendingNetworkOp: 'pull' });
 
-    useGitStore.getState().setCredentials({ type: 'sshAgent' });
+    store.getState().setCredentials({ type: 'sshAgent' });
 
     await vi.waitFor(() => {
       expect(gitPull).toHaveBeenCalledWith('repository-test', 'origin', { type: 'sshAgent' });
     });
 
-    expect(useGitStore.getState().pendingNetworkOp).toBeNull();
-    expect(useGitStore.getState().showCredentialsDialog).toBe(false);
+    expect(store.getState().pendingNetworkOp).toBeNull();
+    expect(store.getState().showCredentialsDialog).toBe(false);
   });
 
   it('push without credentials sets pendingNetworkOp=push', async () => {
-    await useGitStore.getState().push();
+    await store.getState().push();
 
-    expect(useGitStore.getState().showCredentialsDialog).toBe(true);
-    expect(useGitStore.getState().pendingNetworkOp).toBe('push');
+    expect(store.getState().showCredentialsDialog).toBe(true);
+    expect(store.getState().pendingNetworkOp).toBe('push');
   });
 
   it('fetch without credentials sets pendingNetworkOp=fetch', async () => {
-    await useGitStore.getState().fetch();
+    await store.getState().fetch();
 
-    expect(useGitStore.getState().showCredentialsDialog).toBe(true);
-    expect(useGitStore.getState().pendingNetworkOp).toBe('fetch');
+    expect(store.getState().showCredentialsDialog).toBe(true);
+    expect(store.getState().pendingNetworkOp).toBe('fetch');
   });
 
   it('dismissing dialog clears pendingNetworkOp without retrying', async () => {
     const { gitPush } = await import('@/lib/tauri-api');
-    useGitStore.setState({ pendingNetworkOp: 'push' });
+    store.setState({ pendingNetworkOp: 'push' });
 
-    useGitStore.getState().setShowCredentialsDialog(false);
+    store.getState().setShowCredentialsDialog(false);
 
-    expect(useGitStore.getState().pendingNetworkOp).toBeNull();
+    expect(store.getState().pendingNetworkOp).toBeNull();
     expect(gitPush).not.toHaveBeenCalled();
   });
 
   it('reset clears pendingNetworkOp', () => {
-    useGitStore.setState({ pendingNetworkOp: 'fetch' });
+    store.setState({ pendingNetworkOp: 'fetch' });
 
-    useGitStore.getState().reset();
+    store.getState().reset();
 
-    expect(useGitStore.getState().pendingNetworkOp).toBeNull();
+    expect(store.getState().pendingNetworkOp).toBeNull();
   });
 });
 
 describe('staging', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       error: null,
@@ -364,7 +443,7 @@ describe('staging', () => {
   it('stageFiles calls gitStage and refreshes status', async () => {
     const { gitStage, gitStatus } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().stageFiles(['foo.bru']);
+    await store.getState().stageFiles(['foo.bru']);
 
     expect(gitStage).toHaveBeenCalledWith('repository-test', ['foo.bru']);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -373,7 +452,7 @@ describe('staging', () => {
   it('unstageFiles calls gitUnstage and refreshes status', async () => {
     const { gitUnstage, gitStatus } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().unstageFiles(['foo.bru']);
+    await store.getState().unstageFiles(['foo.bru']);
 
     expect(gitUnstage).toHaveBeenCalledWith('repository-test', ['foo.bru']);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -395,7 +474,7 @@ describe('staging', () => {
       files,
     });
 
-    await useGitStore.getState().stageAll();
+    await store.getState().stageAll();
 
     expect(gitStage).toHaveBeenCalledWith('repository-test', ['unstaged-modified.bru']);
   });
@@ -403,7 +482,7 @@ describe('staging', () => {
   it('discardFiles calls gitDiscard and refreshes status', async () => {
     const { gitDiscard, gitStatus } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().discardFiles(['foo.bru']);
+    await store.getState().discardFiles(['foo.bru']);
 
     expect(gitDiscard).toHaveBeenCalledWith('repository-test', ['foo.bru']);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -412,7 +491,7 @@ describe('staging', () => {
   it('commitChanges calls gitCommit and refreshes status', async () => {
     const { gitCommit, gitStatus } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().commitChanges('initial commit');
+    await store.getState().commitChanges('initial commit');
 
     expect(gitCommit).toHaveBeenCalledWith('repository-test', 'initial commit');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -422,15 +501,15 @@ describe('staging', () => {
     const { gitStage } = await import('@/lib/tauri-api');
     vi.mocked(gitStage).mockRejectedValueOnce(new Error('permission denied'));
 
-    await useGitStore.getState().stageFiles(['locked.bru']);
+    await store.getState().stageFiles(['locked.bru']);
 
-    expect(useGitStore.getState().error).toContain('permission denied');
+    expect(store.getState().error).toContain('permission denied');
   });
 });
 
 describe('branches', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       error: null,
@@ -443,7 +522,7 @@ describe('branches', () => {
   it('switchBranch calls api and refreshes status and branches', async () => {
     const { gitSwitchBranch, gitStatus, gitBranches } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().switchBranch('feature');
+    await store.getState().switchBranch('feature');
 
     expect(gitSwitchBranch).toHaveBeenCalledWith('repository-test', 'feature');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -453,7 +532,7 @@ describe('branches', () => {
   it('createBranch calls api and refreshes branches', async () => {
     const { gitCreateBranch, gitBranches } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().createBranch('new-branch');
+    await store.getState().createBranch('new-branch');
 
     expect(gitCreateBranch).toHaveBeenCalledWith('repository-test', 'new-branch');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
@@ -462,7 +541,7 @@ describe('branches', () => {
   it('deleteBranch calls api and refreshes branches', async () => {
     const { gitDeleteBranch, gitBranches } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().deleteBranch('old-branch');
+    await store.getState().deleteBranch('old-branch');
 
     expect(gitDeleteBranch).toHaveBeenCalledWith('repository-test', 'old-branch');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
@@ -471,7 +550,7 @@ describe('branches', () => {
   it('mergeBranch calls api and refreshes status and branches', async () => {
     const { gitMergeBranch, gitStatus, gitBranches } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().mergeBranch('feature');
+    await store.getState().mergeBranch('feature');
 
     expect(gitMergeBranch).toHaveBeenCalledWith('repository-test', 'feature');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -482,15 +561,15 @@ describe('branches', () => {
     const { gitSwitchBranch } = await import('@/lib/tauri-api');
     vi.mocked(gitSwitchBranch).mockRejectedValueOnce(new Error('branch not found'));
 
-    await useGitStore.getState().switchBranch('nonexistent');
+    await store.getState().switchBranch('nonexistent');
 
-    expect(useGitStore.getState().error).toContain('branch not found');
+    expect(store.getState().error).toContain('branch not found');
   });
 
   it('checkoutRemoteBranch calls api and refreshes status and branches', async () => {
     const { gitCheckoutRemoteBranch, gitStatus, gitBranches } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().checkoutRemoteBranch('origin/feature');
+    await store.getState().checkoutRemoteBranch('origin/feature');
 
     expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('repository-test', 'origin/feature');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -500,7 +579,7 @@ describe('branches', () => {
 
 describe('stash', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       error: null,
@@ -513,7 +592,7 @@ describe('stash', () => {
   it('saveStash calls api and refreshes status and stashes', async () => {
     const { gitStashSave, gitStatus, gitStashList } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().saveStash('WIP');
+    await store.getState().saveStash('WIP');
 
     expect(gitStashSave).toHaveBeenCalledWith('repository-test', 'WIP');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -523,7 +602,7 @@ describe('stash', () => {
   it('popStash calls api and refreshes status and stashes', async () => {
     const { gitStashPop, gitStatus, gitStashList } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().popStash(0);
+    await store.getState().popStash(0);
 
     expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -533,7 +612,7 @@ describe('stash', () => {
   it('applyStash calls api and refreshes status and stashes', async () => {
     const { gitStashApply, gitStatus, gitStashList } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().applyStash(0);
+    await store.getState().applyStash(0);
 
     expect(gitStashApply).toHaveBeenCalledWith('repository-test', 0);
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -543,7 +622,7 @@ describe('stash', () => {
   it('dropStash calls api and refreshes stashes but not status', async () => {
     const { gitStashDrop, gitStashList, gitStatus } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().dropStash(0);
+    await store.getState().dropStash(0);
 
     expect(gitStashDrop).toHaveBeenCalledWith('repository-test', 0);
     expect(gitStashList).toHaveBeenCalledWith('repository-test');
@@ -553,7 +632,7 @@ describe('stash', () => {
 
 describe('remotes', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       error: null,
@@ -565,7 +644,7 @@ describe('remotes', () => {
   it('addRemote calls api and refreshes remotes', async () => {
     const { gitAddRemote, gitListRemotes } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().addRemote('upstream', 'https://github.com/org/repo.git');
+    await store.getState().addRemote('upstream', 'https://github.com/org/repo.git');
 
     expect(gitAddRemote).toHaveBeenCalledWith(
       'repository-test',
@@ -578,7 +657,7 @@ describe('remotes', () => {
   it('removeRemote calls api and refreshes remotes', async () => {
     const { gitRemoveRemote, gitListRemotes } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().removeRemote('upstream');
+    await store.getState().removeRemote('upstream');
 
     expect(gitRemoveRemote).toHaveBeenCalledWith('repository-test', 'upstream');
     expect(gitListRemotes).toHaveBeenCalledWith('repository-test');
@@ -587,7 +666,7 @@ describe('remotes', () => {
   it('setRemoteUrl calls api and refreshes remotes', async () => {
     const { gitSetRemoteUrl, gitListRemotes } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().setRemoteUrl('origin', 'https://github.com/org/new.git');
+    await store.getState().setRemoteUrl('origin', 'https://github.com/org/new.git');
 
     expect(gitSetRemoteUrl).toHaveBeenCalledWith(
       'repository-test',
@@ -601,15 +680,15 @@ describe('remotes', () => {
     const { gitAddRemote } = await import('@/lib/tauri-api');
     vi.mocked(gitAddRemote).mockRejectedValueOnce(new Error('remote already exists'));
 
-    await useGitStore.getState().addRemote('origin', 'https://github.com/org/repo.git');
+    await store.getState().addRemote('origin', 'https://github.com/org/repo.git');
 
-    expect(useGitStore.getState().error).toContain('remote already exists');
+    expect(store.getState().error).toContain('remote already exists');
   });
 });
 
 describe('conflicts', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-test',
       isRepo: true,
       error: null,
@@ -622,7 +701,7 @@ describe('conflicts', () => {
   it('resolveConflict calls api and refreshes status and conflicts', async () => {
     const { gitResolveConflict, gitStatus, gitConflicts } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().resolveConflict('foo.bru', { resolution: 'ours' });
+    await store.getState().resolveConflict('foo.bru', { resolution: 'ours' });
 
     expect(gitResolveConflict).toHaveBeenCalledWith('repository-test', 'foo.bru', {
       resolution: 'ours',
@@ -634,7 +713,7 @@ describe('conflicts', () => {
   it('abortMerge calls api and refreshes status and conflicts', async () => {
     const { gitAbortMerge, gitStatus, gitConflicts } = await import('@/lib/tauri-api');
 
-    await useGitStore.getState().abortMerge();
+    await store.getState().abortMerge();
 
     expect(gitAbortMerge).toHaveBeenCalledWith('repository-test');
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
@@ -644,12 +723,12 @@ describe('conflicts', () => {
 
 describe('reset', () => {
   beforeEach(() => {
-    useGitStore.getState().reset();
+    store.getState().reset();
     vi.clearAllMocks();
   });
 
   it('reset clears all state to initial values including pendingNetworkOp', () => {
-    useGitStore.setState({
+    store.setState({
       isRepo: true,
       repositoryId: 'repository-some',
       error: 'some error',
@@ -660,9 +739,9 @@ describe('reset', () => {
       branches: { current: 'main', local: [], remote: [] },
     });
 
-    useGitStore.getState().reset();
+    store.getState().reset();
 
-    const s = useGitStore.getState();
+    const s = store.getState();
     expect(s.isRepo).toBe(false);
     expect(s.repositoryId).toBeNull();
     expect(s.status).toBeNull();
@@ -680,7 +759,7 @@ describe('reset', () => {
 
 describe('git-store stash batch operations', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       error: null,
       repositoryId: 'repository-test',
       isRepo: true,
@@ -696,7 +775,7 @@ describe('git-store stash batch operations', () => {
       order.push(index);
     });
 
-    await useGitStore.getState().applyStashMany([2, 0, 1]);
+    await store.getState().applyStashMany([2, 0, 1]);
 
     expect(order).toEqual([0, 1, 2]);
   });
@@ -707,18 +786,18 @@ describe('git-store stash batch operations', () => {
       .mockResolvedValueOnce(undefined) // index 0 succeeds
       .mockRejectedValueOnce(new Error('conflict')); // index 1 fails
 
-    await useGitStore.getState().applyStashMany([0, 1, 2]);
+    await store.getState().applyStashMany([0, 1, 2]);
 
     expect(vi.mocked(gitStashApply)).toHaveBeenCalledTimes(2);
-    expect(useGitStore.getState().error).toContain('stash@{1}');
-    expect(useGitStore.getState().error).toContain('conflict');
+    expect(store.getState().error).toContain('stash@{1}');
+    expect(store.getState().error).toContain('conflict');
   });
 
   it('applyStashMany refreshes stashes and status after completion', async () => {
     const { gitStashApply, gitStashList, gitStatus } = await import('@/lib/tauri-api');
     vi.mocked(gitStashApply).mockResolvedValue(undefined);
 
-    await useGitStore.getState().applyStashMany([0]);
+    await store.getState().applyStashMany([0]);
 
     expect(vi.mocked(gitStashList)).toHaveBeenCalled();
     expect(vi.mocked(gitStatus)).toHaveBeenCalled();
@@ -731,7 +810,7 @@ describe('git-store stash batch operations', () => {
       order.push(index);
     });
 
-    await useGitStore.getState().popStashMany([1, 0]);
+    await store.getState().popStashMany([1, 0]);
 
     expect(order).toEqual([1, 0]);
   });
@@ -743,7 +822,7 @@ describe('git-store stash batch operations', () => {
       order.push(index);
     });
 
-    await useGitStore.getState().dropStashMany([2, 0, 1]);
+    await store.getState().dropStashMany([2, 0, 1]);
 
     expect(order).toEqual([2, 1, 0]);
   });
@@ -753,7 +832,7 @@ describe('git-store stash batch operations', () => {
     vi.mocked(gitStashDrop).mockResolvedValue(undefined);
     vi.mocked(gitStatus).mockClear();
 
-    await useGitStore.getState().dropStashMany([0]);
+    await store.getState().dropStashMany([0]);
 
     expect(vi.mocked(gitStatus)).not.toHaveBeenCalled();
   });
@@ -761,7 +840,7 @@ describe('git-store stash batch operations', () => {
 
 describe('git-store credential auto-load', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       isRepo: false,
       repositoryId: null,
       credentials: null,
@@ -789,10 +868,10 @@ describe('git-store credential auto-load', () => {
     vi.mocked(gitIsRepo).mockResolvedValue(true);
     vi.mocked(loadGitCredentials).mockResolvedValue(savedCreds as unknown as GitCredentials);
 
-    await useGitStore.getState().setRepository('repository-some');
+    await store.getState().setRepository('repository-some');
 
     expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
-    expect(useGitStore.getState().credentials).toEqual(savedCreds);
+    expect(store.getState().credentials).toEqual(savedCreds);
   });
 
   it('leaves credentials null when keychain returns null', async () => {
@@ -800,31 +879,31 @@ describe('git-store credential auto-load', () => {
     vi.mocked(gitIsRepo).mockResolvedValue(true);
     vi.mocked(loadGitCredentials).mockResolvedValue(null);
 
-    await useGitStore.getState().setRepository('repository-some');
+    await store.getState().setRepository('repository-some');
 
     expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
-    expect(useGitStore.getState().credentials).toBeNull();
+    expect(store.getState().credentials).toBeNull();
   });
 
   it('overwrites existing credentials with keychain result (always reloads on setRepository)', async () => {
     const { loadGitCredentials, gitIsRepo } = await import('@/lib/tauri-api');
     const existing = { type: 'token' as const, token: 'mytoken' };
-    useGitStore.setState({ credentials: existing as unknown as GitCredentials });
+    store.setState({ credentials: existing as unknown as GitCredentials });
     vi.mocked(loadGitCredentials).mockResolvedValue(null);
     vi.mocked(gitIsRepo).mockResolvedValue(true);
 
-    await useGitStore.getState().setRepository('repository-some');
+    await store.getState().setRepository('repository-some');
 
     // Always reload repository-scoped credentials on setRepository;
     // keychain returning null clears any previously-set in-memory credentials.
     expect(vi.mocked(loadGitCredentials)).toHaveBeenCalledWith('repository-some');
-    expect(useGitStore.getState().credentials).toBeNull();
+    expect(store.getState().credentials).toBeNull();
   });
 });
 
 describe('git-store identity setup flow', () => {
   beforeEach(() => {
-    useGitStore.setState({
+    store.setState({
       repositoryId: null,
       credentials: null,
       showCredentialsDialog: false,
@@ -842,13 +921,13 @@ describe('git-store identity setup flow', () => {
   it('setCredentials with sshKey and repositoryId shows identity setup dialog', async () => {
     const { gitGetIdentity } = await import('@/lib/tauri-api');
     vi.mocked(gitGetIdentity).mockResolvedValue({ name: 'Snehal', email: 'snehal@example.com' });
-    useGitStore.setState({ repositoryId: 'repository-some' });
+    store.setState({ repositoryId: 'repository-some' });
 
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
-    useGitStore.getState().setCredentials(creds);
+    store.getState().setCredentials(creds);
     await new Promise((r) => setTimeout(r, 0));
 
-    const state = useGitStore.getState();
+    const state = store.getState();
     expect(state.credentials).toBeNull();
     expect(state.showCredentialsDialog).toBe(false);
     expect(state.showIdentitySetupDialog).toBe(true);
@@ -858,23 +937,23 @@ describe('git-store identity setup flow', () => {
   });
 
   it('setCredentials with sshKey but no repositoryId activates immediately', () => {
-    useGitStore.setState({ repositoryId: null });
+    store.setState({ repositoryId: null });
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
 
-    useGitStore.getState().setCredentials(creds);
+    store.getState().setCredentials(creds);
 
-    const state = useGitStore.getState();
+    const state = store.getState();
     expect(state.credentials).toEqual(creds);
     expect(state.showIdentitySetupDialog).toBe(false);
   });
 
   it('setCredentials with token creds activates immediately without identity dialog', () => {
-    useGitStore.setState({ repositoryId: 'repository-some' });
+    store.setState({ repositoryId: 'repository-some' });
     const creds: GitCredentials = { type: 'token', token: 'ghp_xxx' };
 
-    useGitStore.getState().setCredentials(creds);
+    store.getState().setCredentials(creds);
 
-    const state = useGitStore.getState();
+    const state = store.getState();
     expect(state.credentials).toEqual(creds);
     expect(state.showIdentitySetupDialog).toBe(false);
   });
@@ -882,20 +961,20 @@ describe('git-store identity setup flow', () => {
   it('setCredentials with sshKey falls back to immediate activation when gitGetIdentity throws', async () => {
     const { gitGetIdentity } = await import('@/lib/tauri-api');
     vi.mocked(gitGetIdentity).mockRejectedValue(new Error('no repo'));
-    useGitStore.setState({ repositoryId: 'repository-some' });
+    store.setState({ repositoryId: 'repository-some' });
 
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
-    useGitStore.getState().setCredentials(creds);
+    store.getState().setCredentials(creds);
     await new Promise((r) => setTimeout(r, 0));
 
-    const state = useGitStore.getState();
+    const state = store.getState();
     expect(state.credentials).toEqual(creds);
     expect(state.showIdentitySetupDialog).toBe(false);
   });
 
   it('activatePendingCredentials sets credentials and clears identity setup state', () => {
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
-    useGitStore.setState({
+    store.setState({
       pendingCredentialsForIdentitySetup: creds,
       showIdentitySetupDialog: true,
       identitySetupInitialName: 'Snehal',
@@ -903,9 +982,9 @@ describe('git-store identity setup flow', () => {
       pendingNetworkOp: null,
     });
 
-    useGitStore.getState().activatePendingCredentials();
+    store.getState().activatePendingCredentials();
 
-    const state = useGitStore.getState();
+    const state = store.getState();
     expect(state.credentials).toEqual(creds);
     expect(state.showIdentitySetupDialog).toBe(false);
     expect(state.pendingCredentialsForIdentitySetup).toBeNull();
@@ -917,7 +996,7 @@ describe('git-store identity setup flow', () => {
     const { gitPush } = await import('@/lib/tauri-api');
     vi.mocked(gitPush).mockResolvedValue(undefined);
     const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '~/.ssh/id_ed25519' };
-    useGitStore.setState({
+    store.setState({
       repositoryId: 'repository-some',
       pendingCredentialsForIdentitySetup: creds,
       showIdentitySetupDialog: true,
@@ -925,20 +1004,71 @@ describe('git-store identity setup flow', () => {
       remotes: [{ name: 'origin', url: 'git@github.com:test/test.git' }],
     });
 
-    useGitStore.getState().activatePendingCredentials();
+    store.getState().activatePendingCredentials();
     await new Promise((r) => setTimeout(r, 0));
 
     expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds);
   });
 
   it('activatePendingCredentials is a no-op when no pending credentials exist', () => {
-    useGitStore.setState({
+    store.setState({
       credentials: { type: 'token', token: 'existing' } as unknown as GitCredentials,
     });
 
-    useGitStore.getState().activatePendingCredentials();
+    store.getState().activatePendingCredentials();
 
     // Should not overwrite existing credentials
-    expect(useGitStore.getState().credentials).toEqual({ type: 'token', token: 'existing' });
+    expect(store.getState().credentials).toEqual({ type: 'token', token: 'existing' });
+  });
+});
+
+describe('setRepository generation guard', () => {
+  it('does not let a slower first call overwrite a faster second call', async () => {
+    const { gitIsRepo } = await import('@/lib/tauri-api');
+    const gitIsRepoMock = vi.mocked(gitIsRepo);
+    let resolveFirst!: (value: boolean) => void;
+    gitIsRepoMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    gitIsRepoMock.mockResolvedValueOnce(true);
+
+    const firstCall = store.getState().setRepository('repo-a');
+    // Let the second call's setRepository start and fully resolve before the first does.
+    await store.getState().setRepository('repo-b');
+    expect(store.getState().repositoryId).toBe('repo-b');
+
+    // Now let the slow first call resolve. It must not clobber repo-b's state.
+    resolveFirst(true);
+    await firstCall;
+    expect(store.getState().repositoryId).toBe('repo-b');
+  });
+
+  it('does not let a stale refreshBranches response from a superseded repository overwrite the current one', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    const staleBranches = createDeferred<tauriApi.BranchList>();
+    // repo-a's own refreshBranches() call (fired inside setRepository's
+    // Promise.all) hangs; repo-b's setRepository must be free to complete
+    // fully in the meantime. Keyed on the argument (not call order) so the
+    // test doesn't depend on the exact microtask interleaving of two
+    // concurrently-running setRepository() calls.
+    vi.mocked(tauriApi.gitBranches).mockImplementation((repositoryId) =>
+      repositoryId === 'repo-a'
+        ? staleBranches.promise
+        : Promise.resolve({ current: 'main-b', local: [], remote: [] }),
+    );
+
+    const firstCall = store.getState().setRepository('repo-a');
+    await store.getState().setRepository('repo-b');
+    expect(store.getState().branches?.current).toBe('main-b');
+
+    // The stale repo-a branch list arrives after repo-b is already active.
+    // It must be discarded, not written over repo-b's branches.
+    staleBranches.resolve({ current: 'main-a', local: [], remote: [] });
+    await firstCall;
+    expect(store.getState().repositoryId).toBe('repo-b');
+    expect(store.getState().branches?.current).toBe('main-b');
   });
 });

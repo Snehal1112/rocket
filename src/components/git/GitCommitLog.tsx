@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CommitInfo } from '@/lib/tauri-api';
-import { useGitStore } from '@/stores/git-store';
+import { useGitStore } from '@/stores/git-store-context';
 
 function relativeTime(timestamp: string): string {
   const now = Date.now();
@@ -25,7 +25,7 @@ interface GitCommitLogProps {
 }
 
 export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
-  const { commitLog, refreshLog } = useGitStore();
+  const { commitLog, refreshLog } = useGitStore((state) => state);
   const [limit, setLimit] = useState(50);
 
   const handleLoadMore = async () => {
