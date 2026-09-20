@@ -63,8 +63,12 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       setCollections([]);
       setSelectedCollection(null);
     } else {
-      // Closing also disowns any clone still in flight from this session.
+      // Closing also disowns any clone still in flight from this session, and
+      // any pending credentials-wait session — otherwise credentials arriving
+      // after close would still trigger the continuation effect below.
       requestIdRef.current += 1;
+      setAwaitingCredentials(false);
+      setDestination(null);
     }
   }, [open]);
 
@@ -140,11 +144,12 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   // Continue exactly once when credentials arrive after the credentials dialog.
   useEffect(() => {
+    if (!open) return;
     if (awaitingCredentials && credentials) {
       setAwaitingCredentials(false);
       void performClone(credentials);
     }
-  }, [awaitingCredentials, credentials, performClone]);
+  }, [open, awaitingCredentials, credentials, performClone]);
 
   const handleBrowse = async () => {
     const result = await selectCloneDestination();

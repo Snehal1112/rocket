@@ -97,6 +97,59 @@ describe('GitCloneDialog stale completion', () => {
     expect(switchWorkspaceMock).not.toHaveBeenCalled();
   });
 
+  it('does not continue a credentials-pending clone after the dialog was closed', async () => {
+    // Regression test: closing the dialog (e.g. via Escape) while
+    // awaitingCredentials was true used to leave the credentials-continuation
+    // effect armed. If credentials then arrived — from some other, still-open
+    // credentials UI — performClone would run to completion with no clone
+    // dialog visible on screen, silently switching the user's workspace.
+    vi.mocked(tauriApi.gitClone).mockResolvedValue(undefined);
+
+    const store = createGitStore();
+    // No credentials yet — Clone will trigger the credentials dialog instead
+    // of cloning immediately.
+    store.setState({ credentials: null });
+
+    const onOpenChange = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <GitStoreProvider store={store}>
+          <GitCloneDialog open={true} onOpenChange={onOpenChange} />
+        </GitStoreProvider>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /browse/i }));
+    await userEvent.type(
+      screen.getByPlaceholderText(/github.com/i),
+      'https://example.com/repo.git',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^clone$/i }));
+
+    // Clone is now awaiting credentials (progress step shown, dialog still open).
+    expect(await screen.findByText(/cloning repository/i)).toBeInTheDocument();
+
+    // User presses Escape — dialog closes while still awaiting credentials.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <GitStoreProvider store={store}>
+          <GitCloneDialog open={false} onOpenChange={onOpenChange} />
+        </GitStoreProvider>
+      </QueryClientProvider>,
+    );
+
+    // Credentials now arrive via whatever other UI surface prompted for them.
+    store.setState({ credentials: { type: 'token', token: 'tok' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(tauriApi.gitClone).not.toHaveBeenCalled();
+    expect(openFromDiskMock).not.toHaveBeenCalled();
+    expect(switchWorkspaceMock).not.toHaveBeenCalled();
+  });
+
   it('gives the URL and destination fields accessible names', () => {
     renderDialog(vi.fn(), true);
     expect(screen.getByLabelText('Repository URL')).toBeInTheDocument();
