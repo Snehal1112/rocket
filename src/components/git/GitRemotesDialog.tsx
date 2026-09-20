@@ -13,8 +13,13 @@ interface Props {
 }
 
 export function GitRemotesDialog({ open, onOpenChange }: Props) {
-  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes, error, clearError } =
-    useGitStore((state) => state);
+  const remotes = useGitStore((state) => state.remotes);
+  const addRemote = useGitStore((state) => state.addRemote);
+  const removeRemote = useGitStore((state) => state.removeRemote);
+  const setRemoteUrl = useGitStore((state) => state.setRemoteUrl);
+  const refreshRemotes = useGitStore((state) => state.refreshRemotes);
+  const error = useGitStore((state) => state.error);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   const [newName, setNewName] = useState('');

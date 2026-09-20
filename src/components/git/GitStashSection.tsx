@@ -44,18 +44,16 @@ export function GitStashSection() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
 
-  const {
-    stashes,
-    saveStash,
-    popStash,
-    applyStash,
-    dropStash,
-    applyStashMany,
-    popStashMany,
-    dropStashMany,
-    error,
-    clearError,
-  } = useGitStore((state) => state);
+  const stashes = useGitStore((state) => state.stashes);
+  const saveStash = useGitStore((state) => state.saveStash);
+  const popStash = useGitStore((state) => state.popStash);
+  const applyStash = useGitStore((state) => state.applyStash);
+  const dropStash = useGitStore((state) => state.dropStash);
+  const applyStashMany = useGitStore((state) => state.applyStashMany);
+  const popStashMany = useGitStore((state) => state.popStashMany);
+  const dropStashMany = useGitStore((state) => state.dropStashMany);
+  const error = useGitStore((state) => state.error);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   const isSelecting = selectedIndices.size > 0;
