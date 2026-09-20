@@ -117,3 +117,58 @@ describe('BranchSelector switchBranch result handling', () => {
     expect(await screen.findByText('uncommitted changes would be overwritten')).toBeInTheDocument();
   });
 });
+
+describe('BranchSelector mergeBranch/deleteBranch result handling', () => {
+  it('treats a repeated identical merge error as a failure and keeps the popover open', async () => {
+    const store = renderWithStore({
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+      mergeBranch: async () => {
+        store.setState({ error: 'not something we can merge (unrelated histories)' });
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    await user.click(screen.getByRole('button', { name: /merge into current/i }));
+
+    expect(
+      await screen.findByText('not something we can merge (unrelated histories)'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /merge into current/i }));
+    expect(
+      await screen.findByText('not something we can merge (unrelated histories)'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows an error when deleting a branch fails', async () => {
+    const store = renderWithStore({
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+      deleteBranch: async () => {
+        store.setState({ error: 'cannot delete the currently checked-out branch' });
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    await user.click(screen.getByRole('button', { name: /delete branch/i }));
+
+    expect(
+      await screen.findByText('cannot delete the currently checked-out branch'),
+    ).toBeInTheDocument();
+  });
+});

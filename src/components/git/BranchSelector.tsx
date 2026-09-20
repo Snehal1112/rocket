@@ -89,10 +89,10 @@ export function BranchSelector() {
   // - On other error: keep the popover open and show the error inline.
   const handleMerge = async (name: string) => {
     setSwitchError(null);
-    const prevError = gitStoreApi.getState().error;
+    clearError();
     await mergeBranch(name);
     const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
+    if (nextError) {
       if (nextError.toLowerCase().includes('conflict')) {
         setOpen(false);
       } else {
@@ -100,6 +100,16 @@ export function BranchSelector() {
       }
     } else {
       setOpen(false);
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    setSwitchError(null);
+    clearError();
+    await deleteBranch(name);
+    const nextError = gitStoreApi.getState().error;
+    if (nextError) {
+      setSwitchError(nextError);
     }
   };
 
@@ -168,6 +178,7 @@ export function BranchSelector() {
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5'
+                          aria-label='Merge into current'
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleMerge(branch.name);
@@ -184,9 +195,10 @@ export function BranchSelector() {
                           variant='ghost'
                           size='icon'
                           className='h-5 w-5 text-destructive'
+                          aria-label='Delete branch'
                           onClick={(e) => {
                             e.stopPropagation();
-                            deleteBranch(branch.name);
+                            void handleDelete(branch.name);
                           }}
                         >
                           <Trash2 className='h-3.5 w-3.5' />
