@@ -122,15 +122,23 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const statusDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (loadStatus !== 'ready') return;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     void onCollectionChanged((event) => {
       if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
       if (statusDebounce.current) clearTimeout(statusDebounce.current);
       statusDebounce.current = setTimeout(() => void refreshStatus(), 300);
     }).then((fn) => {
+      if (cancelled) {
+        // Cleanup already ran before registration resolved — the effect's own
+        // `unlisten` variable will never be read again, so unregister directly.
+        fn();
+        return;
+      }
       unlisten = fn;
     });
     return () => {
+      cancelled = true;
       unlisten?.();
       if (statusDebounce.current) clearTimeout(statusDebounce.current);
     };

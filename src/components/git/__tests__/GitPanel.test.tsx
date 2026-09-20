@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitPanel } from '@/components/git/GitPanel';
 import * as tauriApi from '@/lib/tauri-api';
+import { createDeferred } from '@/test/deferred';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -116,5 +117,47 @@ describe('GitPanel load error rendering', () => {
     expect(screen.getByText(/disk unreadable/i)).toBeInTheDocument();
     expect(screen.queryByText('Initialize Git')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+});
+
+describe('GitPanel collection-changed listener cleanup', () => {
+  it('unregisters the listener even if it unmounts before registration resolves', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    vi.mocked(tauriApi.gitStatus).mockResolvedValue({
+      branch: 'main',
+      files: [],
+      ahead: 0,
+      behind: 0,
+      isClean: true,
+    });
+    vi.mocked(tauriApi.gitBranches).mockResolvedValue({ current: 'main', local: [], remote: [] });
+    vi.mocked(tauriApi.gitStashList).mockResolvedValue([]);
+
+    const deferredListen = createDeferred<() => void>();
+    const unlisten = vi.fn();
+    vi.mocked(tauriApi.onCollectionChanged).mockReturnValue(deferredListen.promise);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <GitPanel repositoryId='repo-a' repositoryLabel='Repo A' />
+      </QueryClientProvider>,
+    );
+
+    // Wait for the panel to reach its ready state — this is when the listener
+    // registration effect runs and calls onCollectionChanged — but keep the
+    // registration promise itself unresolved.
+    await screen.findByText('Repo A');
+    expect(tauriApi.onCollectionChanged).toHaveBeenCalled();
+
+    // Unmount before the registration resolves.
+    unmount();
+
+    // The registration now resolves, after cleanup already ran.
+    deferredListen.resolve(unlisten);
+    await deferredListen.promise;
+    await Promise.resolve();
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 });
