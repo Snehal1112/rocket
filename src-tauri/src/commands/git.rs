@@ -250,9 +250,10 @@ pub fn git_push(
     collection_path: String,
     remote: String,
     creds: GitCredentials,
+    force: bool,
     svc: State<'_, GitAppService>,
 ) -> Result<(), DomainError> {
-    svc.push(&collection_path, &remote, &creds)
+    svc.push(&collection_path, &remote, &creds, force)
 }
 
 pub fn git_pull(
@@ -291,9 +292,10 @@ pub fn git_switch_branch(
 pub fn git_checkout_remote_branch(
     collection_path: String,
     name: String,
+    force: bool,
     svc: State<'_, GitAppService>,
 ) -> Result<(), DomainError> {
-    svc.checkout_remote_branch(&collection_path, &name)
+    svc.checkout_remote_branch(&collection_path, &name, force)
 }
 
 pub fn git_create_branch(
@@ -559,11 +561,12 @@ pub fn git_push_v2(
     repository_id: String,
     remote: String,
     creds: GitCredentials,
+    force: bool,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
 ) -> Result<(), GitNetworkErrorDto> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_push(path, remote, creds, svc).map_err(Into::into)
+    git_push(path, remote, creds, force, svc).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -615,11 +618,12 @@ pub fn git_switch_branch_v2(
 pub fn git_checkout_remote_branch_v2(
     repository_id: String,
     name: String,
+    force: bool,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
     svc: State<'_, GitAppService>,
 ) -> Result<(), DomainError> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
-    git_checkout_remote_branch(path, name, svc)
+    git_checkout_remote_branch(path, name, force, svc)
 }
 
 #[tauri::command]

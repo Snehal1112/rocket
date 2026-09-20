@@ -872,8 +872,12 @@ export const gitCommit = (repositoryId: string, message: string) =>
 export const gitLog = (repositoryId: string, limit: number) =>
   invoke<CommitInfo[]>('git_log_v2', { repositoryId, limit });
 
-export const gitPush = (repositoryId: string, remote: string, creds: GitCredentials) =>
-  invoke<void>('git_push_v2', { repositoryId, remote, creds });
+export const gitPush = (
+  repositoryId: string,
+  remote: string,
+  creds: GitCredentials,
+  force = false,
+) => invoke<void>('git_push_v2', { repositoryId, remote, creds, force });
 
 export const gitPull = (repositoryId: string, remote: string, creds: GitCredentials) =>
   invoke<void>('git_pull_v2', { repositoryId, remote, creds });
@@ -887,8 +891,8 @@ export const gitBranches = (repositoryId: string) =>
 export const gitSwitchBranch = (repositoryId: string, name: string) =>
   invoke<void>('git_switch_branch_v2', { repositoryId, name });
 
-export const gitCheckoutRemoteBranch = (repositoryId: string, name: string) =>
-  invoke<void>('git_checkout_remote_branch_v2', { repositoryId, name });
+export const gitCheckoutRemoteBranch = (repositoryId: string, name: string, force = false) =>
+  invoke<void>('git_checkout_remote_branch_v2', { repositoryId, name, force });
 
 export const gitCreateBranch = (repositoryId: string, name: string) =>
   invoke<void>('git_create_branch_v2', { repositoryId, name });

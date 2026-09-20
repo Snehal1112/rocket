@@ -91,7 +91,7 @@ export interface GitState {
   popStashMany: (indices: number[]) => Promise<void>;
   dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
-  checkoutRemoteBranch: (name: string) => Promise<void>;
+  checkoutRemoteBranch: (name: string, force?: boolean) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -101,7 +101,7 @@ export interface GitState {
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
   clearPendingNetworkOp: () => void;
-  push: (remote?: string) => Promise<void>;
+  push: (remote?: string, force?: boolean) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
@@ -523,12 +523,14 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
-    // Check out a remote branch as a new local tracking branch.
-    checkoutRemoteBranch: async (name) => {
+    // Check out a remote branch as a new local tracking branch. When `force`
+    // is set, a colliding local branch is reset to match the remote branch's
+    // content instead of being rejected.
+    checkoutRemoteBranch: async (name, force = false) => {
       const { repositoryId } = get();
       if (!repositoryId) return;
       try {
-        await gitCheckoutRemoteBranch(repositoryId, name);
+        await gitCheckoutRemoteBranch(repositoryId, name, force);
         await get().refreshStatus();
         await get().refreshBranches();
       } catch (e) {
@@ -669,7 +671,9 @@ export function createGitStore(): StoreApi<GitState> {
     },
 
     // Push local commits to the remote, prompting for credentials if needed.
-    push: async (remote) => {
+    // `force` requests a --force-with-lease push (still refused server-side
+    // if the remote has moved since the last fetch).
+    push: async (remote, force = false) => {
       const { repositoryId, credentials } = get();
       if (!repositoryId) return;
       if (!credentials) {
@@ -679,7 +683,7 @@ export function createGitStore(): StoreApi<GitState> {
       const resolvedRemote = remote ?? get().remotes[0]?.name;
       set({ error: null });
       try {
-        await gitPush(repositoryId, resolvedRemote, credentials);
+        await gitPush(repositoryId, resolvedRemote, credentials, force);
         await get().refreshStatus();
         set({ trustFailure: null });
       } catch (e) {

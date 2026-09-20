@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronDown,
   Clock,
   GitBranch,
   GitCommit,
@@ -23,8 +24,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
@@ -40,6 +47,7 @@ export function GitLandingPanel() {
   const clearError = useGitStore((s) => s.clearError);
   const credentials = useGitStore((s) => s.credentials);
   const setShowCredentialsDialog = useGitStore((s) => s.setShowCredentialsDialog);
+  const remotes = useGitStore((s) => s.remotes);
   const gitStoreApi = useGitStoreApi();
 
   const [pushing, setPushing] = useState(false);
@@ -48,6 +56,7 @@ export function GitLandingPanel() {
   const [lastFetched, setLastFetched] = useState<string | null>(null);
   const [showStashDialog, setShowStashDialog] = useState(false);
   const [showFetchFirstDialog, setShowFetchFirstDialog] = useState(false);
+  const [showForcePushDialog, setShowForcePushDialog] = useState(false);
 
   const handleFetch = async () => {
     const { credentials } = gitStoreApi.getState();
@@ -171,6 +180,31 @@ export function GitLandingPanel() {
     }
   };
 
+  const handleForcePushClick = () => {
+    const { credentials } = gitStoreApi.getState();
+    if (!credentials) {
+      // Resolve credentials first, exactly like handlePush does — the
+      // generic credential-resume path (activatePendingCredentials) replays
+      // a bare `push()` with no arguments, which would silently drop the
+      // force flag and turn a confirmed force-push into a normal one. Never
+      // show the force-push confirmation until credentials already exist,
+      // so the resume path is never involved in a forced push.
+      push();
+      return;
+    }
+    setShowForcePushDialog(true);
+  };
+
+  const handleForcePush = async () => {
+    setShowForcePushDialog(false);
+    setPushing(true);
+    try {
+      await push(undefined, true);
+    } finally {
+      setPushing(false);
+    }
+  };
+
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
@@ -271,20 +305,43 @@ export function GitLandingPanel() {
               )}
               Pull{behind > 0 ? ` ↓${behind}` : ''}
             </Button>
-            <Button
-              variant={ahead > 0 ? 'default' : 'outline'}
-              size='sm'
-              className='flex-1'
-              onClick={handlePush}
-              disabled={pushing || hasConflicts}
-            >
-              {pushing ? (
-                <Loader2 className='h-3.5 w-3.5 animate-spin' />
-              ) : (
-                <ArrowUp className='h-3.5 w-3.5' />
-              )}
-              Push{ahead > 0 ? ` ↑${ahead}` : ''}
-            </Button>
+            <div className='flex flex-1'>
+              <Button
+                variant={ahead > 0 ? 'default' : 'outline'}
+                size='sm'
+                className='flex-1 rounded-r-none border-r-0'
+                onClick={handlePush}
+                disabled={pushing || hasConflicts}
+              >
+                {pushing ? (
+                  <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                ) : (
+                  <ArrowUp className='h-3.5 w-3.5' />
+                )}
+                Push{ahead > 0 ? ` ↑${ahead}` : ''}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant={ahead > 0 ? 'default' : 'outline'}
+                    size='sm'
+                    className='rounded-l-none px-2'
+                    disabled={pushing || hasConflicts}
+                    aria-label='More push options'
+                  >
+                    <ChevronDown className='h-3.5 w-3.5' />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end'>
+                  <DropdownMenuItem
+                    className='text-destructive focus:text-destructive'
+                    onClick={handleForcePushClick}
+                  >
+                    <ArrowUp className='h-3.5 w-3.5 mr-2 shrink-0' /> Force Push
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Inline error alert for failed push/pull/fetch operations. */}
@@ -364,6 +421,34 @@ export function GitLandingPanel() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handlePushAnyway}>Push Anyway</AlertDialogAction>
             <AlertDialogAction onClick={handleFetchAndPush}>Fetch & Push</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Force-push confirmation dialog — distinct from the local-only reset warning. */}
+      <AlertDialog open={showForcePushDialog} onOpenChange={setShowForcePushDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Force Push?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will overwrite{' '}
+              <span className='font-mono'>
+                {remotes[0]?.name ?? 'the remote'}/{status?.branch ?? 'this branch'}
+              </span>
+              's history to match your local <span className='font-mono'>{status?.branch}</span>.
+              Anyone else who has fetched this branch may lose commits you don't have. This cannot
+              be undone from the UI.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pushing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: 'destructive' }))}
+              onClick={handleForcePush}
+              disabled={pushing}
+            >
+              Force Push
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

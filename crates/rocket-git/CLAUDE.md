@@ -81,6 +81,7 @@ All types derive `Serialize`/`Deserialize` with `camelCase` field names (for Tau
 - **Status**: A file with both staged and unstaged changes emits two separate `FileStatus` entries (one with `staged: true`, one with `staged: false`).
 - **Diff**: Uses a simplistic all-removals-then-all-additions approach in a single hunk (`build_simple_diff`). Not a proper Myers diff.
 - **Commit signature**: Requires git config user identity (user.name and user.email) — no fallback. If missing, operations return a `DomainError::Internal`.
+- **Push**: `force` opts into `--force-with-lease`, never a blind force. Before a `+`-prefixed refspec is used, the remote's live tip for the target branch is read over a `Direction::Push` `connect_auth` + `list()` (ref advertisement only, no object download) and compared with `refs/remotes/<remote>/<branch>`. A mismatch, a missing local record, or a branch that has vanished from the remote returns `DomainError::Conflict` before anything is written. `force == false` is the unchanged plain push.
 - **Pull**: Implements fetch + fast-forward or merge commit. On conflicts, writes the index and returns `Ok(())`, leaving the repo in merge-in-progress state for the frontend to resolve.
 - **Conflict resolution**: `ConflictResolution` supports `Ours`, `Theirs`, or `Custom { content }`. Resolution writes the file, stages it, and clears the conflict marker in the index.
 

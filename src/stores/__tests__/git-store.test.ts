@@ -125,6 +125,24 @@ describe('git-store clearError', () => {
     expect(store.getState().error).toBeNull();
   });
 
+  it('push passes force through to gitPush, defaulting to false', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, false);
+
+    await store.getState().push(undefined, true);
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, true);
+  });
+
   it('pull clears stale error before executing', async () => {
     const { gitPull } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
@@ -571,7 +589,11 @@ describe('branches', () => {
 
     await store.getState().checkoutRemoteBranch('origin/feature');
 
-    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('repository-test', 'origin/feature');
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith(
+      'repository-test',
+      'origin/feature',
+      false,
+    );
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
   });
@@ -1007,7 +1029,7 @@ describe('git-store identity setup flow', () => {
     store.getState().activatePendingCredentials();
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds);
+    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds, false);
   });
 
   it('activatePendingCredentials is a no-op when no pending credentials exist', () => {
