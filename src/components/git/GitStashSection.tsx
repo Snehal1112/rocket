@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -190,12 +191,11 @@ export function GitStashSection() {
               {/* Checkbox / index badge slot — fixed width, no layout shift */}
               <div className='shrink-0 w-6 flex items-center justify-end'>
                 {showCheckbox ? (
-                  <input
-                    type='checkbox'
-                    className='h-3.5 w-3.5 accent-primary cursor-pointer'
+                  <Checkbox
                     checked={isSelected}
                     disabled={isBatchRunning}
-                    onChange={(e) => toggleSelect(stash.index, e.target.checked)}
+                    onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
+                    aria-label={`Select stash @{${stash.index}}`}
                   />
                 ) : (
                   <span className='text-[10px] font-mono text-muted-foreground/35 select-none leading-none'>
