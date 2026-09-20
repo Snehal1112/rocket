@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { CommitInfo } from '@/lib/tauri-api';
 import { formatRelativeTime } from '@/lib/relative-time';
+import type { CommitInfo } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store-context';
 
 interface GitCommitLogProps {

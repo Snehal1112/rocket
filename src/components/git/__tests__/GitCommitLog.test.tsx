@@ -1,5 +1,5 @@
-import { Profiler, type ProfilerOnRenderCallback } from 'react';
 import { act, render, screen } from '@testing-library/react';
+import { Profiler, type ProfilerOnRenderCallback } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { GitCommitLog } from '@/components/git/GitCommitLog';
 import { createGitStore } from '@/stores/git-store';
@@ -26,7 +26,11 @@ describe('GitCommitLog store subscription', () => {
     render(
       <GitStoreProvider store={store}>
         <Profiler id='commit-log' onRender={onRender}>
-          <GitCommitLog onCommitClick={() => {}} />
+          <GitCommitLog
+            onCommitClick={() => {
+              // Click handler is irrelevant to this render-count test.
+            }}
+          />
         </Profiler>
       </GitStoreProvider>,
     );

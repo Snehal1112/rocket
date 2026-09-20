@@ -22,8 +22,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/relative-time';
+import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 export function GitStashSection() {
@@ -188,7 +188,7 @@ export function GitStashSection() {
                   checked={isSelected}
                   disabled={isBatchRunning}
                   onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
-                  aria-label={`Select stash @{${stash.index}}`}
+                  aria-label={`Select stash @${stash.index}`}
                   className={cn(
                     'peer absolute transition-opacity',
                     showCheckbox ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100',

@@ -243,9 +243,10 @@ describe('BranchSelector keyboard behavior', () => {
     // Find the 'develop' branch row (a div with role='button')
     const developRow = screen.getByText('develop').closest('div[role="button"]');
     expect(developRow).toBeInTheDocument();
+    if (!developRow) throw new Error('develop row not found');
 
     const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-    developRow!.dispatchEvent(event);
+    developRow.dispatchEvent(event);
 
     expect(switchBranch).toHaveBeenCalledWith('develop');
     expect(event.defaultPrevented).toBe(true);
