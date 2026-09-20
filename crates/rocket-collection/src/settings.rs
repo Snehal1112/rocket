@@ -18,6 +18,17 @@ pub struct CollectionVariable {
     pub secret: bool,
 }
 
+/// JS sandbox capability level for scripts in a collection. Defaults to `Safe`
+/// (no filesystem/process access) so an imported collection never silently
+/// inherits an elevated capability from wherever it was authored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxMode {
+    #[default]
+    Safe,
+    Developer,
+}
+
 /// Per-collection default auth, headers, and variables, stored in opencollection.yml.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +48,10 @@ pub struct CollectionSettings {
     /// Collection-scoped variables, resolved alongside environment variables.
     #[serde(default)]
     pub variables: Vec<CollectionVariable>,
+
+    /// JS sandbox capability level for scripts in this collection.
+    #[serde(default)]
+    pub sandbox_mode: SandboxMode,
 }
 
 /// Merge a folder ancestor chain into a single deduplicated, sorted variable set.
@@ -129,5 +144,27 @@ mod tests {
         assert_eq!(result[0].value, "2");
         assert_eq!(result[1].key, "b");
         assert_eq!(result[1].value, "3");
+    }
+
+    #[test]
+    fn sandbox_mode_defaults_to_safe_when_absent_from_json() {
+        let json = r#"{"headers":[],"variables":[]}"#;
+        let settings: CollectionSettings = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(settings.sandbox_mode, SandboxMode::Safe);
+    }
+
+    #[test]
+    fn sandbox_mode_developer_roundtrips_as_camel_case() {
+        let settings = CollectionSettings {
+            sandbox_mode: SandboxMode::Developer,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialize");
+        assert!(
+            json.contains(r#""sandboxMode":"developer""#),
+            "expected camelCase sandboxMode field, got {json}"
+        );
+        let round: CollectionSettings = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round.sandbox_mode, SandboxMode::Developer);
     }
 }
