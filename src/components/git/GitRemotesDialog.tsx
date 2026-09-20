@@ -56,8 +56,11 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
   const handleConfirmDelete = async () => {
     if (!deletingRemote) return;
+    clearError();
     await removeRemote(deletingRemote);
-    setDeletingRemote(null);
+    if (!gitStoreApi.getState().error) {
+      setDeletingRemote(null);
+    }
   };
 
   return (
@@ -192,6 +195,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+                          aria-label='Delete remote'
                           onClick={() => setDeletingRemote(remote.name)}
                         >
                           <Trash2 className='h-3.5 w-3.5' />

@@ -83,4 +83,24 @@ describe('GitRemotesDialog failure handling', () => {
     expect(await screen.findByText('invalid remote URL')).toBeInTheDocument();
     expect(screen.getByDisplayValue('not-a-url')).toBeInTheDocument();
   });
+
+  it('stays in delete-confirmation mode and shows the error when removing a remote fails', async () => {
+    const store = createGitStore();
+    store.setState({
+      remotes: [{ name: 'origin', url: 'https://example.com/repo.git' }],
+      refreshRemotes: vi.fn().mockResolvedValue(undefined),
+      removeRemote: async () => {
+        store.setState({ error: 'could not remove remote' });
+      },
+    });
+    renderDialog(store);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Delete remote' }));
+    await user.click(screen.getByRole('button', { name: /^remove$/i }));
+
+    expect(await screen.findByText('could not remove remote')).toBeInTheDocument();
+    expect(screen.getByText(/Remove/, { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^remove$/i })).toBeInTheDocument();
+  });
 });
