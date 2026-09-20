@@ -83,6 +83,39 @@ describe('GitStashSection stash selection', () => {
     expect(checkbox).toBeChecked();
     expect(await screen.findByText('1 selected')).toBeInTheDocument();
   });
+
+  it('reaches and toggles the first stash checkbox via keyboard without hovering', async () => {
+    const store = createGitStore();
+    store.setState({
+      stashes: [
+        {
+          index: 0,
+          message: 'wip',
+          timestamp: new Date().toISOString(),
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+          changedFiles: ['a.txt'],
+          branch: 'main',
+        },
+      ],
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <GitStashSection />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+
+    // No hover — the checkbox must already be present and focusable.
+    const checkbox = screen.getByRole('checkbox');
+    checkbox.focus();
+    expect(checkbox).toHaveFocus();
+
+    await user.keyboard(' ');
+    expect(checkbox).toBeChecked();
+    expect(await screen.findByText('1 selected')).toBeInTheDocument();
+  });
 });
 
 describe('GitStashSection error handling', () => {

@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 /** Format a UTC timestamp string into a concise relative label. */
@@ -194,19 +195,25 @@ export function GitStashSection() {
               onMouseLeave={() => setHoveredIndex(null)}
             >
               {/* Checkbox / index badge slot — fixed width, no layout shift */}
-              <div className='shrink-0 w-6 flex items-center justify-end'>
-                {showCheckbox ? (
-                  <Checkbox
-                    checked={isSelected}
-                    disabled={isBatchRunning}
-                    onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
-                    aria-label={`Select stash @{${stash.index}}`}
-                  />
-                ) : (
-                  <span className='text-[10px] font-mono text-muted-foreground/35 select-none leading-none'>
-                    @{stash.index}
-                  </span>
-                )}
+              <div className='shrink-0 w-6 h-4 flex items-center justify-end relative'>
+                <Checkbox
+                  checked={isSelected}
+                  disabled={isBatchRunning}
+                  onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
+                  aria-label={`Select stash @{${stash.index}}`}
+                  className={cn(
+                    'peer absolute transition-opacity',
+                    showCheckbox ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100',
+                  )}
+                />
+                <span
+                  className={cn(
+                    'text-[10px] font-mono text-muted-foreground/35 select-none leading-none transition-opacity pointer-events-none',
+                    showCheckbox ? 'opacity-0' : 'peer-focus-visible:opacity-0',
+                  )}
+                >
+                  @{stash.index}
+                </span>
               </div>
 
               {/* Message + metadata */}
