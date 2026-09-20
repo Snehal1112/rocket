@@ -20,5 +20,11 @@ export function WorkspaceGitTab({ workspaceId }: WorkspaceGitTabProps) {
     );
   }
 
-  return <GitPanel repositoryId={repositoryId} repositoryLabel={workspace?.name ?? 'Workspace'} />;
+  return (
+    <GitPanel
+      key={repositoryId}
+      repositoryId={repositoryId}
+      repositoryLabel={workspace?.name ?? 'Workspace'}
+    />
+  );
 }

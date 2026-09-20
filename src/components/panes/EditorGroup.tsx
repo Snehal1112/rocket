@@ -193,6 +193,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (
             <GitPanel
+              key={activeTab.repositoryId}
               repositoryId={activeTab.repositoryId}
               repositoryLabel={activeTab.repositoryLabel}
             />
