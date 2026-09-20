@@ -1,6 +1,5 @@
 import '@/components/editor/monaco-setup';
 import Editor from '@monaco-editor/react';
-import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import {
@@ -17,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 import type { ConflictState } from '@/types/pane-types';
+import { GitErrorBanner } from './GitErrorBanner';
 
 interface ConflictResolverProps {
   conflictState: ConflictState;
@@ -144,24 +144,7 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
             </Button>
           </div>
         </div>
-        {error && (
-          <div
-            role='alert'
-            className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'
-          >
-            <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
-            <span className='flex-1 wrap-break-word'>{error}</span>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-4 w-4 shrink-0'
-              onClick={clearError}
-              aria-label='Dismiss error'
-            >
-              <X className='h-3 w-3' />
-            </Button>
-          </div>
-        )}
+        {error && <GitErrorBanner message={error} onDismiss={clearError} className='mx-3 mt-2' />}
         <div className='flex-1'>
           <Editor
             value={manualContent}
@@ -194,24 +177,7 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
           </Button>
         </div>
       </div>
-      {error && (
-        <div
-          role='alert'
-          className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'
-        >
-          <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
-          <span className='flex-1 wrap-break-word'>{error}</span>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='h-4 w-4 shrink-0'
-            onClick={clearError}
-            aria-label='Dismiss error'
-          >
-            <X className='h-3 w-3' />
-          </Button>
-        </div>
-      )}
+      {error && <GitErrorBanner message={error} onDismiss={clearError} className='mx-3 mt-2' />}
       <div className='flex flex-1 min-h-0'>
         <div className='flex-1 flex flex-col border-r'>
           <div className='px-2 py-1 text-sm font-medium text-muted-foreground border-b'>Ours</div>
