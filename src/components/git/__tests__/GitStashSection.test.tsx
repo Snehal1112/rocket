@@ -65,7 +65,14 @@ describe('GitStashSection stash selection', () => {
         <GitStashSection />
       </GitStoreProvider>,
     );
-    const user = userEvent.setup();
+    // skipHover: false (the default) makes userEvent.click() re-move the
+    // pointer to the checkbox before clicking. Because userEvent's simulated
+    // mouseout/mouseover events never set relatedTarget, React's
+    // onMouseEnter/onMouseLeave polyfill treats that move as the pointer
+    // leaving the document entirely, which fires the row's onMouseLeave and
+    // unmounts the checkbox before the click lands. We already moved the
+    // pointer onto the row via hover() below, so skip the redundant move.
+    const user = userEvent.setup({ skipHover: true });
 
     // The checkbox is hidden until hover/selection; hover the row first.
     await user.hover(screen.getByText('wip'));
