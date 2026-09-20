@@ -47,8 +47,11 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
   const handleSaveEdit = async () => {
     if (!editingRemote) return;
+    clearError();
     await setRemoteUrl(editingRemote, editUrl.trim());
-    setEditingRemote(null);
+    if (!gitStoreApi.getState().error) {
+      setEditingRemote(null);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -177,6 +180,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0'
+                          aria-label='Edit remote'
                           onClick={() => {
                             setEditingRemote(remote.name);
                             setEditUrl(remote.url);

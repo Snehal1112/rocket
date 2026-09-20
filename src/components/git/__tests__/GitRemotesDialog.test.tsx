@@ -61,4 +61,26 @@ describe('GitRemotesDialog failure handling', () => {
 
     expect(await screen.findByPlaceholderText('name')).toHaveValue('');
   });
+
+  it('stays in edit mode and shows the error when saving a remote URL fails', async () => {
+    const store = createGitStore();
+    store.setState({
+      remotes: [{ name: 'origin', url: 'https://old.example.com/repo.git' }],
+      refreshRemotes: vi.fn().mockResolvedValue(undefined),
+      setRemoteUrl: async () => {
+        store.setState({ error: 'invalid remote URL' });
+      },
+    });
+    renderDialog(store);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /pencil|edit/i }));
+    const urlInput = screen.getByDisplayValue('https://old.example.com/repo.git');
+    await user.clear(urlInput);
+    await user.type(urlInput, 'not-a-url');
+    await user.keyboard('{Enter}');
+
+    expect(await screen.findByText('invalid remote URL')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('not-a-url')).toBeInTheDocument();
+  });
 });
