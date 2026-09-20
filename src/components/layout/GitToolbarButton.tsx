@@ -20,6 +20,12 @@ export async function openGitPanel(): Promise<void> {
     toast.error('Failed to open Git panel: could not load collections.');
     return;
   }
+
+  // The active collection may have changed while listCollections() was in
+  // flight — don't open a Git tab for a collection the user has since
+  // navigated away from.
+  if (usePaneStore.getState().activeCollection !== activeCollection) return;
+
   if (!summary) {
     toast.error('Failed to open Git panel: collection not found.');
     return;
