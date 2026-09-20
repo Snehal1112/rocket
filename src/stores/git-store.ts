@@ -6,6 +6,7 @@ import {
   type ConflictResolution,
   type FileStatus,
   type GitCredentials,
+  type GitIdentity,
   type GitSshTrustFailure,
   gitAbortMerge,
   gitAddRemote,
@@ -27,6 +28,7 @@ import {
   gitPush,
   gitRemoveRemote,
   gitResolveConflict,
+  gitSetIdentity,
   gitSetRemoteUrl,
   gitStage,
   gitStashApply,
@@ -101,6 +103,12 @@ export interface GitState {
   dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
   checkoutRemoteBranch: (name: string, force?: boolean, asName?: string) => Promise<void>;
+  /** Return the repository's configured git identity, or null if it is
+   *  unset or the lookup fails — both are treated as "identity unknown" by
+   *  callers (see GitCommitForm). */
+  checkIdentity: () => Promise<GitIdentity | null>;
+  /** Save the repository's git identity (user.name/user.email). */
+  setIdentity: (name: string, email: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -612,6 +620,28 @@ export function createGitStore(): StoreApi<GitState> {
         await get().refreshBranches();
       } catch (e) {
         set({ error: String(e) });
+      }
+    },
+
+    checkIdentity: async () => {
+      const { repositoryId } = get();
+      if (!repositoryId) return null;
+      try {
+        const identity = await gitGetIdentity(repositoryId);
+        if (!identity.name.trim() || !identity.email.trim()) return null;
+        return identity;
+      } catch {
+        return null;
+      }
+    },
+
+    setIdentity: async (name, email) => {
+      const { repositoryId } = get();
+      if (!repositoryId) return;
+      try {
+        await gitSetIdentity(repositoryId, name, email);
+      } catch (e) {
+        set({ error: `Failed to save git identity: ${String(e)}` });
       }
     },
 

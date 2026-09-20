@@ -54,6 +54,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   gitSetRemoteUrl: vi.fn().mockResolvedValue(undefined),
   loadGitCredentials: vi.fn().mockResolvedValue(null),
   gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
+  gitSetIdentity: vi.fn(),
 }));
 
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
@@ -1017,6 +1018,56 @@ describe('stash', () => {
     expect(gitStashDrop).toHaveBeenCalledWith('repository-test', 0);
     expect(gitStashList).toHaveBeenCalledWith('repository-test');
     expect(gitStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkIdentity and setIdentity', () => {
+  beforeEach(() => {
+    store.setState({ repositoryId: 'repository-test', error: null });
+  });
+
+  it('checkIdentity returns the identity when name and email are set', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockResolvedValueOnce({
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+    });
+
+    const identity = await store.getState().checkIdentity();
+
+    expect(identity).toEqual({ name: 'Ada Lovelace', email: 'ada@example.com' });
+  });
+
+  it('checkIdentity returns null when the identity is blank', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockResolvedValueOnce({ name: '', email: '' });
+
+    expect(await store.getState().checkIdentity()).toBeNull();
+  });
+
+  it('checkIdentity returns null when the lookup fails', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockRejectedValueOnce(new Error('git config unreadable'));
+
+    expect(await store.getState().checkIdentity()).toBeNull();
+  });
+
+  it('setIdentity calls gitSetIdentity with the repository, name, and email', async () => {
+    vi.mocked(tauriApi.gitSetIdentity).mockResolvedValueOnce(undefined);
+
+    await store.getState().setIdentity('Ada Lovelace', 'ada@example.com');
+
+    expect(tauriApi.gitSetIdentity).toHaveBeenCalledWith(
+      'repository-test',
+      'Ada Lovelace',
+      'ada@example.com',
+    );
+    expect(store.getState().error).toBeNull();
+  });
+
+  it('setIdentity sets an error when the save fails', async () => {
+    vi.mocked(tauriApi.gitSetIdentity).mockRejectedValueOnce(new Error('permission denied'));
+
+    await store.getState().setIdentity('Ada Lovelace', 'ada@example.com');
+
+    expect(store.getState().error).toContain('permission denied');
   });
 });
 
