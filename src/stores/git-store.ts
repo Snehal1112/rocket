@@ -4,6 +4,7 @@ import {
   type CommitInfo,
   type ConflictFile,
   type ConflictResolution,
+  type FileDiff,
   type FileStatus,
   type GitCredentials,
   type GitIdentity,
@@ -16,6 +17,7 @@ import {
   gitConflicts,
   gitCreateBranch,
   gitDeleteBranch,
+  gitDiffCommit,
   gitDiscard,
   gitFetch,
   gitGetIdentity,
@@ -86,6 +88,11 @@ export interface GitState {
   refreshBranches: () => Promise<void>;
   refreshRemotes: () => Promise<void>;
   refreshLog: (limit?: number) => Promise<void>;
+  /** Fetch the full per-file diff for a single commit. Thin wrapper around
+   *  the IPC call so components read `repositoryId` from the store instead
+   *  of importing gitDiffCommit directly. Rethrows on failure so the caller
+   *  can render an actionable error instead of discarding it. */
+  loadCommitDiff: (oid: string) => Promise<FileDiff[]>;
   resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
   abortMerge: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
@@ -378,6 +385,12 @@ export function createGitStore(): StoreApi<GitState> {
       } catch (e) {
         set({ error: String(e) });
       }
+    },
+
+    loadCommitDiff: async (oid) => {
+      const { repositoryId } = get();
+      if (!repositoryId) throw new Error('No repository loaded.');
+      return gitDiffCommit(repositoryId, oid);
     },
 
     // Stage the given file paths.

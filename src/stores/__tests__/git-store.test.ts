@@ -55,6 +55,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   loadGitCredentials: vi.fn().mockResolvedValue(null),
   gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
   gitSetIdentity: vi.fn(),
+  gitDiffCommit: vi.fn(),
 }));
 
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
@@ -1068,6 +1069,29 @@ describe('checkIdentity and setIdentity', () => {
     await store.getState().setIdentity('Ada Lovelace', 'ada@example.com');
 
     expect(store.getState().error).toContain('permission denied');
+  });
+});
+
+describe('loadCommitDiff', () => {
+  beforeEach(() => {
+    store.setState({ repositoryId: 'repository-test' });
+  });
+
+  it('resolves the diffs for the given commit', async () => {
+    const diffs = [{ path: 'a.txt', oldContent: 'old', newContent: 'new', hunks: [] }];
+    vi.mocked(tauriApi.gitDiffCommit).mockResolvedValueOnce(diffs);
+
+    const result = await store.getState().loadCommitDiff('abc123');
+
+    expect(tauriApi.gitDiffCommit).toHaveBeenCalledWith('repository-test', 'abc123');
+    expect(result).toEqual(diffs);
+  });
+
+  it('rejects when the IPC call fails, without touching store error state', async () => {
+    vi.mocked(tauriApi.gitDiffCommit).mockRejectedValueOnce(new Error('object not found'));
+
+    await expect(store.getState().loadCommitDiff('abc123')).rejects.toThrow('object not found');
+    expect(store.getState().error).toBeNull();
   });
 });
 
