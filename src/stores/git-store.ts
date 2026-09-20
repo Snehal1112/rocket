@@ -47,6 +47,11 @@ import {
 
 export interface GitState {
   isRepo: boolean;
+  /** Single source of truth for what GitPanel should render, set at every exit
+   *  point of `setRepository`. 'error' means the repository's status could not
+   *  even be determined (distinct from a known repo whose background refresh
+   *  failed, which stays 'ready' with `error` set). */
+  loadStatus: 'idle' | 'loading' | 'ready' | 'not-repo' | 'error';
   repositoryId: string | null;
   status: RepoStatus | null;
   conflicts: ConflictFile[];
@@ -151,6 +156,7 @@ export function createGitStore(): StoreApi<GitState> {
       return status?.files.some((f) => f.status === 'conflicted') ?? false;
     },
     isRepo: false,
+    loadStatus: 'idle',
     repositoryId: null,
     status: null,
     conflicts: [],
@@ -172,7 +178,7 @@ export function createGitStore(): StoreApi<GitState> {
     // Set the active repository and check if it is a git repo.
     setRepository: async (repositoryId: string) => {
       const myGeneration = ++loadGeneration;
-      set({ repositoryId, loading: true, error: null });
+      set({ repositoryId, loading: true, error: null, loadStatus: 'loading' });
       try {
         const isRepo = await gitIsRepo(repositoryId);
         if (myGeneration !== loadGeneration) return;
@@ -195,14 +201,22 @@ export function createGitStore(): StoreApi<GitState> {
             get().refreshRemotes(),
           ]);
           if (myGeneration !== loadGeneration) return;
-          set({ status, loading: false });
+          set({ status, loading: false, loadStatus: 'ready' });
         } else {
           if (myGeneration !== loadGeneration) return;
-          set({ status: null, loading: false });
+          set({ status: null, loading: false, loadStatus: 'not-repo' });
         }
       } catch (e) {
         if (myGeneration !== loadGeneration) return;
-        set({ error: String(e), loading: false });
+        // If `isRepo` was already determined true before this failure (e.g. a
+        // refresh inside the Promise.all threw), we know it's a repository —
+        // only classify as a load failure when we never got that far.
+        const stillUnknown = !get().isRepo;
+        set({
+          error: String(e),
+          loading: false,
+          loadStatus: stillUnknown ? 'error' : 'ready',
+        });
       }
     },
 
@@ -747,6 +761,7 @@ export function createGitStore(): StoreApi<GitState> {
     reset: () => {
       set({
         isRepo: false,
+        loadStatus: 'idle',
         repositoryId: null,
         status: null,
         conflicts: [],

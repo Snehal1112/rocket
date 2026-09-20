@@ -42,8 +42,6 @@ interface GitPanelProps {
 }
 
 export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
-  // null = loading, false = not a repo, true = is a repo.
-  const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightPanel, setRightPanel] = useState<RightPanelView>({
     kind: 'landing',
@@ -59,7 +57,8 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const refreshStatus = useStore(store, (state) => state.refreshStatus);
   const status = useStore(store, (state) => state.status);
   const loadedRepositoryId = useStore(store, (state) => state.repositoryId);
-  const storeIsRepo = useStore(store, (state) => state.isRepo);
+  const loadStatus = useStore(store, (state) => state.loadStatus);
+  const loadError = useStore(store, (state) => state.error);
   const initRepo = useStore(store, (state) => state.initRepo);
   const showIdentitySetupDialog = useStore(store, (state) => state.showIdentitySetupDialog);
   const identitySetupInitialName = useStore(store, (state) => state.identitySetupInitialName);
@@ -69,29 +68,10 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
 
-  // Initialize the git store for the given repository. setRepository handles the
-  // isRepo check internally, so read back the result rather than checking twice.
-  const checkAndLoad = useCallback(
-    async (id: string) => {
-      setIsRepo(null);
-      try {
-        await setRepository(id);
-        setIsRepo(store.getState().isRepo);
-      } catch {
-        setIsRepo(false);
-      }
-    },
-    [setRepository, store],
-  );
-
   useEffect(() => {
-    // Skip the round-trip if the store already has this repository loaded.
-    if (loadedRepositoryId === repositoryId) {
-      setIsRepo(storeIsRepo);
-      return;
-    }
-    void checkAndLoad(repositoryId);
-  }, [repositoryId, checkAndLoad, loadedRepositoryId, storeIsRepo]);
+    if (loadedRepositoryId === repositoryId) return;
+    void setRepository(repositoryId);
+  }, [repositoryId, loadedRepositoryId, setRepository]);
 
   // Keyboard handler for the vertical separator: ArrowLeft/ArrowRight adjust width.
   const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -141,7 +121,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   // one call. Git operations are skipped — the store refreshes inline after each one.
   const statusDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!isRepo) return;
+    if (loadStatus !== 'ready') return;
     let unlisten: (() => void) | undefined;
     void onCollectionChanged((event) => {
       if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
@@ -154,7 +134,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
       unlisten?.();
       if (statusDebounce.current) clearTimeout(statusDebounce.current);
     };
-  }, [isRepo, refreshStatus]);
+  }, [loadStatus, refreshStatus]);
 
   // Return to the overview when the branch changes so stale diff/conflict views
   // from the previous branch are not shown.
@@ -170,24 +150,37 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
     prevBranchRef.current = currentBranch;
   }, [currentBranch]);
 
-  if (isRepo === null) {
+  if (loadStatus === 'idle' || loadStatus === 'loading') {
     return <GitPanelSkeleton />;
   }
 
-  if (!isRepo) {
+  if (loadStatus === 'error') {
+    return (
+      <GitStoreProvider store={store}>
+        <div className='flex flex-col items-center justify-center gap-3 h-full px-4 text-center'>
+          <AlertTriangle className='h-5 w-5 text-destructive' />
+          <p className='text-sm text-destructive'>Failed to load this repository.</p>
+          {loadError && (
+            <p className='text-xs text-muted-foreground wrap-break-word max-w-sm'>{loadError}</p>
+          )}
+          <Button variant='outline' size='sm' onClick={() => void setRepository(repositoryId)}>
+            Retry
+          </Button>
+        </div>
+      </GitStoreProvider>
+    );
+  }
+
+  if (loadStatus === 'not-repo') {
     return (
       <GitStoreProvider store={store}>
         <div className='flex flex-col items-center justify-center gap-3 h-full px-4 text-center'>
           <p className='text-sm text-muted-foreground'>This collection is not a Git repository.</p>
+          {loadError && (
+            <p className='text-xs text-destructive wrap-break-word max-w-sm'>{loadError}</p>
+          )}
           <div className='flex gap-2'>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={async () => {
-                await initRepo(repositoryId);
-                setIsRepo(store.getState().isRepo);
-              }}
-            >
+            <Button variant='outline' size='sm' onClick={() => void initRepo(repositoryId)}>
               Initialize Git
             </Button>
             <Button variant='outline' size='sm' onClick={() => setShowCloneDialog(true)}>
@@ -211,6 +204,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
     );
   }
 
+  // loadStatus === 'ready' from here.
   return (
     <GitStoreProvider store={store}>
       <div className='flex flex-col h-full'>

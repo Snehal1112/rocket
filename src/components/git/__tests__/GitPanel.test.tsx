@@ -100,3 +100,21 @@ describe('GitPanel remount on repositoryId change', () => {
     expect(vi.mocked(tauriApi.loadGitCredentials)).toHaveBeenCalledWith('repo-b');
   });
 });
+
+describe('GitPanel load error rendering', () => {
+  it('renders a retryable error state, not the Initialize/Clone prompt, when the load fails', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockRejectedValue(new Error('disk unreadable'));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <GitPanel repositoryId='repo-a' repositoryLabel='Repo A' />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/failed to load this repository/i)).toBeInTheDocument();
+    expect(screen.getByText(/disk unreadable/i)).toBeInTheDocument();
+    expect(screen.queryByText('Initialize Git')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+});

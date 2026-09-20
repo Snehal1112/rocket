@@ -92,6 +92,38 @@ beforeEach(() => {
   });
 });
 
+describe('git-store loadStatus', () => {
+  it('sets loadStatus to "error" (not "not-repo") when gitIsRepo itself fails', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockRejectedValue(new Error('disk unreadable'));
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('error');
+    expect(store.getState().error).toBe('Error: disk unreadable');
+    expect(store.getState().isRepo).toBe(false);
+  });
+
+  it('sets loadStatus to "ready" (not "error") when the repo loads but a later refresh fails', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    vi.mocked(tauriApi.gitStatus).mockRejectedValue(new Error('status unavailable'));
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('ready');
+    expect(store.getState().isRepo).toBe(true);
+    expect(store.getState().error).toBe('Error: status unavailable');
+  });
+
+  it('sets loadStatus to "not-repo" when gitIsRepo cleanly resolves false', async () => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(false);
+
+    await store.getState().setRepository('repo-1');
+
+    expect(store.getState().loadStatus).toBe('not-repo');
+    expect(store.getState().error).toBeNull();
+  });
+});
+
 describe('git-store clearError', () => {
   beforeEach(() => {
     store.setState({
