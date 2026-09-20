@@ -28,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { selectHasConflicts } from '@/stores/git-store';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 export function GitLandingPanel() {
@@ -111,7 +112,7 @@ export function GitLandingPanel() {
       // After pull, check whether it produced merge conflicts.
       // If so, do NOT restore the stash — applying it on top of a conflicted
       // index would corrupt the working tree with doubled conflicts.
-      if (gitStoreApi.getState().hasConflicts()) {
+      if (selectHasConflicts(gitStoreApi.getState())) {
         // Leave the stash in place; the user can pop it after resolving conflicts.
         return;
       }
@@ -190,7 +191,7 @@ export function GitLandingPanel() {
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   const isUpToDate = (status?.isClean ?? false) && ahead === 0 && behind === 0;
-  const hasConflicts = useGitStore((state) => state.hasConflicts?.()) ?? false;
+  const hasConflicts = useGitStore(selectHasConflicts);
 
   return (
     <div className='flex flex-col items-center justify-center h-full px-6'>

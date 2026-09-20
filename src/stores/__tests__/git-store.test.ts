@@ -3,7 +3,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { GitCredentials } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
-import { createGitStore, type GitState } from '../git-store';
+import { createGitStore, type GitState, selectHasConflicts } from '../git-store';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
@@ -1232,5 +1232,28 @@ describe('git-store network actions with no remote configured', () => {
     await store.getState().fetch();
     expect(tauriApi.gitFetch).not.toHaveBeenCalled();
     expect(store.getState().error).toBe('No remote configured.');
+  });
+});
+
+describe('selectHasConflicts', () => {
+  it('is true when any status file is conflicted', () => {
+    const state = {
+      status: {
+        branch: 'main',
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+        files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
+      },
+    } as GitState;
+    expect(selectHasConflicts(state)).toBe(true);
+  });
+
+  it('is false with no status or no conflicted files', () => {
+    expect(selectHasConflicts({ status: null } as GitState)).toBe(false);
+    const clean = {
+      status: { branch: 'main', ahead: 0, behind: 0, isClean: true, files: [] },
+    } as unknown as GitState;
+    expect(selectHasConflicts(clean)).toBe(false);
   });
 });

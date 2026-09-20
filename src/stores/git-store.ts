@@ -115,7 +115,6 @@ export interface GitState {
   clearError: () => void;
   reset: () => void;
   initRepo: (repositoryId: string) => Promise<void>;
-  hasConflicts: () => boolean;
 }
 
 /**
@@ -153,11 +152,6 @@ export function createGitStore(): StoreApi<GitState> {
   let loadGeneration = 0;
 
   return createStore<GitState>((set, get) => ({
-    // Selector to determine if any file is in a conflicted state
-    hasConflicts: () => {
-      const { status } = get();
-      return status?.files.some((f) => f.status === 'conflicted') ?? false;
-    },
     isRepo: false,
     loadStatus: 'idle',
     repositoryId: null,
@@ -820,4 +814,11 @@ export function createGitStore(): StoreApi<GitState> {
       });
     },
   }));
+}
+
+/** True when the repository's current status has any conflicted file. Shared
+ *  by GitPanel and GitLandingPanel so conflict detection isn't computed
+ *  independently in two places. */
+export function selectHasConflicts(state: GitState): boolean {
+  return state.status?.files.some((f) => f.status === 'conflicted') ?? false;
 }
