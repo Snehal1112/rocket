@@ -13,6 +13,16 @@ pub enum DomainEvent {
     RequestDeleted { collection: String, path: String },
     ItemMoved { src_collection: String, src_path: String, dst_collection: String, dst_path: String },
 
+    // Folder events
+    FolderCreated { collection: String, path: String },
+    FolderDeleted { collection: String, path: String },
+    ItemsReordered { collection: String, folder_path: String },
+
+    // Collection settings/variable events
+    CollectionSettingsSaved { collection: String },
+    FolderVariablesSaved { collection: String, folder_path: String },
+    RequestVariablesSaved { collection: String, request_path: String },
+
     // Environment events
     EnvironmentSaved { name: String },
     EnvironmentDeleted { name: String },
@@ -330,5 +340,47 @@ mod tests {
             json,
             r#"{"type":"runnerFinished","run_id":"01J","stopped_reason":"completed","step_count":3,"failed_count":1}"#
         );
+    }
+
+    #[test]
+    fn folder_created_wire_shape() {
+        let event = DomainEvent::FolderCreated { collection: "my-api".into(), path: "auth".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"folderCreated","collection":"my-api","path":"auth"}"#);
+    }
+
+    #[test]
+    fn folder_deleted_wire_shape() {
+        let event = DomainEvent::FolderDeleted { collection: "my-api".into(), path: "auth".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"folderDeleted","collection":"my-api","path":"auth"}"#);
+    }
+
+    #[test]
+    fn items_reordered_wire_shape() {
+        let event = DomainEvent::ItemsReordered { collection: "my-api".into(), folder_path: "auth".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"itemsReordered","collection":"my-api","folder_path":"auth"}"#);
+    }
+
+    #[test]
+    fn collection_settings_saved_wire_shape() {
+        let event = DomainEvent::CollectionSettingsSaved { collection: "my-api".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"collectionSettingsSaved","collection":"my-api"}"#);
+    }
+
+    #[test]
+    fn folder_variables_saved_wire_shape() {
+        let event = DomainEvent::FolderVariablesSaved { collection: "my-api".into(), folder_path: "auth".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"folderVariablesSaved","collection":"my-api","folder_path":"auth"}"#);
+    }
+
+    #[test]
+    fn request_variables_saved_wire_shape() {
+        let event = DomainEvent::RequestVariablesSaved { collection: "my-api".into(), request_path: "users.yml".into() };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#);
     }
 }
