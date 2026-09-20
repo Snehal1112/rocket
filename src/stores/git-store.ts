@@ -112,6 +112,17 @@ export interface GitState {
   push: (remote?: string, force?: boolean) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
+  /** Stash working-tree changes, pull, then restore the stash — stopping
+   *  immediately if any step fails or the pull produces merge conflicts.
+   *  Extracted from GitLandingPanel so the sequencing is unit-testable
+   *  without rendering the component (see
+   *  docs/reports/git-integration-review/02-frontend-architecture.md, F-13). */
+  stashThenPull: () => Promise<void>;
+  /** Fetch, then push only if the fetch succeeded and did not leave the
+   *  branch behind the remote. Resolves whether the fetch step itself
+   *  succeeded (independent of whether push ran or succeeded) — the caller
+   *  uses that alone to decide whether to record a "last fetched" timestamp. */
+  fetchThenPush: () => Promise<boolean>;
   clearError: () => void;
   reset: () => void;
   initRepo: (repositoryId: string) => Promise<void>;
@@ -797,6 +808,48 @@ export function createGitStore(): StoreApi<GitState> {
       } catch (e) {
         set(networkErrorPatch(e, 'fetch'));
       }
+    },
+
+    stashThenPull: async () => {
+      get().clearError();
+      const { repositoryId } = get();
+      if (!repositoryId) return;
+      try {
+        await gitStashSave(repositoryId, 'Auto-stash before pull');
+        await get().refreshStashes();
+      } catch (e) {
+        set({ error: String(e) });
+        return;
+      }
+      if (get().error) {
+        // Stash itself failed — nothing changed, nothing to pull or pop.
+        return;
+      }
+      get().clearError();
+      await get().pull();
+      if (get().error) {
+        // Pull failed outright (network/auth/etc.) — leave the stash in place
+        // rather than popping it on top of an unknown working-tree state.
+        return;
+      }
+      // After pull, check whether it produced merge conflicts.
+      // If so, do NOT restore the stash — applying it on top of a conflicted
+      // index would corrupt the working tree with doubled conflicts.
+      if (selectHasConflicts(get())) {
+        // Leave the stash in place; the user can pop it after resolving conflicts.
+        return;
+      }
+      await get().popStash(0);
+    },
+
+    fetchThenPush: async () => {
+      await get().fetch();
+      if (get().error) return false;
+      // Re-check status after fetch — if now behind, abort push.
+      const { status } = get();
+      if (status && status.behind > 0) return true;
+      await get().push();
+      return true;
     },
 
     clearError: () => set({ error: null }),

@@ -415,6 +415,143 @@ describe('git-store pull refreshes the commit log', () => {
   });
 });
 
+describe('stashThenPull', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repository-test',
+      isRepo: true,
+      error: null,
+      credentials: { type: 'sshAgent' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
+    });
+  });
+
+  it('stashes, pulls, and pops when every step succeeds', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashSave).toHaveBeenCalledWith('repository-test', 'Auto-stash before pull');
+    expect(gitPull).toHaveBeenCalled();
+    expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
+  });
+
+  it('does not pull when the stash save fails', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashSave).mockRejectedValueOnce(new Error('nothing to stash'));
+
+    await store.getState().stashThenPull();
+
+    expect(gitPull).not.toHaveBeenCalled();
+    expect(gitStashPop).not.toHaveBeenCalled();
+    expect(store.getState().error).toContain('nothing to stash');
+  });
+
+  it('does not pop the stash when pull fails', async () => {
+    const { gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockRejectedValueOnce(new Error('authentication failed'));
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashPop).not.toHaveBeenCalled();
+  });
+
+  it('does not pop the stash when the pull produces merge conflicts', async () => {
+    const { gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
+      ahead: 0,
+      behind: 0,
+      isClean: false,
+    });
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashPop).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale pre-existing error before checking each step', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    store.setState({ error: 'stale error from an earlier push' });
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashSave).toHaveBeenCalled();
+    expect(gitPull).toHaveBeenCalled();
+    expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
+  });
+});
+
+describe('fetchThenPush', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repository-test',
+      isRepo: true,
+      error: null,
+      credentials: { type: 'sshAgent' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+      status: { branch: 'main', files: [], ahead: 1, behind: 0, isClean: true },
+    });
+  });
+
+  it('returns true and pushes after a successful fetch that leaves the branch not behind', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: [],
+      receivedObjects: 0,
+      receivedBytes: 0,
+    });
+    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      files: [],
+      ahead: 1,
+      behind: 0,
+      isClean: true,
+    });
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(true);
+    expect(gitPush).toHaveBeenCalled();
+  });
+
+  it('returns false and does not push when the fetch fails', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockRejectedValueOnce(new Error('authentication failed'));
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(false);
+    expect(gitPush).not.toHaveBeenCalled();
+  });
+
+  it('returns true but does not push when the post-fetch status is now behind the remote', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: ['refs/heads/main'],
+      receivedObjects: 3,
+      receivedBytes: 900,
+    });
+    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      files: [],
+      ahead: 1,
+      behind: 2,
+      isClean: true,
+    });
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(true);
+    expect(gitPush).not.toHaveBeenCalled();
+  });
+});
+
 describe('setRepository', () => {
   beforeEach(() => {
     store.setState({

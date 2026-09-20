@@ -45,8 +45,8 @@ export function GitLandingPanel() {
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const saveStash = useGitStore((s) => s.saveStash);
-  const popStash = useGitStore((s) => s.popStash);
+  const stashThenPull = useGitStore((s) => s.stashThenPull);
+  const fetchThenPush = useGitStore((s) => s.fetchThenPush);
   const error = useGitStore((s) => s.error);
   const clearError = useGitStore((s) => s.clearError);
   const credentials = useGitStore((s) => s.credentials);
@@ -111,27 +111,7 @@ export function GitLandingPanel() {
     setShowStashDialog(false);
     setPulling(true);
     try {
-      clearError();
-      await saveStash('Auto-stash before pull');
-      if (gitStoreApi.getState().error) {
-        // Stash itself failed — nothing changed, nothing to pull or pop.
-        return;
-      }
-      clearError();
-      await pull();
-      if (gitStoreApi.getState().error) {
-        // Pull failed outright (network/auth/etc.) — leave the stash in place
-        // rather than popping it on top of an unknown working-tree state.
-        return;
-      }
-      // After pull, check whether it produced merge conflicts.
-      // If so, do NOT restore the stash — applying it on top of a conflicted
-      // index would corrupt the working tree with doubled conflicts.
-      if (selectHasConflicts(gitStoreApi.getState())) {
-        // Leave the stash in place; the user can pop it after resolving conflicts.
-        return;
-      }
-      await popStash(0);
+      await stashThenPull();
       if (!gitStoreApi.getState().error) {
         setLastFetched(new Date().toLocaleTimeString());
       }
@@ -179,15 +159,10 @@ export function GitLandingPanel() {
     setShowFetchFirstDialog(false);
     setPushing(true);
     try {
-      await fetch();
-      if (gitStoreApi.getState().error) return;
-      setLastFetched(new Date().toLocaleTimeString());
-      // Re-check status after fetch — if now behind, abort push.
-      const { status: freshStatus } = gitStoreApi.getState();
-      if (freshStatus && freshStatus.behind > 0) {
-        return;
+      const fetchSucceeded = await fetchThenPush();
+      if (fetchSucceeded) {
+        setLastFetched(new Date().toLocaleTimeString());
       }
-      await push();
     } finally {
       setPushing(false);
     }
