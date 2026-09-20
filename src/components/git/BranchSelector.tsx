@@ -22,6 +22,7 @@ export function BranchSelector() {
     mergeBranch,
     checkoutRemoteBranch,
     status,
+    clearError,
   } = useGitStore((state) => state);
   const gitStoreApi = useGitStoreApi();
 
@@ -43,10 +44,10 @@ export function BranchSelector() {
   const handleCreate = async () => {
     if (!newBranchName.trim()) return;
     setCreateError(null);
-    const prevError = gitStoreApi.getState().error;
+    clearError();
     await createBranch(newBranchName.trim());
     const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
+    if (nextError) {
       setCreateError(nextError);
     } else {
       setNewBranchName('');
