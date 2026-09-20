@@ -52,7 +52,11 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
     setShowAbortConfirm(false);
     setBusy(true);
     try {
+      clearError();
       await abortMerge();
+      if (!gitStoreApi.getState().error) {
+        onResolved?.();
+      }
     } finally {
       setBusy(false);
     }

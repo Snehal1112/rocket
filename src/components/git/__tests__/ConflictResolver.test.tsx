@@ -159,3 +159,36 @@ describe('ConflictResolver', () => {
     expect(abortMerge).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ConflictResolver onResolved for abort', () => {
+  it('calls onResolved after a successful abort, not just a successful resolve', async () => {
+    const onResolved = vi.fn();
+    const store = createGitStore();
+    store.setState({
+      abortMerge: async () => {
+        store.setState({ error: null });
+      },
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <ConflictResolver
+          conflictState={{
+            filePath: 'a.txt',
+            repositoryId: 'repo-1',
+            repositoryLabel: 'Repo',
+            ours: 'ours',
+            theirs: 'theirs',
+            ancestor: null,
+          }}
+          onResolved={onResolved}
+        />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /abort merge/i }));
+    await user.click(screen.getByRole('button', { name: /confirm abort/i }));
+
+    expect(onResolved).toHaveBeenCalledTimes(1);
+  });
+});
