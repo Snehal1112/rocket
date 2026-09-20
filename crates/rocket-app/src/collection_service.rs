@@ -74,7 +74,12 @@ impl CollectionService {
 
     pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
         let actual_path = self.repo.save_request(collection, path, request)?;
-        self.repo.get_request(collection, &actual_path)
+        let saved = self.repo.get_request(collection, &actual_path)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: actual_path,
+        });
+        Ok(saved)
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
@@ -83,6 +88,10 @@ impl CollectionService {
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
         self.repo.save_request(collection, old_path, &request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: old_path.to_string(),
+        });
         Ok(())
     }
 
@@ -90,11 +99,20 @@ impl CollectionService {
         let mut request = self.repo.get_request(collection, path)?;
         request.docs = docs.map(Documentation::text);
         self.repo.save_request(collection, path, &request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: path.to_string(),
+        });
         Ok(())
     }
 
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.delete_request(collection, path)
+        self.repo.delete_request(collection, path)?;
+        self.events.publish(DomainEvent::RequestDeleted {
+            collection: collection.to_string(),
+            path: path.to_string(),
+        });
+        Ok(())
     }
 
     pub fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
@@ -157,15 +175,17 @@ mod tests {
     use super::*;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::{DomainEvent, EventPublisher, NullEventPublisher};
+    use rocket_shared::types::HttpMethod;
     use std::sync::{Arc, Mutex};
 
     struct MockCollectionRepo {
         collections: Mutex<Vec<Collection>>,
+        requests: Mutex<Vec<(String, String, Request)>>,
     }
 
     impl MockCollectionRepo {
         fn new() -> Self {
-            Self { collections: Mutex::new(Vec::new()) }
+            Self { collections: Mutex::new(Vec::new()), requests: Mutex::new(Vec::new()) }
         }
     }
 
@@ -216,10 +236,31 @@ mod tests {
             }
         }
 
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<Request> { unimplemented!() }
-        fn save_request(&self, _: &str, path: &str, _: &Request) -> DomainResult<String> { Ok(path.to_string()) }
+        fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+            self.requests
+                .lock()
+                .expect("lock")
+                .iter()
+                .find(|(c, p, _)| c == collection && p == path)
+                .map(|(_, _, r)| r.clone())
+                .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
+        }
+        fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String> {
+            let mut requests = self.requests.lock().expect("lock");
+            requests.retain(|(c, p, _)| !(c == collection && p == path));
+            requests.push((collection.to_string(), path.to_string(), request.clone()));
+            Ok(path.to_string())
+        }
         fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
+        fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
+            let mut requests = self.requests.lock().expect("lock");
+            let len_before = requests.len();
+            requests.retain(|(c, p, _)| !(c == collection && p == path));
+            if requests.len() == len_before {
+                return Err(DomainError::NotFound(format!("{collection}/{path}")));
+            }
+            Ok(())
+        }
         fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
         fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
@@ -373,6 +414,99 @@ mod tests {
                 DomainEvent::CollectionRenamed { old_name, new_name } if old_name == "old" && new_name == "new"
             )),
             "expected CollectionRenamed, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn save_request_emits_request_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+            )),
+            "expected RequestSaved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn delete_request_emits_request_deleted() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        svc.delete_request("my-api", "users.yml").expect("delete_request");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::RequestDeleted { collection, path } if collection == "my-api" && path == "users.yml"
+            )),
+            "expected RequestDeleted, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn delete_request_on_missing_request_publishes_nothing() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let result = svc.delete_request("my-api", "ghost.yml");
+        assert!(result.is_err(), "deleting a nonexistent request must fail");
+        assert!(publisher.events.lock().expect("lock").is_empty(), "no event should publish on failure");
+    }
+
+    #[test]
+    fn rename_request_emits_request_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        publisher.events.lock().expect("lock").clear();
+        svc.rename_request("my-api", "users.yml", "List Users").expect("rename_request");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+            )),
+            "expected RequestSaved, got {:?}", *published
+        );
+    }
+
+    #[test]
+    fn update_request_docs_emits_request_saved() {
+        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        publisher.events.lock().expect("lock").clear();
+        svc.update_request_docs("my-api", "users.yml", Some("Fetches all users.".into())).expect("update_request_docs");
+        let published = publisher.events.lock().expect("lock");
+        assert!(
+            published.iter().any(|e| matches!(
+                e,
+                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+            )),
+            "expected RequestSaved, got {:?}", *published
         );
     }
 
