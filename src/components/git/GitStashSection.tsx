@@ -157,7 +157,10 @@ export function GitStashSection() {
 
       {/* Error banner */}
       {error && (
-        <div className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+        <div
+          role='alert'
+          className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'
+        >
           <AlertCircle className='mt-px h-3 w-3 shrink-0' />
           <span className='break-all leading-relaxed'>{error}</span>
         </div>

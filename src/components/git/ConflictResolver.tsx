@@ -145,7 +145,10 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
           </div>
         </div>
         {error && (
-          <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
+          <div
+            role='alert'
+            className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'
+          >
             <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
             <span className='flex-1 wrap-break-word'>{error}</span>
             <Button
@@ -192,7 +195,10 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
         </div>
       </div>
       {error && (
-        <div className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'>
+        <div
+          role='alert'
+          className='flex items-start gap-2 mx-3 mt-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'
+        >
           <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
           <span className='flex-1 wrap-break-word'>{error}</span>
           <Button

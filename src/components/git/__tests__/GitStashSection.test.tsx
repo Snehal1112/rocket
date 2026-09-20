@@ -83,3 +83,16 @@ describe('GitStashSection stash selection', () => {
     expect(await screen.findByText('1 selected')).toBeInTheDocument();
   });
 });
+
+describe('GitStashSection error handling', () => {
+  it('announces the error banner as an alert', () => {
+    const store = createGitStore();
+    store.setState({ error: 'could not save stash' });
+    render(
+      <GitStoreProvider store={store}>
+        <GitStashSection />
+      </GitStoreProvider>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('could not save stash');
+  });
+});

@@ -199,3 +199,26 @@ describe('BranchSelector duplicate-action guards', () => {
     expect(createBranch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('BranchSelector error announcements', () => {
+  it('announces the branch-switch error banner as an alert', async () => {
+    const store = renderWithStore({
+      switchBranch: async () => {
+        store.setState({ error: 'checkout failed' });
+      },
+      branches: {
+        current: 'main',
+        local: [
+          { name: 'main', isHead: true, isRemote: false },
+          { name: 'develop', isHead: false, isRemote: false },
+        ],
+        remote: [],
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /main/ }));
+    await user.click(screen.getByText('develop'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('checkout failed');
+  });
+});

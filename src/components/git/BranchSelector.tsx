@@ -154,7 +154,10 @@ export function BranchSelector() {
       </PopoverTrigger>
       <PopoverContent className='w-64 p-0' align='start'>
         {switchError && (
-          <div className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border/70'>
+          <div
+            role='alert'
+            className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border/70'
+          >
             <AlertCircle className='h-3 w-3 shrink-0 mt-0.5' />
             <span className='wrap-break-word'>{switchError}</span>
           </div>
@@ -294,7 +297,7 @@ export function BranchSelector() {
             </Button>
           </div>
           {createError && (
-            <div className='flex items-start gap-1.5 text-xs text-destructive'>
+            <div role='alert' className='flex items-start gap-1.5 text-xs text-destructive'>
               <AlertCircle className='h-3 w-3 shrink-0 mt-0.5' />
               <span className='wrap-break-word'>{createError}</span>
             </div>
