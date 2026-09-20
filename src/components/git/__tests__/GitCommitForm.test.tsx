@@ -5,6 +5,7 @@ import { GitCommitForm } from '@/components/git/GitCommitForm';
 import type * as tauriApi from '@/lib/tauri-api';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
+import { createDeferred } from '@/test/deferred';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -59,5 +60,19 @@ describe('GitCommitForm failure handling', () => {
     await user.click(screen.getByRole('button', { name: /commit 1 file/i }));
 
     expect(await screen.findByLabelText('Commit message')).toHaveValue('');
+  });
+
+  it('marks the commit button as busy while committing', async () => {
+    const deferred = createDeferred<void>();
+    renderForm(() => deferred.promise);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('Commit message'), 'fix: broken thing');
+    const commitButton = screen.getByRole('button', { name: /commit 1 file/i });
+    await user.click(commitButton);
+
+    expect(commitButton).toHaveAttribute('aria-busy', 'true');
+    deferred.resolve();
+    await vi.waitFor(() => expect(commitButton).toHaveAttribute('aria-busy', 'false'));
   });
 });

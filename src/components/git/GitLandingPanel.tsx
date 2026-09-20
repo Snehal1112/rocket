@@ -265,6 +265,7 @@ export function GitLandingPanel() {
               className='flex-1'
               onClick={handleFetch}
               disabled={fetching}
+              aria-busy={fetching}
             >
               {fetching ? (
                 <Loader2 className='h-3.5 w-3.5 animate-spin' />
@@ -279,6 +280,7 @@ export function GitLandingPanel() {
               className='flex-1'
               onClick={handlePull}
               disabled={pulling}
+              aria-busy={pulling}
             >
               {pulling ? (
                 <Loader2 className='h-3.5 w-3.5 animate-spin' />
@@ -293,6 +295,7 @@ export function GitLandingPanel() {
               className='flex-1'
               onClick={handlePush}
               disabled={pushing || hasConflicts}
+              aria-busy={pushing}
             >
               {pushing ? (
                 <Loader2 className='h-3.5 w-3.5 animate-spin' />

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
+import { createDeferred } from '@/test/deferred';
 
 describe('GitStashSection store subscription', () => {
   it('does not rerender when an unrelated store field changes', () => {
@@ -94,5 +95,30 @@ describe('GitStashSection error handling', () => {
       </GitStoreProvider>,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('could not save stash');
+  });
+});
+
+describe('GitStashSection busy state', () => {
+  it('marks the Stash button as busy while saving', async () => {
+    const deferred = createDeferred<void>();
+    const store = createGitStore();
+    store.setState({ saveStash: () => deferred.promise });
+    render(
+      <GitStoreProvider store={store}>
+        <GitStashSection />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+    // Note: the stash message Input has no accessible label (no aria-label,
+    // id, or associated <label>) in the current markup, so it cannot be
+    // queried via getByLabelText as in the task brief. Falling back to its
+    // placeholder text, which uniquely identifies it.
+    await user.type(screen.getByPlaceholderText('Describe your stash…'), 'wip');
+    const stashButton = screen.getByRole('button', { name: /stash/i });
+    await user.click(stashButton);
+
+    expect(stashButton).toHaveAttribute('aria-busy', 'true');
+    deferred.resolve();
+    await vi.waitFor(() => expect(stashButton).toHaveAttribute('aria-busy', 'false'));
   });
 });

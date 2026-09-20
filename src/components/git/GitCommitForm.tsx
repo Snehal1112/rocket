@@ -111,6 +111,7 @@ export function GitCommitForm() {
         <Button
           onClick={handleCommit}
           disabled={!message.trim() || stagedCount === 0 || committing}
+          aria-busy={committing}
           className='w-full'
           size='sm'
         >

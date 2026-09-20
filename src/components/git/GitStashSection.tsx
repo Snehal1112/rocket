@@ -149,6 +149,7 @@ export function GitStashSection() {
           className='h-7 px-2.5 text-xs shrink-0 gap-1'
           onClick={() => void handleSave()}
           disabled={!message.trim() || isSaving}
+          aria-busy={isSaving}
         >
           {isSaving && <Loader2 className='h-3 w-3 animate-spin' />}
           {isSaving ? 'Saving…' : 'Stash'}

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GitLandingPanel } from '@/components/git/GitLandingPanel';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
+import { createDeferred } from '@/test/deferred';
 
 describe('GitLandingPanel workflow guards', () => {
   it('does not record a fetch timestamp when fetch fails', async () => {
@@ -107,5 +108,27 @@ describe('GitLandingPanel workflow guards', () => {
 
     expect(await screen.findByText('authentication failed')).toBeInTheDocument();
     expect(popStash).not.toHaveBeenCalled();
+  });
+
+  it('marks Fetch as busy while a fetch is in flight', async () => {
+    const deferred = createDeferred<void>();
+    const store = createGitStore();
+    store.setState({
+      credentials: { type: 'token', token: 'tok' },
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: true },
+      fetch: () => deferred.promise,
+    });
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
+    const user = userEvent.setup();
+    const fetchButton = screen.getByRole('button', { name: /^fetch$/i });
+    await user.click(fetchButton);
+
+    expect(fetchButton).toHaveAttribute('aria-busy', 'true');
+    deferred.resolve();
+    await vi.waitFor(() => expect(fetchButton).toHaveAttribute('aria-busy', 'false'));
   });
 });
