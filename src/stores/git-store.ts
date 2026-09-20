@@ -47,6 +47,11 @@ import {
 
 export interface GitState {
   isRepo: boolean;
+  /** Single source of truth for what GitPanel should render, set at every exit
+   *  point of `setRepository`. 'error' means the repository's status could not
+   *  even be determined (distinct from a known repo whose background refresh
+   *  failed, which stays 'ready' with `error` set). */
+  loadStatus: 'idle' | 'loading' | 'ready' | 'not-repo' | 'error';
   repositoryId: string | null;
   status: RepoStatus | null;
   conflicts: ConflictFile[];
@@ -67,6 +72,10 @@ export interface GitState {
   identitySetupInitialEmail: string;
   pendingCredentialsForIdentitySetup: GitCredentials | null;
   activatePendingCredentials: () => void;
+  /** Discard a pending SSH-identity-setup prompt without activating its credentials
+   *  or retrying the network operation that triggered it — used when the user
+   *  explicitly cancels, as opposed to confirming/saving the identity. */
+  discardPendingIdentitySetup: () => void;
 
   setRepository: (repositoryId: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -100,14 +109,12 @@ export interface GitState {
   setRemoteUrl: (name: string, url: string) => Promise<void>;
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
-  clearPendingNetworkOp: () => void;
   push: (remote?: string, force?: boolean) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
   reset: () => void;
   initRepo: (repositoryId: string) => Promise<void>;
-  hasConflicts: () => boolean;
 }
 
 /**
@@ -163,12 +170,8 @@ export function createGitStore(): StoreApi<GitState> {
   let loadGeneration = 0;
 
   return createStore<GitState>((set, get) => ({
-    // Selector to determine if any file is in a conflicted state
-    hasConflicts: () => {
-      const { status } = get();
-      return status?.files.some((f) => f.status === 'conflicted') ?? false;
-    },
     isRepo: false,
+    loadStatus: 'idle',
     repositoryId: null,
     status: null,
     conflicts: [],
@@ -190,7 +193,20 @@ export function createGitStore(): StoreApi<GitState> {
     // Set the active repository and check if it is a git repo.
     setRepository: async (repositoryId: string) => {
       const myGeneration = ++loadGeneration;
-      set({ repositoryId, loading: true, error: null });
+      set({
+        repositoryId,
+        loading: true,
+        error: null,
+        loadStatus: 'loading',
+        isRepo: false,
+        status: null,
+        branches: null,
+        remotes: [],
+        stashes: [],
+        commitLog: [],
+        conflicts: [],
+        credentials: null,
+      });
       try {
         const isRepo = await gitIsRepo(repositoryId);
         if (myGeneration !== loadGeneration) return;
@@ -213,14 +229,22 @@ export function createGitStore(): StoreApi<GitState> {
             get().refreshRemotes(),
           ]);
           if (myGeneration !== loadGeneration) return;
-          set({ status, loading: false });
+          set({ status, loading: false, loadStatus: 'ready' });
         } else {
           if (myGeneration !== loadGeneration) return;
-          set({ status: null, loading: false });
+          set({ status: null, loading: false, loadStatus: 'not-repo' });
         }
       } catch (e) {
         if (myGeneration !== loadGeneration) return;
-        set({ error: String(e), loading: false });
+        // If `isRepo` was already determined true before this failure (e.g. a
+        // refresh inside the Promise.all threw), we know it's a repository —
+        // only classify as a load failure when we never got that far.
+        const stillUnknown = !get().isRepo;
+        set({
+          error: String(e),
+          loading: false,
+          loadStatus: stillUnknown ? 'error' : 'ready',
+        });
       }
     },
 
@@ -669,8 +693,6 @@ export function createGitStore(): StoreApi<GitState> {
     setShowCredentialsDialog: (show) =>
       set({ showCredentialsDialog: show, ...(show ? {} : { pendingNetworkOp: null }) }),
 
-    clearPendingNetworkOp: () => set({ pendingNetworkOp: null }),
-
     activatePendingCredentials: () => {
       const { pendingCredentialsForIdentitySetup, pendingNetworkOp } = get();
       if (!pendingCredentialsForIdentitySetup) return;
@@ -688,6 +710,16 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
+    discardPendingIdentitySetup: () => {
+      set({
+        showIdentitySetupDialog: false,
+        pendingCredentialsForIdentitySetup: null,
+        identitySetupInitialName: '',
+        identitySetupInitialEmail: '',
+        pendingNetworkOp: null,
+      });
+    },
+
     // Push local commits to the remote, prompting for credentials if needed.
     // `force` requests a --force-with-lease push (still refused server-side
     // if the remote has moved since the last fetch).
@@ -699,6 +731,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? resolveActiveRemote(get());
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitPush(repositoryId, resolvedRemote, credentials, force);
@@ -718,6 +754,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? resolveActiveRemote(get());
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitPull(repositoryId, resolvedRemote, credentials);
@@ -725,12 +765,14 @@ export function createGitStore(): StoreApi<GitState> {
       } catch (e) {
         set(networkErrorPatch(e, 'pull'));
       }
-      // Always refresh status and conflicts after a pull attempt — whether it
-      // succeeded or produced merge conflicts — so the UI reflects the real
-      // repo state (behind count, conflict files, etc.).
+      // Always refresh status, conflicts, branches, and the commit log after a
+      // pull attempt — whether it succeeded or produced merge conflicts — so
+      // the UI reflects the real repo state (behind count, conflict files,
+      // incoming commits, etc.).
       await get().refreshStatus();
       await get().refreshConflicts();
       await get().refreshBranches();
+      await get().refreshLog();
     },
 
     // Fetch remote refs without merging, prompting for credentials if needed.
@@ -742,6 +784,10 @@ export function createGitStore(): StoreApi<GitState> {
         return;
       }
       const resolvedRemote = remote ?? resolveActiveRemote(get());
+      if (!resolvedRemote) {
+        set({ error: 'No remote configured.' });
+        return;
+      }
       set({ error: null });
       try {
         await gitFetch(repositoryId, resolvedRemote, credentials);
@@ -769,6 +815,7 @@ export function createGitStore(): StoreApi<GitState> {
     reset: () => {
       set({
         isRepo: false,
+        loadStatus: 'idle',
         repositoryId: null,
         status: null,
         conflicts: [],
@@ -789,4 +836,11 @@ export function createGitStore(): StoreApi<GitState> {
       });
     },
   }));
+}
+
+/** True when the repository's current status has any conflicted file. Shared
+ *  by GitPanel and GitLandingPanel so conflict detection isn't computed
+ *  independently in two places. */
+export function selectHasConflicts(state: GitState): boolean {
+  return state.status?.files.some((f) => f.status === 'conflicted') ?? false;
 }

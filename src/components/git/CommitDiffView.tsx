@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { GitStatusBadge } from '@/components/git/GitStatusBadge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { FileDiff, GitStatusKind } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
@@ -59,17 +60,18 @@ export function CommitDiffView({ diffs, repositoryId, repositoryLabel }: CommitD
         <ScrollArea className='flex-1'>
           <div className='p-1'>
             {diffs.map((diff) => (
-              <button
+              <Button
                 key={diff.path}
                 type='button'
-                className={`w-full flex items-center gap-1.5 px-2 py-1 rounded text-left text-sm hover:bg-muted/50 ${
+                variant='ghost'
+                className={`w-full h-auto flex items-center gap-1.5 px-2 py-1 rounded justify-start font-normal text-left text-sm hover:bg-muted/50 ${
                   selectedPath === diff.path ? 'bg-muted/70' : ''
                 }`}
                 onClick={() => setSelectedPath(diff.path)}
               >
                 <GitStatusBadge status={fileStatus(diff)} />
                 <span className='truncate flex-1 text-xs font-mono'>{diff.path}</span>
-              </button>
+              </Button>
             ))}
           </div>
         </ScrollArea>

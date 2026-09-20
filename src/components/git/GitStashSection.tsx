@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,20 +22,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatRelativeTime } from '@/lib/relative-time';
+import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
-
-/** Format a UTC timestamp string into a concise relative label. */
-function formatAge(timestamp: string): string {
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
 
 export function GitStashSection() {
   const [message, setMessage] = useState('');
@@ -44,18 +34,16 @@ export function GitStashSection() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
 
-  const {
-    stashes,
-    saveStash,
-    popStash,
-    applyStash,
-    dropStash,
-    applyStashMany,
-    popStashMany,
-    dropStashMany,
-    error,
-    clearError,
-  } = useGitStore((state) => state);
+  const stashes = useGitStore((state) => state.stashes);
+  const saveStash = useGitStore((state) => state.saveStash);
+  const popStash = useGitStore((state) => state.popStash);
+  const applyStash = useGitStore((state) => state.applyStash);
+  const dropStash = useGitStore((state) => state.dropStash);
+  const applyStashMany = useGitStore((state) => state.applyStashMany);
+  const popStashMany = useGitStore((state) => state.popStashMany);
+  const dropStashMany = useGitStore((state) => state.dropStashMany);
+  const error = useGitStore((state) => state.error);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   const isSelecting = selectedIndices.size > 0;
@@ -138,6 +126,7 @@ export function GitStashSection() {
       <div className='flex gap-1.5 px-3 pb-2'>
         <Input
           placeholder='Describe your stash…'
+          aria-label='Stash message'
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           className='h-7 text-xs flex-1'
@@ -150,6 +139,7 @@ export function GitStashSection() {
           className='h-7 px-2.5 text-xs shrink-0 gap-1'
           onClick={() => void handleSave()}
           disabled={!message.trim() || isSaving}
+          aria-busy={isSaving}
         >
           {isSaving && <Loader2 className='h-3 w-3 animate-spin' />}
           {isSaving ? 'Saving…' : 'Stash'}
@@ -158,7 +148,10 @@ export function GitStashSection() {
 
       {/* Error banner */}
       {error && (
-        <div className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+        <div
+          role='alert'
+          className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'
+        >
           <AlertCircle className='mt-px h-3 w-3 shrink-0' />
           <span className='break-all leading-relaxed'>{error}</span>
         </div>
@@ -190,20 +183,25 @@ export function GitStashSection() {
               onMouseLeave={() => setHoveredIndex(null)}
             >
               {/* Checkbox / index badge slot — fixed width, no layout shift */}
-              <div className='shrink-0 w-6 flex items-center justify-end'>
-                {showCheckbox ? (
-                  <input
-                    type='checkbox'
-                    className='h-3.5 w-3.5 accent-primary cursor-pointer'
-                    checked={isSelected}
-                    disabled={isBatchRunning}
-                    onChange={(e) => toggleSelect(stash.index, e.target.checked)}
-                  />
-                ) : (
-                  <span className='text-[10px] font-mono text-muted-foreground/35 select-none leading-none'>
-                    @{stash.index}
-                  </span>
-                )}
+              <div className='shrink-0 w-6 h-4 flex items-center justify-end relative'>
+                <Checkbox
+                  checked={isSelected}
+                  disabled={isBatchRunning}
+                  onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
+                  aria-label={`Select stash @${stash.index}`}
+                  className={cn(
+                    'peer absolute transition-opacity',
+                    showCheckbox ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100',
+                  )}
+                />
+                <span
+                  className={cn(
+                    'text-[10px] font-mono text-muted-foreground/35 select-none leading-none transition-opacity pointer-events-none',
+                    showCheckbox ? 'opacity-0' : 'peer-focus-visible:opacity-0',
+                  )}
+                >
+                  @{stash.index}
+                </span>
               </div>
 
               {/* Message + metadata */}
@@ -274,7 +272,7 @@ export function GitStashSection() {
 
                   <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
                   <span className='text-[10px] text-muted-foreground/50 shrink-0'>
-                    {formatAge(stash.timestamp)}
+                    {formatRelativeTime(stash.timestamp)}
                   </span>
                 </div>
               </div>
@@ -295,7 +293,12 @@ export function GitStashSection() {
                   onOpenChange={(open) => setOpenStashIndex(open ? stash.index : null)}
                 >
                   <DropdownMenuTrigger asChild>
-                    <Button variant='ghost' size='icon' className='h-6 w-6'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-6 w-6'
+                      aria-label='Stash actions'
+                    >
                       <MoreHorizontal className='h-3.5 w-3.5' />
                     </Button>
                   </DropdownMenuTrigger>

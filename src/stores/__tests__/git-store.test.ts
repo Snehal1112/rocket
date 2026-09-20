@@ -3,7 +3,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { GitCredentials } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
-import { createGitStore, type GitState } from '../git-store';
+import { createGitStore, type GitState, selectHasConflicts } from '../git-store';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
@@ -398,6 +398,23 @@ describe('git-store SSH trust failures', () => {
   });
 });
 
+describe('git-store pull refreshes the commit log', () => {
+  it('calls refreshLog after a successful pull', async () => {
+    store.setState({
+      repositoryId: 'repo-1',
+      isRepo: true,
+      credentials: { type: 'token', token: 'tok' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+    });
+    vi.mocked(tauriApi.gitPull).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.gitLog).mockResolvedValue([]);
+
+    await store.getState().pull();
+
+    expect(tauriApi.gitLog).toHaveBeenCalledWith('repo-1', 50);
+  });
+});
+
 describe('setRepository', () => {
   beforeEach(() => {
     store.setState({
@@ -502,6 +519,9 @@ describe('git-store setRepository clears stale data synchronously', () => {
           filesChanged: 1,
         },
       ],
+      conflicts: [
+        { path: 'config.yml', ours: 'version: 1', theirs: 'version: 2', ancestor: 'version: 0' },
+      ],
       credentials: { type: 'token', token: 'repo-a-secret' },
     });
 
@@ -517,6 +537,7 @@ describe('git-store setRepository clears stale data synchronously', () => {
     expect(store.getState().remotes).toEqual([]);
     expect(store.getState().stashes).toEqual([]);
     expect(store.getState().commitLog).toEqual([]);
+    expect(store.getState().conflicts).toEqual([]);
     expect(store.getState().credentials).toBeNull();
     expect(store.getState().isRepo).toBe(false);
 
@@ -1243,6 +1264,29 @@ describe('git-store identity setup flow', () => {
     // Should not overwrite existing credentials
     expect(store.getState().credentials).toEqual({ type: 'token', token: 'existing' });
   });
+
+  it('cancelling identity setup does not activate credentials or retry the pending operation', async () => {
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '/home/user/.ssh/id_ed25519' };
+    store.setState({
+      repositoryId: 'repo-1',
+      pendingCredentialsForIdentitySetup: creds,
+      showIdentitySetupDialog: true,
+      identitySetupInitialName: 'Some Name',
+      identitySetupInitialEmail: 'some@example.com',
+      pendingNetworkOp: 'push',
+    });
+
+    store.getState().discardPendingIdentitySetup();
+
+    const state = store.getState();
+    expect(state.credentials).toBeNull();
+    expect(state.showIdentitySetupDialog).toBe(false);
+    expect(state.pendingCredentialsForIdentitySetup).toBeNull();
+    expect(state.pendingNetworkOp).toBeNull();
+    expect(state.identitySetupInitialName).toBe('');
+    expect(state.identitySetupInitialEmail).toBe('');
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+  });
 });
 
 describe('setRepository generation guard', () => {
@@ -1293,5 +1337,57 @@ describe('setRepository generation guard', () => {
     await firstCall;
     expect(store.getState().repositoryId).toBe('repo-b');
     expect(store.getState().branches?.current).toBe('main-b');
+  });
+});
+
+describe('git-store network actions with no remote configured', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repo-1',
+      isRepo: true,
+      credentials: { type: 'token', token: 'tok' },
+      remotes: [],
+    });
+  });
+
+  it('push sets an error and never calls gitPush', async () => {
+    await store.getState().push();
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
+  });
+
+  it('pull sets an error and never calls gitPull', async () => {
+    await store.getState().pull();
+    expect(tauriApi.gitPull).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
+  });
+
+  it('fetch sets an error and never calls gitFetch', async () => {
+    await store.getState().fetch();
+    expect(tauriApi.gitFetch).not.toHaveBeenCalled();
+    expect(store.getState().error).toBe('No remote configured.');
+  });
+});
+
+describe('selectHasConflicts', () => {
+  it('is true when any status file is conflicted', () => {
+    const state = {
+      status: {
+        branch: 'main',
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+        files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
+      },
+    } as GitState;
+    expect(selectHasConflicts(state)).toBe(true);
+  });
+
+  it('is false with no status or no conflicted files', () => {
+    expect(selectHasConflicts({ status: null } as GitState)).toBe(false);
+    const clean = {
+      status: { branch: 'main', ahead: 0, behind: 0, isClean: true, files: [] },
+    } as unknown as GitState;
+    expect(selectHasConflicts(clean)).toBe(false);
   });
 });

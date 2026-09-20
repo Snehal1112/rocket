@@ -1,4 +1,4 @@
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,15 +13,20 @@ export function GitCommitForm() {
   const status = useGitStore((state) => state.status);
   const commitChanges = useGitStore((state) => state.commitChanges);
   const repositoryId = useGitStore((state) => state.repositoryId);
+  const error = useGitStore((state) => state.error);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   const stagedCount = status?.files.filter((f) => f.staged).length ?? 0;
 
   const doCommit = async () => {
     setCommitting(true);
+    gitStoreApi.setState({ error: null });
     try {
       await commitChanges(message.trim());
-      setMessage('');
+      if (!gitStoreApi.getState().error) {
+        setMessage('');
+      }
     } finally {
       setCommitting(false);
     }
@@ -73,6 +78,22 @@ export function GitCommitForm() {
       />
 
       <div className='space-y-2'>
+        {error && (
+          <div className='flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+            <span role='alert' className='flex-1 wrap-break-word'>
+              {error}
+            </span>
+            <Button
+              variant='ghost'
+              size='icon'
+              className='h-4 w-4 shrink-0'
+              onClick={clearError}
+              aria-label='Dismiss error'
+            >
+              <X className='h-3 w-3' />
+            </Button>
+          </div>
+        )}
         <Textarea
           placeholder='Commit message... (Ctrl+Enter to commit)'
           value={message}
@@ -90,6 +111,7 @@ export function GitCommitForm() {
         <Button
           onClick={handleCommit}
           disabled={!message.trim() || stagedCount === 0 || committing}
+          aria-busy={committing}
           className='w-full'
           size='sm'
         >

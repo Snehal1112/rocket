@@ -1,5 +1,6 @@
 import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, ShieldCheck, X } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
 import { isContractTab, isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
@@ -104,17 +105,19 @@ export function TabItem({
         />
       )}
       {!isWorkspaceTab(tab) && (
-        <button
+        <Button
           type='button'
+          variant='ghost'
+          size='icon'
           aria-label='Close tab'
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
-          className='shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:text-foreground rounded-sm p-0.5 transition-opacity'
+          className='h-auto w-auto shrink-0 p-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-transparent hover:text-foreground rounded-sm transition-opacity'
         >
           <X aria-hidden='true' className='h-3.5 w-3.5' />
-        </button>
+        </Button>
       )}
     </div>
   );

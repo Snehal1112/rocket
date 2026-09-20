@@ -25,20 +25,23 @@ export function BranchSelector() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [checkingOutRemote, setCheckingOutRemote] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [mergingName, setMergingName] = useState<string | null>(null);
+  const [deletingName, setDeletingName] = useState<string | null>(null);
   // Full remote branch name (e.g. "collections/main") awaiting confirmation
   // to force-reset a colliding local branch onto it.
   const [pendingForceCheckout, setPendingForceCheckout] = useState<string | null>(null);
   // Name typed into the "Checkout as New" field on the collision dialog.
   const [checkoutAsName, setCheckoutAsName] = useState('');
-  const {
-    branches,
-    switchBranch,
-    createBranch,
-    deleteBranch,
-    mergeBranch,
-    checkoutRemoteBranch,
-    status,
-  } = useGitStore((state) => state);
+  const branches = useGitStore((state) => state.branches);
+  const switchBranch = useGitStore((state) => state.switchBranch);
+  const createBranch = useGitStore((state) => state.createBranch);
+  const deleteBranch = useGitStore((state) => state.deleteBranch);
+  const mergeBranch = useGitStore((state) => state.mergeBranch);
+  const checkoutRemoteBranch = useGitStore((state) => state.checkoutRemoteBranch);
+  const status = useGitStore((state) => state.status);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   if (!branches) return null;
@@ -61,27 +64,38 @@ export function BranchSelector() {
   });
 
   const handleCreate = async () => {
-    if (!newBranchName.trim()) return;
+    if (!newBranchName.trim() || creating) return;
+    setCreating(true);
     setCreateError(null);
-    const prevError = gitStoreApi.getState().error;
-    await createBranch(newBranchName.trim());
-    const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
-      setCreateError(nextError);
-    } else {
-      setNewBranchName('');
+    clearError();
+    try {
+      await createBranch(newBranchName.trim());
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        setCreateError(nextError);
+      } else {
+        setNewBranchName('');
+      }
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleSwitch = async (name: string) => {
+    if (switchingTo) return;
+    setSwitchingTo(name);
     setSwitchError(null);
-    const prevError = gitStoreApi.getState().error;
-    await switchBranch(name);
-    const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
-      setSwitchError(nextError);
-    } else {
-      setOpen(false);
+    clearError();
+    try {
+      await switchBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        setSwitchError(nextError);
+      } else {
+        setOpen(false);
+      }
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
@@ -92,7 +106,7 @@ export function BranchSelector() {
     // branch again) would compare the new rejection against the leftover
     // error from the first attempt, see no change, and silently report
     // success instead of re-showing the confirmation dialog.
-    gitStoreApi.getState().clearError();
+    clearError();
     setCheckingOutRemote(name);
     try {
       await checkoutRemoteBranch(name, force, asName);
@@ -144,18 +158,40 @@ export function BranchSelector() {
   // - On conflict: close the popover so the conflict resolver is visible.
   // - On other error: keep the popover open and show the error inline.
   const handleMerge = async (name: string) => {
+    if (mergingName) return;
+    setMergingName(name);
     setSwitchError(null);
-    const prevError = gitStoreApi.getState().error;
-    await mergeBranch(name);
-    const nextError = gitStoreApi.getState().error;
-    if (nextError && nextError !== prevError) {
-      if (nextError.toLowerCase().includes('conflict')) {
-        setOpen(false);
+    clearError();
+    try {
+      await mergeBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
+        if (nextError.toLowerCase().includes('conflict')) {
+          setOpen(false);
+        } else {
+          setSwitchError(nextError);
+        }
       } else {
+        setOpen(false);
+      }
+    } finally {
+      setMergingName(null);
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    if (deletingName) return;
+    setDeletingName(name);
+    setSwitchError(null);
+    clearError();
+    try {
+      await deleteBranch(name);
+      const nextError = gitStoreApi.getState().error;
+      if (nextError) {
         setSwitchError(nextError);
       }
-    } else {
-      setOpen(false);
+    } finally {
+      setDeletingName(null);
     }
   };
 
@@ -186,7 +222,10 @@ export function BranchSelector() {
           }}
         >
           {switchError && (
-            <div className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border/70'>
+            <div
+              role='alert'
+              className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border/70'
+            >
               <AlertCircle className='h-3 w-3 shrink-0 mt-0.5' />
               <span className='wrap-break-word'>{switchError}</span>
             </div>
@@ -213,11 +252,13 @@ export function BranchSelector() {
                 tabIndex={0}
                 className='branch-row flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left'
                 onClick={() => {
+                  if (switchingTo) return;
                   if (!branch.isHead) void handleSwitch(branch.name);
                   else setOpen(false);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if ((e.key === 'Enter' || e.key === ' ') && !switchingTo) {
+                    e.preventDefault();
                     if (!branch.isHead) void handleSwitch(branch.name);
                     else setOpen(false);
                   }
@@ -244,6 +285,8 @@ export function BranchSelector() {
                             variant='ghost'
                             size='icon'
                             className='h-5 w-5'
+                            aria-label='Merge into current'
+                            disabled={mergingName !== null || deletingName !== null}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleMerge(branch.name);
@@ -260,9 +303,11 @@ export function BranchSelector() {
                             variant='ghost'
                             size='icon'
                             className='h-5 w-5 text-destructive'
+                            aria-label='Delete branch'
+                            disabled={mergingName !== null || deletingName !== null}
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteBranch(branch.name);
+                              void handleDelete(branch.name);
                             }}
                           >
                             <Trash2 className='h-3.5 w-3.5' />
@@ -285,11 +330,12 @@ export function BranchSelector() {
                   const localName = rest.join('/');
                   const isCheckingOutThis = checkingOutRemote === branch.name;
                   return (
-                    <button
+                    <Button
                       key={branch.name}
                       type='button'
+                      variant='ghost'
                       disabled={checkingOutRemote !== null}
-                      className='flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 cursor-pointer text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed'
+                      className='flex w-full h-auto items-center gap-1.5 rounded px-2 py-1 justify-start font-normal hover:bg-muted/50 text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed'
                       onClick={() => {
                         void handleCheckoutRemote(branch.name);
                       }}
@@ -307,7 +353,7 @@ export function BranchSelector() {
                         <span className='text-muted-foreground/60'>{remoteName}/</span>
                         {localName}
                       </span>
-                    </button>
+                    </Button>
                   );
                 })}
               </>
@@ -332,14 +378,14 @@ export function BranchSelector() {
                 size='sm'
                 className='h-7 shrink-0'
                 onClick={handleCreate}
-                disabled={!newBranchName.trim()}
+                disabled={!newBranchName.trim() || creating}
                 aria-label='Create branch'
               >
                 <Plus className='h-3.5 w-3.5' />
               </Button>
             </div>
             {createError && (
-              <div className='flex items-start gap-1.5 text-xs text-destructive'>
+              <div role='alert' className='flex items-start gap-1.5 text-xs text-destructive'>
                 <AlertCircle className='h-3 w-3 shrink-0 mt-0.5' />
                 <span className='wrap-break-word'>{createError}</span>
               </div>

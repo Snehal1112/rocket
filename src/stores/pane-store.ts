@@ -16,11 +16,7 @@ import { useEnvStore } from '@/stores/env-store';
 import type {
   CollectionSection,
   CollectionTab,
-  ConflictState,
-  ConflictTab,
   ContractTab,
-  DiffState,
-  DiffTab,
   LeafNode,
   PaneNode,
   RequestState,
@@ -96,12 +92,6 @@ export interface PaneState {
   setResponse: (tabId: string, response: ResponseState) => void;
   markDirty: (tabId: string) => void;
   markClean: (tabId: string) => void;
-
-  // Diff tab action.
-  openDiffTab: (diffState: DiffState) => void;
-
-  // Conflict tab action.
-  openConflictTab: (conflictState: ConflictState) => void;
 
   // Collection-keyed tab state actions.
   setActiveCollection: (name: string) => void;
@@ -358,30 +348,6 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   markClean(tabId) {
     const { root } = get();
     set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: false })) });
-  },
-
-  openDiffTab(diffState) {
-    const tabId = `diff:${diffState.repositoryId}/${diffState.filePath}:${diffState.isStaged ? 'staged' : 'working'}`;
-    const tab: DiffTab = {
-      id: tabId,
-      title: `${diffState.filePath} (${diffState.isStaged ? 'Staged' : 'Working'})`,
-      isDirty: false,
-      tabType: 'diff',
-      diffState,
-    };
-    get().openTab(tab);
-  },
-
-  openConflictTab(conflictState) {
-    const tabId = `conflict:${conflictState.repositoryId}/${conflictState.filePath}`;
-    const tab: ConflictTab = {
-      id: tabId,
-      title: `${conflictState.filePath} (Conflict)`,
-      isDirty: false,
-      tabType: 'conflict',
-      conflictState,
-    };
-    get().openTab(tab);
   },
 
   openContractTab(collectionName, collectionRoot) {

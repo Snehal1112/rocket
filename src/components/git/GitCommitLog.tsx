@@ -2,30 +2,17 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatRelativeTime } from '@/lib/relative-time';
 import type { CommitInfo } from '@/lib/tauri-api';
 import { useGitStore } from '@/stores/git-store-context';
-
-function relativeTime(timestamp: string): string {
-  const now = Date.now();
-  const then = new Date(timestamp).getTime();
-  const diff = now - then;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
 
 interface GitCommitLogProps {
   onCommitClick: (commit: CommitInfo) => void;
 }
 
 export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
-  const { commitLog, refreshLog } = useGitStore((state) => state);
+  const commitLog = useGitStore((state) => state.commitLog);
+  const refreshLog = useGitStore((state) => state.refreshLog);
   const [limit, setLimit] = useState(50);
 
   const handleLoadMore = async () => {
@@ -54,22 +41,27 @@ export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
             className='flex items-start gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer'
             onClick={() => onCommitClick(commit)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') onCommitClick(commit);
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onCommitClick(commit);
+              }
             }}
           >
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
+                  <Button
                     type='button'
-                    className='shrink-0 cursor-pointer font-mono text-[10px] px-1 py-0.5 bg-muted rounded text-muted-foreground hover:text-foreground transition-colors'
+                    variant='ghost'
+                    size='sm'
+                    className='shrink-0 h-auto px-1 py-0.5 font-mono text-[10px] bg-muted rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                     onClick={(e) => {
                       e.stopPropagation();
                       navigator.clipboard.writeText(commit.fullId);
                     }}
                   >
                     {commit.id}
-                  </button>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>{commit.fullId} (click to copy)</p>
@@ -79,7 +71,7 @@ export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
             <div className='min-w-0 flex-1'>
               <p className='truncate text-[13px] font-medium leading-snug'>{commit.message}</p>
               <p className='text-[10px] text-muted-foreground/70 mt-0.5'>
-                {commit.author} · {relativeTime(commit.timestamp)}
+                {commit.author} · {formatRelativeTime(commit.timestamp)}
                 {commit.filesChanged > 0 && (
                   <span className='ml-1.5'>
                     · {commit.filesChanged} file{commit.filesChanged !== 1 ? 's' : ''}

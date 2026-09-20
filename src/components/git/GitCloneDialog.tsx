@@ -1,5 +1,5 @@
 import { Check, FolderOpen, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -39,6 +39,13 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const [collections, setCollections] = useState<CollectionScanResult[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
 
+  // Bumped every time the dialog opens or a clone starts; a clone's async
+  // continuation only touches state/navigation if it's still the current one
+  // when it resolves. This stops a stale clone (dialog closed and reopened,
+  // or reopened with a new URL/destination, while the old one was in flight)
+  // from opening a workspace or writing into a dialog session it no longer owns.
+  const requestIdRef = useRef(0);
+
   const credentials = useGitStore((s) => s.credentials);
   const gitStoreApi = useGitStoreApi();
   const openFromDiskMutation = useOpenWorkspaceFromDisk();
@@ -47,6 +54,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   // Reset all state when dialog opens.
   useEffect(() => {
     if (open) {
+      requestIdRef.current += 1;
       setStep('input');
       setRepoUrl('');
       setDestination(null);
@@ -54,6 +62,13 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       setError(null);
       setCollections([]);
       setSelectedCollection(null);
+    } else {
+      // Closing also disowns any clone still in flight from this session, and
+      // any pending credentials-wait session — otherwise credentials arriving
+      // after close would still trigger the continuation effect below.
+      requestIdRef.current += 1;
+      setAwaitingCredentials(false);
+      setDestination(null);
     }
   }, [open]);
 
@@ -74,7 +89,9 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   // Handle post-clone detection: auto-open workspace or show picker.
   const handlePostClone = useCallback(
     async (clonedPath: string) => {
+      const myRequestId = requestIdRef.current;
       const structure: ClonedRepoStructure = await detectClonedStructure(clonedPath);
+      if (requestIdRef.current !== myRequestId) return;
 
       if (structure.kind === 'workspace' && structure.workspacePath) {
         await handleOpenWorkspace(structure.workspacePath);
@@ -107,12 +124,15 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
         return;
       }
 
+      const myRequestId = requestIdRef.current;
       setError(null);
       setStep('progress');
       try {
         await gitClone(repoUrl.trim(), destination.capability, creds);
+        if (requestIdRef.current !== myRequestId) return;
         await handlePostClone(destination.displayPath);
       } catch (e) {
+        if (requestIdRef.current !== myRequestId) return;
         // Capabilities are one-time, including failed clone attempts.
         setDestination(null);
         setError(String(e));
@@ -124,11 +144,12 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
 
   // Continue exactly once when credentials arrive after the credentials dialog.
   useEffect(() => {
+    if (!open) return;
     if (awaitingCredentials && credentials) {
       setAwaitingCredentials(false);
       void performClone(credentials);
     }
-  }, [awaitingCredentials, credentials, performClone]);
+  }, [open, awaitingCredentials, credentials, performClone]);
 
   const handleBrowse = async () => {
     const result = await selectCloneDestination();
@@ -203,10 +224,11 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
             <>
               <div className='space-y-1'>
                 {collections.map((col) => (
-                  <button
+                  <Button
                     key={col.path}
                     type='button'
-                    className='flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer text-sm w-full text-left'
+                    variant='ghost'
+                    className='flex items-center gap-2 px-2 py-1.5 h-auto rounded justify-start font-normal hover:bg-muted/50 text-sm w-full text-left'
                     onClick={() => setSelectedCollection(col.path)}
                   >
                     <Check
@@ -216,7 +238,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
                       }}
                     />
                     <span className='truncate'>{col.name}</span>
-                  </button>
+                  </Button>
                 ))}
               </div>
               <DialogFooter>
@@ -247,6 +269,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
             <Label className='text-sm'>Repository URL</Label>
             <Input
               placeholder='https://github.com/user/repo.git'
+              aria-label='Repository URL'
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
               className='h-8 text-sm'
@@ -258,6 +281,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
               <Input
                 value={destination?.displayPath ?? ''}
                 readOnly
+                aria-label='Destination'
                 placeholder='Select an empty folder'
                 className='h-8 text-sm flex-1'
               />

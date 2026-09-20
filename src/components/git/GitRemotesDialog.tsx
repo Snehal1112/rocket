@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitStore } from '@/stores/git-store-context';
+import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 
 interface Props {
   open: boolean;
@@ -13,15 +13,23 @@ interface Props {
 }
 
 export function GitRemotesDialog({ open, onOpenChange }: Props) {
-  const { remotes, addRemote, removeRemote, setRemoteUrl, refreshRemotes } = useGitStore(
-    (state) => state,
-  );
+  const remotes = useGitStore((state) => state.remotes);
+  const addRemote = useGitStore((state) => state.addRemote);
+  const removeRemote = useGitStore((state) => state.removeRemote);
+  const setRemoteUrl = useGitStore((state) => state.setRemoteUrl);
+  const refreshRemotes = useGitStore((state) => state.refreshRemotes);
+  const error = useGitStore((state) => state.error);
+  const clearError = useGitStore((state) => state.clearError);
+  const gitStoreApi = useGitStoreApi();
 
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [editingRemote, setEditingRemote] = useState<string | null>(null);
   const [editUrl, setEditUrl] = useState('');
   const [deletingRemote, setDeletingRemote] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   // Refresh the remote list each time the dialog opens.
   useEffect(() => {
@@ -37,21 +45,46 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
     !remotes.some((r) => r.name === newName.trim());
 
   const handleAdd = async () => {
-    await addRemote(newName.trim(), newUrl.trim());
-    setNewName('');
-    setNewUrl('');
+    if (adding) return;
+    setAdding(true);
+    clearError();
+    try {
+      await addRemote(newName.trim(), newUrl.trim());
+      if (!gitStoreApi.getState().error) {
+        setNewName('');
+        setNewUrl('');
+      }
+    } finally {
+      setAdding(false);
+    }
   };
 
   const handleSaveEdit = async () => {
-    if (!editingRemote) return;
-    await setRemoteUrl(editingRemote, editUrl.trim());
-    setEditingRemote(null);
+    if (!editingRemote || savingEdit) return;
+    setSavingEdit(true);
+    clearError();
+    try {
+      await setRemoteUrl(editingRemote, editUrl.trim());
+      if (!gitStoreApi.getState().error) {
+        setEditingRemote(null);
+      }
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
-    if (!deletingRemote) return;
-    await removeRemote(deletingRemote);
-    setDeletingRemote(null);
+    if (!deletingRemote || removing) return;
+    setRemoving(true);
+    clearError();
+    try {
+      await removeRemote(deletingRemote);
+      if (!gitStoreApi.getState().error) {
+        setDeletingRemote(null);
+      }
+    } finally {
+      setRemoving(false);
+    }
   };
 
   return (
@@ -63,6 +96,22 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
 
         <TooltipProvider delayDuration={300}>
           <div className='space-y-3 min-w-0'>
+            {error && (
+              <div className='flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'>
+                <span role='alert' className='flex-1 wrap-break-word'>
+                  {error}
+                </span>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-4 w-4 shrink-0'
+                  onClick={clearError}
+                  aria-label='Dismiss error'
+                >
+                  <X className='h-3 w-3' />
+                </Button>
+              </div>
+            )}
             {remotes.length === 0 ? (
               <p className='text-sm text-muted-foreground text-center py-4'>
                 No remotes configured.
@@ -83,6 +132,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='destructive'
                           className='h-7 text-xs'
+                          disabled={removing}
                           onClick={handleConfirmDelete}
                         >
                           Remove
@@ -119,6 +169,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0 shrink-0'
+                          disabled={savingEdit}
                           onClick={handleSaveEdit}
                         >
                           <Check className='h-3.5 w-3.5' />
@@ -158,6 +209,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0'
+                          aria-label='Edit remote'
                           onClick={() => {
                             setEditingRemote(remote.name);
                             setEditUrl(remote.url);
@@ -169,6 +221,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                           size='sm'
                           variant='ghost'
                           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+                          aria-label='Delete remote'
                           onClick={() => setDeletingRemote(remote.name)}
                         >
                           <Trash2 className='h-3.5 w-3.5' />
@@ -185,6 +238,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
             <div className='flex items-center gap-2'>
               <Input
                 placeholder='name'
+                aria-label='Remote name'
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 className='h-8 text-sm flex-[2] min-w-0'
@@ -194,6 +248,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
               />
               <Input
                 placeholder='https://github.com/...'
+                aria-label='Remote URL'
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
                 className='h-8 text-sm flex-[5] min-w-0'
@@ -201,7 +256,12 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                   if (e.key === 'Enter' && canAdd) handleAdd();
                 }}
               />
-              <Button size='sm' className='h-8 shrink-0' disabled={!canAdd} onClick={handleAdd}>
+              <Button
+                size='sm'
+                className='h-8 shrink-0'
+                disabled={!canAdd || adding}
+                onClick={handleAdd}
+              >
                 <Plus className='h-3.5 w-3.5 mr-1' /> Add
               </Button>
             </div>
