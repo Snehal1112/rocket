@@ -1,5 +1,5 @@
 import { Check, FolderOpen, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -39,6 +39,13 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const [collections, setCollections] = useState<CollectionScanResult[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
 
+  // Bumped every time the dialog opens or a clone starts; a clone's async
+  // continuation only touches state/navigation if it's still the current one
+  // when it resolves. This stops a stale clone (dialog closed and reopened,
+  // or reopened with a new URL/destination, while the old one was in flight)
+  // from opening a workspace or writing into a dialog session it no longer owns.
+  const requestIdRef = useRef(0);
+
   const credentials = useGitStore((s) => s.credentials);
   const gitStoreApi = useGitStoreApi();
   const openFromDiskMutation = useOpenWorkspaceFromDisk();
@@ -47,6 +54,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   // Reset all state when dialog opens.
   useEffect(() => {
     if (open) {
+      requestIdRef.current += 1;
       setStep('input');
       setRepoUrl('');
       setDestination(null);
@@ -54,6 +62,9 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       setError(null);
       setCollections([]);
       setSelectedCollection(null);
+    } else {
+      // Closing also disowns any clone still in flight from this session.
+      requestIdRef.current += 1;
     }
   }, [open]);
 
@@ -74,7 +85,9 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   // Handle post-clone detection: auto-open workspace or show picker.
   const handlePostClone = useCallback(
     async (clonedPath: string) => {
+      const myRequestId = requestIdRef.current;
       const structure: ClonedRepoStructure = await detectClonedStructure(clonedPath);
+      if (requestIdRef.current !== myRequestId) return;
 
       if (structure.kind === 'workspace' && structure.workspacePath) {
         await handleOpenWorkspace(structure.workspacePath);
@@ -107,12 +120,15 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
         return;
       }
 
+      const myRequestId = requestIdRef.current;
       setError(null);
       setStep('progress');
       try {
         await gitClone(repoUrl.trim(), destination.capability, creds);
+        if (requestIdRef.current !== myRequestId) return;
         await handlePostClone(destination.displayPath);
       } catch (e) {
+        if (requestIdRef.current !== myRequestId) return;
         // Capabilities are one-time, including failed clone attempts.
         setDestination(null);
         setError(String(e));
