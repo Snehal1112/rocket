@@ -10,7 +10,7 @@ touches the filesystem or any I/O directly — those concerns live in
 
 | Type | Purpose |
 |---|---|
-| `CollectionService` | CRUD for collections, folders, and requests; enforces name validation. |
+| `CollectionService` | CRUD for collections, folders, and requests; enforces name validation; publishes a `DomainEvent` for every mutation. |
 | `CookieService` | Thin wrapper over `CookieRepository` for per-domain cookie jars. |
 | `EnvironmentService` | CRUD for environments; publishes `EnvironmentSaved/Deleted` events. |
 | `RequestExecutionService` | Core HTTP dispatch: resolves variables, merges collection settings, runs the request, saves history, publishes `RequestExecuted`. |
@@ -25,6 +25,7 @@ touches the filesystem or any I/O directly — those concerns live in
 ## Service Method Details
 
 ### CollectionService
+- Every mutating method publishes a `DomainEvent` (e.g. `CollectionCreated`, `RequestSaved`, `FolderDeleted`, `ItemMoved`, `CollectionSettingsSaved`) after the underlying repository call succeeds.
 - `rename_request` — mutates only the `name` field inside the JSON; the filename stays the same, producing a single `Modify` filesystem event.
 - `move_item` — moves a request or folder between collections or paths.
 - `reorder_items` — reorders items within a folder by supplying the new name order.

@@ -74,12 +74,11 @@ impl CollectionService {
 
     pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
         let actual_path = self.repo.save_request(collection, path, request)?;
-        let saved = self.repo.get_request(collection, &actual_path)?;
         self.events.publish(DomainEvent::RequestSaved {
             collection: collection.to_string(),
-            path: actual_path,
+            path: actual_path.clone(),
         });
-        Ok(saved)
+        self.repo.get_request(collection, &actual_path)
     }
 
     pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
@@ -87,10 +86,10 @@ impl CollectionService {
         // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
         request.name = new_name.to_string();
-        self.repo.save_request(collection, old_path, &request)?;
+        let actual_path = self.repo.save_request(collection, old_path, &request)?;
         self.events.publish(DomainEvent::RequestSaved {
             collection: collection.to_string(),
-            path: old_path.to_string(),
+            path: actual_path,
         });
         Ok(())
     }
@@ -98,10 +97,10 @@ impl CollectionService {
     pub fn update_request_docs(&self, collection: &str, path: &str, docs: Option<String>) -> DomainResult<()> {
         let mut request = self.repo.get_request(collection, path)?;
         request.docs = docs.map(Documentation::text);
-        self.repo.save_request(collection, path, &request)?;
+        let actual_path = self.repo.save_request(collection, path, &request)?;
         self.events.publish(DomainEvent::RequestSaved {
             collection: collection.to_string(),
-            path: path.to_string(),
+            path: actual_path,
         });
         Ok(())
     }

@@ -134,7 +134,8 @@ pub enum DomainEvent {
     },
     /// Emitted when a collection-scoped variable is written (currently only via
     /// `rok.setCollectionVar` / `runtime.actions` collection-scope writes; manual
-    /// collection-settings saves do not yet publish any event).
+    /// collection-settings saves publish `CollectionSettingsSaved` instead, not
+    /// this variant).
     CollectionVariableWritten { collection: String, key: String },
 }
 
