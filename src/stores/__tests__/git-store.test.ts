@@ -461,13 +461,22 @@ describe('stashThenPull', () => {
   it('does not pop the stash when the pull produces merge conflicts', async () => {
     const { gitPull, gitStashPop } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
-    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
-      branch: 'main',
-      files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
-      ahead: 0,
-      behind: 0,
-      isClean: false,
-    });
+    // Mock gitStatus twice: first for saveStash's refreshStatus (clean), then for pull's refreshStatus (conflicted)
+    vi.mocked(tauriApi.gitStatus)
+      .mockResolvedValueOnce({
+        branch: 'main',
+        files: [],
+        ahead: 0,
+        behind: 0,
+        isClean: true,
+      })
+      .mockResolvedValueOnce({
+        branch: 'main',
+        files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+      });
 
     await store.getState().stashThenPull();
 

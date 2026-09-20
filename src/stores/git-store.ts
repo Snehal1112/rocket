@@ -812,15 +812,7 @@ export function createGitStore(): StoreApi<GitState> {
 
     stashThenPull: async () => {
       get().clearError();
-      const { repositoryId } = get();
-      if (!repositoryId) return;
-      try {
-        await gitStashSave(repositoryId, 'Auto-stash before pull');
-        await get().refreshStashes();
-      } catch (e) {
-        set({ error: String(e) });
-        return;
-      }
+      await get().saveStash('Auto-stash before pull');
       if (get().error) {
         // Stash itself failed — nothing changed, nothing to pull or pop.
         return;

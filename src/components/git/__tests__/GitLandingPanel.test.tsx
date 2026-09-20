@@ -31,14 +31,15 @@ describe('GitLandingPanel workflow guards', () => {
   });
 
   it('does not push after a fetch failure in the fetch-then-push flow', async () => {
+    const push = vi.fn().mockResolvedValue(undefined);
     const store = createGitStore();
     store.setState({
       credentials: { type: 'token', token: 'tok' },
       status: { branch: 'main', files: [], ahead: 1, behind: 0, isClean: true },
-      fetchThenPush: vi.fn().mockImplementation(async () => {
+      push,
+      fetch: async () => {
         store.setState({ error: 'auth failed' });
-        return false; // fetch failed
-      }),
+      },
     });
     render(
       <GitStoreProvider store={store}>
@@ -52,16 +53,21 @@ describe('GitLandingPanel workflow guards', () => {
     await user.click(screen.getByRole('button', { name: /fetch & push/i }));
 
     expect(await screen.findByText('auth failed')).toBeInTheDocument();
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('does not pull after a failed auto-stash, and does not pop after a failed pull', async () => {
+    const pull = vi.fn().mockResolvedValue(undefined);
+    const popStash = vi.fn().mockResolvedValue(undefined);
     const store = createGitStore();
     store.setState({
       credentials: { type: 'token', token: 'tok' },
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
-      stashThenPull: async () => {
+      saveStash: async () => {
         store.setState({ error: 'could not create stash' });
       },
+      pull,
+      popStash,
     });
     render(
       <GitStoreProvider store={store}>
@@ -74,16 +80,21 @@ describe('GitLandingPanel workflow guards', () => {
     await user.click(screen.getByRole('button', { name: /stash & pull/i }));
 
     expect(await screen.findByText('could not create stash')).toBeInTheDocument();
+    expect(pull).not.toHaveBeenCalled();
+    expect(popStash).not.toHaveBeenCalled();
   });
 
   it('does not pop the auto-stash after an outright pull failure', async () => {
+    const popStash = vi.fn().mockResolvedValue(undefined);
     const store = createGitStore();
     store.setState({
       credentials: { type: 'token', token: 'tok' },
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
-      stashThenPull: vi.fn().mockImplementation(async () => {
+      saveStash: vi.fn().mockResolvedValue(undefined),
+      pull: async () => {
         store.setState({ error: 'authentication failed' });
-      }),
+      },
+      popStash,
     });
     render(
       <GitStoreProvider store={store}>
@@ -96,19 +107,26 @@ describe('GitLandingPanel workflow guards', () => {
     await user.click(screen.getByRole('button', { name: /stash & pull/i }));
 
     expect(await screen.findByText('authentication failed')).toBeInTheDocument();
+    expect(popStash).not.toHaveBeenCalled();
   });
 
   it('does not abort stash-then-pull due to a stale error left over from an earlier, unrelated failure', async () => {
     // Regression test: the store's `error` field can be non-null on entry
-    // (e.g. a previously failed push) even though stashThenPull is
-    // about to succeed. handleStashAndPull must clear that stale error
-    // before calling stashThenPull, or stashThenPull's internal error checking
-    // will misread the stale error as its own failure.
+    // (e.g. a previously failed push) even though saveStash/pull/popStash are
+    // all about to succeed. handleStashAndPull must clear that stale error
+    // before each awaited step it checks, or it will misread the stale error
+    // as its own failure and bail out early — leaving the stash un-popped.
+    const saveStash = vi.fn().mockResolvedValue(undefined);
+    const pull = vi.fn().mockResolvedValue(undefined);
+    const popStash = vi.fn().mockResolvedValue(undefined);
     const store = createGitStore();
     store.setState({
       credentials: { type: 'token', token: 'tok' },
       status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
       error: 'stale error from an earlier push',
+      saveStash,
+      pull,
+      popStash,
     });
     render(
       <GitStoreProvider store={store}>
@@ -120,7 +138,9 @@ describe('GitLandingPanel workflow guards', () => {
     await user.click(screen.getByRole('button', { name: /^pull/i }));
     await user.click(screen.getByRole('button', { name: /stash & pull/i }));
 
-    // After success, stale error should be cleared and not displayed
+    await vi.waitFor(() => expect(popStash).toHaveBeenCalledWith(0));
+    expect(saveStash).toHaveBeenCalledWith('Auto-stash before pull');
+    expect(pull).toHaveBeenCalled();
     expect(screen.queryByText('stale error from an earlier push')).not.toBeInTheDocument();
   });
 
