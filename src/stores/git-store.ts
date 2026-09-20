@@ -147,7 +147,8 @@ export interface GitState {
   /** Thin passthrough to the clone IPC call, used before a repository is
    *  loaded into this store (see GitCloneDialog). The component owns all
    *  clone-flow sequencing, request-id guarding, and error handling — this
-   *  exists only so the panel's Git IPC calls all go through the store. */
+   *  exists only so the panel's Git IPC calls all go through the store.
+   *  Rejections propagate to the caller. */
   cloneRepository: (url: string, capability: string, creds: GitCredentials) => Promise<void>;
   /** Thin passthrough to the post-clone structure-detection IPC call. */
   detectClonedRepoStructure: (path: string) => Promise<ClonedRepoStructure>;
@@ -622,6 +623,28 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
+    checkIdentity: async () => {
+      const { repositoryId } = get();
+      if (!repositoryId) return null;
+      try {
+        const identity = await gitGetIdentity(repositoryId);
+        if (!identity.name.trim() || !identity.email.trim()) return null;
+        return identity;
+      } catch {
+        return null;
+      }
+    },
+
+    setIdentity: async (name, email) => {
+      const { repositoryId } = get();
+      if (!repositoryId) return;
+      try {
+        await gitSetIdentity(repositoryId, name, email);
+      } catch (e) {
+        set({ error: `Failed to save git identity: ${String(e)}` });
+      }
+    },
+
     // Create a new branch with the given name and switch to it.
     createBranch: async (name) => {
       const { repositoryId } = get();
@@ -643,28 +666,6 @@ export function createGitStore(): StoreApi<GitState> {
         await get().refreshBranches();
       } catch (e) {
         set({ error: String(e) });
-      }
-    },
-
-    checkIdentity: async () => {
-      const { repositoryId } = get();
-      if (!repositoryId) return null;
-      try {
-        const identity = await gitGetIdentity(repositoryId);
-        if (!identity.name.trim() || !identity.email.trim()) return null;
-        return identity;
-      } catch {
-        return null;
-      }
-    },
-
-    setIdentity: async (name, email) => {
-      const { repositoryId } = get();
-      if (!repositoryId) return;
-      try {
-        await gitSetIdentity(repositoryId, name, email);
-      } catch (e) {
-        set({ error: `Failed to save git identity: ${String(e)}` });
       }
     },
 

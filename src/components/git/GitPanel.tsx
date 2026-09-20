@@ -24,7 +24,7 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { CommitInfo, ConflictFile, FileDiff } from '@/lib/tauri-api';
-import { gitSetIdentity, onCollectionChanged } from '@/lib/tauri-api';
+import { onCollectionChanged } from '@/lib/tauri-api';
 import { createGitStore, selectHasConflicts } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
 
@@ -68,6 +68,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const identitySetupInitialEmail = useStore(store, (state) => state.identitySetupInitialEmail);
   const activatePendingCredentials = useStore(store, (state) => state.activatePendingCredentials);
   const discardPendingIdentitySetup = useStore(store, (state) => state.discardPendingIdentitySetup);
+  const setIdentity = useStore(store, (state) => state.setIdentity);
   const currentBranch = status?.branch ?? null;
   const hasConflicts = useStore(store, selectHasConflicts);
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
@@ -89,11 +90,8 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   }, []);
 
   const handleIdentitySetupConfirm = async (name: string, email: string) => {
-    try {
-      await gitSetIdentity(repositoryId, name, email);
-    } catch {
-      // Non-blocking — proceed even if identity save fails.
-    }
+    await setIdentity(name, email);
+    store.setState({ error: null }); // Non-blocking — proceed even if identity save fails.
     activatePendingCredentials();
   };
 
@@ -116,7 +114,10 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
-    if (rightPanel.kind === 'commits') void refreshLog();
+    if (rightPanel.kind === 'commits') {
+      setCommitDiffError(null);
+      void refreshLog();
+    }
   }, [rightPanel.kind, refreshLog]);
 
   // Refresh the stash list when the stash view is opened.
