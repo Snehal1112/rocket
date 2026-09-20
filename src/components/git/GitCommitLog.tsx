@@ -25,7 +25,8 @@ interface GitCommitLogProps {
 }
 
 export function GitCommitLog({ onCommitClick }: GitCommitLogProps) {
-  const { commitLog, refreshLog } = useGitStore((state) => state);
+  const commitLog = useGitStore((state) => state.commitLog);
+  const refreshLog = useGitStore((state) => state.refreshLog);
   const [limit, setLimit] = useState(50);
 
   const handleLoadMore = async () => {

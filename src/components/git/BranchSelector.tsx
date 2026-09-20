@@ -18,16 +18,14 @@ export function BranchSelector() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [mergingName, setMergingName] = useState<string | null>(null);
   const [deletingName, setDeletingName] = useState<string | null>(null);
-  const {
-    branches,
-    switchBranch,
-    createBranch,
-    deleteBranch,
-    mergeBranch,
-    checkoutRemoteBranch,
-    status,
-    clearError,
-  } = useGitStore((state) => state);
+  const branches = useGitStore((state) => state.branches);
+  const switchBranch = useGitStore((state) => state.switchBranch);
+  const createBranch = useGitStore((state) => state.createBranch);
+  const deleteBranch = useGitStore((state) => state.deleteBranch);
+  const mergeBranch = useGitStore((state) => state.mergeBranch);
+  const checkoutRemoteBranch = useGitStore((state) => state.checkoutRemoteBranch);
+  const status = useGitStore((state) => state.status);
+  const clearError = useGitStore((state) => state.clearError);
   const gitStoreApi = useGitStoreApi();
 
   if (!branches) return null;
