@@ -49,7 +49,7 @@ Constructor takes **two** repos: `WorkspaceRepository` (registry) and `Workspace
 ### GitAppService
 Wraps `Box<dyn GitService>`. Every mutating operation publishes a `DomainEvent`. Notable methods:
 - `diff_staged` — diff for already-staged files.
-- `checkout_remote_branch` — creates a local tracking branch.
+- `checkout_remote_branch` — creates a local tracking branch. Rejects an existing local branch of the same name unless `force` is set, which instead resets that branch (and its upstream) to the remote's tip, discarding local commits absent from that remote. A forced reset of the *checked-out* branch still refuses to run over uncommitted tracked changes.
 - `fetch` — no event published (read-only remote op).
 - `conflicts` — publishes `GitConflictDetected` only when the list is non-empty.
 - `abort_merge` — reverts in-progress merge; publishes `GitStatusChanged`.

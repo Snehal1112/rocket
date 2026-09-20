@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use git2::{IndexEntry, Oid, Repository, Signature};
+use rocket_shared::error::DomainError;
 use tempfile::TempDir;
 
 use super::Git2Service;
@@ -194,7 +195,7 @@ fn snapshot(repo_path: &Path) -> RepositorySnapshot {
 fn snapshot_reference(reference: &git2::Reference<'_>) -> ReferenceSnapshot {
     ReferenceSnapshot {
         name: reference.name().unwrap_or("<non-utf8>").to_string(),
-        symbolic_target: reference.symbolic_target().map(String::from),
+        symbolic_target: reference.symbolic_target().ok().flatten().map(String::from),
         direct_target: reference.target().map(|oid| oid.to_string()),
     }
 }
@@ -907,7 +908,8 @@ fn remote_checkout_collision_rejects_without_refs_index_or_worktree_mutation() {
     .expect("write colliding untracked file");
 
     let before = snapshot(local_dir.path());
-    let result = Git2Service::new().checkout_remote_branch(&local_path, "origin/feature");
+    let result =
+        Git2Service::new().checkout_remote_branch(&local_path, "origin/feature", false, None);
     let after = snapshot(local_dir.path());
 
     assert_eq!(
@@ -917,6 +919,67 @@ fn remote_checkout_collision_rejects_without_refs_index_or_worktree_mutation() {
     assert!(
         result.is_err(),
         "colliding remote checkout must be rejected"
+    );
+}
+
+#[test]
+fn forced_remote_branch_reset_rejects_dirty_worktree_without_mutation() {
+    let (origin_bare, _origin_seed) =
+        create_remote_with_branch_files(&[("base.txt", "base\n")], &[]);
+    let (other_bare, _other_seed) =
+        create_remote_with_branch_files(&[("other.txt", "from other remote\n")], &[]);
+
+    let local_dir = TempDir::new().expect("create local clone directory");
+    let local_path = local_dir.path().to_string_lossy().into_owned();
+    let local_repo = Repository::clone(
+        origin_bare.path().to_str().expect("UTF-8 remote path"),
+        local_dir.path(),
+    )
+    .expect("clone local checkout fixture");
+    set_identity(&local_repo);
+    local_repo
+        .remote(
+            "other",
+            other_bare.path().to_str().expect("UTF-8 remote path"),
+        )
+        .expect("add unrelated second remote");
+
+    let service = Git2Service::new();
+    let creds = GitCredentials::UserPass {
+        username: String::new(),
+        password: String::new(),
+    };
+    service
+        .fetch(&local_path, "other", &creds)
+        .expect("fetch second remote");
+
+    // An uncommitted edit to a tracked file on the branch about to be reset.
+    fs::write(
+        local_dir.path().join("base.txt"),
+        "local uncommitted edit\n",
+    )
+    .expect("dirty a tracked file");
+
+    let before = snapshot(local_dir.path());
+    let result = service.checkout_remote_branch(&local_path, "other/main", true, None);
+    let after = snapshot(local_dir.path());
+
+    assert!(
+        matches!(
+            result,
+            Err(DomainError::InvalidInput(ref message))
+                if message.contains("uncommitted changes")
+        ),
+        "a forced reset over a dirty worktree must be rejected: {result:?}"
+    );
+    assert_eq!(
+        after, before,
+        "rejected forced reset must not mutate HEAD, refs, index, or worktree"
+    );
+    assert_eq!(
+        fs::read(local_dir.path().join("base.txt")).expect("read dirtied file"),
+        b"local uncommitted edit\n",
+        "the uncommitted change must survive verbatim"
     );
 }
 

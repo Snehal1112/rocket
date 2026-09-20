@@ -157,6 +157,72 @@ describe('git-store clearError', () => {
     expect(store.getState().error).toBeNull();
   });
 
+  it('push passes force through to gitPush, defaulting to false', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, false);
+
+    await store.getState().push(undefined, true);
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, true);
+  });
+
+  it("push targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      // "collections" is listed first, but the current branch tracks "origin" —
+      // pushing to remotes[0] here would silently push to the wrong remote.
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'origin', creds, false);
+  });
+
+  it('push falls back to the first configured remote when the current branch has no upstream', async () => {
+    const { gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitPush).mockResolvedValue(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false }],
+        remote: [],
+      },
+    });
+
+    await store.getState().push();
+    expect(gitPush).toHaveBeenLastCalledWith('repository-test', 'collections', creds, false);
+  });
+
   it('pull clears stale error before executing', async () => {
     const { gitPull } = await import('@/lib/tauri-api');
     vi.mocked(gitPull).mockResolvedValueOnce(undefined);
@@ -171,6 +237,29 @@ describe('git-store clearError', () => {
     await store.getState().pull();
 
     expect(store.getState().error).toBeNull();
+  });
+
+  it("pull targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitPull } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().pull();
+    expect(gitPull).toHaveBeenLastCalledWith('repository-test', 'origin', creds);
   });
 
   it('fetch clears stale error before executing', async () => {
@@ -191,6 +280,33 @@ describe('git-store clearError', () => {
     await store.getState().fetch();
 
     expect(store.getState().error).toBeNull();
+  });
+
+  it("fetch targets the current branch's tracked remote, not just the first configured remote", async () => {
+    const { gitFetch } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: [],
+      receivedObjects: 0,
+      receivedBytes: 0,
+    });
+    const creds = { type: 'sshAgent' as const };
+
+    store.setState({
+      repositoryId: 'repository-test',
+      credentials: creds,
+      remotes: [
+        { name: 'collections', url: 'git@github.com:test/collections.git' },
+        { name: 'origin', url: 'git@github.com:test/repo.git' },
+      ],
+      branches: {
+        current: 'main',
+        local: [{ name: 'main', isHead: true, isRemote: false, upstream: 'origin/main' }],
+        remote: [],
+      },
+    });
+
+    await store.getState().fetch();
+    expect(gitFetch).toHaveBeenLastCalledWith('repository-test', 'origin', creds);
   });
 
   it('push sets error when operation fails', async () => {
@@ -681,9 +797,27 @@ describe('branches', () => {
 
     await store.getState().checkoutRemoteBranch('origin/feature');
 
-    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith('repository-test', 'origin/feature');
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith(
+      'repository-test',
+      'origin/feature',
+      false,
+      undefined,
+    );
     expect(gitStatus).toHaveBeenCalledWith('repository-test');
     expect(gitBranches).toHaveBeenCalledWith('repository-test');
+  });
+
+  it('checkoutRemoteBranch passes asName through to the api when provided', async () => {
+    const { gitCheckoutRemoteBranch } = await import('@/lib/tauri-api');
+
+    await store.getState().checkoutRemoteBranch('collections/main', false, 'collections/main');
+
+    expect(gitCheckoutRemoteBranch).toHaveBeenCalledWith(
+      'repository-test',
+      'collections/main',
+      false,
+      'collections/main',
+    );
   });
 });
 
@@ -1117,7 +1251,7 @@ describe('git-store identity setup flow', () => {
     store.getState().activatePendingCredentials();
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds);
+    expect(vi.mocked(gitPush)).toHaveBeenCalledWith('repository-some', 'origin', creds, false);
   });
 
   it('activatePendingCredentials is a no-op when no pending credentials exist', () => {

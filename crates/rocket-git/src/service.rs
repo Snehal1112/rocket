@@ -38,14 +38,44 @@ pub trait GitService: Send + Sync {
     fn log(&self, path: &str, limit: usize) -> DomainResult<Vec<CommitInfo>>;
 
     // Remote
-    fn push(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()>;
+    /// Push the current branch to `remote`.
+    ///
+    /// With `force` unset this is a plain push, which the remote refuses if
+    /// the local history is not a fast-forward of its own. Setting `force`
+    /// opts into `--force-with-lease` semantics — never a blind force: the
+    /// remote's live tip for the target branch must still match this
+    /// repository's remote-tracking ref for it. If the remote has moved since
+    /// the last fetch (someone else pushed) or there is no local record of it,
+    /// the push is refused with `DomainError::Conflict` and nothing is written
+    /// to the remote.
+    fn push(
+        &self,
+        path: &str,
+        remote: &str,
+        creds: &GitCredentials,
+        force: bool,
+    ) -> DomainResult<()>;
     fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()>;
     fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult>;
 
     // Branches
     fn branches(&self, path: &str) -> DomainResult<BranchList>;
     fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()>;
-    fn checkout_remote_branch(&self, path: &str, remote_branch: &str) -> DomainResult<()>;
+    /// Check out `remote_branch` (e.g. `"origin/feature-x"`) as a local
+    /// tracking branch. If a local branch with the same short name already
+    /// exists this is rejected, unless `force` is set — which resets that
+    /// existing branch to the remote's tip, discarding any local commits it
+    /// carried that are absent from that remote. `as_name`, when non-empty,
+    /// overrides the derived local branch name, letting the caller avoid the
+    /// destructive reset path entirely by checking out under a distinct,
+    /// non-colliding name instead.
+    fn checkout_remote_branch(
+        &self,
+        path: &str,
+        remote_branch: &str,
+        force: bool,
+        as_name: Option<&str>,
+    ) -> DomainResult<()>;
     fn create_branch(&self, path: &str, name: &str) -> DomainResult<()>;
     fn delete_branch(&self, path: &str, name: &str) -> DomainResult<()>;
     fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()>;

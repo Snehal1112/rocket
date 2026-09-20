@@ -100,7 +100,7 @@ export interface GitState {
   popStashMany: (indices: number[]) => Promise<void>;
   dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
-  checkoutRemoteBranch: (name: string) => Promise<void>;
+  checkoutRemoteBranch: (name: string, force?: boolean, asName?: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -109,7 +109,7 @@ export interface GitState {
   setRemoteUrl: (name: string, url: string) => Promise<void>;
   setCredentials: (creds: GitCredentials) => void;
   setShowCredentialsDialog: (show: boolean) => void;
-  push: (remote?: string) => Promise<void>;
+  push: (remote?: string, force?: boolean) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
   clearError: () => void;
@@ -141,6 +141,24 @@ function networkErrorPatch(
     trustFailure: null,
     ...(isAuthError ? { pendingNetworkOp: op } : {}),
   };
+}
+
+/**
+ * Resolve which remote push/pull/fetch should target when no remote is
+ * given explicitly, and which remote the UI should display as that target.
+ * Prefers the current branch's actual tracked remote (its upstream) over
+ * just the first configured remote — with more than one remote configured,
+ * the tracked remote and `remotes[0]` are not necessarily the same, and
+ * defaulting to `remotes[0]` risks silently operating on the wrong remote.
+ * Falls back to `remotes[0]` for a branch with no upstream (e.g. never pushed).
+ */
+export function resolveActiveRemote(state: Pick<GitState, 'branches' | 'remotes'>) {
+  const currentBranch = state.branches?.local.find((b) => b.isHead);
+  const upstreamRemote = currentBranch?.upstream?.split('/')[0];
+  if (upstreamRemote && state.remotes.some((r) => r.name === upstreamRemote)) {
+    return upstreamRemote;
+  }
+  return state.remotes[0]?.name;
 }
 
 export function createGitStore(): StoreApi<GitState> {
@@ -547,12 +565,14 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
-    // Check out a remote branch as a new local tracking branch.
-    checkoutRemoteBranch: async (name) => {
+    // Check out a remote branch as a new local tracking branch. When `force`
+    // is set, a colliding local branch is reset to match the remote branch's
+    // content instead of being rejected.
+    checkoutRemoteBranch: async (name, force = false, asName) => {
       const { repositoryId } = get();
       if (!repositoryId) return;
       try {
-        await gitCheckoutRemoteBranch(repositoryId, name);
+        await gitCheckoutRemoteBranch(repositoryId, name, force, asName);
         await get().refreshStatus();
         await get().refreshBranches();
       } catch (e) {
@@ -701,21 +721,23 @@ export function createGitStore(): StoreApi<GitState> {
     },
 
     // Push local commits to the remote, prompting for credentials if needed.
-    push: async (remote) => {
+    // `force` requests a --force-with-lease push (still refused server-side
+    // if the remote has moved since the last fetch).
+    push: async (remote, force = false) => {
       const { repositoryId, credentials } = get();
       if (!repositoryId) return;
       if (!credentials) {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'push' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       if (!resolvedRemote) {
         set({ error: 'No remote configured.' });
         return;
       }
       set({ error: null });
       try {
-        await gitPush(repositoryId, resolvedRemote, credentials);
+        await gitPush(repositoryId, resolvedRemote, credentials, force);
         await get().refreshStatus();
         set({ trustFailure: null });
       } catch (e) {
@@ -731,7 +753,7 @@ export function createGitStore(): StoreApi<GitState> {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'pull' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       if (!resolvedRemote) {
         set({ error: 'No remote configured.' });
         return;
@@ -761,7 +783,7 @@ export function createGitStore(): StoreApi<GitState> {
         set({ showCredentialsDialog: true, pendingNetworkOp: 'fetch' });
         return;
       }
-      const resolvedRemote = remote ?? get().remotes[0]?.name;
+      const resolvedRemote = remote ?? resolveActiveRemote(get());
       if (!resolvedRemote) {
         set({ error: 'No remote configured.' });
         return;

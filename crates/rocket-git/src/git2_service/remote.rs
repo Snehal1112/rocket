@@ -15,11 +15,11 @@ pub(super) fn list_remotes(path: &str) -> DomainResult<Vec<RemoteInfo>> {
         .remotes()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     let mut remotes = Vec::new();
-    for name in remote_names.iter().flatten() {
+    for name in remote_names.iter().flatten().flatten() {
         let remote = repo
             .find_remote(name)
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        let url = remote.url().unwrap_or("").to_string();
+        let url = remote.url().unwrap_or_default().to_string();
         remotes.push(RemoteInfo {
             name: name.to_string(),
             url,
@@ -55,8 +55,8 @@ pub(super) fn set_remote_url(path: &str, name: &str, url: &str) -> DomainResult<
     if let Ok(refs) = repo.references() {
         let stale: Vec<String> = refs
             .flatten()
-            .filter_map(|r| r.name().map(String::from))
-            .filter(|n| n.starts_with(&prefix))
+            .filter_map(|r| r.name().ok().map(String::from))
+            .filter(|n: &String| n.starts_with(&prefix))
             .collect();
         for refname in stale {
             if let Ok(mut r) = repo.find_reference(&refname) {
@@ -67,12 +67,100 @@ pub(super) fn set_remote_url(path: &str, name: &str, url: &str) -> DomainResult<
     Ok(())
 }
 
-#[tracing::instrument(name = "git_push", skip(creds), fields(repo_path = %path, remote = %remote))]
+/// Verify the force-with-lease precondition for `remote_branch` before any
+/// forced write reaches the remote: the remote's live tip must still be the
+/// commit this repository last recorded for it in
+/// `refs/remotes/<remote>/<branch>`. If it has moved (someone else pushed) or
+/// this repository has no record of it at all, the force-push is refused so
+/// that commits the user has never seen are never silently overwritten.
+///
+/// This only lists the remote's advertised refs — no objects are downloaded.
+fn verify_force_with_lease(
+    repo: &git2::Repository,
+    remote_obj: &mut git2::Remote<'_>,
+    remote: &str,
+    remote_branch: &str,
+    creds: &GitCredentials,
+    remote_url: &str,
+    known_hosts_path: Option<PathBuf>,
+) -> DomainResult<()> {
+    let target_ref = format!("refs/heads/{remote_branch}");
+
+    // A separate connection with its own callbacks: `connect_auth` consumes
+    // the callbacks it is given, so the push below needs a fresh set. This
+    // only reads the remote's ref advertisement — no objects are downloaded
+    // and nothing is written.
+    //
+    // The direction is `Push`, not `Fetch`: libgit2 resolves a `Fetch`
+    // connection against the remote's fetch URL and a `Push` connection
+    // against its pushurl (falling back to the fetch URL when none is set).
+    // The lease has to be read from the endpoint the push will actually
+    // write to, or a remote with a distinct pushurl would be leased against
+    // the wrong repository.
+    let (list_callbacks, list_verification) = build_callbacks(creds, remote_url, known_hosts_path);
+    let live_oid = {
+        let connection = remote_obj
+            .connect_auth(git2::Direction::Push, Some(list_callbacks), None)
+            .map_err(|error| list_verification.map_error(error))?;
+        let heads = connection
+            .list()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        heads
+            .iter()
+            .find(|head| head.name() == target_ref)
+            .map(|head| head.oid())
+        // The guard disconnects on drop, releasing `remote_obj` so the push
+        // that follows can reconnect. This lease check and the push below are
+        // two separate connections, not one continuous session — a push that
+        // lands on the remote in the gap between them would still be
+        // overwritten. Real git's --force-with-lease has the same class of
+        // window (it is not a server-side atomic compare-and-swap either),
+        // but reads the advertisement and pushes over one session, which is
+        // narrower than this. git2's `RemoteConnection` does expose a way to
+        // keep the same connection open across both steps (`.remote()`,
+        // returning `&mut Remote` while still connected) — narrowing this to
+        // real-git parity is possible future work, not attempted here.
+    };
+
+    // What this repository last knew the remote's tip to be.
+    let known_oid = repo
+        .find_reference(&format!("refs/remotes/{remote}/{remote_branch}"))
+        .ok()
+        .and_then(|reference| reference.peel_to_commit().ok())
+        .map(|commit| commit.id())
+        .ok_or_else(|| {
+            DomainError::Conflict(format!(
+                "Cannot force-push: no local record of {remote}/{remote_branch}'s \
+                 current state. Fetch first."
+            ))
+        })?;
+
+    let Some(live_oid) = live_oid else {
+        // The branch vanished from the remote since the last fetch — the same
+        // class of surprise as it having moved, so refuse the same way.
+        return Err(DomainError::Conflict(format!(
+            "Cannot force-push: '{remote}/{remote_branch}' no longer exists on the remote. \
+             Fetch first to see the remote's current state before overwriting."
+        )));
+    };
+
+    if known_oid != live_oid {
+        return Err(DomainError::Conflict(format!(
+            "Cannot force-push: '{remote}/{remote_branch}' has new commits since your \
+             last fetch. Fetch first to see them before overwriting."
+        )));
+    }
+
+    Ok(())
+}
+
+#[tracing::instrument(name = "git_push", skip(creds), fields(repo_path = %path, remote = %remote, force = force))]
 pub(super) fn push(
     path: &str,
     remote: &str,
     creds: &GitCredentials,
     known_hosts_path: Option<PathBuf>,
+    force: bool,
 ) -> DomainResult<()> {
     let repo = open_repo(path)?;
     let mut remote_obj = repo
@@ -85,7 +173,16 @@ pub(super) fn push(
     let branch_name_str = head.shorthand().unwrap_or("main");
 
     // Prefer the configured upstream's remote branch name as the push target.
-    // Falls back to same-name if no upstream is configured.
+    // Falls back to same-name if no upstream is configured. Note: this reads
+    // the branch's upstream unconditionally, regardless of which `remote`
+    // this call is pushing to — if the upstream happens to belong to a
+    // DIFFERENT remote (e.g. after force-resetting a branch onto another
+    // remote's content), pushing to `remote` here would target that other
+    // remote's branch NAME against `remote`. This fails safe: the lease
+    // check below would refuse if `refs/remotes/<remote>/<that name>`
+    // doesn't exist or doesn't match, rather than pushing to the wrong ref
+    // silently. Narrowing this to "only trust the upstream when it belongs
+    // to `remote`" is a reasonable follow-up, not attempted here.
     let remote_branch = repo
         .find_branch(branch_name_str, git2::BranchType::Local)
         .ok()
@@ -102,9 +199,30 @@ pub(super) fn push(
     let refspec = format!("refs/heads/{branch_name_str}:refs/heads/{remote_branch}");
     let remote_url = remote_obj
         .pushurl()
-        .or_else(|| remote_obj.url())
-        .ok_or_else(|| DomainError::InvalidInput(format!("Remote '{remote}' has no URL")))?
-        .to_owned();
+        .ok()
+        .flatten()
+        .map(str::to_owned)
+        .or_else(|| remote_obj.url().ok().map(str::to_owned))
+        .ok_or_else(|| DomainError::InvalidInput(format!("Remote '{remote}' has no URL")))?;
+
+    // A forced push opts into --force-with-lease semantics, never a blind
+    // force: the lease is checked before the refspec is allowed to carry the
+    // "+" that lets the remote's history be overwritten, so a refused push
+    // leaves the remote completely untouched.
+    let refspec = if force {
+        verify_force_with_lease(
+            &repo,
+            &mut remote_obj,
+            remote,
+            &remote_branch,
+            creds,
+            &remote_url,
+            known_hosts_path.clone(),
+        )?;
+        format!("+{refspec}")
+    } else {
+        refspec
+    };
 
     let (callbacks, verification) = build_callbacks(creds, &remote_url, known_hosts_path);
     let mut push_opts = git2::PushOptions::new();
@@ -129,6 +247,7 @@ pub(super) fn fetch(
         .map_err(|e| DomainError::Internal(e.to_string()))?;
     let remote_url = remote_obj
         .url()
+        .ok()
         .ok_or_else(|| DomainError::InvalidInput(format!("Remote '{remote}' has no URL")))?
         .to_owned();
 

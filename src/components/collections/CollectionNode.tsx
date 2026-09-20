@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event';
 import {
   BoxIcon,
   ChevronDown,
@@ -143,6 +144,8 @@ export function CollectionNode({
       .catch((err) => console.error('[CollectionNode] fetch error', err));
   }, [summary.name]);
 
+  const gitDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Fetch when first expanded.
   useEffect(() => {
     if (open && !collection) refreshTree();
@@ -158,6 +161,10 @@ export function CollectionNode({
       // sidebar's own fetchCollections listener. Refreshing the tree here
       // would call getCollection with a name that no longer exists on disk.
       if (event.type === 'collectionDeleted' || event.type === 'collectionRenamed') return;
+
+      // Branch-switch/merge events are handled by the git-changed listener
+      // below, unconditionally — skip here to avoid a duplicate refresh.
+      if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
 
       // event.collection may be a full filesystem path (e.g. from git events).
       // Extract just the last segment so it can be compared against the name.
@@ -179,6 +186,31 @@ export function CollectionNode({
       if (treeDebounce.current) clearTimeout(treeDebounce.current);
     };
   }, [open, refreshTree, summary.name]);
+
+  // A branch switch/merge can rewrite files anywhere under this collection,
+  // but the git domain event's `collection` field is the git repository's
+  // filesystem path, not a collection name — for a workspace-scoped repo
+  // (the common case) that path's last segment is the workspace directory,
+  // which never matches `summary.name` above. Refresh unconditionally on the
+  // raw git-changed event instead, mirroring CollectionsSidebar's own
+  // top-level handling of the same event.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen('git-changed', () => {
+      if (gitDebounce.current) clearTimeout(gitDebounce.current);
+      gitDebounce.current = setTimeout(() => refreshTree(), 300);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      if (gitDebounce.current) clearTimeout(gitDebounce.current);
+    };
+  }, [open, refreshTree]);
 
   // Auto-expand when filter is active.
   useEffect(() => {

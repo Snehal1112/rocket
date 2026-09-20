@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StoreApi } from 'zustand/vanilla';
 import * as tauriApi from '@/lib/tauri-api';
@@ -266,5 +267,94 @@ describe('Git clone credential handoff characterization', () => {
     clone.resolve();
     await waitFor(() => expect(tauriApi.detectClonedStructure).toHaveBeenCalledTimes(1));
     expect(tauriApi.gitClone).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Force push split button', () => {
+  beforeEach(() => {
+    setRepositoryState({ status: { ...cleanStatus, ahead: 1 } });
+    render(
+      <GitStoreProvider store={store}>
+        <GitLandingPanel />
+      </GitStoreProvider>,
+    );
+  });
+
+  it('reveals Force Push from the dropdown without triggering a push', async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+
+    expect(await screen.findByRole('menuitem', { name: /force push/i })).toBeInTheDocument();
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+  });
+
+  it('opens a confirmation dialog on click, without pushing yet', async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+    await user.click(await screen.findByRole('menuitem', { name: /force push/i }));
+
+    expect(await screen.findByRole('alertdialog', { name: 'Force Push?' })).toBeInTheDocument();
+    expect(
+      screen.getByText(/anyone else who has fetched this branch may lose commits/i),
+    ).toBeInTheDocument();
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+  });
+
+  it('calls push with force:true only after confirming', async () => {
+    vi.mocked(tauriApi.gitPush).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+    await user.click(await screen.findByRole('menuitem', { name: /force push/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Force Push' }));
+
+    await waitFor(() => expect(tauriApi.gitPush).toHaveBeenCalledTimes(1));
+    expect(tauriApi.gitPush).toHaveBeenCalledWith(
+      'collection:default:active',
+      'origin',
+      { type: 'sshAgent' },
+      true,
+    );
+  });
+
+  it('canceling does not call push at all', async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+    await user.click(await screen.findByRole('menuitem', { name: /force push/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog', { name: 'Force Push?' })).not.toBeInTheDocument(),
+    );
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a rejected force-push through the existing error banner', async () => {
+    vi.mocked(tauriApi.gitPush).mockRejectedValueOnce(
+      new Error(
+        "Cannot force-push: 'origin/main' has new commits since your last fetch. Fetch first to see them before overwriting.",
+      ),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+    await user.click(await screen.findByRole('menuitem', { name: /force push/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Force Push' }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/has new commits since your last fetch/i)).toBeInTheDocument(),
+    );
+  });
+
+  it('resolves credentials first instead of showing the confirmation dialog when none are set', async () => {
+    // Regression test: without credentials, a confirmed force-push used to
+    // fall through the generic credential-resume path, which replays a bare
+    // push() and silently drops the force flag — turning a confirmed
+    // destructive action into a normal push with no explanation.
+    store.setState({ credentials: null });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More push options' }));
+    await user.click(await screen.findByRole('menuitem', { name: /force push/i }));
+
+    expect(screen.queryByText('Force Push?')).not.toBeInTheDocument();
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
   });
 });

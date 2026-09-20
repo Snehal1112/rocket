@@ -120,8 +120,16 @@ impl GitAppService {
     }
 
     // Remote
-    pub fn push(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
-        self.git.push(path, remote, creds)?;
+    /// Push the current branch. `force` opts into force-with-lease semantics;
+    /// see `GitService::push`.
+    pub fn push(
+        &self,
+        path: &str,
+        remote: &str,
+        creds: &GitCredentials,
+        force: bool,
+    ) -> DomainResult<()> {
+        self.git.push(path, remote, creds, force)?;
         self.events.publish(DomainEvent::GitPush {
             collection: path.to_string(),
             remote: remote.to_string(),
@@ -156,8 +164,14 @@ impl GitAppService {
         Ok(())
     }
 
-    pub fn checkout_remote_branch(&self, path: &str, name: &str) -> DomainResult<()> {
-        self.git.checkout_remote_branch(path, name)?;
+    pub fn checkout_remote_branch(
+        &self,
+        path: &str,
+        name: &str,
+        force: bool,
+        as_name: Option<&str>,
+    ) -> DomainResult<()> {
+        self.git.checkout_remote_branch(path, name, force, as_name)?;
         self.events.publish(DomainEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
