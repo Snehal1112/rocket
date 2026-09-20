@@ -72,6 +72,10 @@ export interface GitState {
   identitySetupInitialEmail: string;
   pendingCredentialsForIdentitySetup: GitCredentials | null;
   activatePendingCredentials: () => void;
+  /** Discard a pending SSH-identity-setup prompt without activating its credentials
+   *  or retrying the network operation that triggered it — used when the user
+   *  explicitly cancels, as opposed to confirming/saving the identity. */
+  discardPendingIdentitySetup: () => void;
 
   setRepository: (repositoryId: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -693,6 +697,16 @@ export function createGitStore(): StoreApi<GitState> {
       if (pendingNetworkOp && creds) {
         get()[pendingNetworkOp]();
       }
+    },
+
+    discardPendingIdentitySetup: () => {
+      set({
+        showIdentitySetupDialog: false,
+        pendingCredentialsForIdentitySetup: null,
+        identitySetupInitialName: '',
+        identitySetupInitialEmail: '',
+        pendingNetworkOp: null,
+      });
     },
 
     // Push local commits to the remote, prompting for credentials if needed.

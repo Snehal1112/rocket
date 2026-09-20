@@ -1090,6 +1090,29 @@ describe('git-store identity setup flow', () => {
     // Should not overwrite existing credentials
     expect(store.getState().credentials).toEqual({ type: 'token', token: 'existing' });
   });
+
+  it('cancelling identity setup does not activate credentials or retry the pending operation', async () => {
+    const creds: GitCredentials = { type: 'sshKey', privateKeyPath: '/home/user/.ssh/id_ed25519' };
+    store.setState({
+      repositoryId: 'repo-1',
+      pendingCredentialsForIdentitySetup: creds,
+      showIdentitySetupDialog: true,
+      identitySetupInitialName: 'Some Name',
+      identitySetupInitialEmail: 'some@example.com',
+      pendingNetworkOp: 'push',
+    });
+
+    store.getState().discardPendingIdentitySetup();
+
+    const state = store.getState();
+    expect(state.credentials).toBeNull();
+    expect(state.showIdentitySetupDialog).toBe(false);
+    expect(state.pendingCredentialsForIdentitySetup).toBeNull();
+    expect(state.pendingNetworkOp).toBeNull();
+    expect(state.identitySetupInitialName).toBe('');
+    expect(state.identitySetupInitialEmail).toBe('');
+    expect(tauriApi.gitPush).not.toHaveBeenCalled();
+  });
 });
 
 describe('setRepository generation guard', () => {

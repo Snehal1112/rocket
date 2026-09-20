@@ -64,6 +64,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const identitySetupInitialName = useStore(store, (state) => state.identitySetupInitialName);
   const identitySetupInitialEmail = useStore(store, (state) => state.identitySetupInitialEmail);
   const activatePendingCredentials = useStore(store, (state) => state.activatePendingCredentials);
+  const discardPendingIdentitySetup = useStore(store, (state) => state.discardPendingIdentitySetup);
   const currentBranch = status?.branch ?? null;
   const hasConflicts = status?.files.some((f) => f.status === 'conflicted') ?? false;
   const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
@@ -94,7 +95,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   };
 
   const handleIdentitySetupCancel = () => {
-    activatePendingCredentials();
+    discardPendingIdentitySetup();
   };
 
   const handleCommitClick = async (commit: CommitInfo) => {
