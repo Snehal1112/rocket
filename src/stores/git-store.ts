@@ -1,9 +1,11 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   type BranchList,
+  type ClonedRepoStructure,
   type CommitInfo,
   type ConflictFile,
   type ConflictResolution,
+  detectClonedStructure,
   type FileDiff,
   type FileStatus,
   type GitCredentials,
@@ -13,6 +15,7 @@ import {
   gitAddRemote,
   gitBranches,
   gitCheckoutRemoteBranch,
+  gitClone,
   gitCommit,
   gitConflicts,
   gitCreateBranch,
@@ -141,6 +144,13 @@ export interface GitState {
   clearError: () => void;
   reset: () => void;
   initRepo: (repositoryId: string) => Promise<void>;
+  /** Thin passthrough to the clone IPC call, used before a repository is
+   *  loaded into this store (see GitCloneDialog). The component owns all
+   *  clone-flow sequencing, request-id guarding, and error handling — this
+   *  exists only so the panel's Git IPC calls all go through the store. */
+  cloneRepository: (url: string, capability: string, creds: GitCredentials) => Promise<void>;
+  /** Thin passthrough to the post-clone structure-detection IPC call. */
+  detectClonedRepoStructure: (path: string) => Promise<ClonedRepoStructure>;
 }
 
 /**
@@ -898,6 +908,9 @@ export function createGitStore(): StoreApi<GitState> {
         set({ error: String(e) });
       }
     },
+
+    cloneRepository: (url, capability, creds) => gitClone(url, capability, creds),
+    detectClonedRepoStructure: (path) => detectClonedStructure(path),
 
     // Reset the store back to its initial state.
     reset: () => {

@@ -56,6 +56,8 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
   gitSetIdentity: vi.fn(),
   gitDiffCommit: vi.fn(),
+  gitClone: vi.fn(),
+  detectClonedStructure: vi.fn(),
 }));
 
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
@@ -1587,6 +1589,27 @@ describe('git-store network actions with no remote configured', () => {
     await store.getState().fetch();
     expect(tauriApi.gitFetch).not.toHaveBeenCalled();
     expect(store.getState().error).toBe('No remote configured.');
+  });
+});
+
+describe('cloneRepository and detectClonedRepoStructure', () => {
+  it('cloneRepository calls gitClone with the given url, capability, and credentials', async () => {
+    vi.mocked(tauriApi.gitClone).mockResolvedValueOnce(undefined);
+    const creds: GitCredentials = { type: 'sshAgent' };
+
+    await store.getState().cloneRepository('https://example.com/repo.git', 'cap-1', creds);
+
+    expect(tauriApi.gitClone).toHaveBeenCalledWith('https://example.com/repo.git', 'cap-1', creds);
+  });
+
+  it('detectClonedRepoStructure calls detectClonedStructure with the given path', async () => {
+    const structure = { kind: 'unknown' as const, workspacePath: null, collections: [] };
+    vi.mocked(tauriApi.detectClonedStructure).mockResolvedValueOnce(structure);
+
+    const result = await store.getState().detectClonedRepoStructure('/tmp/cloned-repo');
+
+    expect(tauriApi.detectClonedStructure).toHaveBeenCalledWith('/tmp/cloned-repo');
+    expect(result).toEqual(structure);
   });
 });
 
