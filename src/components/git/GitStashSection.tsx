@@ -1,5 +1,4 @@
 import {
-  AlertCircle,
   Archive,
   FileText,
   GitBranch,
@@ -25,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { formatRelativeTime } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
+import { GitErrorBanner } from './GitErrorBanner';
 
 export function GitStashSection() {
   const [message, setMessage] = useState('');
@@ -147,15 +147,7 @@ export function GitStashSection() {
       </div>
 
       {/* Error banner */}
-      {error && (
-        <div
-          role='alert'
-          className='mx-3 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive'
-        >
-          <AlertCircle className='mt-px h-3 w-3 shrink-0' />
-          <span className='break-all leading-relaxed'>{error}</span>
-        </div>
-      )}
+      {error && <GitErrorBanner message={error} className='mx-3 mb-2' />}
 
       {/* Empty state */}
       {stashes.length === 0 && !error && (
