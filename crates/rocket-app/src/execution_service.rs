@@ -3,7 +3,7 @@ use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
-use rocket_collection::CollectionRepository;
+use rocket_collection::{settings::SandboxMode as CollectionSandboxMode, CollectionRepository};
 use rocket_environment::{
     resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
 };
@@ -13,8 +13,8 @@ use rocket_http::{
     LoadTestConfig, LoadTestResult, RequestOptions,
 };
 use rocket_scripting::{
-    ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext, ScriptEngine,
-    ScriptResult, TestResult, TestStatus,
+    context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
+    ScriptEngine, ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::DomainResult;
 use std::sync::Arc;
@@ -131,6 +131,9 @@ pub(crate) struct PhaseState {
     /// Set by a before-request script calling `rok.runner.skipRequest()`.
     /// Only the Collection Runner reads this; `execute()` always sends.
     pub skip_request: bool,
+    /// Resolved once in `begin_phases` from the collection's `sandbox_mode`
+    /// setting, applied to every phase's `ScriptContext`.
+    pub sandbox_mode: SandboxMode,
 }
 
 impl PhaseState {
@@ -833,6 +836,14 @@ impl RequestExecutionService {
             }
         }
 
+        let sandbox_mode = match input.collection.as_deref() {
+            Some(col) => match self.collection_repo.get_settings(col).unwrap_or_default().sandbox_mode {
+                CollectionSandboxMode::Safe => SandboxMode::Safe,
+                CollectionSandboxMode::Developer => SandboxMode::Developer,
+            },
+            None => SandboxMode::Safe,
+        };
+
         Ok(PhaseState {
             http_request,
             var_ctx,
@@ -841,6 +852,7 @@ impl RequestExecutionService {
             test_results: Vec::new(),
             next_request: None,
             skip_request: false,
+            sandbox_mode,
         })
     }
 
@@ -870,7 +882,8 @@ impl RequestExecutionService {
                     input.tags.clone(),
                     input.path_params.clone(),
                 )
-                .with_execution_mode(mode);
+                .with_execution_mode(mode)
+                .with_sandbox_mode(state.sandbox_mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "before-request", &mut state.console,
                 ).await;
@@ -1026,7 +1039,8 @@ impl RequestExecutionService {
                     input.tags.clone(),
                     input.path_params.clone(),
                 )
-                .with_execution_mode(mode);
+                .with_execution_mode(mode)
+                .with_sandbox_mode(state.sandbox_mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "after-response", &mut state.console,
                 ).await;
@@ -1070,7 +1084,8 @@ impl RequestExecutionService {
                     input.tags.clone(),
                     input.path_params.clone(),
                 )
-                .with_execution_mode(mode);
+                .with_execution_mode(mode)
+                .with_sandbox_mode(state.sandbox_mode);
                 let result = self.run_script_phase(
                     code, ctx, &request_name, "tests", &mut state.console,
                 ).await;
@@ -1924,6 +1939,7 @@ mod tests {
             auth: Some(Auth::Bearer { token: "col_tok".into() }),
             headers: vec![],
             variables: vec![],
+            sandbox_mode: rocket_collection::settings::SandboxMode::Safe,
         };
 
         // Use a mock executor that captures the request auth.
@@ -3863,6 +3879,48 @@ mod tests {
 
         let modes = engine.seen_modes.lock().expect("lock").clone();
         assert_eq!(modes, vec!["standalone", "standalone", "standalone"]);
+    }
+
+    struct SandboxModeProbeEngine {
+        seen_modes: Mutex<Vec<rocket_scripting::context::SandboxMode>>,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for SandboxModeProbeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.seen_modes.lock().expect("lock").push(ctx.sandbox_mode);
+            Ok(ScriptResult::default())
+        }
+    }
+
+    struct SharedSandboxModeProbe(Arc<SandboxModeProbeEngine>);
+    #[async_trait]
+    impl ScriptEngine for SharedSandboxModeProbe {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    #[tokio::test]
+    async fn before_request_script_receives_collection_sandbox_mode() {
+        let engine = Arc::new(SandboxModeProbeEngine { seen_modes: Mutex::new(vec![]) });
+        let collection_repo = StubCollectionRepo::with_settings(CollectionSettings {
+            sandbox_mode: rocket_collection::settings::SandboxMode::Developer,
+            ..Default::default()
+        });
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(collection_repo),
+            Box::new(SharedSandboxModeProbe(Arc::clone(&engine))),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute");
+
+        let modes = engine.seen_modes.lock().expect("lock").clone();
+        assert_eq!(modes, vec![rocket_scripting::context::SandboxMode::Developer]);
     }
 
     #[tokio::test]
