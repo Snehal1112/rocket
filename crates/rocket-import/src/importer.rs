@@ -123,8 +123,10 @@ impl ImportService {
         _workspace_id: &str,
         name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        let mut report = ImportReport::default();
-        report.detected_type = "collection".to_string();
+        let mut report = ImportReport {
+            detected_type: "collection".to_string(),
+            ..Default::default()
+        };
 
         let col_name = name_hint
             .map(|n| n.to_string())
@@ -176,8 +178,10 @@ impl ImportService {
             return Err(ImportError::NotABrunoDirectory(path.to_path_buf()));
         }
 
-        let mut combined = ImportReport::default();
-        combined.detected_type = "workspace".to_string();
+        let mut combined = ImportReport {
+            detected_type: "workspace".to_string(),
+            ..Default::default()
+        };
 
         if create_new_workspace {
             let ws_name = name_hint
@@ -314,7 +318,7 @@ impl ImportService {
 
             if p.is_dir() {
                 // Skip environments — handled separately.
-                if p.file_name().map_or(false, |n| n == "environments") {
+                if p.file_name().is_some_and(|n| n == "environments") {
                     continue;
                 }
                 // Create subfolder metadata and recurse.
@@ -331,7 +335,7 @@ impl ImportService {
             }
             // Skip Bruno metadata files.
             // Skip Bruno metadata files — not requests.
-            if p.file_name().map_or(false, |n| {
+            if p.file_name().is_some_and(|n| {
                 matches!(
                     n.to_str(),
                     Some("bruno.json" | "_order.yml" | "folder.bru" | "collection.bru")
@@ -438,8 +442,10 @@ impl ImportService {
         _workspace_id: &str,
         name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        let mut report = ImportReport::default();
-        report.detected_type = "collection".to_string();
+        let mut report = ImportReport {
+            detected_type: "collection".to_string(),
+            ..Default::default()
+        };
 
         let col_name = name_hint
             .map(|n| n.to_string())
@@ -467,8 +473,10 @@ impl ImportService {
         use crate::converter::postman as pc;
         use crate::postman::parse_postman_json;
 
-        let mut report = ImportReport::default();
-        report.detected_type = "collection".to_string();
+        let mut report = ImportReport {
+            detected_type: "collection".to_string(),
+            ..Default::default()
+        };
 
         let collection = parse_postman_json(json_path)?;
         let col_name = self.resolve_collection_name(&collection.info.name)?;
@@ -578,8 +586,10 @@ impl ImportService {
         use crate::postman::parse_postman_environment;
         use rocket_environment::{Environment, Variable};
 
-        let mut report = ImportReport::default();
-        report.detected_type = "environment".to_string();
+        let mut report = ImportReport {
+            detected_type: "environment".to_string(),
+            ..Default::default()
+        };
 
         let postman_env = parse_postman_environment(json_path)?;
 
@@ -605,7 +615,7 @@ impl ImportService {
     ///   - `opencollection.yml` at the collection root (written by `repo.create`).
     ///   - `workspace.yml` anywhere (workspace marker, not a request).
     ///   - `_order.yml` (Bruno internal ordering file).
-    /// Files inside `environments/` are counted separately and not added to `report.imported`.
+    ///     Files inside `environments/` are counted separately and not added to `report.imported`.
     fn copy_collection_files(
         &self,
         src_root: &Path,

@@ -110,7 +110,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
             let path = entry.path();
-            if !path.extension().is_some_and(|e| e == "yml") {
+            if path.extension().is_none_or(|e| e != "yml") {
                 continue;
             }
             let content = fs::read_to_string(&path)?;

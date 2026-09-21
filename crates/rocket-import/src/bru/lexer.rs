@@ -35,7 +35,9 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
         if trimmed.ends_with('{') || trimmed.ends_with('[') {
             let is_list = trimmed.ends_with('[');
             let closer = if is_list { "]" } else { "}" };
-            let header = trimmed.trim_end_matches(|c| c == '{' || c == '[').trim();
+            let header = trimmed
+                .trim_end_matches(|c| ['{', '['].contains(&c))
+                .trim();
             let (name, subtype) = if let Some((n, s)) = header.split_once(':') {
                 (n.trim().to_string(), Some(s.trim().to_string()))
             } else {

@@ -114,7 +114,7 @@ mod tests {
             ..Default::default()
         };
         let flat = ctx.flatten_with_process_env();
-        assert!(flat.get("API_KEY").is_none());
+        assert!(!flat.contains_key("API_KEY"));
         assert_eq!(flat.get("process.env.API_KEY").unwrap(), "secret");
     }
 

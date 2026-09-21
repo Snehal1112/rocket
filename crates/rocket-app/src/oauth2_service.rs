@@ -99,6 +99,9 @@ pub struct ResolvedOAuth2Config {
     pub force_reauth: bool,
 }
 
+/// Form body params and extra HTTP headers for an OAuth2 token request.
+type FormAndHeaders = (Vec<(String, String)>, Vec<(String, String)>);
+
 // ─── Service ───────────────────────────────────────────────────────
 
 pub struct OAuth2Service {
@@ -182,9 +185,7 @@ impl OAuth2Service {
 
     /// Builds form body params and extra headers for a token request.
     /// Used by client_credentials, password, and the code-exchange step of auth_code.
-    pub(crate) fn build_token_request_parts(
-        config: &ResolvedOAuth2Config,
-    ) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    pub(crate) fn build_token_request_parts(config: &ResolvedOAuth2Config) -> FormAndHeaders {
         let mut form: Vec<(String, String)> =
             vec![("grant_type".into(), config.grant_type.clone())];
         let mut headers: Vec<(String, String)> = vec![];
@@ -287,7 +288,7 @@ impl OAuth2Service {
         let client_id = r(&req.client_id);
         let client_secret = r(req.client_secret.as_deref().unwrap_or_default());
         let refresh_token = r(&req.refresh_token);
-        let scope = req.scope.as_deref().map(|s| r(s)).filter(|s| !s.is_empty());
+        let scope = req.scope.as_deref().map(&r).filter(|s| !s.is_empty());
         let client_auth = req
             .client_authentication
             .clone()
@@ -428,8 +429,8 @@ impl OAuth2Service {
             callback_url: ru(req.callback_url.as_deref().unwrap_or_default()),
             client_id: r(&req.client_id),
             client_secret: r(req.client_secret.as_deref().unwrap_or_default()),
-            scope: req.scope.as_deref().map(|s| r(s)).filter(|s| !s.is_empty()),
-            state: req.state.as_deref().map(|s| r(s)).filter(|s| !s.is_empty()),
+            scope: req.scope.as_deref().map(&r).filter(|s| !s.is_empty()),
+            state: req.state.as_deref().map(&r).filter(|s| !s.is_empty()),
             username: r(req.username.as_deref().unwrap_or_default()),
             password: r(req.password.as_deref().unwrap_or_default()),
             client_authentication: req

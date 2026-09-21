@@ -31,7 +31,7 @@ pub(super) fn get_request(
         if file_path.exists()
             && file_path
                 .extension()
-                .map_or(false, |e| e == "yml" || e == "yaml")
+                .is_some_and(|e| e == "yml" || e == "yaml")
         {
             let content = fs::read_to_string(&file_path)?;
             let oc: OcHttpRequest = serde_yaml::from_str(&content)
