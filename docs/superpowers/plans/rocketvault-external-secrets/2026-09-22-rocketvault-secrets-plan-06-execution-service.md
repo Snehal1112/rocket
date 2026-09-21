@@ -875,9 +875,11 @@ git commit -m "feat(app): thread external_secrets through the variable-resolutio
 
 **Interfaces:**
 - Consumes: `resolve_external_secrets` (Task 1), the four threaded signatures (Task 2).
-- Produces: `execute()`'s new resolution-then-dispatch ordering — this is the
-  end of this plan's scope; Plan 07 reuses `resolve_external_secrets` for
-  `CollectionRunnerService::run` separately.
+- Produces: `execute()`'s new resolution-then-dispatch ordering, plus
+  `redact_secrets_in_url(url, secret_values) -> String` (a private helper —
+  strips secret values from the URL persisted to `rocket-history`, spec
+  §6/AC4). This is the end of this plan's scope; Plan 07 reuses
+  `resolve_external_secrets` for `CollectionRunnerService::run` separately.
 
 - [ ] **Step 1: Write the failing integration tests**
 
@@ -1057,7 +1059,175 @@ pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteR
 Run: `cargo test -p rocket-app execute_resolves_external_secret_before_dispatch execute_fails_before_dispatch_when_external_secret_fetch_errors`
 Expected: PASS — 2 tests.
 
-- [ ] **Step 5: Run the full `rocket-app` test suite (excluding the one known error)**
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/rocket-app/src/execution_service.rs
+git commit -m "feat(app): resolve external secrets before dispatch in RequestExecutionService::execute"
+```
+
+**A second, separate leak this plan must also close: `rocket-history`.**
+Spec §6 and acceptance criterion 4 both require that a resolved secret value
+"never appears in ... `rocket-history`", not just the saved environment YAML.
+`finish_phases` (`execution_service.rs:1192-1276`, unmodified by anything
+above) builds its `HistoryEntry` directly from the *resolved* URL:
+
+```rust
+// crates/rocket-app/src/execution_service.rs:1244-1255 (current, unmodified)
+let mut entry = HistoryEntry::new(
+    input.method.to_string(),
+    &state.http_request.url,   // ← already-resolved: contains the real secret value
+    response.status,
+    response.duration_ms,
+    response.size_bytes,
+);
+if let (Some(col), Some(name)) = (&input.collection, &input.request_name) {
+    entry = entry.with_collection(col, name);
+}
+let _ = self.history_repo.save(&entry);
+```
+
+`rocket-history`'s own `HistoryEntry` only ever stores method/url/status/
+duration/size (confirmed: `crates/rocket-history/src/entry.rs`) — no headers,
+no body — so the URL is the *only* field that can leak a secret value into
+`~/.rocket-api/history/`. `state.var_ctx.secret_values` (populated by this
+task's Step 3 for external secrets, and already populated today for local
+`secret: true` variables per the already-shipped secret-aware-variable-context
+spec — see Global Constraints) is exactly the redaction list this needs; this
+fix incidentally closes the same pre-existing gap for local secrets too,
+which today leak into history unredacted.
+
+- [ ] **Step 6: Write the failing test**
+
+```rust
+#[tokio::test]
+async fn history_entry_redacts_external_secret_value_from_the_url() {
+    let mut env = Environment::new("prod");
+    env.external_secrets.push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+    let fetcher = Arc::new(FakeVaultFetcher::new(vec![
+        ("sec-1", FakeSecretOutcome::Value("sk-live-test-value".to_string())),
+    ]));
+
+    let history_repo = Box::new(MockHistoryRepo::new());
+    let history_arc = history_repo.saved_entries_handle(); // see note below
+
+    let svc = RequestExecutionService::new(
+        Box::new(MockEnvRepo::with_env(env)),
+        Arc::new(MockExecutor::new(200)),
+        history_repo,
+        Box::new(StubCollectionRepo::empty()),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(FakeSecretManagerRepo::with_connection(test_connection("conn-1"))),
+        Arc::new(FakeSecretStore),
+        fetcher,
+    );
+
+    svc.execute(sample_input(
+        "https://api.example.com/{{payments.apiKey}}",
+        Some("prod"),
+    ))
+    .await
+    .expect("execute");
+
+    let saved = history_arc.lock().expect("lock saved entries");
+    assert_eq!(saved.len(), 1);
+    assert!(
+        !saved[0].url.contains("sk-live-test-value"),
+        "history entry must not contain the resolved secret value, got: {}",
+        saved[0].url
+    );
+    assert!(
+        saved[0].url.contains("••••••"),
+        "expected the redaction marker in place of the secret, got: {}",
+        saved[0].url
+    );
+}
+```
+
+(`MockHistoryRepo` already exists in this file's test module per Task 1's
+reused fakes; if it doesn't currently expose a way to inspect what was saved
+— check its actual definition first — add a `saved_entries_handle(&self) ->
+Arc<Mutex<Vec<HistoryEntry>>>` accessor to it, or an equivalent `saved()`
+getter matching whatever style its neighbors already use, as a small
+prerequisite change in this same step; do not invent a second, parallel mock
+history repo type.)
+
+- [ ] **Step 7: Run the test to verify it fails**
+
+Run: `cargo test -p rocket-app history_entry_redacts_external_secret_value_from_the_url`
+Expected: FAIL — the saved entry's URL still contains
+`sk-live-test-value` verbatim.
+
+- [ ] **Step 8: Implement the redaction**
+
+```rust
+// crates/rocket-app/src/execution_service.rs — new private helper, near
+// the other small free functions in this file (e.g. alongside
+// merge_auth/merge_headers)
+fn redact_secrets_in_url(url: &str, secret_values: &std::collections::HashSet<String>) -> String {
+    if secret_values.is_empty() {
+        return url.to_string();
+    }
+    let mut out = url.to_string();
+    for value in secret_values {
+        if value.len() < MIN_REDACTION_LEN {
+            continue; // same short-secret exemption already applied when populating secret_values
+        }
+        out = out.replace(value.as_str(), "••••••");
+    }
+    out
+}
+```
+
+Then change `finish_phases`'s `HistoryEntry::new` call
+(`execution_service.rs:1245`) from:
+
+```rust
+let mut entry = HistoryEntry::new(
+    input.method.to_string(),
+    &state.http_request.url,
+    response.status,
+    response.duration_ms,
+    response.size_bytes,
+);
+```
+
+to:
+
+```rust
+let redacted_url = redact_secrets_in_url(&state.http_request.url, &state.var_ctx.secret_values);
+let mut entry = HistoryEntry::new(
+    input.method.to_string(),
+    &redacted_url,
+    response.status,
+    response.duration_ms,
+    response.size_bytes,
+);
+```
+
+Only the history write changes — `state.http_request.url` itself (used for
+the actual dispatch, already sent by the time `finish_phases` runs, and for
+the `DomainEvent::RequestExecuted` event a few lines below) is left
+untouched; redaction applies only at the persistence boundary, matching this
+spec's existing "redact at the point output is produced, not at the point
+secrets are read" principle from the already-shipped
+secret-aware-variable-context spec.
+
+- [ ] **Step 9: Run the test to verify it passes**
+
+Run: `cargo test -p rocket-app history_entry_redacts_external_secret_value_from_the_url`
+Expected: PASS.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add crates/rocket-app/src/execution_service.rs
+git commit -m "fix(app): redact secret values from history URL before persisting"
+```
+
+- [ ] **Step 11: Run the full `rocket-app` test suite (excluding the one known error)**
 
 Run: `cargo test -p rocket-app`
 Expected: every test passes except the crate still fails to *compile* at
@@ -1065,13 +1235,6 @@ Expected: every test passes except the crate still fails to *compile* at
 Constraints). If Plan 07 has already landed in this working tree by the time
 you run this, `cargo test -p rocket-app` should be fully green with no
 excluded cases.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add crates/rocket-app/src/execution_service.rs
-git commit -m "feat(app): resolve external secrets before dispatch in RequestExecutionService::execute"
-```
 
 ---
 
@@ -1082,6 +1245,7 @@ git commit -m "feat(app): resolve external secrets before dispatch in RequestExe
 - [ ] `build_variable_scopes`/`build_variable_context`/`resolve_request`/`begin_phases` each gain an `external_secrets: &HashMap<String, String>` parameter, all four still synchronous
 - [ ] `build_variable_scopes` folds `external_secrets` into both `ctx.external_secrets` and (subject to `MIN_REDACTION_LEN`) `ctx.secret_values`
 - [ ] `execute()` calls `resolve_external_secrets` before `begin_phases` and propagates its error with `?`, before any HTTP dispatch
+- [ ] `redact_secrets_in_url` strips every value in `state.var_ctx.secret_values` (both external-secret and pre-existing local-secret values) out of the URL passed to `HistoryEntry::new` in `finish_phases` — the dispatched request and the `RequestExecuted` event still carry the real URL, only the persisted history entry is redacted (spec §6/AC4)
 - [ ] `run_load_test` and `LoadTestService::run` permanently pass an empty map — explicitly out of scope, not a placeholder
 - [ ] `collection_runner_service.rs:362` deliberately left broken, owned by Plan 07
 - [ ] `cargo test -p rocket-app` — all pass (except the one line owned by Plan 07, until Plan 07 lands)
