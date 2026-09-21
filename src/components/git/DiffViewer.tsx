@@ -103,6 +103,12 @@ export function DiffViewer({
   const canShowVisual = diffState.filePath.endsWith('.yml');
   const language = getLanguage(diffState.filePath);
 
+  // A wholly added, deleted, or untracked file has nothing on one side of the
+  // diff. Side-by-side rendering then wastes half the view on Monaco's empty-
+  // pane hatching — inline rendering shows the same content as a plain,
+  // fully readable listing instead.
+  const isWholeFileChange = diffState.oldContent === '' || diffState.newContent === '';
+
   return (
     <div className='flex flex-col h-full'>
       <DiffHeader
@@ -134,10 +140,12 @@ export function DiffViewer({
             onMount={handleDiffMount}
             options={{
               readOnly: true,
-              renderSideBySide: true,
+              renderSideBySide: !isWholeFileChange,
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
-              fontSize: 12,
+              fontSize: 15,
+              fontFamily: "'JetBrains Mono', monospace",
+              hideUnchangedRegions: { enabled: true },
             }}
           />
         </div>

@@ -1,7 +1,9 @@
 import { lazy, Suspense, useState } from 'react';
 import { GitStatusBadge } from '@/components/git/GitStatusBadge';
 import { Button } from '@/components/ui/button';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { FileDiff, GitStatusKind } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
 
@@ -11,6 +13,16 @@ interface CommitDiffViewProps {
   diffs: FileDiff[];
   repositoryId: string;
   repositoryLabel: string;
+}
+
+// Splits a repo-relative path into its containing directory and file name, so
+// the file list can show the name — the part that most distinguishes one row
+// from the next — on its own line instead of losing it to a mid-string ellipsis.
+function splitPath(path: string): { dir: string; name: string } {
+  const idx = path.lastIndexOf('/');
+  return idx === -1
+    ? { dir: '', name: path }
+    : { dir: path.slice(0, idx), name: path.slice(idx + 1) };
 }
 
 function fileDiffToDiffState(
@@ -51,34 +63,63 @@ export function CommitDiffView({ diffs, repositoryId, repositoryLabel }: CommitD
   }
 
   return (
-    <div className='flex h-full'>
+    <ResizablePanelGroup className='h-full'>
       {/* File list sidebar */}
-      <div className='w-52 shrink-0 border-r border-border/70 flex flex-col'>
-        <div className='px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70'>
-          {diffs.length} file{diffs.length !== 1 ? 's' : ''} changed
-        </div>
-        <ScrollArea className='flex-1'>
-          <div className='p-1'>
-            {diffs.map((diff) => (
-              <Button
-                key={diff.path}
-                type='button'
-                variant='ghost'
-                className={`w-full h-auto flex items-center gap-1.5 px-2 py-1 rounded justify-start font-normal text-left text-sm hover:bg-muted/50 ${
-                  selectedPath === diff.path ? 'bg-muted/70' : ''
-                }`}
-                onClick={() => setSelectedPath(diff.path)}
-              >
-                <GitStatusBadge status={fileStatus(diff)} />
-                <span className='truncate flex-1 text-xs font-mono'>{diff.path}</span>
-              </Button>
-            ))}
+      {/* minSize/maxSize take pixels as a plain number in this version of
+          react-resizable-panels — unlike defaultSize, where a plain number
+          is a percent. Percentage strings are required here, or a small
+          maxSize silently clamps the panel to that many pixels instead of
+          that percent, freezing it far narrower than intended. */}
+      <ResizablePanel defaultSize={28} minSize='20%' maxSize='45%'>
+        <div className='h-full border-r border-border/70 flex flex-col'>
+          <div className='px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70'>
+            {diffs.length} file{diffs.length !== 1 ? 's' : ''} changed
           </div>
-        </ScrollArea>
-      </div>
+          <TooltipProvider>
+            <ScrollArea className='flex-1'>
+              <div className='p-1'>
+                {diffs.map((diff) => {
+                  const { dir, name } = splitPath(diff.path);
+                  return (
+                    <Tooltip key={diff.path}>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          className={`w-full h-auto flex-col items-stretch gap-0 px-2 py-1.5 rounded justify-start font-normal text-left hover:bg-muted/50 ${
+                            selectedPath === diff.path ? 'bg-muted/70' : ''
+                          }`}
+                          onClick={() => setSelectedPath(diff.path)}
+                        >
+                          <div className='flex items-center gap-1.5 w-full'>
+                            <GitStatusBadge status={fileStatus(diff)} />
+                            <span className='truncate flex-1 min-w-0 text-xs font-mono'>
+                              {name}
+                            </span>
+                          </div>
+                          {dir && (
+                            <span className='pl-5 truncate text-[10px] font-mono text-muted-foreground/70'>
+                              {dir}
+                            </span>
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side='right' className='font-mono text-xs'>
+                        {diff.path}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </TooltipProvider>
+        </div>
+      </ResizablePanel>
+
+      <ResizableHandle withHandle />
 
       {/* Diff viewer */}
-      <div className='flex-1 overflow-hidden'>
+      <ResizablePanel defaultSize={72} minSize='40%'>
         {selectedDiff ? (
           <Suspense fallback={null}>
             <DiffViewer
@@ -92,7 +133,7 @@ export function CommitDiffView({ diffs, repositoryId, repositoryLabel }: CommitD
             Select a file to view its diff.
           </div>
         )}
-      </div>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

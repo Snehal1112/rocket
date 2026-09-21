@@ -150,7 +150,12 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
             value={manualContent}
             onChange={(v) => setManualContent(v ?? '')}
             theme={themeName}
-            options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 15,
+              fontFamily: "'JetBrains Mono', monospace",
+              scrollBeyondLastLine: false,
+            }}
           />
         </div>
         {abortConfirmDialog}
@@ -188,7 +193,8 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
-                fontSize: 12,
+                fontSize: 15,
+                fontFamily: "'JetBrains Mono', monospace",
                 scrollBeyondLastLine: false,
               }}
             />
@@ -203,7 +209,8 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
-                fontSize: 12,
+                fontSize: 15,
+                fontFamily: "'JetBrains Mono', monospace",
                 scrollBeyondLastLine: false,
               }}
             />
