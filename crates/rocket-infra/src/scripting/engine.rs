@@ -962,6 +962,96 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn fs_and_process_are_undefined_in_safe_mode() {
+        // minimal_ctx sets sandbox_mode: SandboxMode::Safe, so this is the
+        // regression test that would catch a future change accidentally
+        // registering the dev ops unconditionally.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "rok.setVar('typeofFs', typeof fs); rok.setVar('typeofProcess', typeof process)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("typeofFs").expect("typeofFs"), "undefined");
+        assert_eq!(
+            result.runtime_vars.get("typeofProcess").expect("typeofProcess"),
+            "undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn fs_write_then_read_roundtrips_in_developer_mode() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("script-output.txt").to_string_lossy().to_string();
+        let path_json = serde_json::to_string(&path).expect("json path");
+        let code = format!(
+            "fs.writeFile({path_json}, 'hello from script'); \
+             rok.setVar('content', fs.readFile({path_json}))"
+        );
+        let engine = DenoScriptEngine::new();
+        let ctx = ScriptContext {
+            sandbox_mode: SandboxMode::Developer,
+            ..minimal_ctx(&code)
+        };
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("content").expect("content"),
+            "hello from script"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_exec_runs_a_real_command_in_developer_mode() {
+        // Per-platform command coverage for op_process_exec itself already
+        // lives in ops/process.rs's own tests — this only needs to prove the
+        // wiring (mode gating, JS<->op marshalling) works end to end on one
+        // platform.
+        let engine = DenoScriptEngine::new();
+        let ctx = ScriptContext {
+            sandbox_mode: SandboxMode::Developer,
+            ..minimal_ctx(
+                "const result = process.exec('echo', ['hello-from-script']); \
+                 rok.setVar('stdout', result.stdout); \
+                 rok.setVar('exitCode', result.exitCode)",
+            )
+        };
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(
+            result
+                .runtime_vars
+                .get("stdout")
+                .expect("stdout")
+                .as_str()
+                .expect("string")
+                .trim(),
+            "hello-from-script"
+        );
+        assert_eq!(result.runtime_vars.get("exitCode").expect("exitCode"), 0);
+    }
+
+    #[tokio::test]
+    async fn fs_mkdir_and_exists_work_in_developer_mode() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let nested = dir.path().join("a").join("b").to_string_lossy().to_string();
+        let nested_json = serde_json::to_string(&nested).expect("json path");
+        let code = format!(
+            "fs.mkdir({nested_json}, {{recursive: true}}); \
+             rok.setVar('exists', fs.exists({nested_json}))"
+        );
+        let engine = DenoScriptEngine::new();
+        let ctx = ScriptContext {
+            sandbox_mode: SandboxMode::Developer,
+            ..minimal_ctx(&code)
+        };
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert_eq!(result.runtime_vars.get("exists").expect("exists"), true);
+    }
+
     // ── execution timeout ────────────────────────────────────────────────────
 
     /// Short budget so the timeout tests finish fast instead of waiting the
