@@ -64,7 +64,7 @@ describe('GitCredentialsDialog saving state', () => {
     expect(setCredentials).toHaveBeenCalled();
   });
 
-  it('re-enables Connect and records the keychain error in store state after a failed save', async () => {
+  it('surfaces the keychain error in the component local error state after a failed save', async () => {
     vi.mocked(tauriApi.saveGitCredentials).mockRejectedValueOnce(new Error('keychain locked'));
     const { setCredentials } = renderDialog();
     const user = userEvent.setup();
