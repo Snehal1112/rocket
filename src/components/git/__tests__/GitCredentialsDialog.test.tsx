@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitCredentialsDialog } from '@/components/git/GitCredentialsDialog';
 import * as tauriApi from '@/lib/tauri-api';
 import { createGitStore } from '@/stores/git-store';
@@ -18,6 +18,13 @@ vi.mock('@/lib/tauri-api', async () => {
   };
 });
 
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(tauriApi.listSshKeyPaths).mockResolvedValue([]);
+  vi.mocked(tauriApi.getDefaultSshKeyPath).mockResolvedValue(null);
+  vi.mocked(tauriApi.loadGitCredentials).mockResolvedValue(null);
+});
+
 function renderDialog() {
   const store = createGitStore();
   // Stub setCredentials. The real store action closes showCredentialsDialog
@@ -26,7 +33,10 @@ function renderDialog() {
   // Stubbing it isolates the Connect button's local `saving` state from that
   // unrelated, pre-existing store behavior while still letting us assert it
   // was invoked (preserving coverage of the "always activate credentials"
-  // constraint).
+  // constraint). Note: because the real setCredentials closes the dialog
+  // immediately in production, the keychain-error assertion below verifies
+  // the component's own error-rendering logic in isolation, not something a
+  // user can actually see today.
   const setCredentials = vi.fn();
   store.setState({ repositoryId: 'repo-1', showCredentialsDialog: true, setCredentials });
   render(
@@ -54,7 +64,7 @@ describe('GitCredentialsDialog saving state', () => {
     expect(setCredentials).toHaveBeenCalled();
   });
 
-  it('re-enables Connect and shows the keychain error after a failed save', async () => {
+  it('re-enables Connect and records the keychain error in store state after a failed save', async () => {
     vi.mocked(tauriApi.saveGitCredentials).mockRejectedValueOnce(new Error('keychain locked'));
     const { setCredentials } = renderDialog();
     const user = userEvent.setup();
