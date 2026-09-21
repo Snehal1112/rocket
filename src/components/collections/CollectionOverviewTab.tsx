@@ -28,6 +28,7 @@ import {
   type CollectionItem,
   type CollectionVariable,
   getCollection,
+  getCollectionSettings,
   saveCollectionSettings,
 } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
@@ -248,17 +249,22 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     setCollectionAuth(collectionName, auth);
   }, [auth, collectionName, setCollectionAuth, isLoaded]);
 
-  // Persist all settings to disk (no auto-save).
+  // Persist all settings to disk (no auto-save). saveCollectionSettings is a full
+  // replace on the backend, so sandboxMode is read fresh here immediately before
+  // saving rather than from `collection` (loaded once on mount) — otherwise a mode
+  // change made via the toolbar's SandboxPopover in the meantime would be silently
+  // wiped by this save.
   const saveSettings = useCallback(async () => {
+    const current = await getCollectionSettings(collectionName);
     await saveCollectionSettings(collectionName, {
       auth: toPersistedAuth(auth),
       headers: toPersistedHeaders(headers),
       docs: docs || undefined,
       variables,
-      sandboxMode: collection?.settings.sandboxMode ?? 'safe',
+      sandboxMode: current.sandboxMode,
     });
     setIsDirty(false);
-  }, [collectionName, auth, headers, docs, variables, collection]);
+  }, [collectionName, auth, headers, docs, variables]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
     saveSettings,

@@ -44,11 +44,13 @@ describe('SandboxPopover', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
-    const popover = await screen.findByText('JavaScript Sandbox', { selector: 'p' });
-    const dot = within(popover.closest('div')!.parentElement!.parentElement!).queryByText(
-      'Developer Mode',
-    );
-    expect(dot).toBeInTheDocument();
+
+    // The "Developer Mode" option label always renders regardless of the active
+    // mode, so it can't distinguish the two — assert on the warning footer text,
+    // which only renders when mode === 'developer'.
+    expect(
+      await screen.findByText('Only enable for collections from trusted authors.'),
+    ).toBeInTheDocument();
   });
 
   it('saves immediately when switching to Safe Mode, preserving the rest of the loaded settings', async () => {
@@ -121,5 +123,41 @@ describe('SandboxPopover', () => {
         baseSettings({ sandboxMode: 'developer', docs: 'hello' }),
       ),
     );
+  });
+
+  it('shows an error instead of a confident mode when loading settings fails', async () => {
+    usePaneStore.setState({ activeCollection: 'my-api' });
+    vi.mocked(tauriApi.getCollectionSettings).mockRejectedValue(new Error('boom'));
+
+    render(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
+
+    expect(await screen.findByText('Failed to load sandbox mode.')).toBeInTheDocument();
+    expect(screen.queryByText('Safe Mode')).not.toBeInTheDocument();
+  });
+
+  it('shows an error and keeps the confirmation dialog open when saving Developer Mode fails', async () => {
+    usePaneStore.setState({ activeCollection: 'my-api' });
+    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
+      baseSettings({ sandboxMode: 'safe' }),
+    );
+    vi.mocked(tauriApi.saveCollectionSettings).mockRejectedValue(new Error('boom'));
+
+    render(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
+    await user.click(await screen.findByText('Developer Mode'));
+
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /Enable/i }));
+
+    await waitFor(() => expect(tauriApi.saveCollectionSettings).toHaveBeenCalled());
+    // A failed save must not silently dismiss the dialog as if it succeeded.
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 });
