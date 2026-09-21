@@ -3,6 +3,7 @@ use crate::scripting::state::ScriptInputState;
 
 pub mod console;
 pub mod fs;
+pub mod process;
 pub mod req;
 pub mod res;
 pub mod rok;
