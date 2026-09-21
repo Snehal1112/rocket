@@ -18,7 +18,9 @@ pub fn oc_folder_to_folder(oc: OcFolder) -> Folder {
         .filter_map(|item| match &item {
             OcItem::Http(_) => {
                 if let OcItem::Http(req) = item {
-                    Some(CollectionItem::Request(oc_http_request_to_request(req)))
+                    Some(CollectionItem::Request(Box::new(oc_http_request_to_request(
+                        req,
+                    ))))
                 } else {
                     None
                 }
@@ -141,7 +143,9 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
         .filter_map(|item| match &item {
             OcItem::Http(_) => {
                 if let OcItem::Http(req) = item {
-                    Some(CollectionItem::Request(oc_http_request_to_request(req)))
+                    Some(CollectionItem::Request(Box::new(oc_http_request_to_request(
+                        req,
+                    ))))
                 } else {
                     None
                 }

@@ -11,7 +11,7 @@ pub enum OcAuth {
     /// String shorthand: "inherit".
     Inherit(String),
     /// Object form: dispatched by `type` field.
-    Typed(OcAuthTyped),
+    Typed(Box<OcAuthTyped>),
 }
 
 /// Typed auth — discriminated by `type` field.
@@ -76,9 +76,9 @@ pub enum OcAuthTyped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pkce: Option<OcOAuth2PKCE>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        additional_parameters: Option<OAuth2AdditionalParameters>,
+        additional_parameters: Box<Option<OAuth2AdditionalParameters>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        token_config: Option<OAuth2TokenConfig>,
+        token_config: Box<Option<OAuth2TokenConfig>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
     },

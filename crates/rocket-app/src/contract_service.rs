@@ -974,7 +974,7 @@ fn walk_folder<'a>(
                 } else {
                     prefix.join(file_name)
                 };
-                out.push((path, req));
+                out.push((path, req.as_ref()));
             }
             CollectionItem::Folder(sub) => {
                 // Skip folders with no on-disk name. build_folder_tree always

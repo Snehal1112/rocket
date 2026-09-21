@@ -79,7 +79,7 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                 out.push(RunItem {
                     name: request.name.clone(),
                     request_path: format!("{prefix}{file_name}"),
-                    request: request.clone(),
+                    request: request.as_ref().clone(),
                 });
             }
             CollectionItem::Folder(sub) => {
@@ -118,7 +118,7 @@ pub fn build_step_input(
 ) -> ExecuteRequestInput {
     let request = &item.request;
     ExecuteRequestInput {
-        method: request.method.clone(),
+        method: request.method,
         url: request.url.clone(),
         headers: request.headers.clone(),
         query_params: request.query_params.clone(),

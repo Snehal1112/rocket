@@ -10,7 +10,7 @@ impl From<OcAuth> for Auth {
         match oc {
             OcAuth::Inherit(ref s) if s == "inherit" => Auth::Inherit,
             OcAuth::Inherit(_) => Auth::None,
-            OcAuth::Typed(typed) => typed.into(),
+            OcAuth::Typed(typed) => (*typed).into(),
         }
     }
 }
@@ -71,6 +71,12 @@ impl From<OcAuthTyped> for Auth {
                 token_config,
                 settings,
             } => {
+                // Fields are `Box<Option<_>>` on `OcAuthTyped::OAuth2` to keep the
+                // enum small (clippy::large_enum_variant); unbox once here so the
+                // rest of this conversion works with the plain `Option<_>` that
+                // `OAuth2Flow` expects.
+                let additional_parameters = *additional_parameters;
+                let token_config = *token_config;
                 let creds = credentials.map(oc_creds_to_domain).unwrap_or_else(|| {
                     OAuth2ClientCredentials {
                         client_id: String::new(),
@@ -111,7 +117,7 @@ impl From<OcAuthTyped> for Auth {
                         token_config,
                         settings,
                     },
-                    "implicit" | _ => OAuth2Flow::Implicit {
+                    _ => OAuth2Flow::Implicit {
                         authorization_url: authorization_url.unwrap_or_default(),
                         callback_url,
                         client_id: creds.client_id,
@@ -122,7 +128,7 @@ impl From<OcAuthTyped> for Auth {
                         settings,
                     },
                 };
-                Auth::OAuth2(oauth_flow)
+                Auth::OAuth2(Box::new(oauth_flow))
             }
         }
     }
@@ -154,34 +160,34 @@ impl From<Auth> for OcAuth {
     fn from(auth: Auth) -> Self {
         match auth {
             Auth::Inherit => OcAuth::Inherit("inherit".into()),
-            Auth::None => OcAuth::Typed(OcAuthTyped::None),
+            Auth::None => OcAuth::Typed(Box::new(OcAuthTyped::None)),
             Auth::Basic { username, password } => {
-                OcAuth::Typed(OcAuthTyped::Basic { username, password })
+                OcAuth::Typed(Box::new(OcAuthTyped::Basic { username, password }))
             }
-            Auth::Bearer { token } => OcAuth::Typed(OcAuthTyped::Bearer { token }),
+            Auth::Bearer { token } => OcAuth::Typed(Box::new(OcAuthTyped::Bearer { token })),
             Auth::ApiKey {
                 key,
                 value,
                 placement,
-            } => OcAuth::Typed(OcAuthTyped::ApiKey {
+            } => OcAuth::Typed(Box::new(OcAuthTyped::ApiKey {
                 key,
                 value,
                 placement: Some(placement),
-            }),
+            })),
             Auth::Digest { username, password } => {
-                OcAuth::Typed(OcAuthTyped::Digest { username, password })
+                OcAuth::Typed(Box::new(OcAuthTyped::Digest { username, password }))
             }
             Auth::Ntlm {
                 username,
                 password,
                 domain,
-            } => OcAuth::Typed(OcAuthTyped::Ntlm {
+            } => OcAuth::Typed(Box::new(OcAuthTyped::Ntlm {
                 username,
                 password,
                 domain,
-            }),
+            })),
             Auth::Wsse { username, password } => {
-                OcAuth::Typed(OcAuthTyped::Wsse { username, password })
+                OcAuth::Typed(Box::new(OcAuthTyped::Wsse { username, password }))
             }
             Auth::AwsSigV4 {
                 access_key,
@@ -190,7 +196,7 @@ impl From<Auth> for OcAuth {
                 service,
                 session_token,
                 profile_name,
-            } => OcAuth::Typed(OcAuthTyped::AwsV4 {
+            } => OcAuth::Typed(Box::new(OcAuthTyped::AwsV4 {
                 access_key_id: access_key,
                 secret_access_key: secret_key,
                 region: if region.is_empty() {
@@ -205,7 +211,7 @@ impl From<Auth> for OcAuth {
                 },
                 session_token,
                 profile_name,
-            }),
+            })),
             Auth::OAuth2(flow) => {
                 let (
                     flow_str,
@@ -221,8 +227,8 @@ impl From<Auth> for OcAuth {
                     additional_parameters,
                     token_config,
                     settings,
-                ) = domain_oauth2_to_oc_fields(flow);
-                OcAuth::Typed(OcAuthTyped::OAuth2 {
+                ) = domain_oauth2_to_oc_fields(*flow);
+                OcAuth::Typed(Box::new(OcAuthTyped::OAuth2 {
                     flow: flow_str,
                     access_token_url,
                     refresh_token_url,
@@ -233,10 +239,10 @@ impl From<Auth> for OcAuth {
                     scope,
                     state,
                     pkce,
-                    additional_parameters,
-                    token_config,
+                    additional_parameters: Box::new(additional_parameters),
+                    token_config: Box::new(token_config),
                     settings,
-                })
+                }))
             }
         }
     }

@@ -23,7 +23,7 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
         match request_result {
             Ok(mut request) => {
                 request.file_name = Some(entry_name.to_string());
-                Ok(Some(CollectionItem::Request(request)))
+                Ok(Some(CollectionItem::Request(Box::new(request))))
             }
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file");

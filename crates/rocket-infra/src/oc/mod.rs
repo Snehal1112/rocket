@@ -144,10 +144,13 @@ mod tests {
         let yaml = "type: basic\nusername: user\npassword: pass";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
         match auth {
-            OcAuth::Typed(OcAuthTyped::Basic { username, password }) => {
-                assert_eq!(username, "user");
-                assert_eq!(password, "pass");
-            }
+            OcAuth::Typed(typed) => match *typed {
+                OcAuthTyped::Basic { username, password } => {
+                    assert_eq!(username, "user");
+                    assert_eq!(password, "pass");
+                }
+                _ => panic!("expected Basic"),
+            },
             _ => panic!("expected Basic"),
         }
     }
@@ -156,7 +159,10 @@ mod tests {
     fn oc_auth_bearer_yaml() {
         let yaml = "type: bearer\ntoken: my-token-123";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::Bearer { .. })));
+        assert!(matches!(
+            auth,
+            OcAuth::Typed(typed) if matches!(*typed, OcAuthTyped::Bearer { .. })
+        ));
     }
 
     #[test]
@@ -164,15 +170,18 @@ mod tests {
         let yaml = "type: apikey\nkey: X-API-Key\nvalue: abc123\nplacement: header";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
         match auth {
-            OcAuth::Typed(OcAuthTyped::ApiKey {
-                key,
-                value,
-                placement,
-            }) => {
-                assert_eq!(key, "X-API-Key");
-                assert_eq!(value, "abc123");
-                assert_eq!(placement, Some("header".into()));
-            }
+            OcAuth::Typed(typed) => match *typed {
+                OcAuthTyped::ApiKey {
+                    key,
+                    value,
+                    placement,
+                } => {
+                    assert_eq!(key, "X-API-Key");
+                    assert_eq!(value, "abc123");
+                    assert_eq!(placement, Some("header".into()));
+                }
+                _ => panic!("expected ApiKey"),
+            },
             _ => panic!("expected ApiKey"),
         }
     }
@@ -182,14 +191,20 @@ mod tests {
         let yaml =
             "type: awsv4\naccessKeyId: AKIA...\nsecretAccessKey: secret\nregion: us-east-1\nservice: s3";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::AwsV4 { .. })));
+        assert!(matches!(
+            auth,
+            OcAuth::Typed(typed) if matches!(*typed, OcAuthTyped::AwsV4 { .. })
+        ));
     }
 
     #[test]
     fn oc_auth_digest_yaml() {
         let yaml = "type: digest\nusername: admin\npassword: secret";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
-        assert!(matches!(auth, OcAuth::Typed(OcAuthTyped::Digest { .. })));
+        assert!(matches!(
+            auth,
+            OcAuth::Typed(typed) if matches!(*typed, OcAuthTyped::Digest { .. })
+        ));
     }
 
     #[test]
@@ -197,19 +212,22 @@ mod tests {
         let yaml = "type: oauth2\nflow: client_credentials\naccessTokenUrl: https://auth.example.com/token\ncredentials:\n  clientId: my-id\n  clientSecret: my-secret";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
         match auth {
-            OcAuth::Typed(OcAuthTyped::OAuth2 {
-                flow,
-                access_token_url,
-                credentials,
-                ..
-            }) => {
-                assert_eq!(flow, "client_credentials");
-                assert_eq!(
+            OcAuth::Typed(typed) => match *typed {
+                OcAuthTyped::OAuth2 {
+                    flow,
                     access_token_url,
-                    Some("https://auth.example.com/token".into())
-                );
-                assert!(credentials.is_some());
-            }
+                    credentials,
+                    ..
+                } => {
+                    assert_eq!(flow, "client_credentials");
+                    assert_eq!(
+                        access_token_url,
+                        Some("https://auth.example.com/token".into())
+                    );
+                    assert!(credentials.is_some());
+                }
+                _ => panic!("expected OAuth2"),
+            },
             _ => panic!("expected OAuth2"),
         }
     }
@@ -219,11 +237,14 @@ mod tests {
         let yaml = "type: oauth2\nflow: authorization_code\nauthorizationUrl: https://auth.example.com/authorize\naccessTokenUrl: https://auth.example.com/token\ncredentials:\n  clientId: id\n  clientSecret: secret\npkce:\n  enabled: true\n  method: S256";
         let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
         match auth {
-            OcAuth::Typed(OcAuthTyped::OAuth2 { flow, pkce, .. }) => {
-                assert_eq!(flow, "authorization_code");
-                assert!(pkce.is_some());
+            OcAuth::Typed(typed) => match *typed {
+                OcAuthTyped::OAuth2 { flow, pkce, .. } => {
+                    assert_eq!(flow, "authorization_code");
+                    assert!(pkce.is_some());
                 assert_eq!(pkce.unwrap().method, Some("S256".into()));
-            }
+                }
+                _ => panic!("expected OAuth2"),
+            },
             _ => panic!("expected OAuth2"),
         }
     }

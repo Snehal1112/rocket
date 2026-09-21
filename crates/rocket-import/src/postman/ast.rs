@@ -27,7 +27,7 @@ pub(crate) struct PostmanInfo {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum PostmanItem {
-    Request(PostmanRequestItem),
+    Request(Box<PostmanRequestItem>),
     Folder(PostmanFolder),
 }
 

@@ -18,8 +18,12 @@ pub struct OpaqueProtocolItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CollectionItem {
+    /// Boxed to keep `CollectionItem` small — `Request` is by far the
+    /// largest variant, so an unboxed field would inflate every enum value
+    /// (including `Folder`/`OpaqueItem`/`Summary`) to its size. Serde treats
+    /// `Box<T>` transparently, so the on-disk/IPC shape is unchanged.
     #[serde(rename = "request")]
-    Request(Request),
+    Request(Box<Request>),
     #[serde(rename = "folder")]
     Folder(Folder),
     /// Raw YAML for non-HTTP protocols (GraphQL, gRPC, WebSocket).
@@ -57,7 +61,7 @@ impl Folder {
     }
 
     pub fn add_request(&mut self, request: Request) {
-        self.items.push(CollectionItem::Request(request));
+        self.items.push(CollectionItem::Request(Box::new(request)));
     }
 
     pub fn add_subfolder(&mut self, folder: Folder) {
@@ -67,7 +71,7 @@ impl Folder {
     /// Find a request by name (non-recursive, current level only).
     pub fn find_request(&self, name: &str) -> Option<&Request> {
         self.items.iter().find_map(|item| match item {
-            CollectionItem::Request(r) if r.name == name => Some(r),
+            CollectionItem::Request(r) if r.name == name => Some(r.as_ref()),
             _ => None,
         })
     }

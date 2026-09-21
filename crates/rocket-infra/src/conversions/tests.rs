@@ -179,10 +179,10 @@ fn body_form_urlencoded_oc_to_domain() {
 
 #[test]
 fn auth_basic_oc_to_domain() {
-    let oc = OcAuth::Typed(OcAuthTyped::Basic {
+    let oc = OcAuth::Typed(Box::new(OcAuthTyped::Basic {
         username: "u".into(),
         password: "p".into(),
-    });
+    }));
     let auth: Auth = oc.into();
     assert_eq!(
         auth,
@@ -202,14 +202,14 @@ fn auth_inherit_oc_to_domain() {
 
 #[test]
 fn auth_awsv4_oc_to_domain() {
-    let oc = OcAuth::Typed(OcAuthTyped::AwsV4 {
+    let oc = OcAuth::Typed(Box::new(OcAuthTyped::AwsV4 {
         access_key_id: "AK".into(),
         secret_access_key: "SK".into(),
         region: Some("us-east-1".into()),
         service: Some("s3".into()),
         session_token: None,
         profile_name: None,
-    });
+    }));
     let auth: Auth = oc.into();
     match auth {
         Auth::AwsSigV4 {
@@ -230,7 +230,7 @@ fn auth_awsv4_oc_to_domain() {
 
 #[test]
 fn auth_oauth2_client_credentials_oc_to_domain() {
-    let oc = OcAuth::Typed(OcAuthTyped::OAuth2 {
+    let oc = OcAuth::Typed(Box::new(OcAuthTyped::OAuth2 {
         flow: "client_credentials".into(),
         access_token_url: Some("https://auth.example.com/token".into()),
         refresh_token_url: None,
@@ -245,10 +245,10 @@ fn auth_oauth2_client_credentials_oc_to_domain() {
         scope: Some("read".into()),
         state: None,
         pkce: None,
-        additional_parameters: None,
-        token_config: None,
+        additional_parameters: Box::new(None),
+        token_config: Box::new(None),
         settings: None,
-    });
+    }));
     let auth: Auth = oc.into();
     match auth {
         Auth::OAuth2(flow) => {
@@ -877,16 +877,19 @@ http:
     let back = request_to_oc_http_request(&req);
     let auth = back.http.auth.unwrap();
     match auth {
-        OcAuth::Typed(OcAuthTyped::OAuth2 {
-            additional_parameters,
-            token_config,
-            settings,
-            ..
-        }) => {
-            assert!(additional_parameters.is_some());
-            assert!(token_config.is_some());
-            assert!(settings.is_some());
-        }
+        OcAuth::Typed(typed) => match *typed {
+            OcAuthTyped::OAuth2 {
+                additional_parameters,
+                token_config,
+                settings,
+                ..
+            } => {
+                assert!(additional_parameters.is_some());
+                assert!(token_config.is_some());
+                assert!(settings.is_some());
+            }
+            _ => panic!("expected OAuth2"),
+        },
         _ => panic!("expected OAuth2"),
     }
 }
