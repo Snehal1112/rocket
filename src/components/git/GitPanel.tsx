@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { CommitInfo, ConflictFile, FileDiff } from '@/lib/tauri-api';
 import { onCollectionChanged } from '@/lib/tauri-api';
-import { createGitStore, selectHasConflicts } from '@/stores/git-store';
+import { createGitStore, selectConflictFiles } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
 
 type RightPanelView =
@@ -70,8 +70,8 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const discardPendingIdentitySetup = useStore(store, (state) => state.discardPendingIdentitySetup);
   const setIdentity = useStore(store, (state) => state.setIdentity);
   const currentBranch = status?.branch ?? null;
-  const hasConflicts = useStore(store, selectHasConflicts);
-  const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
+  const conflictCount = useStore(store, (state) => selectConflictFiles(state).length);
+  const hasConflicts = conflictCount > 0;
 
   useEffect(() => {
     if (loadedRepositoryId === repositoryId) return;

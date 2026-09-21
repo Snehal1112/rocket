@@ -940,9 +940,15 @@ export function createGitStore(): StoreApi<GitState> {
   }));
 }
 
-/** True when the repository's current status has any conflicted file. Shared
- *  by GitPanel and GitLandingPanel so conflict detection isn't computed
- *  independently in two places. */
+/** All files with conflicted status in the current repository's status.
+ *  Shared by GitPanel and GitLandingPanel so conflict detection isn't
+ *  computed independently in two places (see
+ *  docs/reports/git-integration-review/02-frontend-architecture.md, dup-obs #6). */
+export function selectConflictFiles(state: GitState): FileStatus[] {
+  return state.status?.files.filter((f) => f.status === 'conflicted') ?? [];
+}
+
+/** True when the repository's current status has any conflicted file. */
 export function selectHasConflicts(state: GitState): boolean {
-  return state.status?.files.some((f) => f.status === 'conflicted') ?? false;
+  return selectConflictFiles(state).length > 0;
 }

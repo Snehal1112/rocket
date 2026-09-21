@@ -3,7 +3,12 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { GitCredentials } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
-import { createGitStore, type GitState, selectHasConflicts } from '../git-store';
+import {
+  createGitStore,
+  type GitState,
+  selectConflictFiles,
+  selectHasConflicts,
+} from '../git-store';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
@@ -1633,5 +1638,29 @@ describe('selectHasConflicts', () => {
       status: { branch: 'main', ahead: 0, behind: 0, isClean: true, files: [] },
     } as unknown as GitState;
     expect(selectHasConflicts(clean)).toBe(false);
+  });
+});
+
+describe('selectConflictFiles', () => {
+  it('returns only the conflicted files from status', () => {
+    const state = {
+      status: {
+        branch: 'main',
+        files: [
+          { path: 'a.txt', staged: false, status: 'conflicted' },
+          { path: 'b.txt', staged: false, status: 'modified' },
+          { path: 'c.txt', staged: false, status: 'conflicted' },
+        ],
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+      },
+    } as GitState;
+
+    expect(selectConflictFiles(state).map((f) => f.path)).toEqual(['a.txt', 'c.txt']);
+  });
+
+  it('returns an empty array when there is no status', () => {
+    expect(selectConflictFiles({ status: null } as GitState)).toEqual([]);
   });
 });
