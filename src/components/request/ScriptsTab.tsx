@@ -1,12 +1,12 @@
 import { PanelRight } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import {
   POST_RESPONSE_SNIPPETS,
   PRE_REQUEST_SNIPPETS,
   type ScriptPhase,
 } from '@/components/editor/rok-types';
-import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
