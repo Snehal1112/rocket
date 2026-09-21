@@ -20,6 +20,7 @@ fn exec_impl(
 ) -> Result<(String, String, i32), ScriptOpError> {
     let mut cmd = Command::new(command);
     cmd.args(args);
+    cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     if let Some(dir) = cwd {
@@ -69,8 +70,12 @@ fn exec_impl(
         }
     };
 
-    let stdout = stdout_rx.recv().unwrap_or_default();
-    let stderr = stderr_rx.recv().unwrap_or_default();
+    let stdout = stdout_rx
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .unwrap_or_default();
+    let stderr = stderr_rx
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .unwrap_or_default();
     let exit_code = status.code().unwrap_or(-1);
     Ok((stdout, stderr, exit_code))
 }
@@ -170,6 +175,30 @@ mod tests {
             200,
         );
         assert!(result.is_err(), "expected a timeout error");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_output_drain_is_bounded_by_the_timeout_even_with_a_lingering_grandchild() {
+        // The direct child (`sh`) backgrounds a grandchild (`sleep 2`) that
+        // inherits the stdout/stderr pipes and exits almost immediately
+        // itself. Without the recv_timeout fix, the background reader
+        // threads would block on read_to_string until the grandchild's pipe
+        // handle closes ~2s later, well past the 500ms timeout given here.
+        let start = Instant::now();
+        let result = exec_impl(
+            "sh",
+            &["-c".to_string(), "(sleep 2 &) ; echo done".to_string()],
+            None,
+            &HashMap::new(),
+            500,
+        );
+        let elapsed = start.elapsed();
+        assert!(result.is_ok(), "expected the direct child's exit to succeed: {result:?}");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "exec_impl should return promptly instead of blocking on the grandchild's held-open pipe, took {elapsed:?}"
+        );
     }
 
     #[cfg(unix)]

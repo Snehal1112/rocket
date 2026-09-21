@@ -205,11 +205,11 @@ extension!(
     ],
 );
 
-/// Only registered when `ScriptContext.sandbox_mode == SandboxMode::Developer`
-/// (see `run_script` below). In Safe Mode these ops do not exist in the
-/// isolate at all — `typeof fs` / `typeof process` are `'undefined'`, not
-/// "defined but throws" — matching the same narrowly-enumerated op table
-/// philosophy as `rocket_scripting_ext` above, just gated per-run.
+// Only registered when `ScriptContext.sandbox_mode == SandboxMode::Developer`
+// (see `run_script` below). In Safe Mode these ops do not exist in the
+// isolate at all — `typeof fs` / `typeof process` are `'undefined'`, not
+// "defined but throws" — matching the same narrowly-enumerated op table
+// philosophy as `rocket_scripting_ext` above, just gated per-run.
 extension!(
     rocket_scripting_dev_ext,
     ops = [
@@ -321,7 +321,7 @@ fn run_script(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_scripting::{ScriptContext, ScriptPhase, context::SandboxMode};
+    use rocket_scripting::{ScriptContext, ScriptPhase};
     use rocket_environment::VariableContext;
     use rocket_http::HttpRequest;
     use rocket_shared::types::HttpMethod;
