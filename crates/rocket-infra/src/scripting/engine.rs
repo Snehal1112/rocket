@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use deno_core::{extension, v8, JsRuntime, OpState, RuntimeOptions, op2};
-use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
+use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
-use crate::scripting::ops::{console, redact, req, res, rok};
+use crate::scripting::ops::{console, fs, process, redact, req, res, rok};
 
 /// JS scripting engine backed by `deno_core` (V8).
 ///
@@ -205,14 +205,38 @@ extension!(
     ],
 );
 
+/// Only registered when `ScriptContext.sandbox_mode == SandboxMode::Developer`
+/// (see `run_script` below). In Safe Mode these ops do not exist in the
+/// isolate at all — `typeof fs` / `typeof process` are `'undefined'`, not
+/// "defined but throws" — matching the same narrowly-enumerated op table
+/// philosophy as `rocket_scripting_ext` above, just gated per-run.
+extension!(
+    rocket_scripting_dev_ext,
+    ops = [
+        fs::op_fs_read_file,
+        fs::op_fs_write_file,
+        fs::op_fs_read_dir,
+        fs::op_fs_exists,
+        fs::op_fs_mkdir,
+        fs::op_fs_remove,
+        process::op_process_exec,
+    ],
+);
+
 fn run_script(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
 ) -> DomainResult<ScriptResult> {
     let code = ctx.code;
+    let sandbox_mode = ctx.sandbox_mode;
+
+    let mut extensions = vec![rocket_scripting_ext::init()];
+    if sandbox_mode == SandboxMode::Developer {
+        extensions.push(rocket_scripting_dev_ext::init());
+    }
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
-        extensions: vec![rocket_scripting_ext::init()],
+        extensions,
         create_params: Some(
             v8::CreateParams::default().heap_limits(0, SCRIPT_HEAP_LIMIT_BYTES),
         ),

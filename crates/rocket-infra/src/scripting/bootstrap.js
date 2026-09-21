@@ -182,6 +182,33 @@
   globalThis.rok.test   = globalThis.test;
   globalThis.rok.expect = globalThis.expect;
 
+  // ── fs / process (Developer Mode only) ────────────────────────────────────
+  // These ops only exist in the isolate when the collection's sandbox mode is
+  // Developer (see rocket_scripting_dev_ext in engine.rs) — feature-detected
+  // here rather than assumed, so Safe Mode leaves both globals entirely
+  // undefined instead of defined-but-throwing.
+  if (typeof __ops.op_fs_read_file === 'function') {
+    globalThis.fs = {
+      readFile:  (path, opts)          => __ops.op_fs_read_file(path, (opts && opts.encoding) || 'utf8'),
+      writeFile: (path, content, opts) => __ops.op_fs_write_file(path, content, (opts && opts.encoding) || 'utf8'),
+      readDir:   (path)                => JSON.parse(__ops.op_fs_read_dir(path)),
+      exists:    (path)                => __ops.op_fs_exists(path),
+      mkdir:     (path, opts)          => __ops.op_fs_mkdir(path, !!(opts && opts.recursive)),
+      remove:    (path, opts)          => __ops.op_fs_remove(path, !!(opts && opts.recursive)),
+    };
+  }
+  if (typeof __ops.op_process_exec === 'function') {
+    globalThis.process = {
+      exec: (command, args, opts) => JSON.parse(__ops.op_process_exec(
+        command,
+        JSON.stringify(args || []),
+        (opts && opts.cwd) || '',
+        JSON.stringify((opts && opts.env) || {}),
+        (opts && opts.timeoutMs) || 5000,
+      )),
+    };
+  }
+
   // Every global is wired up now. Remove the raw Deno global so the user script,
   // which runs in a later and separate execute_script() call, cannot reach any
   // deno_core built-in op such as op_print or op_panic directly.
