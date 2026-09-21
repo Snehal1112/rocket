@@ -1,5 +1,15 @@
 import { Lock, ShieldCheck, Unlock } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -38,6 +48,16 @@ export function SandboxPopover() {
     const next: CollectionSettings = { ...settings, sandboxMode: 'safe' };
     await saveCollectionSettings(activeCollection, next);
     setSettings(next);
+  }
+
+  const [showDevConfirm, setShowDevConfirm] = useState(false);
+
+  async function confirmDeveloperMode() {
+    if (!activeCollection || !settings) return;
+    const next: CollectionSettings = { ...settings, sandboxMode: 'developer' };
+    await saveCollectionSettings(activeCollection, next);
+    setSettings(next);
+    setShowDevConfirm(false);
   }
 
   return (
@@ -135,6 +155,7 @@ export function SandboxPopover() {
               {/* Developer Mode */}
               <button
                 type='button'
+                onClick={() => setShowDevConfirm(true)}
                 className={cn(
                   'w-full rounded-md p-2.5 text-left transition-all duration-150 group border',
                   mode === 'developer'
@@ -188,6 +209,25 @@ export function SandboxPopover() {
           </>
         )}
       </PopoverContent>
+      <AlertDialog open={showDevConfirm} onOpenChange={setShowDevConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enable Developer Mode?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Scripts in this collection will get real filesystem read/write and command execution
+              access on your machine — no restrictions on which files or commands. Only enable this
+              for a collection you wrote yourself or trust completely; an imported collection can
+              carry a script that does anything a normal program on your machine could do.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDeveloperMode()}>
+              Enable
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Popover>
   );
 }

@@ -75,4 +75,51 @@ describe('SandboxPopover', () => {
       ),
     );
   });
+
+  it('requires confirmation before enabling Developer Mode, and does not save on cancel', async () => {
+    usePaneStore.setState({ activeCollection: 'my-api' });
+    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
+      baseSettings({ sandboxMode: 'safe' }),
+    );
+
+    render(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
+    await user.click(await screen.findByText('Developer Mode'));
+
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Cancel/i }));
+    expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
+  });
+
+  it('saves Developer Mode only after the confirmation dialog is accepted, preserving the rest of the loaded settings', async () => {
+    usePaneStore.setState({ activeCollection: 'my-api' });
+    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
+      baseSettings({ sandboxMode: 'safe', docs: 'hello' }),
+    );
+    vi.mocked(tauriApi.saveCollectionSettings).mockResolvedValue(undefined);
+
+    render(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
+    await user.click(await screen.findByText('Developer Mode'));
+
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /Enable/i }));
+
+    // Same full-replace concern as Safe Mode's save above — must send the complete
+    // settings object, not a bare `{ sandboxMode }` literal.
+    await waitFor(() =>
+      expect(tauriApi.saveCollectionSettings).toHaveBeenCalledWith(
+        'my-api',
+        baseSettings({ sandboxMode: 'developer', docs: 'hello' }),
+      ),
+    );
+  });
 });
