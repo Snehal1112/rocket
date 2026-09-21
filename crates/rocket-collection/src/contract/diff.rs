@@ -3,6 +3,17 @@ use crate::contract::snapshot::{KeyValueEntry, RequestSignatureSnapshot};
 use crate::contract::types::BreakingChangePolicy;
 use chrono::Utc;
 
+/// Bundles the (now, method, http_path, author) cluster that every diff_*
+/// helper needs but that is identical across all call sites within a single
+/// `diff_signature` invocation. Keeps the helper signatures under clippy's
+/// too-many-arguments threshold without hurting readability.
+struct DiffContext<'a> {
+    now: chrono::DateTime<Utc>,
+    method: &'a str,
+    http_path: &'a str,
+    author: Option<&'a str>,
+}
+
 /// Pure function — no I/O, no side effects.
 /// Returns one `ChangelogEntry` per detected change, each tagged with `is_breaking`
 /// according to the supplied `BreakingChangePolicy`.
@@ -126,16 +137,19 @@ pub fn diff_signature(
         author.as_deref(),
         &mut entries,
     );
+    let ctx = DiffContext {
+        now,
+        method: &new.method,
+        http_path: &new.url_pattern,
+        author: author.as_deref(),
+    };
     diff_kv_list(
         &path,
         "form_field",
         &old.form_fields,
         &new.form_fields,
         policy,
-        now,
-        &new.method,
-        &new.url_pattern,
-        author.as_deref(),
+        &ctx,
         &mut entries,
     );
 
@@ -150,10 +164,7 @@ pub fn diff_signature(
             &old.body_field_keys,
             &new.body_field_keys,
             policy,
-            now,
-            &new.method,
-            &new.url_pattern,
-            author.as_deref(),
+            &ctx,
             &mut entries,
         );
     }
@@ -236,6 +247,13 @@ fn diff_field(
     let old_is_legacy = old_kvs.is_empty() && !old_keys.is_empty();
     let new_is_kv = !new_kvs.is_empty();
 
+    let ctx = DiffContext {
+        now,
+        method,
+        http_path,
+        author,
+    };
+
     match (old_is_legacy, new_is_kv) {
         (true, true) => {
             // Old snapshot is legacy, new is KV → migration path.
@@ -247,15 +265,11 @@ fn diff_field(
         }
         (true, false) => {
             // Both legacy → use the key-only diff (backward compat).
-            diff_key_only_list(
-                path, prefix, old_keys, new_keys, policy, now, method, http_path, author, out,
-            );
+            diff_key_only_list(path, prefix, old_keys, new_keys, policy, &ctx, out);
         }
         _ => {
             // Both KV (or both empty) → full key+value diff.
-            diff_kv_list(
-                path, prefix, old_kvs, new_kvs, policy, now, method, http_path, author, out,
-            );
+            diff_kv_list(path, prefix, old_kvs, new_kvs, policy, &ctx, out);
         }
     }
 }
@@ -286,10 +300,8 @@ fn diff_legacy_to_kv(
 
     for key in old_keys {
         if !new_key_set.contains(key.as_str()) {
-            let is_breaking = match (prefix, policy) {
-                ("header", BreakingChangePolicy::AdditiveOk) => false,
-                _ => true,
-            };
+            let is_breaking =
+                !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
             out.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path_buf.clone(),
@@ -329,10 +341,7 @@ fn diff_kv_list(
     old_kvs: &[KeyValueEntry],
     new_kvs: &[KeyValueEntry],
     policy: &BreakingChangePolicy,
-    now: chrono::DateTime<Utc>,
-    method: &str,
-    http_path: &str,
-    author: Option<&str>,
+    ctx: &DiffContext,
     out: &mut Vec<ChangelogEntry>,
 ) {
     let path_buf = path.to_path_buf();
@@ -340,45 +349,43 @@ fn diff_kv_list(
     for old_entry in old_kvs {
         match new_kvs.iter().find(|e| e.key == old_entry.key) {
             None => {
-                let is_breaking = match (prefix, policy) {
-                    ("header", BreakingChangePolicy::AdditiveOk) => false,
-                    _ => true,
-                };
+                let is_breaking =
+                    !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
                 out.push(ChangelogEntry {
-                    timestamp: now,
+                    timestamp: ctx.now,
                     request_path: path_buf.clone(),
                     field: format!("{prefix}.{}", old_entry.key),
                     change_type: ChangeType::Removed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: None,
                     is_breaking,
-                    request_method: Some(method.to_owned()),
-                    http_path: Some(http_path.to_owned()),
-                    author: author.map(ToOwned::to_owned),
+                    request_method: Some(ctx.method.to_owned()),
+                    http_path: Some(ctx.http_path.to_owned()),
+                    author: ctx.author.map(ToOwned::to_owned),
                 });
             }
             Some(new_entry) if new_entry.value != old_entry.value => {
                 // Header value changes follow the same policy as removals: only
                 // breaking under Strict. Query params and other fields remain
                 // always-breaking because their values are semantically required.
-                let is_breaking = match (prefix, policy) {
+                let is_breaking = !matches!(
+                    (prefix, policy),
                     (
                         "header",
                         BreakingChangePolicy::Lenient | BreakingChangePolicy::AdditiveOk,
-                    ) => false,
-                    _ => true,
-                };
+                    )
+                );
                 out.push(ChangelogEntry {
-                    timestamp: now,
+                    timestamp: ctx.now,
                     request_path: path_buf.clone(),
                     field: format!("{prefix}.{}", old_entry.key),
                     change_type: ChangeType::Changed,
                     old_value: Some(old_entry.value.clone()),
                     new_value: Some(new_entry.value.clone()),
                     is_breaking,
-                    request_method: Some(method.to_owned()),
-                    http_path: Some(http_path.to_owned()),
-                    author: author.map(ToOwned::to_owned),
+                    request_method: Some(ctx.method.to_owned()),
+                    http_path: Some(ctx.http_path.to_owned()),
+                    author: ctx.author.map(ToOwned::to_owned),
                 });
             }
             _ => {}
@@ -388,16 +395,16 @@ fn diff_kv_list(
     for new_entry in new_kvs {
         if !old_kvs.iter().any(|e| e.key == new_entry.key) {
             out.push(ChangelogEntry {
-                timestamp: now,
+                timestamp: ctx.now,
                 request_path: path_buf.clone(),
                 field: format!("{prefix}.{}", new_entry.key),
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(new_entry.value.clone()),
                 is_breaking: matches!(policy, BreakingChangePolicy::Strict),
-                request_method: Some(method.to_owned()),
-                http_path: Some(http_path.to_owned()),
-                author: author.map(ToOwned::to_owned),
+                request_method: Some(ctx.method.to_owned()),
+                http_path: Some(ctx.http_path.to_owned()),
+                author: ctx.author.map(ToOwned::to_owned),
             });
         }
     }
@@ -409,31 +416,26 @@ fn diff_key_only_list(
     old_keys: &[String],
     new_keys: &[String],
     policy: &BreakingChangePolicy,
-    now: chrono::DateTime<Utc>,
-    method: &str,
-    http_path: &str,
-    author: Option<&str>,
+    ctx: &DiffContext,
     out: &mut Vec<ChangelogEntry>,
 ) {
     let path_buf = path.to_path_buf();
 
     for key in old_keys {
         if !new_keys.contains(key) {
-            let is_breaking = match (prefix, policy) {
-                ("header", BreakingChangePolicy::AdditiveOk) => false,
-                _ => true,
-            };
+            let is_breaking =
+                !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
             out.push(ChangelogEntry {
-                timestamp: now,
+                timestamp: ctx.now,
                 request_path: path_buf.clone(),
                 field: format!("{prefix}.{key}"),
                 change_type: ChangeType::Removed,
                 old_value: Some(key.clone()),
                 new_value: None,
                 is_breaking,
-                request_method: Some(method.to_owned()),
-                http_path: Some(http_path.to_owned()),
-                author: author.map(ToOwned::to_owned),
+                request_method: Some(ctx.method.to_owned()),
+                http_path: Some(ctx.http_path.to_owned()),
+                author: ctx.author.map(ToOwned::to_owned),
             });
         }
     }
@@ -441,16 +443,16 @@ fn diff_key_only_list(
     for key in new_keys {
         if !old_keys.contains(key) {
             out.push(ChangelogEntry {
-                timestamp: now,
+                timestamp: ctx.now,
                 request_path: path_buf.clone(),
                 field: format!("{prefix}.{key}"),
                 change_type: ChangeType::Added,
                 old_value: None,
                 new_value: Some(key.clone()),
                 is_breaking: matches!(policy, BreakingChangePolicy::Strict),
-                request_method: Some(method.to_owned()),
-                http_path: Some(http_path.to_owned()),
-                author: author.map(ToOwned::to_owned),
+                request_method: Some(ctx.method.to_owned()),
+                http_path: Some(ctx.http_path.to_owned()),
+                author: ctx.author.map(ToOwned::to_owned),
             });
         }
     }
