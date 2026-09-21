@@ -3,7 +3,12 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { GitCredentials } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
-import { createGitStore, type GitState, selectHasConflicts } from '../git-store';
+import {
+  createGitStore,
+  type GitState,
+  selectConflictFiles,
+  selectHasConflicts,
+} from '../git-store';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   // Keep real pure helpers (parseGitNetworkError, isGitSshTrustFailure, types)
@@ -54,6 +59,10 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   gitSetRemoteUrl: vi.fn().mockResolvedValue(undefined),
   loadGitCredentials: vi.fn().mockResolvedValue(null),
   gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test User', email: 'test@example.com' }),
+  gitSetIdentity: vi.fn(),
+  gitDiffCommit: vi.fn(),
+  gitClone: vi.fn(),
+  detectClonedStructure: vi.fn(),
 }));
 
 const knownRedDescribe = process.env.GIT_SAFETY_CONTRACTS === '1' ? describe : describe.skip;
@@ -412,6 +421,152 @@ describe('git-store pull refreshes the commit log', () => {
     await store.getState().pull();
 
     expect(tauriApi.gitLog).toHaveBeenCalledWith('repo-1', 50);
+  });
+});
+
+describe('stashThenPull', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repository-test',
+      isRepo: true,
+      error: null,
+      credentials: { type: 'sshAgent' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+      status: { branch: 'main', files: [], ahead: 0, behind: 0, isClean: false },
+    });
+  });
+
+  it('stashes, pulls, and pops when every step succeeds', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashSave).toHaveBeenCalledWith('repository-test', 'Auto-stash before pull');
+    expect(gitPull).toHaveBeenCalled();
+    expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
+  });
+
+  it('does not pull when the stash save fails', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitStashSave).mockRejectedValueOnce(new Error('nothing to stash'));
+
+    await store.getState().stashThenPull();
+
+    expect(gitPull).not.toHaveBeenCalled();
+    expect(gitStashPop).not.toHaveBeenCalled();
+    expect(store.getState().error).toContain('nothing to stash');
+  });
+
+  it('does not pop the stash when pull fails', async () => {
+    const { gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockRejectedValueOnce(new Error('authentication failed'));
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashPop).not.toHaveBeenCalled();
+  });
+
+  it('does not pop the stash when the pull produces merge conflicts', async () => {
+    const { gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    // Mock gitStatus twice: first for saveStash's refreshStatus (clean), then for pull's refreshStatus (conflicted)
+    vi.mocked(tauriApi.gitStatus)
+      .mockResolvedValueOnce({
+        branch: 'main',
+        files: [],
+        ahead: 0,
+        behind: 0,
+        isClean: true,
+      })
+      .mockResolvedValueOnce({
+        branch: 'main',
+        files: [{ path: 'a.txt', staged: false, status: 'conflicted' }],
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+      });
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashPop).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale pre-existing error before checking each step', async () => {
+    const { gitStashSave, gitPull, gitStashPop } = await import('@/lib/tauri-api');
+    vi.mocked(gitPull).mockResolvedValueOnce(undefined);
+    store.setState({ error: 'stale error from an earlier push' });
+
+    await store.getState().stashThenPull();
+
+    expect(gitStashSave).toHaveBeenCalled();
+    expect(gitPull).toHaveBeenCalled();
+    expect(gitStashPop).toHaveBeenCalledWith('repository-test', 0);
+  });
+});
+
+describe('fetchThenPush', () => {
+  beforeEach(() => {
+    store.setState({
+      repositoryId: 'repository-test',
+      isRepo: true,
+      error: null,
+      credentials: { type: 'sshAgent' },
+      remotes: [{ name: 'origin', url: 'git@github.com:test/repo.git' }],
+      status: { branch: 'main', files: [], ahead: 1, behind: 0, isClean: true },
+    });
+  });
+
+  it('returns true and pushes after a successful fetch that leaves the branch not behind', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: [],
+      receivedObjects: 0,
+      receivedBytes: 0,
+    });
+    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      files: [],
+      ahead: 1,
+      behind: 0,
+      isClean: true,
+    });
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(true);
+    expect(gitPush).toHaveBeenCalled();
+  });
+
+  it('returns false and does not push when the fetch fails', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockRejectedValueOnce(new Error('authentication failed'));
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(false);
+    expect(gitPush).not.toHaveBeenCalled();
+  });
+
+  it('returns true but does not push when the post-fetch status is now behind the remote', async () => {
+    const { gitFetch, gitPush } = await import('@/lib/tauri-api');
+    vi.mocked(gitFetch).mockResolvedValueOnce({
+      updatedRefs: ['refs/heads/main'],
+      receivedObjects: 3,
+      receivedBytes: 900,
+    });
+    vi.mocked(tauriApi.gitStatus).mockResolvedValueOnce({
+      branch: 'main',
+      files: [],
+      ahead: 1,
+      behind: 2,
+      isClean: true,
+    });
+
+    const result = await store.getState().fetchThenPush();
+
+    expect(result).toBe(true);
+    expect(gitPush).not.toHaveBeenCalled();
   });
 });
 
@@ -871,6 +1026,79 @@ describe('stash', () => {
     expect(gitStashDrop).toHaveBeenCalledWith('repository-test', 0);
     expect(gitStashList).toHaveBeenCalledWith('repository-test');
     expect(gitStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkIdentity and setIdentity', () => {
+  beforeEach(() => {
+    store.setState({ repositoryId: 'repository-test', error: null });
+  });
+
+  it('checkIdentity returns the identity when name and email are set', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockResolvedValueOnce({
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+    });
+
+    const identity = await store.getState().checkIdentity();
+
+    expect(identity).toEqual({ name: 'Ada Lovelace', email: 'ada@example.com' });
+  });
+
+  it('checkIdentity returns null when the identity is blank', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockResolvedValueOnce({ name: '', email: '' });
+
+    expect(await store.getState().checkIdentity()).toBeNull();
+  });
+
+  it('checkIdentity returns null when the lookup fails', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockRejectedValueOnce(new Error('git config unreadable'));
+
+    expect(await store.getState().checkIdentity()).toBeNull();
+  });
+
+  it('setIdentity calls gitSetIdentity with the repository, name, and email', async () => {
+    vi.mocked(tauriApi.gitSetIdentity).mockResolvedValueOnce(undefined);
+
+    await store.getState().setIdentity('Ada Lovelace', 'ada@example.com');
+
+    expect(tauriApi.gitSetIdentity).toHaveBeenCalledWith(
+      'repository-test',
+      'Ada Lovelace',
+      'ada@example.com',
+    );
+    expect(store.getState().error).toBeNull();
+  });
+
+  it('setIdentity sets an error when the save fails', async () => {
+    vi.mocked(tauriApi.gitSetIdentity).mockRejectedValueOnce(new Error('permission denied'));
+
+    await store.getState().setIdentity('Ada Lovelace', 'ada@example.com');
+
+    expect(store.getState().error).toContain('permission denied');
+  });
+});
+
+describe('loadCommitDiff', () => {
+  beforeEach(() => {
+    store.setState({ repositoryId: 'repository-test' });
+  });
+
+  it('resolves the diffs for the given commit', async () => {
+    const diffs = [{ path: 'a.txt', oldContent: 'old', newContent: 'new', hunks: [] }];
+    vi.mocked(tauriApi.gitDiffCommit).mockResolvedValueOnce(diffs);
+
+    const result = await store.getState().loadCommitDiff('abc123');
+
+    expect(tauriApi.gitDiffCommit).toHaveBeenCalledWith('repository-test', 'abc123');
+    expect(result).toEqual(diffs);
+  });
+
+  it('rejects when the IPC call fails, without touching store error state', async () => {
+    vi.mocked(tauriApi.gitDiffCommit).mockRejectedValueOnce(new Error('object not found'));
+
+    await expect(store.getState().loadCommitDiff('abc123')).rejects.toThrow('object not found');
+    expect(store.getState().error).toBeNull();
   });
 });
 
@@ -1369,6 +1597,27 @@ describe('git-store network actions with no remote configured', () => {
   });
 });
 
+describe('cloneRepository and detectClonedRepoStructure', () => {
+  it('cloneRepository calls gitClone with the given url, capability, and credentials', async () => {
+    vi.mocked(tauriApi.gitClone).mockResolvedValueOnce(undefined);
+    const creds: GitCredentials = { type: 'sshAgent' };
+
+    await store.getState().cloneRepository('https://example.com/repo.git', 'cap-1', creds);
+
+    expect(tauriApi.gitClone).toHaveBeenCalledWith('https://example.com/repo.git', 'cap-1', creds);
+  });
+
+  it('detectClonedRepoStructure calls detectClonedStructure with the given path', async () => {
+    const structure = { kind: 'unknown' as const, workspacePath: null, collections: [] };
+    vi.mocked(tauriApi.detectClonedStructure).mockResolvedValueOnce(structure);
+
+    const result = await store.getState().detectClonedRepoStructure('/tmp/cloned-repo');
+
+    expect(tauriApi.detectClonedStructure).toHaveBeenCalledWith('/tmp/cloned-repo');
+    expect(result).toEqual(structure);
+  });
+});
+
 describe('selectHasConflicts', () => {
   it('is true when any status file is conflicted', () => {
     const state = {
@@ -1389,5 +1638,29 @@ describe('selectHasConflicts', () => {
       status: { branch: 'main', ahead: 0, behind: 0, isClean: true, files: [] },
     } as unknown as GitState;
     expect(selectHasConflicts(clean)).toBe(false);
+  });
+});
+
+describe('selectConflictFiles', () => {
+  it('returns only the conflicted files from status', () => {
+    const state = {
+      status: {
+        branch: 'main',
+        files: [
+          { path: 'a.txt', staged: false, status: 'conflicted' },
+          { path: 'b.txt', staged: false, status: 'modified' },
+          { path: 'c.txt', staged: false, status: 'conflicted' },
+        ],
+        ahead: 0,
+        behind: 0,
+        isClean: false,
+      },
+    } as GitState;
+
+    expect(selectConflictFiles(state).map((f) => f.path)).toEqual(['a.txt', 'c.txt']);
+  });
+
+  it('returns an empty array when there is no status', () => {
+    expect(selectConflictFiles({ status: null } as GitState)).toEqual([]);
   });
 });

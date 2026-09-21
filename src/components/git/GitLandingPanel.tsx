@@ -11,7 +11,6 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
-  X,
 } from 'lucide-react';
 import { useState } from 'react';
 import gitIcon from '@/assets/git-icon.svg';
@@ -39,14 +38,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { cn } from '@/lib/utils';
 import { resolveActiveRemote, selectHasConflicts } from '@/stores/git-store';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
+import { GitErrorBanner } from './GitErrorBanner';
 
 export function GitLandingPanel() {
   const status = useGitStore((s) => s.status);
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const fetch = useGitStore((s) => s.fetch);
-  const saveStash = useGitStore((s) => s.saveStash);
-  const popStash = useGitStore((s) => s.popStash);
+  const stashThenPull = useGitStore((s) => s.stashThenPull);
+  const fetchThenPush = useGitStore((s) => s.fetchThenPush);
   const error = useGitStore((s) => s.error);
   const clearError = useGitStore((s) => s.clearError);
   const credentials = useGitStore((s) => s.credentials);
@@ -111,27 +111,7 @@ export function GitLandingPanel() {
     setShowStashDialog(false);
     setPulling(true);
     try {
-      clearError();
-      await saveStash('Auto-stash before pull');
-      if (gitStoreApi.getState().error) {
-        // Stash itself failed — nothing changed, nothing to pull or pop.
-        return;
-      }
-      clearError();
-      await pull();
-      if (gitStoreApi.getState().error) {
-        // Pull failed outright (network/auth/etc.) — leave the stash in place
-        // rather than popping it on top of an unknown working-tree state.
-        return;
-      }
-      // After pull, check whether it produced merge conflicts.
-      // If so, do NOT restore the stash — applying it on top of a conflicted
-      // index would corrupt the working tree with doubled conflicts.
-      if (selectHasConflicts(gitStoreApi.getState())) {
-        // Leave the stash in place; the user can pop it after resolving conflicts.
-        return;
-      }
-      await popStash(0);
+      await stashThenPull();
       if (!gitStoreApi.getState().error) {
         setLastFetched(new Date().toLocaleTimeString());
       }
@@ -179,15 +159,10 @@ export function GitLandingPanel() {
     setShowFetchFirstDialog(false);
     setPushing(true);
     try {
-      await fetch();
-      if (gitStoreApi.getState().error) return;
-      setLastFetched(new Date().toLocaleTimeString());
-      // Re-check status after fetch — if now behind, abort push.
-      const { status: freshStatus } = gitStoreApi.getState();
-      if (freshStatus && freshStatus.behind > 0) {
-        return;
+      const fetchSucceeded = await fetchThenPush();
+      if (fetchSucceeded) {
+        setLastFetched(new Date().toLocaleTimeString());
       }
-      await push();
     } finally {
       setPushing(false);
     }
@@ -382,24 +357,7 @@ export function GitLandingPanel() {
           </div>
 
           {/* Inline error alert for failed push/pull/fetch operations. */}
-          {error && (
-            <div
-              role='alert'
-              className='flex items-start gap-2 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-xs text-destructive'
-            >
-              <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
-              <span className='flex-1 wrap-break-word'>{error}</span>
-              <Button
-                variant='ghost'
-                size='icon'
-                className='h-4 w-4 shrink-0'
-                onClick={clearError}
-                aria-label='Dismiss error'
-              >
-                <X className='h-3 w-3' />
-              </Button>
-            </div>
-          )}
+          {error && <GitErrorBanner message={error} onDismiss={clearError} />}
 
           {/* Sync status + last fetched timestamp in a single footer row */}
           <div className='flex items-center justify-between text-xs text-muted-foreground'>

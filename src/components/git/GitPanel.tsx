@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Package } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, Package } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { BranchSelector } from '@/components/git/BranchSelector';
@@ -24,8 +24,8 @@ import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { CommitInfo, ConflictFile, FileDiff } from '@/lib/tauri-api';
-import { gitDiffCommit, gitSetIdentity, onCollectionChanged } from '@/lib/tauri-api';
-import { createGitStore, selectHasConflicts } from '@/stores/git-store';
+import { onCollectionChanged } from '@/lib/tauri-api';
+import { createGitStore, selectConflictFiles } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
 
 type RightPanelView =
@@ -49,10 +49,13 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const [showRemotesDialog, setShowRemotesDialog] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [store] = useState(() => createGitStore());
+  const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
+  const [loadingCommitDiff, setLoadingCommitDiff] = useState(false);
 
   const showCredentialsDialog = useStore(store, (state) => state.showCredentialsDialog);
   const setRepository = useStore(store, (state) => state.setRepository);
   const refreshLog = useStore(store, (state) => state.refreshLog);
+  const loadCommitDiff = useStore(store, (state) => state.loadCommitDiff);
   const refreshStashes = useStore(store, (state) => state.refreshStashes);
   const refreshStatus = useStore(store, (state) => state.refreshStatus);
   const status = useStore(store, (state) => state.status);
@@ -65,9 +68,10 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const identitySetupInitialEmail = useStore(store, (state) => state.identitySetupInitialEmail);
   const activatePendingCredentials = useStore(store, (state) => state.activatePendingCredentials);
   const discardPendingIdentitySetup = useStore(store, (state) => state.discardPendingIdentitySetup);
+  const setIdentity = useStore(store, (state) => state.setIdentity);
   const currentBranch = status?.branch ?? null;
-  const hasConflicts = useStore(store, selectHasConflicts);
-  const conflictCount = status?.files.filter((f) => f.status === 'conflicted').length ?? 0;
+  const conflictCount = useStore(store, (state) => selectConflictFiles(state).length);
+  const hasConflicts = conflictCount > 0;
 
   useEffect(() => {
     if (loadedRepositoryId === repositoryId) return;
@@ -86,11 +90,8 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   }, []);
 
   const handleIdentitySetupConfirm = async (name: string, email: string) => {
-    try {
-      await gitSetIdentity(repositoryId, name, email);
-    } catch {
-      // Non-blocking — proceed even if identity save fails.
-    }
+    await setIdentity(name, email);
+    store.setState({ error: null }); // Non-blocking — proceed even if identity save fails.
     activatePendingCredentials();
   };
 
@@ -99,17 +100,24 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   };
 
   const handleCommitClick = async (commit: CommitInfo) => {
+    setCommitDiffError(null);
+    setLoadingCommitDiff(true);
     try {
-      const diffs = await gitDiffCommit(repositoryId, commit.fullId);
+      const diffs = await loadCommitDiff(commit.fullId);
       setRightPanel({ kind: 'commitDiff', commit, diffs });
-    } catch {
-      // If diff fails, silently stay on commits view.
+    } catch (e) {
+      setCommitDiffError(String(e));
+    } finally {
+      setLoadingCommitDiff(false);
     }
   };
 
   // Load the commit log when the commits view is opened.
   useEffect(() => {
-    if (rightPanel.kind === 'commits') void refreshLog();
+    if (rightPanel.kind === 'commits') {
+      setCommitDiffError(null);
+      void refreshLog();
+    }
   }, [rightPanel.kind, refreshLog]);
 
   // Refresh the stash list when the stash view is opened.
@@ -349,7 +357,26 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                   />
                 </Suspense>
               )}
-              {rightPanel.kind === 'commits' && <GitCommitLog onCommitClick={handleCommitClick} />}
+              {rightPanel.kind === 'commits' && (
+                <div className='flex flex-col h-full'>
+                  {commitDiffError && (
+                    <div
+                      role='alert'
+                      className='px-3 py-2 text-xs text-destructive border-b border-border/70 bg-destructive/10 shrink-0'
+                    >
+                      Failed to load commit diff: {commitDiffError}
+                    </div>
+                  )}
+                  <div className='flex-1 overflow-hidden relative'>
+                    <GitCommitLog onCommitClick={handleCommitClick} />
+                    {loadingCommitDiff && (
+                      <div className='absolute inset-0 flex items-center justify-center bg-background/60'>
+                        <Loader2 className='h-5 w-5 animate-spin text-muted-foreground' />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {rightPanel.kind === 'commitDiff' && (
                 <CommitDiffView
                   diffs={rightPanel.diffs}

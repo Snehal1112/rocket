@@ -2,7 +2,6 @@ import { Check, Loader2, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { gitGetIdentity, gitSetIdentity } from '@/lib/tauri-api';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 import { GitIdentityDialog } from './GitIdentityDialog';
 
@@ -15,6 +14,8 @@ export function GitCommitForm() {
   const repositoryId = useGitStore((state) => state.repositoryId);
   const error = useGitStore((state) => state.error);
   const clearError = useGitStore((state) => state.clearError);
+  const checkIdentity = useGitStore((state) => state.checkIdentity);
+  const setIdentity = useGitStore((state) => state.setIdentity);
   const gitStoreApi = useGitStoreApi();
 
   const stagedCount = status?.files.filter((f) => f.staged).length ?? 0;
@@ -36,16 +37,8 @@ export function GitCommitForm() {
     if (!message.trim() || stagedCount === 0) return;
     if (!repositoryId) return;
 
-    // Check identity; treat any error as "identity unknown" — show dialog.
-    let identityMissing = false;
-    try {
-      const identity = await gitGetIdentity(repositoryId);
-      identityMissing = !identity.name.trim() || !identity.email.trim();
-    } catch {
-      identityMissing = true;
-    }
-
-    if (identityMissing) {
+    const identity = await checkIdentity();
+    if (!identity) {
       setShowIdentityDialog(true);
       return;
     }
@@ -56,12 +49,9 @@ export function GitCommitForm() {
   const handleIdentityConfirm = async (name: string, email: string) => {
     setShowIdentityDialog(false);
     if (!repositoryId) return;
-    try {
-      await gitSetIdentity(repositoryId, name, email);
-    } catch (e) {
-      gitStoreApi.setState({ error: `Failed to save git identity: ${String(e)}` });
-      return;
-    }
+    gitStoreApi.setState({ error: null });
+    await setIdentity(name, email);
+    if (gitStoreApi.getState().error) return;
     await doCommit();
   };
 

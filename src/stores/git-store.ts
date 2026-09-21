@@ -1,20 +1,26 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   type BranchList,
+  type ClonedRepoStructure,
   type CommitInfo,
   type ConflictFile,
   type ConflictResolution,
+  detectClonedStructure,
+  type FileDiff,
   type FileStatus,
   type GitCredentials,
+  type GitIdentity,
   type GitSshTrustFailure,
   gitAbortMerge,
   gitAddRemote,
   gitBranches,
   gitCheckoutRemoteBranch,
+  gitClone,
   gitCommit,
   gitConflicts,
   gitCreateBranch,
   gitDeleteBranch,
+  gitDiffCommit,
   gitDiscard,
   gitFetch,
   gitGetIdentity,
@@ -27,6 +33,7 @@ import {
   gitPush,
   gitRemoveRemote,
   gitResolveConflict,
+  gitSetIdentity,
   gitSetRemoteUrl,
   gitStage,
   gitStashApply,
@@ -84,6 +91,11 @@ export interface GitState {
   refreshBranches: () => Promise<void>;
   refreshRemotes: () => Promise<void>;
   refreshLog: (limit?: number) => Promise<void>;
+  /** Fetch the full per-file diff for a single commit. Thin wrapper around
+   *  the IPC call so components read `repositoryId` from the store instead
+   *  of importing gitDiffCommit directly. Rethrows on failure so the caller
+   *  can render an actionable error instead of discarding it. */
+  loadCommitDiff: (oid: string) => Promise<FileDiff[]>;
   resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
   abortMerge: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
@@ -101,6 +113,12 @@ export interface GitState {
   dropStashMany: (indices: number[]) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
   checkoutRemoteBranch: (name: string, force?: boolean, asName?: string) => Promise<void>;
+  /** Return the repository's configured git identity, or null if it is
+   *  unset or the lookup fails — both are treated as "identity unknown" by
+   *  callers (see GitCommitForm). */
+  checkIdentity: () => Promise<GitIdentity | null>;
+  /** Save the repository's git identity (user.name/user.email). */
+  setIdentity: (name: string, email: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   mergeBranch: (name: string) => Promise<void>;
@@ -112,9 +130,28 @@ export interface GitState {
   push: (remote?: string, force?: boolean) => Promise<void>;
   pull: (remote?: string) => Promise<void>;
   fetch: (remote?: string) => Promise<void>;
+  /** Stash working-tree changes, pull, then restore the stash — stopping
+   *  immediately if any step fails or the pull produces merge conflicts.
+   *  Extracted from GitLandingPanel so the sequencing is unit-testable
+   *  without rendering the component (see
+   *  docs/reports/git-integration-review/02-frontend-architecture.md, F-13). */
+  stashThenPull: () => Promise<void>;
+  /** Fetch, then push only if the fetch succeeded and did not leave the
+   *  branch behind the remote. Resolves whether the fetch step itself
+   *  succeeded (independent of whether push ran or succeeded) — the caller
+   *  uses that alone to decide whether to record a "last fetched" timestamp. */
+  fetchThenPush: () => Promise<boolean>;
   clearError: () => void;
   reset: () => void;
   initRepo: (repositoryId: string) => Promise<void>;
+  /** Thin passthrough to the clone IPC call, used before a repository is
+   *  loaded into this store (see GitCloneDialog). The component owns all
+   *  clone-flow sequencing, request-id guarding, and error handling — this
+   *  exists only so the panel's Git IPC calls all go through the store.
+   *  Rejections propagate to the caller. */
+  cloneRepository: (url: string, capability: string, creds: GitCredentials) => Promise<void>;
+  /** Thin passthrough to the post-clone structure-detection IPC call. */
+  detectClonedRepoStructure: (path: string) => Promise<ClonedRepoStructure>;
 }
 
 /**
@@ -361,6 +398,12 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
+    loadCommitDiff: async (oid) => {
+      const { repositoryId } = get();
+      if (!repositoryId) throw new Error('No repository loaded.');
+      return gitDiffCommit(repositoryId, oid);
+    },
+
     // Stage the given file paths.
     stageFiles: async (files: string[]) => {
       const { repositoryId } = get();
@@ -577,6 +620,28 @@ export function createGitStore(): StoreApi<GitState> {
         await get().refreshBranches();
       } catch (e) {
         set({ error: String(e) });
+      }
+    },
+
+    checkIdentity: async () => {
+      const { repositoryId } = get();
+      if (!repositoryId) return null;
+      try {
+        const identity = await gitGetIdentity(repositoryId);
+        if (!identity.name.trim() || !identity.email.trim()) return null;
+        return identity;
+      } catch {
+        return null;
+      }
+    },
+
+    setIdentity: async (name, email) => {
+      const { repositoryId } = get();
+      if (!repositoryId) return;
+      try {
+        await gitSetIdentity(repositoryId, name, email);
+      } catch (e) {
+        set({ error: `Failed to save git identity: ${String(e)}` });
       }
     },
 
@@ -799,6 +864,40 @@ export function createGitStore(): StoreApi<GitState> {
       }
     },
 
+    stashThenPull: async () => {
+      get().clearError();
+      await get().saveStash('Auto-stash before pull');
+      if (get().error) {
+        // Stash itself failed — nothing changed, nothing to pull or pop.
+        return;
+      }
+      get().clearError();
+      await get().pull();
+      if (get().error) {
+        // Pull failed outright (network/auth/etc.) — leave the stash in place
+        // rather than popping it on top of an unknown working-tree state.
+        return;
+      }
+      // After pull, check whether it produced merge conflicts.
+      // If so, do NOT restore the stash — applying it on top of a conflicted
+      // index would corrupt the working tree with doubled conflicts.
+      if (selectHasConflicts(get())) {
+        // Leave the stash in place; the user can pop it after resolving conflicts.
+        return;
+      }
+      await get().popStash(0);
+    },
+
+    fetchThenPush: async () => {
+      await get().fetch();
+      if (get().error) return false;
+      // Re-check status after fetch — if now behind, abort push.
+      const { status } = get();
+      if (status && status.behind > 0) return true;
+      await get().push();
+      return true;
+    },
+
     clearError: () => set({ error: null }),
 
     // Initialize a new git repository then load it into the store.
@@ -810,6 +909,9 @@ export function createGitStore(): StoreApi<GitState> {
         set({ error: String(e) });
       }
     },
+
+    cloneRepository: (url, capability, creds) => gitClone(url, capability, creds),
+    detectClonedRepoStructure: (path) => detectClonedStructure(path),
 
     // Reset the store back to its initial state.
     reset: () => {
@@ -838,9 +940,15 @@ export function createGitStore(): StoreApi<GitState> {
   }));
 }
 
-/** True when the repository's current status has any conflicted file. Shared
- *  by GitPanel and GitLandingPanel so conflict detection isn't computed
- *  independently in two places. */
+/** All files with conflicted status in the current repository's status.
+ *  Shared by GitPanel and GitLandingPanel so conflict detection isn't
+ *  computed independently in two places (see
+ *  docs/reports/git-integration-review/02-frontend-architecture.md, dup-obs #6). */
+export function selectConflictFiles(state: GitState): FileStatus[] {
+  return state.status?.files.filter((f) => f.status === 'conflicted') ?? [];
+}
+
+/** True when the repository's current status has any conflicted file. */
 export function selectHasConflicts(state: GitState): boolean {
-  return state.status?.files.some((f) => f.status === 'conflicted') ?? false;
+  return selectConflictFiles(state).length > 0;
 }

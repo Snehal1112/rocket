@@ -16,9 +16,7 @@ import {
   type CloneDestinationGrant,
   type ClonedRepoStructure,
   type CollectionScanResult,
-  detectClonedStructure,
   type GitCredentials,
-  gitClone,
   selectCloneDestination,
 } from '@/lib/tauri-api';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
@@ -47,6 +45,8 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const requestIdRef = useRef(0);
 
   const credentials = useGitStore((s) => s.credentials);
+  const cloneRepository = useGitStore((s) => s.cloneRepository);
+  const detectClonedRepoStructure = useGitStore((s) => s.detectClonedRepoStructure);
   const gitStoreApi = useGitStoreApi();
   const openFromDiskMutation = useOpenWorkspaceFromDisk();
   const switchWorkspaceMutation = useSwitchWorkspace();
@@ -90,7 +90,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
   const handlePostClone = useCallback(
     async (clonedPath: string) => {
       const myRequestId = requestIdRef.current;
-      const structure: ClonedRepoStructure = await detectClonedStructure(clonedPath);
+      const structure: ClonedRepoStructure = await detectClonedRepoStructure(clonedPath);
       if (requestIdRef.current !== myRequestId) return;
 
       if (structure.kind === 'workspace' && structure.workspacePath) {
@@ -113,7 +113,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       setCollections([]);
       setStep('picker');
     },
-    [handleOpenWorkspace],
+    [handleOpenWorkspace, detectClonedRepoStructure],
   );
 
   const performClone = useCallback(
@@ -128,7 +128,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
       setError(null);
       setStep('progress');
       try {
-        await gitClone(repoUrl.trim(), destination.capability, creds);
+        await cloneRepository(repoUrl.trim(), destination.capability, creds);
         if (requestIdRef.current !== myRequestId) return;
         await handlePostClone(destination.displayPath);
       } catch (e) {
@@ -139,7 +139,7 @@ export function GitCloneDialog({ open, onOpenChange }: Props) {
         setStep('input');
       }
     },
-    [destination, handlePostClone, repoUrl],
+    [cloneRepository, destination, handlePostClone, repoUrl],
   );
 
   // Continue exactly once when credentials arrive after the credentials dialog.

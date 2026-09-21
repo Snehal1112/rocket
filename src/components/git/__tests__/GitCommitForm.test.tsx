@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { GitCommitForm } from '@/components/git/GitCommitForm';
-import type * as tauriApi from '@/lib/tauri-api';
+import * as tauriApi from '@/lib/tauri-api';
 import { createGitStore } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
 import { createDeferred } from '@/test/deferred';
@@ -12,6 +12,7 @@ vi.mock('@/lib/tauri-api', async () => {
   return {
     ...actual,
     gitGetIdentity: vi.fn().mockResolvedValue({ name: 'Test', email: 'test@example.com' }),
+    gitSetIdentity: vi.fn(),
   };
 });
 
@@ -74,5 +75,31 @@ describe('GitCommitForm failure handling', () => {
     expect(commitButton).toHaveAttribute('aria-busy', 'true');
     deferred.resolve();
     await vi.waitFor(() => expect(commitButton).toHaveAttribute('aria-busy', 'false'));
+  });
+});
+
+describe('GitCommitForm identity setup', () => {
+  it('prompts for identity before committing when none is configured, then commits after it is saved', async () => {
+    vi.mocked(tauriApi.gitGetIdentity).mockResolvedValueOnce({ name: '', email: '' });
+    vi.mocked(tauriApi.gitSetIdentity).mockResolvedValueOnce(undefined);
+    const commitChanges = vi.fn().mockResolvedValue(undefined);
+    renderForm(commitChanges);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('Commit message'), 'fix: broken thing');
+    await user.click(screen.getByRole('button', { name: /commit 1 file/i }));
+
+    // GitIdentityDialog's actual title is "Git Author Identity" and its
+    // default confirm button label is "Save & Commit" (see
+    // src/components/git/GitIdentityDialog.tsx) — not the guessed
+    // "git identity" / "Save identity" strings.
+    expect(await screen.findByText(/git author identity/i)).toBeInTheDocument();
+    expect(commitChanges).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText(/name/i), 'Ada Lovelace');
+    await user.type(screen.getByLabelText(/email/i), 'ada@example.com');
+    await user.click(screen.getByRole('button', { name: /save & commit/i }));
+
+    await vi.waitFor(() => expect(commitChanges).toHaveBeenCalledWith('fix: broken thing'));
   });
 });

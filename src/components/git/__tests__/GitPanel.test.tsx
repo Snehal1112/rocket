@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitPanel } from '@/components/git/GitPanel';
+import type { CommitInfo } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
 
@@ -17,11 +18,13 @@ vi.mock('@/lib/tauri-api', async () => {
     gitBranches: vi.fn().mockResolvedValue({ current: 'main', local: [], remote: [] }),
     gitListRemotes: vi.fn().mockResolvedValue([]),
     gitStashList: vi.fn().mockResolvedValue([]),
+    gitLog: vi.fn().mockResolvedValue([]),
     loadGitCredentials: vi.fn().mockResolvedValue(null),
     // biome-ignore lint/suspicious/noEmptyBlockStatements: unlisten stub for onCollectionChanged.
     onCollectionChanged: vi.fn().mockResolvedValue(() => {}),
     gitDiff: vi.fn(),
     gitDiffStaged: vi.fn(),
+    gitDiffCommit: vi.fn(),
     gitStage: vi.fn(),
   };
 });
@@ -216,5 +219,58 @@ describe('GitPanel diff view invalidation', () => {
     // it re-derived the open file from fresh status instead of the stale snapshot
     // captured when the user first clicked it.
     await vi.waitFor(() => expect(tauriApi.gitDiffStaged).toHaveBeenCalledWith('repo-a', 'a.txt'));
+  });
+});
+
+describe('GitPanel commit diff loading', () => {
+  const commit: CommitInfo = {
+    id: 'abc1234',
+    fullId: 'abc1234abc1234abc1234',
+    message: 'test commit',
+    author: 'Test User',
+    authorEmail: 'test@example.com',
+    timestamp: '2026-01-01T00:00:00Z',
+    filesChanged: 1,
+  };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.gitIsRepo).mockResolvedValue(true);
+    vi.mocked(tauriApi.gitLog).mockResolvedValue([commit]);
+  });
+
+  async function renderReadyPanelOnCommitsView() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <GitPanel repositoryId='repo-a' repositoryLabel='Repo A' />
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /commits/i }));
+    await screen.findByRole('button', { name: /test commit/i });
+    return user;
+  }
+
+  it('shows an error and stays on the commits view when loading a commit diff fails', async () => {
+    vi.mocked(tauriApi.gitDiffCommit).mockRejectedValueOnce(new Error('object not found'));
+    const user = await renderReadyPanelOnCommitsView();
+
+    await user.click(screen.getByRole('button', { name: /test commit/i }));
+
+    expect(await screen.findByText(/object not found/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /test commit/i })).toBeInTheDocument();
+  });
+
+  it('opens the commit diff view when loading succeeds', async () => {
+    vi.mocked(tauriApi.gitDiffCommit).mockResolvedValueOnce([
+      { path: 'a.txt', oldContent: 'old', newContent: 'new', hunks: [] },
+    ]);
+    const user = await renderReadyPanelOnCommitsView();
+
+    await user.click(screen.getByRole('button', { name: /test commit/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /test commit/i })).not.toBeInTheDocument();
+    });
   });
 });
