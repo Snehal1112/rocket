@@ -362,6 +362,14 @@ pub fn git_stash_drop(
     svc.stash_drop(&collection_path, index)
 }
 
+pub fn git_stash_diff(
+    collection_path: String,
+    index: usize,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<FileDiff>, DomainError> {
+    svc.stash_diff(&collection_path, index)
+}
+
 pub fn git_conflicts(
     collection_path: String,
     svc: State<'_, GitAppService>,
@@ -713,6 +721,17 @@ pub fn git_stash_drop_v2(
 ) -> Result<(), DomainError> {
     let path = resolve_repository_path(&repository_id, workspace_svc)?;
     git_stash_drop(path, index, svc)
+}
+
+#[tauri::command]
+pub fn git_stash_diff_v2(
+    repository_id: String,
+    index: usize,
+    workspace_svc: State<'_, Mutex<WorkspaceService>>,
+    svc: State<'_, GitAppService>,
+) -> Result<Vec<FileDiff>, DomainError> {
+    let path = resolve_repository_path(&repository_id, workspace_svc)?;
+    git_stash_diff(path, index, svc)
 }
 
 #[tauri::command]

@@ -208,6 +208,10 @@ impl GitService for Git2Service {
         stash::stash_drop(path, index)
     }
 
+    fn stash_diff(&self, path: &str, index: usize) -> DomainResult<Vec<FileDiff>> {
+        stash::stash_diff(path, index)
+    }
+
     fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>> {
         conflict::conflicts(path)
     }
@@ -684,6 +688,31 @@ mod tests {
         assert_eq!(stashes.len(), 1); // still there
         let content = fs::read_to_string(dir.path().join("test.bru")).unwrap();
         assert_eq!(content, "stash this"); // restored
+    }
+
+    #[test]
+    fn stash_diff_returns_file_contents() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "changed for stash diff").expect("write file");
+        svc.stash_save(&path, "diff me").expect("stash save");
+
+        let diffs = svc.stash_diff(&path, 0).expect("stash diff");
+
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].path, "test.bru");
+        assert_eq!(diffs[0].old_content.as_deref(), Some("meta { name: Test }"));
+        assert_eq!(diffs[0].new_content.as_deref(), Some("changed for stash diff"));
+    }
+
+    #[test]
+    fn stash_diff_out_of_range_fails() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("test.bru"), "changed").expect("write file");
+        svc.stash_save(&path, "only one").expect("stash save");
+
+        assert!(svc.stash_diff(&path, 5).is_err());
     }
 
     #[test]

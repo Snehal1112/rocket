@@ -23,7 +23,7 @@ import { GitRemotesDialog } from '@/components/git/GitRemotesDialog';
 import { GitStashSection } from '@/components/git/GitStashSection';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { CommitInfo, ConflictFile, FileDiff } from '@/lib/tauri-api';
+import type { CommitInfo, ConflictFile, FileDiff, StashEntry } from '@/lib/tauri-api';
 import { onCollectionChanged } from '@/lib/tauri-api';
 import { createGitStore, selectConflictFiles } from '@/stores/git-store';
 import { GitStoreProvider } from '@/stores/git-store-context';
@@ -34,7 +34,8 @@ type RightPanelView =
   | { kind: 'conflict'; conflictFile: ConflictFile }
   | { kind: 'commits' }
   | { kind: 'commitDiff'; commit: CommitInfo; diffs: FileDiff[] }
-  | { kind: 'stashes' };
+  | { kind: 'stashes' }
+  | { kind: 'stashDiff'; stash: StashEntry; diffs: FileDiff[] };
 
 interface GitPanelProps {
   repositoryId: string;
@@ -51,11 +52,14 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
   const [store] = useState(() => createGitStore());
   const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
   const [loadingCommitDiff, setLoadingCommitDiff] = useState(false);
+  const [stashDiffError, setStashDiffError] = useState<string | null>(null);
+  const [loadingStashDiff, setLoadingStashDiff] = useState(false);
 
   const showCredentialsDialog = useStore(store, (state) => state.showCredentialsDialog);
   const setRepository = useStore(store, (state) => state.setRepository);
   const refreshLog = useStore(store, (state) => state.refreshLog);
   const loadCommitDiff = useStore(store, (state) => state.loadCommitDiff);
+  const loadStashDiff = useStore(store, (state) => state.loadStashDiff);
   const refreshStashes = useStore(store, (state) => state.refreshStashes);
   const refreshStatus = useStore(store, (state) => state.refreshStatus);
   const status = useStore(store, (state) => state.status);
@@ -112,6 +116,19 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
     }
   };
 
+  const handleStashClick = async (stash: StashEntry) => {
+    setStashDiffError(null);
+    setLoadingStashDiff(true);
+    try {
+      const diffs = await loadStashDiff(stash.index);
+      setRightPanel({ kind: 'stashDiff', stash, diffs });
+    } catch (e) {
+      setStashDiffError(String(e));
+    } finally {
+      setLoadingStashDiff(false);
+    }
+  };
+
   // Load the commit log when the commits view is opened.
   useEffect(() => {
     if (rightPanel.kind === 'commits') {
@@ -122,7 +139,10 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
 
   // Refresh the stash list when the stash view is opened.
   useEffect(() => {
-    if (rightPanel.kind === 'stashes') void refreshStashes();
+    if (rightPanel.kind === 'stashes') {
+      setStashDiffError(null);
+      void refreshStashes();
+    }
   }, [rightPanel.kind, refreshStashes]);
 
   // Refresh git status when collection files change (e.g. delete/rename in sidebar).
@@ -317,6 +337,8 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                   {rightPanel.kind === 'commitDiff' &&
                     `${rightPanel.commit.id} — ${rightPanel.commit.message.slice(0, 40)}`}
                   {rightPanel.kind === 'stashes' && 'Stashes'}
+                  {rightPanel.kind === 'stashDiff' &&
+                    `stash@{${rightPanel.stash.index}} — ${rightPanel.stash.message.slice(0, 40)}`}
                 </span>
               </div>
             )}
@@ -385,11 +407,33 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                 />
               )}
               {rightPanel.kind === 'stashes' && (
-                <div className='overflow-y-auto h-full'>
-                  <div className='p-4'>
-                    <GitStashSection />
+                <div className='flex flex-col h-full'>
+                  {stashDiffError && (
+                    <div
+                      role='alert'
+                      className='px-3 py-2 text-xs text-destructive border-b border-border/70 bg-destructive/10 shrink-0'
+                    >
+                      Failed to load stash diff: {stashDiffError}
+                    </div>
+                  )}
+                  <div className='flex-1 overflow-y-auto relative'>
+                    <div className='p-4'>
+                      <GitStashSection onStashClick={(stash) => void handleStashClick(stash)} />
+                    </div>
+                    {loadingStashDiff && (
+                      <div className='absolute inset-0 flex items-center justify-center bg-background/60'>
+                        <Loader2 className='h-5 w-5 animate-spin text-muted-foreground' />
+                      </div>
+                    )}
                   </div>
                 </div>
+              )}
+              {rightPanel.kind === 'stashDiff' && (
+                <CommitDiffView
+                  diffs={rightPanel.diffs}
+                  repositoryId={repositoryId}
+                  repositoryLabel={repositoryLabel}
+                />
               )}
             </div>
           </div>

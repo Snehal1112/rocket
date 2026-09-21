@@ -239,6 +239,10 @@ impl GitAppService {
         Ok(())
     }
 
+    pub fn stash_diff(&self, path: &str, index: usize) -> DomainResult<Vec<FileDiff>> {
+        self.git.stash_diff(path, index)
+    }
+
     // Conflicts
     pub fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>> {
         let files = self.git.conflicts(path)?;

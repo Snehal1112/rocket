@@ -1,6 +1,9 @@
+use std::ops::Not;
+
 use git2::Repository;
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::diff::FileDiff;
 use crate::stash::StashEntry;
 
 #[tracing::instrument(name = "git_stash_list", fields(repo_path = %path))]
@@ -92,6 +95,95 @@ pub(super) fn stash_list(path: &str) -> DomainResult<Vec<StashEntry>> {
     }
 
     Ok(entries)
+}
+
+#[tracing::instrument(name = "git_stash_diff", fields(repo_path = %path, index = %index))]
+pub(super) fn stash_diff(path: &str, index: usize) -> DomainResult<Vec<FileDiff>> {
+    let mut repo = Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    // Same collect-then-index approach as stash_list — stash_foreach borrows
+    // repo mutably, so the commit lookup and diff below must happen after it.
+    let mut raw: Vec<(usize, git2::Oid)> = Vec::new();
+    repo.stash_foreach(|i, _message, oid| {
+        raw.push((i, *oid));
+        true
+    })
+    .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    let oid = raw
+        .into_iter()
+        .find(|(i, _)| *i == index)
+        .map(|(_, oid)| oid)
+        .ok_or_else(|| DomainError::Internal(format!("no stash at index {index}")))?;
+
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    // Same base as stash_list's summary stats: stash^0 (working-tree commit)
+    // against stash^1 (HEAD at stash time) — combines staged and unstaged
+    // changes captured by the stash into one diff.
+    let stash_tree = commit
+        .tree()
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&stash_tree), None)
+        .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    let mut results: Vec<FileDiff> = Vec::new();
+
+    diff.foreach(
+        &mut |delta, _| {
+            let file_path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let old_content = delta
+                .old_file()
+                .id()
+                .is_zero()
+                .not()
+                .then(|| {
+                    repo.find_blob(delta.old_file().id())
+                        .ok()
+                        .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                })
+                .flatten();
+
+            let new_content = delta
+                .new_file()
+                .id()
+                .is_zero()
+                .not()
+                .then(|| {
+                    repo.find_blob(delta.new_file().id())
+                        .ok()
+                        .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from))
+                })
+                .flatten();
+
+            let hunks = super::helpers::build_simple_diff(&old_content, &new_content);
+
+            results.push(FileDiff {
+                path: file_path,
+                old_content,
+                new_content,
+                hunks,
+            });
+            true
+        },
+        None,
+        None,
+        None,
+    )
+    .map_err(|e| DomainError::Internal(e.to_string()))?;
+
+    Ok(results)
 }
 
 #[tracing::instrument(name = "git_stash_save", fields(repo_path = %path))]

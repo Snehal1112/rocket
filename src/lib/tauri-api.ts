@@ -925,6 +925,9 @@ export const gitStashApply = (repositoryId: string, index: number) =>
 export const gitStashDrop = (repositoryId: string, index: number) =>
   invoke<void>('git_stash_drop_v2', { repositoryId, index });
 
+export const gitStashDiff = (repositoryId: string, index: number) =>
+  invoke<FileDiff[]>('git_stash_diff_v2', { repositoryId, index });
+
 export const gitConflicts = (repositoryId: string) =>
   invoke<ConflictFile[]>('git_conflicts_v2', { repositoryId });
 

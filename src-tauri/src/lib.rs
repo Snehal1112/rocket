@@ -401,6 +401,7 @@ pub fn run() {
             commands::git::git_stash_pop_v2,
             commands::git::git_stash_apply_v2,
             commands::git::git_stash_drop_v2,
+            commands::git::git_stash_diff_v2,
             commands::git::git_conflicts_v2,
             commands::git::git_resolve_conflict_v2,
             commands::git::git_abort_merge_v2,

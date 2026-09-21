@@ -29,7 +29,7 @@ describe('GitStashSection store subscription', () => {
     render(
       <GitStoreProvider store={store}>
         <Profiler id='stash-section' onRender={onRender}>
-          <GitStashSection />
+          <GitStashSection onStashClick={vi.fn()} />
         </Profiler>
       </GitStoreProvider>,
     );
@@ -63,7 +63,7 @@ describe('GitStashSection stash selection', () => {
     });
     render(
       <GitStoreProvider store={store}>
-        <GitStashSection />
+        <GitStashSection onStashClick={vi.fn()} />
       </GitStoreProvider>,
     );
     // skipHover: false (the default) makes userEvent.click() re-move the
@@ -102,7 +102,7 @@ describe('GitStashSection stash selection', () => {
     });
     render(
       <GitStoreProvider store={store}>
-        <GitStashSection />
+        <GitStashSection onStashClick={vi.fn()} />
       </GitStoreProvider>,
     );
     const user = userEvent.setup();
@@ -124,7 +124,7 @@ describe('GitStashSection error handling', () => {
     store.setState({ error: 'could not save stash' });
     render(
       <GitStoreProvider store={store}>
-        <GitStashSection />
+        <GitStashSection onStashClick={vi.fn()} />
       </GitStoreProvider>,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('could not save stash');
@@ -138,7 +138,7 @@ describe('GitStashSection busy state', () => {
     store.setState({ saveStash: () => deferred.promise });
     render(
       <GitStoreProvider store={store}>
-        <GitStashSection />
+        <GitStashSection onStashClick={vi.fn()} />
       </GitStoreProvider>,
     );
     const user = userEvent.setup();
@@ -174,7 +174,7 @@ describe('GitStashSection accessible names', () => {
     });
     render(
       <GitStoreProvider store={store}>
-        <GitStashSection />
+        <GitStashSection onStashClick={vi.fn()} />
       </GitStoreProvider>,
     );
     expect(screen.getByLabelText('Stash message')).toBeInTheDocument();

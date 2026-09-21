@@ -37,6 +37,7 @@ import {
   gitSetRemoteUrl,
   gitStage,
   gitStashApply,
+  gitStashDiff,
   gitStashDrop,
   gitStashList,
   gitStashPop,
@@ -96,6 +97,9 @@ export interface GitState {
    *  of importing gitDiffCommit directly. Rethrows on failure so the caller
    *  can render an actionable error instead of discarding it. */
   loadCommitDiff: (oid: string) => Promise<FileDiff[]>;
+  /** Fetch the full per-file diff for a single stash entry. Same thin,
+   *  rethrowing wrapper as loadCommitDiff, for the same reasons. */
+  loadStashDiff: (index: number) => Promise<FileDiff[]>;
   resolveConflict: (file: string, resolution: ConflictResolution) => Promise<void>;
   abortMerge: () => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
@@ -402,6 +406,12 @@ export function createGitStore(): StoreApi<GitState> {
       const { repositoryId } = get();
       if (!repositoryId) throw new Error('No repository loaded.');
       return gitDiffCommit(repositoryId, oid);
+    },
+
+    loadStashDiff: async (index) => {
+      const { repositoryId } = get();
+      if (!repositoryId) throw new Error('No repository loaded.');
+      return gitStashDiff(repositoryId, index);
     },
 
     // Stage the given file paths.

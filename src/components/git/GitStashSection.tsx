@@ -1,5 +1,7 @@
 import {
   Archive,
+  ChevronDown,
+  ChevronUp,
   FileText,
   GitBranch,
   Loader2,
@@ -22,14 +24,20 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatRelativeTime } from '@/lib/relative-time';
+import type { StashEntry } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useGitStore, useGitStoreApi } from '@/stores/git-store-context';
 import { GitErrorBanner } from './GitErrorBanner';
 
-export function GitStashSection() {
+interface GitStashSectionProps {
+  onStashClick: (stash: StashEntry) => void;
+}
+
+export function GitStashSection({ onStashClick }: GitStashSectionProps) {
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [openStashIndex, setOpenStashIndex] = useState<number | null>(null);
+  const [expandedFilesIndex, setExpandedFilesIndex] = useState<number | null>(null);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
@@ -170,152 +178,185 @@ export function GitStashSection() {
           return (
             <li
               key={stash.index}
-              className='stash-row flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors'
               onMouseEnter={() => setHoveredIndex(stash.index)}
               onMouseLeave={() => setHoveredIndex(null)}
             >
-              {/* Checkbox / index badge slot — fixed width, no layout shift */}
-              <div className='shrink-0 w-6 h-4 flex items-center justify-end relative'>
-                <Checkbox
-                  checked={isSelected}
-                  disabled={isBatchRunning}
-                  onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
-                  aria-label={`Select stash @${stash.index}`}
-                  className={cn(
-                    'peer absolute transition-opacity',
-                    showCheckbox ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100',
-                  )}
-                />
-                <span
-                  className={cn(
-                    'text-[10px] font-mono text-muted-foreground/35 select-none leading-none transition-opacity pointer-events-none',
-                    showCheckbox ? 'opacity-0' : 'peer-focus-visible:opacity-0',
-                  )}
-                >
-                  @{stash.index}
-                </span>
-              </div>
-
-              {/* Message + metadata */}
-              <div className='flex-1 min-w-0'>
-                <TooltipProvider delayDuration={400}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className='truncate text-[13px] font-mono leading-snug cursor-default'>
-                        {stash.message}
-                      </p>
-                    </TooltipTrigger>
-                    <TooltipContent side='bottom' className='max-w-64'>
-                      <p className='break-words font-mono text-xs'>{stash.message}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
-                {/* Metadata row: files · +ins −del · branch · age */}
-                <div className='flex items-center gap-1 mt-0.5 flex-wrap'>
-                  {stash.filesChanged > 0 && (
-                    <TooltipProvider delayDuration={300}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className='flex items-center gap-0.5 text-[10px] text-muted-foreground/60 cursor-default'>
-                            <FileText className='h-2.5 w-2.5 shrink-0' />
-                            {stash.filesChanged} {stash.filesChanged === 1 ? 'file' : 'files'}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side='bottom' className='max-w-56 p-2'>
-                          <ul className='space-y-0.5'>
-                            {stash.changedFiles.slice(0, 10).map((f) => (
-                              <li key={f} className='font-mono text-[11px] truncate'>
-                                {f}
-                              </li>
-                            ))}
-                            {stash.changedFiles.length > 10 && (
-                              <li className='text-[11px] text-muted-foreground'>
-                                +{stash.changedFiles.length - 10} more
-                              </li>
-                            )}
-                          </ul>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-
-                  {(stash.insertions > 0 || stash.deletions > 0) && (
-                    <>
-                      <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
-                      <span className='text-[10px] font-mono text-emerald-600 dark:text-emerald-400'>
-                        +{stash.insertions}
-                      </span>
-                      <span className='text-[10px] font-mono text-destructive'>
-                        −{stash.deletions}
-                      </span>
-                    </>
-                  )}
-
-                  {stash.branch && (
-                    <>
-                      <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
-                      <span className='flex items-center gap-0.5 text-[10px] text-muted-foreground/50 truncate max-w-[5rem]'>
-                        <GitBranch className='h-2.5 w-2.5 shrink-0 text-muted-foreground/35' />
-                        {stash.branch}
-                      </span>
-                    </>
-                  )}
-
-                  <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
-                  <span className='text-[10px] text-muted-foreground/50 shrink-0'>
-                    {formatRelativeTime(stash.timestamp)}
+              {/* biome-ignore lint/a11y/useSemanticElements: contains nested buttons (checkbox, actions menu), so role="button" div is intentional */}
+              <div
+                role='button'
+                tabIndex={0}
+                className='stash-row flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer'
+                onClick={() => onStashClick(stash)}
+                onKeyDown={(e) => {
+                  // Only handle Enter/Space when the row itself is the
+                  // keydown target — otherwise a bubbled event from a nested
+                  // interactive child (e.g. Space toggling the checkbox)
+                  // would have its default action blocked by preventDefault
+                  // below, even though it isn't meant for the row.
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onStashClick(stash);
+                  }
+                }}
+              >
+                {/* Checkbox / index badge slot — fixed width, no layout shift */}
+                <div className='shrink-0 w-6 h-4 flex items-center justify-end relative'>
+                  <Checkbox
+                    checked={isSelected}
+                    disabled={isBatchRunning}
+                    onCheckedChange={(checked) => toggleSelect(stash.index, checked === true)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Select stash @${stash.index}`}
+                    className={cn(
+                      'peer absolute transition-opacity',
+                      showCheckbox ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100',
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      'text-[10px] font-mono text-muted-foreground/35 select-none leading-none transition-opacity pointer-events-none',
+                      showCheckbox ? 'opacity-0' : 'peer-focus-visible:opacity-0',
+                    )}
+                  >
+                    @{stash.index}
                   </span>
                 </div>
-              </div>
 
-              {/* Per-row hover actions — hidden when row is selected */}
-              <div
-                className='stash-row-actions shrink-0'
-                style={
-                  isSelected
-                    ? { display: 'none' }
-                    : openStashIndex === stash.index
-                      ? { display: 'flex' }
-                      : undefined
-                }
-              >
-                <DropdownMenu
-                  open={openStashIndex === stash.index}
-                  onOpenChange={(open) => setOpenStashIndex(open ? stash.index : null)}
+                {/* Message + metadata */}
+                <div className='flex-1 min-w-0'>
+                  <TooltipProvider delayDuration={400}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className='truncate text-[13px] font-mono leading-snug cursor-default'>
+                          {stash.message}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent side='bottom' className='max-w-64'>
+                        <p className='break-words font-mono text-xs'>{stash.message}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
+                  {/* Metadata row: files · +ins −del · branch · age */}
+                  <div className='flex items-center gap-1 mt-0.5 flex-wrap'>
+                    {stash.filesChanged > 0 && (
+                      <button
+                        type='button'
+                        className='flex items-center gap-0.5 text-[10px] text-muted-foreground/60 hover:text-foreground'
+                        aria-expanded={expandedFilesIndex === stash.index}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedFilesIndex((prev) =>
+                            prev === stash.index ? null : stash.index,
+                          );
+                        }}
+                      >
+                        <FileText className='h-2.5 w-2.5 shrink-0' />
+                        {stash.filesChanged} {stash.filesChanged === 1 ? 'file' : 'files'}
+                        {expandedFilesIndex === stash.index ? (
+                          <ChevronUp className='h-2.5 w-2.5 shrink-0' />
+                        ) : (
+                          <ChevronDown className='h-2.5 w-2.5 shrink-0' />
+                        )}
+                      </button>
+                    )}
+
+                    {(stash.insertions > 0 || stash.deletions > 0) && (
+                      <>
+                        <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                        <span className='text-[10px] font-mono text-emerald-600 dark:text-emerald-400'>
+                          +{stash.insertions}
+                        </span>
+                        <span className='text-[10px] font-mono text-destructive'>
+                          −{stash.deletions}
+                        </span>
+                      </>
+                    )}
+
+                    {stash.branch && (
+                      <>
+                        <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                        <span className='flex items-center gap-0.5 text-[10px] text-muted-foreground/50 truncate max-w-[5rem]'>
+                          <GitBranch className='h-2.5 w-2.5 shrink-0 text-muted-foreground/35' />
+                          {stash.branch}
+                        </span>
+                      </>
+                    )}
+
+                    <span className='text-muted-foreground/25 text-[10px] select-none'>·</span>
+                    <span className='text-[10px] text-muted-foreground/50 shrink-0'>
+                      {formatRelativeTime(stash.timestamp)}
+                    </span>
+                  </div>
+
+                  {/* Expanded file list — full row width, no truncation cap. */}
+                  {expandedFilesIndex === stash.index && (
+                    <ul className='mt-1 space-y-0.5 border-t border-border/50 pt-1'>
+                      {stash.changedFiles.map((f) => (
+                        <li
+                          key={f}
+                          title={f}
+                          className='truncate font-mono text-[11px] text-muted-foreground'
+                        >
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Per-row hover actions — hidden when row is selected */}
+                <div
+                  className='stash-row-actions shrink-0'
+                  style={
+                    isSelected
+                      ? { display: 'none' }
+                      : openStashIndex === stash.index
+                        ? { display: 'flex' }
+                        : undefined
+                  }
                 >
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-6 w-6'
-                      aria-label='Stash actions'
-                    >
-                      <MoreHorizontal className='h-3.5 w-3.5' />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' className='w-48'>
-                    <DropdownMenuItem onClick={() => void popStash(stash.index)}>
-                      <PackageOpen className='h-3.5 w-3.5 mr-2 shrink-0' />
-                      <span>Pop</span>
-                      <span className='ml-auto text-[11px] text-muted-foreground'>
-                        apply + remove
-                      </span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void applyStash(stash.index)}>
-                      <PackageCheck className='h-3.5 w-3.5 mr-2 shrink-0' />
-                      <span>Apply</span>
-                      <span className='ml-auto text-[11px] text-muted-foreground'>keep stash</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className='text-destructive focus:text-destructive'
-                      onClick={() => void dropStash(stash.index)}
-                    >
-                      <Trash2 className='h-3.5 w-3.5 mr-2 shrink-0' /> Drop
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  <DropdownMenu
+                    open={openStashIndex === stash.index}
+                    onOpenChange={(open) => setOpenStashIndex(open ? stash.index : null)}
+                  >
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-6 w-6'
+                        aria-label='Stash actions'
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreHorizontal className='h-3.5 w-3.5' />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end' className='w-48'>
+                      <DropdownMenuItem onClick={() => void popStash(stash.index)}>
+                        <PackageOpen className='h-3.5 w-3.5 mr-2 shrink-0' />
+                        <span>Pop</span>
+                        <span className='ml-auto text-[11px] text-muted-foreground'>
+                          apply + remove
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void applyStash(stash.index)}>
+                        <PackageCheck className='h-3.5 w-3.5 mr-2 shrink-0' />
+                        <span>Apply</span>
+                        <span className='ml-auto text-[11px] text-muted-foreground'>
+                          keep stash
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className='text-destructive focus:text-destructive'
+                        onClick={() => void dropStash(stash.index)}
+                      >
+                        <Trash2 className='h-3.5 w-3.5 mr-2 shrink-0' /> Drop
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             </li>
           );

@@ -86,6 +86,10 @@ pub trait GitService: Send + Sync {
     fn stash_pop(&self, path: &str, index: usize) -> DomainResult<()>;
     fn stash_apply(&self, path: &str, index: usize) -> DomainResult<()>;
     fn stash_drop(&self, path: &str, index: usize) -> DomainResult<()>;
+    /// Per-file diff for the stash at `index`, comparing its tree against the
+    /// commit it was stashed from — the same base `stash_list` uses for its
+    /// summary stats, so file counts and content stay consistent.
+    fn stash_diff(&self, path: &str, index: usize) -> DomainResult<Vec<FileDiff>>;
 
     // Conflicts
     fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>>;
