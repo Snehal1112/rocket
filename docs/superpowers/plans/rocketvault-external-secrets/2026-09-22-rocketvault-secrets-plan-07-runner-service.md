@@ -589,13 +589,12 @@ Then add, alongside the other fixture builders (near `three_step_collection`):
         values.insert("sec-1".to_string(), "sk-test-secret-value".to_string());
         let fetcher = FakeVaultSecretFetcher::new(values);
 
-        // NOTE: `.with_secret_manager_repo` / `.with_secret_store` /
-        // `.with_vault_secret_fetcher` follow this file's established
-        // opt-in builder pattern (`with_script_engine`,
-        // `with_collection_env_repo_factory` above `begin_phases` in
-        // execution_service.rs) -- the pattern this plan expects Plan 06 to
-        // land with. If Plan 06's actual method names differ, update only
-        // these three lines; the fakes and assertions below do not change.
+        // Plan 06 (now written — see 2026-09-22-rocketvault-secrets-plan-06-execution-service.md)
+        // finalized `secret_manager_repo`/`vault_connection_secret_store`/
+        // `vault_fetcher` as three trailing POSITIONAL arguments appended to
+        // `RequestExecutionService::new`/`new_with_audit` — not builder
+        // methods. `with_script_engine` is unaffected (Plan 06 left it as
+        // the pre-existing opt-in builder it already was).
         let exec = RequestExecutionService::new(
             Box::new(StaticEnvRepo(environment_with_one_external_secret_binding())),
             Arc::new(SharedExecutor(Arc::clone(&executor))),
@@ -603,11 +602,11 @@ Then add, alongside the other fixture builders (near `three_step_collection`):
             Box::new(SharedCollectionRepo(Arc::clone(&repo))),
             Box::new(NullCookieRepo),
             Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(fake_connection())),
+            Arc::new(FakeSecretStore("client-secret-xyz".to_string())),
+            Arc::clone(&fetcher),
         )
-        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))))
-        .with_secret_manager_repo(Box::new(FakeSecretManagerRepo(fake_connection())))
-        .with_secret_store(Arc::new(FakeSecretStore("client-secret-xyz".to_string())))
-        .with_vault_secret_fetcher(Arc::clone(&fetcher));
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
 
         let runner = CollectionRunnerService::new(
             Box::new(SharedCollectionRepo(Arc::clone(&repo))),
