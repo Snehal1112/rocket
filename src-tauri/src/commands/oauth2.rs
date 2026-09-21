@@ -29,6 +29,9 @@ struct AuthCodeResult {
 ///
 /// DEPRECATED: prefer `oauth2_get_token` with grant_type "authorization_code".
 /// Kept for backward compatibility until the frontend migration completes.
+// Deprecated IPC command kept param-for-param compatible with the frontend;
+// do not restructure until the frontend migration to oauth2_get_token completes.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn oauth2_auth_code_flow(
     app: AppHandle,

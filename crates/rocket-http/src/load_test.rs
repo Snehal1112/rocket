@@ -970,9 +970,8 @@ pub async fn run_load_test(
         .map(|s| Duration::from_secs(s as u64));
 
     let mut handles = Vec::new();
-    let mut seq: u32 = 0;
 
-    for i in 0..total {
+    for (seq, i) in (0_u32..).zip(0..total) {
         // Stop spawning if the duration cap has been reached.
         if let Some(cap) = cap {
             if start.elapsed() >= cap {
@@ -985,8 +984,6 @@ pub async fn run_load_test(
         };
         let req = request.clone();
         let exec = executor.clone();
-        let current_seq = seq;
-        seq += 1;
 
         let handle = tokio::spawn(async move {
             let t0 = std::time::Instant::now();
@@ -1004,7 +1001,7 @@ pub async fn run_load_test(
                     TaskResult {
                         outcome,
                         entry: RequestLogEntry {
-                            seq: current_seq,
+                            seq,
                             status: Some(resp.status),
                             latency_ms,
                             response_bytes: resp.size_bytes as u64,
@@ -1016,7 +1013,7 @@ pub async fn run_load_test(
                 Err(e) => TaskResult {
                     outcome: Outcome::TransportFail,
                     entry: RequestLogEntry {
-                        seq: current_seq,
+                        seq,
                         status: None,
                         latency_ms: 0.0,
                         response_bytes: 0,
@@ -1377,7 +1374,7 @@ mod tests {
                 let n = self
                     .counter
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let (status, duration_ms) = if n % 2 == 0 { (200, 10) } else { (500, 20) };
+                let (status, duration_ms) = if n.is_multiple_of(2) { (200, 10) } else { (500, 20) };
                 Ok(HttpResponse {
                     status,
                     status_text: "".into(),

@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 /// OpenCollection Description — polymorphic: string | {content, type} | null.
 /// Used across headers, params, variables, assertions, folders, environments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Description {
+    #[default]
     None,
     Text(String),
     Typed {
@@ -103,12 +104,6 @@ impl<'de> Deserialize<'de> for Description {
             }
         }
         deserializer.deserialize_any(DescVisitor)
-    }
-}
-
-impl Default for Description {
-    fn default() -> Self {
-        Self::None
     }
 }
 

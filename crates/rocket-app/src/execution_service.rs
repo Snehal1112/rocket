@@ -362,7 +362,7 @@ impl RequestExecutionService {
             .collect();
 
         Ok(HttpRequest {
-            method: input.method.clone(),
+            method: input.method,
             url: resolved_url,
             headers: resolved_headers,
             query_params: input.query_params.clone(),
