@@ -16,6 +16,8 @@ fn read_file_impl(path: &str, encoding: &str) -> Result<String, ScriptOpError> {
     }
 }
 
+/// Backs `fs.readFile(path, encoding)`. `encoding` is a required string ("utf8" or "base64")
+/// since the op has no way to express an omitted argument; the JS wrapper must always supply it.
 #[op2]
 #[string]
 pub fn op_fs_read_file(#[string] path: String, #[string] encoding: String) -> Result<String, ScriptOpError> {
@@ -34,6 +36,9 @@ fn write_file_impl(path: &str, content: &str, encoding: &str) -> Result<(), Scri
     fs::write(path, bytes).map_err(|e| io_err(e, path))
 }
 
+/// Backs `fs.writeFile(path, content, encoding)`. `encoding` is a required string ("utf8" or
+/// "base64") that the JS wrapper must always supply explicitly, since the op has no way to
+/// express an omitted argument.
 #[op2(fast)]
 pub fn op_fs_write_file(#[string] path: String, #[string] content: String, #[string] encoding: String) -> Result<(), ScriptOpError> {
     write_file_impl(&path, &content, &encoding)
@@ -54,6 +59,9 @@ fn read_dir_impl(path: &str) -> Result<String, ScriptOpError> {
     Ok(serde_json::to_string(&items).unwrap_or_else(|_| "[]".into()))
 }
 
+/// Backs `fs.readDir(path)`. Returns a JSON array of `{ name, isDirectory, isFile }` entries as a
+/// string, which the JS wrapper must `JSON.parse`, matching the pattern other ops in this file
+/// use for structured returns.
 #[op2]
 #[string]
 pub fn op_fs_read_dir(#[string] path: String) -> Result<String, ScriptOpError> {
@@ -64,6 +72,8 @@ fn exists_impl(path: &str) -> bool {
     std::path::Path::new(path).exists()
 }
 
+/// Backs `fs.exists(path)`. Returns true when the path exists (following symlinks), false
+/// otherwise.
 #[op2(fast)]
 pub fn op_fs_exists(#[string] path: String) -> bool {
     exists_impl(&path)
@@ -74,13 +84,18 @@ fn mkdir_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
     result.map_err(|e| io_err(e, path))
 }
 
+/// Backs `fs.mkdir(path, recursive)`. `recursive` is a required bool that the JS wrapper must
+/// default to `false` when the caller omits it, since the op has no way to express an omitted
+/// argument.
 #[op2(fast)]
 pub fn op_fs_mkdir(#[string] path: String, recursive: bool) -> Result<(), ScriptOpError> {
     mkdir_impl(&path, recursive)
 }
 
 fn remove_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
-    let meta = fs::metadata(path).map_err(|e| io_err(e, path))?;
+    // Use symlink_metadata (lstat semantics) so a symlink is treated as itself rather than
+    // followed to its target, matching Node's rmSync behavior.
+    let meta = fs::symlink_metadata(path).map_err(|e| io_err(e, path))?;
     let result = if meta.is_dir() {
         if recursive { fs::remove_dir_all(path) } else { fs::remove_dir(path) }
     } else {
@@ -89,6 +104,9 @@ fn remove_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
     result.map_err(|e| io_err(e, path))
 }
 
+/// Backs `fs.remove(path, recursive)`. `recursive` is a required bool that the JS wrapper must
+/// default to `false` when the caller omits it. Uses symlink-aware (`lstat`-style) semantics like
+/// Node's `rmSync`, so a symlink is unlinked itself rather than followed to its target.
 #[op2(fast)]
 pub fn op_fs_remove(#[string] path: String, recursive: bool) -> Result<(), ScriptOpError> {
     remove_impl(&path, recursive)
@@ -206,5 +224,20 @@ mod tests {
         fs::write(sub.join("inner.txt"), "x").expect("write inner");
         remove_impl(&sub.to_string_lossy(), true).expect("remove recursive");
         assert!(!sub.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn remove_deletes_a_symlink_without_following_it() {
+        let dir = TempDir::new().expect("tempdir");
+        let target = dir.path().join("target.txt");
+        fs::write(&target, "x").expect("write target");
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        remove_impl(&link.to_string_lossy(), false).expect("remove symlink");
+
+        assert!(!link.exists(), "symlink itself must be gone");
+        assert!(target.exists(), "remove must not follow the symlink and delete its target");
     }
 }
