@@ -174,7 +174,7 @@ fn validate_destination(
     expected: Option<(&Path, DestinationIdentity)>,
 ) -> DomainResult<ValidatedDestination> {
     let initial_metadata = destination_metadata(selected_path)?;
-    let initial_identity = destination_identity(&initial_metadata)?;
+    let initial_identity = destination_identity(selected_path, &initial_metadata)?;
 
     if let Some((_, expected_identity)) = expected {
         if initial_identity != expected_identity {
@@ -202,7 +202,7 @@ fn validate_destination(
     ensure_empty(selected_path)?;
 
     let final_metadata = destination_metadata(selected_path)?;
-    let final_identity = destination_identity(&final_metadata)?;
+    let final_identity = destination_identity(selected_path, &final_metadata)?;
     let final_canonical_path = fs::canonicalize(selected_path).map_err(|error| {
         DomainError::InvalidInput(format!(
             "Failed to re-canonicalize clone destination '{}': {error}",
@@ -268,7 +268,7 @@ fn ensure_empty(path: &Path) -> DomainResult<()> {
 }
 
 #[cfg(unix)]
-fn destination_identity(metadata: &Metadata) -> DomainResult<DestinationIdentity> {
+fn destination_identity(_path: &Path, metadata: &Metadata) -> DomainResult<DestinationIdentity> {
     use std::os::unix::fs::MetadataExt;
 
     Ok(DestinationIdentity {
@@ -280,25 +280,77 @@ fn destination_identity(metadata: &Metadata) -> DomainResult<DestinationIdentity
 }
 
 #[cfg(windows)]
-fn destination_identity(metadata: &Metadata) -> DomainResult<DestinationIdentity> {
+fn destination_identity(path: &Path, metadata: &Metadata) -> DomainResult<DestinationIdentity> {
+    use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::MetadataExt;
 
-    let volume_serial_number = metadata.volume_serial_number().ok_or_else(|| {
-        DomainError::Internal("Clone destination volume identity is unavailable".into())
-    })?;
-    let file_index = metadata.file_index().ok_or_else(|| {
-        DomainError::Internal("Clone destination file identity is unavailable".into())
-    })?;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
+    };
+
+    // `MetadataExt::volume_serial_number`/`file_index` require the unstable
+    // `windows_by_handle` feature, so the volume/file identity is fetched
+    // directly via `GetFileInformationByHandle` instead.
+    let wide_path: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // SAFETY: `wide_path` is a valid null-terminated UTF-16 string. Requesting
+    // access mode 0 only queries metadata; the handle is closed below before
+    // returning in every path.
+    let handle: HANDLE = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        )
+    };
+
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(DomainError::Io(format!(
+            "Failed to open clone destination '{}' for identity check: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: `handle` was just opened successfully above and `info` is a
+    // valid out-pointer sized for `BY_HANDLE_FILE_INFORMATION`.
+    let succeeded = unsafe { GetFileInformationByHandle(handle, &mut info) };
+    // SAFETY: `handle` is open and closed exactly once here.
+    unsafe {
+        CloseHandle(handle);
+    }
+
+    if succeeded == 0 {
+        return Err(DomainError::Io(format!(
+            "Failed to read clone destination identity for '{}': {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+
+    let file_index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
 
     Ok(DestinationIdentity {
-        volume_serial_number,
+        volume_serial_number: info.dwVolumeSerialNumber,
         file_index,
         creation_time: metadata.creation_time(),
     })
 }
 
 #[cfg(not(any(unix, windows)))]
-fn destination_identity(_metadata: &Metadata) -> DomainResult<DestinationIdentity> {
+fn destination_identity(_path: &Path, _metadata: &Metadata) -> DomainResult<DestinationIdentity> {
     Err(DomainError::Internal(
         "Clone destination identity checks are unsupported on this platform".into(),
     ))
