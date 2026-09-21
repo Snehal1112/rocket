@@ -1,6 +1,6 @@
+use crate::{ScriptContext, ScriptResult};
 use async_trait::async_trait;
 use rocket_shared::error::DomainResult;
-use crate::{ScriptContext, ScriptResult};
 
 /// Contract for a JS script execution engine.
 ///

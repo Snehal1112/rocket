@@ -37,7 +37,11 @@ impl HistoryEntry {
         }
     }
 
-    pub fn with_collection(mut self, collection: impl Into<String>, request_name: impl Into<String>) -> Self {
+    pub fn with_collection(
+        mut self,
+        collection: impl Into<String>,
+        request_name: impl Into<String>,
+    ) -> Self {
         self.collection = Some(collection.into());
         self.request_name = Some(request_name.into());
         self

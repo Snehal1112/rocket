@@ -3,7 +3,10 @@ use crate::error::ImportResult;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     /// Block opening line: `name:subtype {` or `name {`
-    BlockOpen { name: String, subtype: Option<String> },
+    BlockOpen {
+        name: String,
+        subtype: Option<String>,
+    },
     /// Key-value pair inside a kv-style block: `key: value`
     KeyValue { key: String, value: String },
     /// Raw text content inside a raw-text block (body, script, docs)
@@ -41,7 +44,10 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
 
             // List blocks and raw-text blocks both capture content verbatim.
             let is_raw = is_list || RAW_TEXT_BLOCK_NAMES.contains(&name.as_str());
-            tokens.push(Token::BlockOpen { name: name.clone(), subtype });
+            tokens.push(Token::BlockOpen {
+                name: name.clone(),
+                subtype,
+            });
 
             // Collect block body.
             // For raw-text blocks, track brace/bracket depth so that
@@ -69,7 +75,13 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                                     .unwrap_or(0);
                                 let content = raw_lines
                                     .iter()
-                                    .map(|l| if l.len() >= indent_len { &l[indent_len..] } else { l.trim_start() })
+                                    .map(|l| {
+                                        if l.len() >= indent_len {
+                                            &l[indent_len..]
+                                        } else {
+                                            l.trim_start()
+                                        }
+                                    })
                                     .collect::<Vec<_>>()
                                     .join("\n");
                                 tokens.push(Token::RawText(content.trim().to_string()));
@@ -113,43 +125,73 @@ mod tests {
     fn tokenises_simple_block() {
         let input = "get {\n  url: https://example.com\n}\n";
         let tokens = tokenise(input).unwrap();
-        assert_eq!(tokens, vec![
-            Token::BlockOpen { name: "get".into(), subtype: None },
-            Token::KeyValue { key: "url".into(), value: "https://example.com".into() },
-            Token::BlockClose,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::BlockOpen {
+                    name: "get".into(),
+                    subtype: None
+                },
+                Token::KeyValue {
+                    key: "url".into(),
+                    value: "https://example.com".into()
+                },
+                Token::BlockClose,
+            ]
+        );
     }
 
     #[test]
     fn tokenises_block_with_subtype() {
         let input = "body:json {\n  {\"a\": 1}\n}\n";
         let tokens = tokenise(input).unwrap();
-        assert_eq!(tokens, vec![
-            Token::BlockOpen { name: "body".into(), subtype: Some("json".into()) },
-            Token::RawText("{\"a\": 1}".into()),
-            Token::BlockClose,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::BlockOpen {
+                    name: "body".into(),
+                    subtype: Some("json".into())
+                },
+                Token::RawText("{\"a\": 1}".into()),
+                Token::BlockClose,
+            ]
+        );
     }
 
     #[test]
     fn tokenises_disabled_key_value() {
         let input = "headers {\n  ~X-Debug: true\n}\n";
         let tokens = tokenise(input).unwrap();
-        assert_eq!(tokens, vec![
-            Token::BlockOpen { name: "headers".into(), subtype: None },
-            Token::KeyValue { key: "~X-Debug".into(), value: "true".into() },
-            Token::BlockClose,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::BlockOpen {
+                    name: "headers".into(),
+                    subtype: None
+                },
+                Token::KeyValue {
+                    key: "~X-Debug".into(),
+                    value: "true".into()
+                },
+                Token::BlockClose,
+            ]
+        );
     }
 
     #[test]
     fn tokenises_empty_block() {
         let input = "headers {\n}\n";
         let tokens = tokenise(input).unwrap();
-        assert_eq!(tokens, vec![
-            Token::BlockOpen { name: "headers".into(), subtype: None },
-            Token::BlockClose,
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::BlockOpen {
+                    name: "headers".into(),
+                    subtype: None
+                },
+                Token::BlockClose,
+            ]
+        );
     }
 
     #[test]
@@ -174,10 +216,13 @@ mod tests {
     fn raw_text_block_preserves_inner_content() {
         let input = "script:pre-request {\n  const x = 1;\n  bru.setVar('a', x);\n}\n";
         let tokens = tokenise(input).unwrap();
-        assert_eq!(tokens[0], Token::BlockOpen {
-            name: "script".into(),
-            subtype: Some("pre-request".into()),
-        });
+        assert_eq!(
+            tokens[0],
+            Token::BlockOpen {
+                name: "script".into(),
+                subtype: Some("pre-request".into()),
+            }
+        );
         if let Token::RawText(text) = &tokens[1] {
             assert!(text.contains("const x = 1;"));
             assert!(text.contains("bru.setVar"));
@@ -216,7 +261,9 @@ auth:bearer {
         }
         // The auth block should still be parsed correctly after the body.
         assert!(
-            tokens.iter().any(|t| matches!(t, Token::BlockOpen { name, .. } if name == "auth")),
+            tokens
+                .iter()
+                .any(|t| matches!(t, Token::BlockOpen { name, .. } if name == "auth")),
             "auth block should follow body block"
         );
     }

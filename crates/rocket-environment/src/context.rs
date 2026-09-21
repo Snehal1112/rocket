@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub struct VariableContext {
-    pub runtime:     HashMap<String, String>,
-    pub request:     HashMap<String, String>,
-    pub folder:      HashMap<String, String>,
-    pub env:         HashMap<String, String>,
-    pub collection:  HashMap<String, String>,
-    pub global_env:  HashMap<String, String>,
+    pub runtime: HashMap<String, String>,
+    pub request: HashMap<String, String>,
+    pub folder: HashMap<String, String>,
+    pub env: HashMap<String, String>,
+    pub collection: HashMap<String, String>,
+    pub global_env: HashMap<String, String>,
     pub process_env: HashMap<String, String>,
     /// Keys (from any scope) whose *value* must be redacted if it appears in
     /// script-emitted console/test-error text. Not a per-scope map — a value is
@@ -51,7 +51,10 @@ mod tests {
     use super::*;
 
     fn m(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
@@ -144,13 +147,13 @@ mod tests {
     fn full_hierarchy_runtime_wins() {
         // All 8 scopes present — runtime must win.
         let ctx = VariableContext {
-            runtime:       m(&[("k", "runtime")]),
-            request:       m(&[("k", "request")]),
-            folder:        m(&[("k", "folder")]),
-            env:           m(&[("k", "env")]),
-            collection:    m(&[("k", "collection")]),
-            global_env:    m(&[("k", "global")]),
-            process_env:   m(&[("k", "process")]),
+            runtime: m(&[("k", "runtime")]),
+            request: m(&[("k", "request")]),
+            folder: m(&[("k", "folder")]),
+            env: m(&[("k", "env")]),
+            collection: m(&[("k", "collection")]),
+            global_env: m(&[("k", "global")]),
+            process_env: m(&[("k", "process")]),
             secret_values: std::collections::HashSet::new(),
         };
         assert_eq!(ctx.flatten().get("k").unwrap(), "runtime");
@@ -171,7 +174,10 @@ mod tests {
         // flatten() still returns the real value — secret_values is a
         // separate redaction list, not a filter on the scope maps.
         let flat = ctx.flatten();
-        assert_eq!(flat.get("API_KEY").expect("API_KEY present"), "sk-live-abcdef123");
+        assert_eq!(
+            flat.get("API_KEY").expect("API_KEY present"),
+            "sk-live-abcdef123"
+        );
     }
 
     #[test]
@@ -182,7 +188,10 @@ mod tests {
         };
         ctx.secret_values.insert("sk-live-abcdef123".to_string());
         let flat = ctx.flatten_with_process_env();
-        assert_eq!(flat.get("API_KEY").expect("API_KEY present"), "sk-live-abcdef123");
+        assert_eq!(
+            flat.get("API_KEY").expect("API_KEY present"),
+            "sk-live-abcdef123"
+        );
     }
 
     #[test]
@@ -201,7 +210,7 @@ mod tests {
         // it should override the prefixed process env entry.
         let ctx = VariableContext {
             process_env: m(&[("X", "from_os")]),
-            collection:  m(&[("process.env.X", "user_override")]),
+            collection: m(&[("process.env.X", "user_override")]),
             ..Default::default()
         };
         let flat = ctx.flatten_with_process_env();

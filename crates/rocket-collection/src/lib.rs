@@ -12,7 +12,9 @@ pub(crate) mod uid;
 pub use collection::Collection;
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use repository::CollectionRepository;
-pub use request::{candidate_filename, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES};
+pub use request::{
+    candidate_filename, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
+};
 pub use request_summary::RequestSummary;
 pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;

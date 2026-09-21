@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
-    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite,
-    NextRequest, RequestMutations, ScriptPhase, TestResult, TestStatus,
+    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest, RequestMutations,
+    ScriptPhase, TestResult, TestStatus,
 };
-use rocket_environment::VariableContext;
 use rocket_shared::types::PathParam;
+use std::collections::{HashMap, HashSet};
 
 /// Holds everything ops need to read from the `ScriptContext`.
 /// Stored in `deno_core::OpState` as a read-only snapshot.
@@ -52,7 +52,11 @@ impl ScriptOutputState {
     pub fn add_test_result(&mut self, name: String, passed: bool, error: Option<String>) {
         self.test_results.push(TestResult {
             name,
-            status: if passed { TestStatus::Passed } else { TestStatus::Failed },
+            status: if passed {
+                TestStatus::Passed
+            } else {
+                TestStatus::Failed
+            },
             error,
         });
     }

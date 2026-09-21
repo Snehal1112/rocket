@@ -181,7 +181,8 @@ mod tests {
         let path = dir.path().join("data.yml");
         atomic_write(&path, b"v1\n").unwrap();
         atomic_write(&path, b"v2\n").unwrap();
-        let tmps: Vec<_> = fs::read_dir(dir.path()).unwrap()
+        let tmps: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
             .collect();
@@ -212,9 +213,17 @@ mod tests {
     fn atomic_write_bulk_writes_all_files() {
         let dir = TempDir::new().unwrap();
         let pairs: Vec<(std::path::PathBuf, Vec<u8>)> = (0..5)
-            .map(|i| (dir.path().join(format!("file{i}.yml")), format!("index: {i}\n").into_bytes()))
+            .map(|i| {
+                (
+                    dir.path().join(format!("file{i}.yml")),
+                    format!("index: {i}\n").into_bytes(),
+                )
+            })
             .collect();
-        let refs: Vec<(&std::path::Path, &[u8])> = pairs.iter().map(|(p, c)| (p.as_path(), c.as_slice())).collect();
+        let refs: Vec<(&std::path::Path, &[u8])> = pairs
+            .iter()
+            .map(|(p, c)| (p.as_path(), c.as_slice()))
+            .collect();
         atomic_write_bulk(&refs).unwrap();
         for (path, content) in &pairs {
             assert_eq!(std::fs::read(path).unwrap(), *content);
@@ -227,9 +236,13 @@ mod tests {
         let pairs: Vec<(std::path::PathBuf, Vec<u8>)> = (0..3)
             .map(|i| (dir.path().join(format!("f{i}.yml")), b"ok\n".to_vec()))
             .collect();
-        let refs: Vec<(&std::path::Path, &[u8])> = pairs.iter().map(|(p, c)| (p.as_path(), c.as_slice())).collect();
+        let refs: Vec<(&std::path::Path, &[u8])> = pairs
+            .iter()
+            .map(|(p, c)| (p.as_path(), c.as_slice()))
+            .collect();
         atomic_write_bulk(&refs).unwrap();
-        let tmps: Vec<_> = fs::read_dir(dir.path()).unwrap()
+        let tmps: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
             .collect();

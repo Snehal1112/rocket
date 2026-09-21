@@ -95,7 +95,9 @@ mod tests {
         let example = HttpRequestExample {
             name: "Success case".into(),
             description: None,
-            request: Some(serde_yaml::from_str("url: https://api.example.com\nmethod: GET").unwrap()),
+            request: Some(
+                serde_yaml::from_str("url: https://api.example.com\nmethod: GET").unwrap(),
+            ),
             response: Some(serde_yaml::from_str("status: 200\nbody:\n  ok: true").unwrap()),
         };
         let yaml = serde_yaml::to_string(&example).unwrap();

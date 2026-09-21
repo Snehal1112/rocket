@@ -14,10 +14,15 @@ pub fn generate(name: &str) -> Option<String> {
         // ── Basic Data Types ──
         "guid" | "randomUUID" => Some(uuid::Uuid::new_v4().to_string()),
         "timestamp" => Some(chrono::Utc::now().timestamp().to_string()),
-        "isoTimestamp" => Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+        "isoTimestamp" => {
+            Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        }
         "randomNanoId" => {
-            let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
-            let id: String = (0..21).map(|_| charset[rng.gen_range(0..charset.len())] as char).collect();
+            let charset: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+            let id: String = (0..21)
+                .map(|_| charset[rng.gen_range(0..charset.len())] as char)
+                .collect();
             Some(id)
         }
         "randomAlphaNumeric" => {
@@ -28,16 +33,37 @@ pub fn generate(name: &str) -> Option<String> {
         "randomBoolean" => Some(rng.gen_bool(0.5).to_string()),
         "randomInt" => Some(rng.gen_range(0..=1000).to_string()),
         "randomColor" => {
-            let colors = ["red", "green", "blue", "yellow", "purple", "cyan", "magenta",
-                          "white", "black", "orange", "pink", "grey", "fuchsia", "lime",
-                          "maroon", "navy", "olive", "teal", "violet", "turquoise"];
+            let colors = [
+                "red",
+                "green",
+                "blue",
+                "yellow",
+                "purple",
+                "cyan",
+                "magenta",
+                "white",
+                "black",
+                "orange",
+                "pink",
+                "grey",
+                "fuchsia",
+                "lime",
+                "maroon",
+                "navy",
+                "olive",
+                "teal",
+                "violet",
+                "turquoise",
+            ];
             Some(colors[rng.gen_range(0..colors.len())].to_string())
         }
         "randomHexColor" => Some(format!("#{:06x}", rng.gen::<u32>() & 0xFFFFFF)),
         "randomAbbreviation" => {
-            let abbrs = ["SQL", "PCI", "JSON", "HTTP", "SSL", "TCP", "UDP", "API", "XML",
-                         "CSS", "HTML", "FTP", "SSH", "DNS", "RAM", "CPU", "GPU", "USB",
-                         "URL", "CLI", "GUI", "SDK", "IDE", "REST", "SMTP"];
+            let abbrs = [
+                "SQL", "PCI", "JSON", "HTTP", "SSL", "TCP", "UDP", "API", "XML", "CSS", "HTML",
+                "FTP", "SSH", "DNS", "RAM", "CPU", "GPU", "USB", "URL", "CLI", "GUI", "SDK", "IDE",
+                "REST", "SMTP",
+            ];
             Some(abbrs[rng.gen_range(0..abbrs.len())].to_string())
         }
         "randomWord" => {
@@ -50,12 +76,17 @@ pub fn generate(name: &str) -> Option<String> {
         }
 
         // ── Internet and Network ──
-        "randomIP" | "randomIPV4" => {
-            Some(format!("{}.{}.{}.{}", rng.gen_range(1..255), rng.gen_range(0..255),
-                         rng.gen_range(0..255), rng.gen_range(1..255)))
-        }
+        "randomIP" | "randomIPV4" => Some(format!(
+            "{}.{}.{}.{}",
+            rng.gen_range(1..255),
+            rng.gen_range(0..255),
+            rng.gen_range(0..255),
+            rng.gen_range(1..255)
+        )),
         "randomIPV6" => {
-            let segments: Vec<String> = (0..8).map(|_| format!("{:04x}", rng.gen::<u16>())).collect();
+            let segments: Vec<String> = (0..8)
+                .map(|_| format!("{:04x}", rng.gen::<u16>()))
+                .collect();
             Some(segments.join(":"))
         }
         "randomMACAddress" => {
@@ -64,12 +95,16 @@ pub fn generate(name: &str) -> Option<String> {
         }
         "randomPassword" => {
             let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-            let pw: String = (0..15).map(|_| charset[rng.gen_range(0..charset.len())] as char).collect();
+            let pw: String = (0..15)
+                .map(|_| charset[rng.gen_range(0..charset.len())] as char)
+                .collect();
             Some(pw)
         }
         "randomLocale" => {
-            let locales = ["en", "fr", "de", "es", "it", "pt", "nl", "ja", "ko", "zh",
-                           "ru", "ar", "hi", "sv", "no", "da", "fi", "pl", "cs", "tr"];
+            let locales = [
+                "en", "fr", "de", "es", "it", "pt", "nl", "ja", "ko", "zh", "ru", "ar", "hi", "sv",
+                "no", "da", "fi", "pl", "cs", "tr",
+            ];
             Some(locales[rng.gen_range(0..locales.len())].to_string())
         }
         "randomUserAgent" => {
@@ -83,7 +118,12 @@ pub fn generate(name: &str) -> Option<String> {
             Some(agents[rng.gen_range(0..agents.len())].to_string())
         }
         "randomProtocol" => Some(if rng.gen_bool(0.5) { "http" } else { "https" }.to_string()),
-        "randomSemver" => Some(format!("{}.{}.{}", rng.gen_range(0..10), rng.gen_range(0..10), rng.gen_range(0..10))),
+        "randomSemver" => Some(format!(
+            "{}.{}.{}",
+            rng.gen_range(0..10),
+            rng.gen_range(0..10),
+            rng.gen_range(0..10)
+        )),
         "randomDomainName" => {
             let word: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
             let tlds = [".com", ".org", ".net", ".io", ".dev"];
@@ -100,7 +140,11 @@ pub fn generate(name: &str) -> Option<String> {
         "randomExampleEmail" => {
             let first: String = fake::faker::name::en::FirstName().fake_with_rng(&mut rng);
             let last: String = fake::faker::name::en::LastName().fake_with_rng(&mut rng);
-            Some(format!("{}.{}@example.com", first.to_lowercase(), last.to_lowercase()))
+            Some(format!(
+                "{}.{}@example.com",
+                first.to_lowercase(),
+                last.to_lowercase()
+            ))
         }
         "randomEmail" => {
             let email: String = fake::faker::internet::en::FreeEmail().fake_with_rng(&mut rng);
@@ -108,12 +152,20 @@ pub fn generate(name: &str) -> Option<String> {
         }
         "randomUserName" => {
             let first: String = fake::faker::name::en::FirstName().fake_with_rng(&mut rng);
-            Some(format!("{}{}", first.to_lowercase(), rng.gen_range(10..999)))
+            Some(format!(
+                "{}{}",
+                first.to_lowercase(),
+                rng.gen_range(10..999)
+            ))
         }
         "randomUrl" => {
             let word: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
             let tlds = ["com", "org", "net", "io"];
-            Some(format!("https://{}.{}", word, tlds[rng.gen_range(0..tlds.len())]))
+            Some(format!(
+                "https://{}.{}",
+                word,
+                tlds[rng.gen_range(0..tlds.len())]
+            ))
         }
 
         // ── Names and Personal Information ──
@@ -125,17 +177,39 @@ pub fn generate(name: &str) -> Option<String> {
             Some(prefixes[rng.gen_range(0..prefixes.len())].to_string())
         }
         "randomNameSuffix" => {
-            let suffixes = ["Jr.", "Sr.", "I", "II", "III", "IV", "V", "MD", "DDS", "PhD", "DVM"];
+            let suffixes = [
+                "Jr.", "Sr.", "I", "II", "III", "IV", "V", "MD", "DDS", "PhD", "DVM",
+            ];
             Some(suffixes[rng.gen_range(0..suffixes.len())].to_string())
         }
         "randomJobArea" => {
-            let areas = ["Marketing", "Engineering", "Sales", "Finance", "Human Resources",
-                         "Operations", "Research", "Design", "Legal", "Support"];
+            let areas = [
+                "Marketing",
+                "Engineering",
+                "Sales",
+                "Finance",
+                "Human Resources",
+                "Operations",
+                "Research",
+                "Design",
+                "Legal",
+                "Support",
+            ];
             Some(areas[rng.gen_range(0..areas.len())].to_string())
         }
         "randomJobDescriptor" => {
-            let descriptors = ["Senior", "Lead", "Junior", "Principal", "Chief", "Staff",
-                               "Associate", "Executive", "Regional", "Global"];
+            let descriptors = [
+                "Senior",
+                "Lead",
+                "Junior",
+                "Principal",
+                "Chief",
+                "Staff",
+                "Associate",
+                "Executive",
+                "Regional",
+                "Global",
+            ];
             Some(descriptors[rng.gen_range(0..descriptors.len())].to_string())
         }
         "randomJobTitle" => {
@@ -143,15 +217,24 @@ pub fn generate(name: &str) -> Option<String> {
             Some(title)
         }
         "randomJobType" => {
-            let types = ["Full-time", "Part-time", "Contract", "Freelance", "Intern", "Temporary"];
+            let types = [
+                "Full-time",
+                "Part-time",
+                "Contract",
+                "Freelance",
+                "Intern",
+                "Temporary",
+            ];
             Some(types[rng.gen_range(0..types.len())].to_string())
         }
         "randomPhoneNumber" => {
-            let phone: String = fake::faker::phone_number::en::PhoneNumber().fake_with_rng(&mut rng);
+            let phone: String =
+                fake::faker::phone_number::en::PhoneNumber().fake_with_rng(&mut rng);
             Some(phone)
         }
         "randomPhoneNumberExt" => {
-            let phone: String = fake::faker::phone_number::en::PhoneNumber().fake_with_rng(&mut rng);
+            let phone: String =
+                fake::faker::phone_number::en::PhoneNumber().fake_with_rng(&mut rng);
             Some(format!("{} ext. {}", phone, rng.gen_range(100..999)))
         }
 
@@ -164,13 +247,27 @@ pub fn generate(name: &str) -> Option<String> {
             Some(format!("{} {}", num, street))
         }
         "randomCountry" => Some(fake::faker::address::en::CountryName().fake_with_rng(&mut rng)),
-        "randomCountryCode" => Some(fake::faker::address::en::CountryCode().fake_with_rng(&mut rng)),
-        "randomLatitude" => Some(fake::faker::address::en::Latitude().fake_with_rng::<f64, _>(&mut rng).to_string()),
-        "randomLongitude" => Some(fake::faker::address::en::Longitude().fake_with_rng::<f64, _>(&mut rng).to_string()),
+        "randomCountryCode" => {
+            Some(fake::faker::address::en::CountryCode().fake_with_rng(&mut rng))
+        }
+        "randomLatitude" => Some(
+            fake::faker::address::en::Latitude()
+                .fake_with_rng::<f64, _>(&mut rng)
+                .to_string(),
+        ),
+        "randomLongitude" => Some(
+            fake::faker::address::en::Longitude()
+                .fake_with_rng::<f64, _>(&mut rng)
+                .to_string(),
+        ),
 
         // ── Images ──
         "randomAvatarImage" => Some(format!("https://i.pravatar.cc/{}", rng.gen_range(200..400))),
-        "randomImageUrl" => Some(format!("https://picsum.photos/{}/{}", rng.gen_range(200..800), rng.gen_range(200..800))),
+        "randomImageUrl" => Some(format!(
+            "https://picsum.photos/{}/{}",
+            rng.gen_range(200..800),
+            rng.gen_range(200..800)
+        )),
         "randomAbstractImage" => Some("https://loremflickr.com/320/240/abstract".to_string()),
         "randomAnimalsImage" => Some("https://loremflickr.com/320/240/animals".to_string()),
         "randomBusinessImage" => Some("https://loremflickr.com/320/240/business".to_string()),
@@ -190,27 +287,42 @@ pub fn generate(name: &str) -> Option<String> {
 
         // ── Finance ──
         "randomBankAccount" => {
-            let acct: String = (0..10).map(|_| rng.gen_range(b'0'..=b'9') as char).collect();
+            let acct: String = (0..10)
+                .map(|_| rng.gen_range(b'0'..=b'9') as char)
+                .collect();
             Some(acct)
         }
         "randomBankAccountName" => {
-            let names = ["Checking Account", "Savings Account", "Money Market Account",
-                         "Investment Account", "Personal Loan Account", "Auto Loan Account"];
+            let names = [
+                "Checking Account",
+                "Savings Account",
+                "Money Market Account",
+                "Investment Account",
+                "Personal Loan Account",
+                "Auto Loan Account",
+            ];
             Some(names[rng.gen_range(0..names.len())].to_string())
         }
-        "randomCreditCardMask" => {
-            Some(format!("**** **** **** {}{}{}{}", rng.gen_range(0..=9), rng.gen_range(0..=9),
-                         rng.gen_range(0..=9), rng.gen_range(0..=9)))
-        }
+        "randomCreditCardMask" => Some(format!(
+            "**** **** **** {}{}{}{}",
+            rng.gen_range(0..=9),
+            rng.gen_range(0..=9),
+            rng.gen_range(0..=9),
+            rng.gen_range(0..=9)
+        )),
         "randomBankAccountBic" => {
             let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            let bic: String = (0..8).map(|_| charset[rng.gen_range(0..charset.len())] as char).collect();
+            let bic: String = (0..8)
+                .map(|_| charset[rng.gen_range(0..charset.len())] as char)
+                .collect();
             Some(bic)
         }
         "randomBankAccountIban" => {
             let countries = ["DE", "GB", "FR", "NL", "ES", "IT"];
             let country = countries[rng.gen_range(0..countries.len())];
-            let digits: String = (0..18).map(|_| rng.gen_range(b'0'..=b'9') as char).collect();
+            let digits: String = (0..18)
+                .map(|_| rng.gen_range(b'0'..=b'9') as char)
+                .collect();
             Some(format!("{}{}{}", country, rng.gen_range(10..99), digits))
         }
         "randomTransactionType" => {
@@ -218,12 +330,24 @@ pub fn generate(name: &str) -> Option<String> {
             Some(types[rng.gen_range(0..types.len())].to_string())
         }
         "randomCurrencyCode" => {
-            let codes = ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "INR", "BRL"];
+            let codes = [
+                "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "INR", "BRL",
+            ];
             Some(codes[rng.gen_range(0..codes.len())].to_string())
         }
         "randomCurrencyName" => {
-            let names = ["US Dollar", "Euro", "British Pound", "Japanese Yen", "Canadian Dollar",
-                         "Australian Dollar", "Swiss Franc", "Chinese Yuan", "Indian Rupee", "Brazilian Real"];
+            let names = [
+                "US Dollar",
+                "Euro",
+                "British Pound",
+                "Japanese Yen",
+                "Canadian Dollar",
+                "Australian Dollar",
+                "Swiss Franc",
+                "Chinese Yuan",
+                "Indian Rupee",
+                "Brazilian Real",
+            ];
             Some(names[rng.gen_range(0..names.len())].to_string())
         }
         "randomCurrencySymbol" => {
@@ -233,48 +357,113 @@ pub fn generate(name: &str) -> Option<String> {
         "randomBitcoin" => {
             let charset: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
             let len = rng.gen_range(24..=33);
-            let addr: String = (0..len).map(|_| charset[rng.gen_range(0..charset.len())] as char).collect();
+            let addr: String = (0..len)
+                .map(|_| charset[rng.gen_range(0..charset.len())] as char)
+                .collect();
             Some(format!("1{}", addr))
         }
 
         // ── Business ──
-        "randomCompanyName" => Some(fake::faker::company::en::CompanyName().fake_with_rng(&mut rng)),
-        "randomCompanySuffix" => Some(fake::faker::company::en::CompanySuffix().fake_with_rng(&mut rng)),
+        "randomCompanyName" => {
+            Some(fake::faker::company::en::CompanyName().fake_with_rng(&mut rng))
+        }
+        "randomCompanySuffix" => {
+            Some(fake::faker::company::en::CompanySuffix().fake_with_rng(&mut rng))
+        }
         "randomBs" => Some(fake::faker::company::en::Bs().fake_with_rng(&mut rng)),
         "randomBsAdjective" => Some(fake::faker::company::en::BsAdj().fake_with_rng(&mut rng)),
         "randomBsBuzz" => Some(fake::faker::company::en::BsVerb().fake_with_rng(&mut rng)),
         "randomBsNoun" => Some(fake::faker::company::en::BsNoun().fake_with_rng(&mut rng)),
-        "randomCatchPhrase" => Some(fake::faker::company::en::CatchPhrase().fake_with_rng(&mut rng)),
-        "randomCatchPhraseAdjective" => Some(fake::faker::company::en::CatchPhrase().fake_with_rng::<String, _>(&mut rng).split(' ').next().unwrap_or("innovative").to_string()),
+        "randomCatchPhrase" => {
+            Some(fake::faker::company::en::CatchPhrase().fake_with_rng(&mut rng))
+        }
+        "randomCatchPhraseAdjective" => Some(
+            fake::faker::company::en::CatchPhrase()
+                .fake_with_rng::<String, _>(&mut rng)
+                .split(' ')
+                .next()
+                .unwrap_or("innovative")
+                .to_string(),
+        ),
         "randomCatchPhraseDescriptor" => {
-            let descriptors = ["next-generation", "cutting-edge", "state-of-the-art", "best-in-class",
-                               "mission-critical", "enterprise-grade", "high-performance", "cloud-native"];
+            let descriptors = [
+                "next-generation",
+                "cutting-edge",
+                "state-of-the-art",
+                "best-in-class",
+                "mission-critical",
+                "enterprise-grade",
+                "high-performance",
+                "cloud-native",
+            ];
             Some(descriptors[rng.gen_range(0..descriptors.len())].to_string())
         }
         "randomCatchPhraseNoun" => {
-            let nouns = ["solutions", "platform", "infrastructure", "paradigm", "framework",
-                         "architecture", "interface", "protocol", "middleware", "portal"];
+            let nouns = [
+                "solutions",
+                "platform",
+                "infrastructure",
+                "paradigm",
+                "framework",
+                "architecture",
+                "interface",
+                "protocol",
+                "middleware",
+                "portal",
+            ];
             Some(nouns[rng.gen_range(0..nouns.len())].to_string())
         }
 
         // ── Database ──
         "randomDatabaseColumn" => {
-            let cols = ["id", "name", "email", "created_at", "updated_at", "status",
-                        "title", "description", "amount", "quantity", "price", "is_active"];
+            let cols = [
+                "id",
+                "name",
+                "email",
+                "created_at",
+                "updated_at",
+                "status",
+                "title",
+                "description",
+                "amount",
+                "quantity",
+                "price",
+                "is_active",
+            ];
             Some(cols[rng.gen_range(0..cols.len())].to_string())
         }
         "randomDatabaseType" => {
-            let types = ["varchar", "int", "bigint", "text", "boolean", "timestamp",
-                         "decimal", "float", "uuid", "jsonb", "date", "bytea"];
+            let types = [
+                "varchar",
+                "int",
+                "bigint",
+                "text",
+                "boolean",
+                "timestamp",
+                "decimal",
+                "float",
+                "uuid",
+                "jsonb",
+                "date",
+                "bytea",
+            ];
             Some(types[rng.gen_range(0..types.len())].to_string())
         }
         "randomDatabaseCollation" => {
-            let collations = ["utf8_general_ci", "utf8mb4_unicode_ci", "latin1_swedish_ci",
-                              "utf8_unicode_ci", "ascii_general_ci", "utf8mb4_general_ci"];
+            let collations = [
+                "utf8_general_ci",
+                "utf8mb4_unicode_ci",
+                "latin1_swedish_ci",
+                "utf8_unicode_ci",
+                "ascii_general_ci",
+                "utf8mb4_general_ci",
+            ];
             Some(collations[rng.gen_range(0..collations.len())].to_string())
         }
         "randomDatabaseEngine" => {
-            let engines = ["InnoDB", "MyISAM", "MEMORY", "CSV", "ARCHIVE", "MERGE", "NDB"];
+            let engines = [
+                "InnoDB", "MyISAM", "MEMORY", "CSV", "ARCHIVE", "MERGE", "NDB",
+            ];
             Some(engines[rng.gen_range(0..engines.len())].to_string())
         }
 
@@ -295,28 +484,60 @@ pub fn generate(name: &str) -> Option<String> {
             Some(recent.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
         }
         "randomWeekday" => {
-            let days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            let days = [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ];
             Some(days[rng.gen_range(0..days.len())].to_string())
         }
         "randomMonth" => {
-            let months = ["January", "February", "March", "April", "May", "June",
-                          "July", "August", "September", "October", "November", "December"];
+            let months = [
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
+            ];
             Some(months[rng.gen_range(0..months.len())].to_string())
         }
 
         // ── Files and System ──
         "randomFileName" => {
             let name: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
-            let exts = ["pdf", "txt", "doc", "jpg", "png", "csv", "json", "xml", "html", "md"];
+            let exts = [
+                "pdf", "txt", "doc", "jpg", "png", "csv", "json", "xml", "html", "md",
+            ];
             Some(format!("{}.{}", name, exts[rng.gen_range(0..exts.len())]))
         }
         "randomFileType" => {
-            let types = ["application/pdf", "image/jpeg", "text/plain", "application/json",
-                         "image/png", "text/html", "application/xml", "text/csv"];
+            let types = [
+                "application/pdf",
+                "image/jpeg",
+                "text/plain",
+                "application/json",
+                "image/png",
+                "text/html",
+                "application/xml",
+                "text/csv",
+            ];
             Some(types[rng.gen_range(0..types.len())].to_string())
         }
         "randomFileExt" => {
-            let exts = ["pdf", "txt", "doc", "jpg", "png", "csv", "json", "xml", "html", "zip"];
+            let exts = [
+                "pdf", "txt", "doc", "jpg", "png", "csv", "json", "xml", "html", "zip",
+            ];
             Some(exts[rng.gen_range(0..exts.len())].to_string())
         }
         "randomCommonFileName" => {
@@ -337,7 +558,13 @@ pub fn generate(name: &str) -> Option<String> {
             let sub: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
             let name: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
             let exts = ["txt", "log", "conf", "json", "yml"];
-            Some(format!("/{}/{}/{}.{}", dirs[rng.gen_range(0..dirs.len())], sub, name, exts[rng.gen_range(0..exts.len())]))
+            Some(format!(
+                "/{}/{}/{}.{}",
+                dirs[rng.gen_range(0..dirs.len())],
+                sub,
+                name,
+                exts[rng.gen_range(0..exts.len())]
+            ))
         }
         "randomDirectoryPath" => {
             let dirs = ["usr", "home", "var", "tmp", "opt", "etc"];
@@ -345,73 +572,170 @@ pub fn generate(name: &str) -> Option<String> {
             Some(format!("/{}/{}", dirs[rng.gen_range(0..dirs.len())], sub))
         }
         "randomMimeType" => {
-            let mimes = ["application/json", "application/xml", "text/html", "text/plain",
-                         "image/jpeg", "image/png", "application/pdf", "application/octet-stream",
-                         "multipart/form-data", "application/x-www-form-urlencoded"];
+            let mimes = [
+                "application/json",
+                "application/xml",
+                "text/html",
+                "text/plain",
+                "image/jpeg",
+                "image/png",
+                "application/pdf",
+                "application/octet-stream",
+                "multipart/form-data",
+                "application/x-www-form-urlencoded",
+            ];
             Some(mimes[rng.gen_range(0..mimes.len())].to_string())
         }
 
         // ── Commerce ──
         "randomPrice" => Some(format!("{:.2}", rng.gen_range(1.0_f64..1000.0))),
         "randomProduct" => {
-            let products = ["Chair", "Table", "Keyboard", "Mouse", "Monitor", "Phone",
-                            "Laptop", "Headphones", "Camera", "Watch", "Shoes", "Bag"];
+            let products = [
+                "Chair",
+                "Table",
+                "Keyboard",
+                "Mouse",
+                "Monitor",
+                "Phone",
+                "Laptop",
+                "Headphones",
+                "Camera",
+                "Watch",
+                "Shoes",
+                "Bag",
+            ];
             Some(products[rng.gen_range(0..products.len())].to_string())
         }
         "randomProductAdjective" => {
-            let adjs = ["Ergonomic", "Modern", "Sleek", "Rustic", "Handmade",
-                        "Refined", "Practical", "Gorgeous", "Incredible", "Fantastic"];
+            let adjs = [
+                "Ergonomic",
+                "Modern",
+                "Sleek",
+                "Rustic",
+                "Handmade",
+                "Refined",
+                "Practical",
+                "Gorgeous",
+                "Incredible",
+                "Fantastic",
+            ];
             Some(adjs[rng.gen_range(0..adjs.len())].to_string())
         }
         "randomProductMaterial" => {
-            let materials = ["Wood", "Metal", "Plastic", "Leather", "Cotton",
-                             "Rubber", "Steel", "Granite", "Concrete", "Silk"];
+            let materials = [
+                "Wood", "Metal", "Plastic", "Leather", "Cotton", "Rubber", "Steel", "Granite",
+                "Concrete", "Silk",
+            ];
             Some(materials[rng.gen_range(0..materials.len())].to_string())
         }
         "randomProductName" => {
             let adjs = ["Ergonomic", "Modern", "Sleek", "Rustic", "Handmade"];
             let materials = ["Wood", "Metal", "Plastic", "Leather", "Cotton"];
             let products = ["Chair", "Table", "Keyboard", "Mouse", "Monitor"];
-            Some(format!("{} {} {}",
+            Some(format!(
+                "{} {} {}",
                 adjs[rng.gen_range(0..adjs.len())],
                 materials[rng.gen_range(0..materials.len())],
-                products[rng.gen_range(0..products.len())]))
+                products[rng.gen_range(0..products.len())]
+            ))
         }
         "randomDepartment" => {
-            let depts = ["Electronics", "Clothing", "Books", "Home", "Sports",
-                         "Toys", "Garden", "Health", "Beauty", "Automotive"];
+            let depts = [
+                "Electronics",
+                "Clothing",
+                "Books",
+                "Home",
+                "Sports",
+                "Toys",
+                "Garden",
+                "Health",
+                "Beauty",
+                "Automotive",
+            ];
             Some(depts[rng.gen_range(0..depts.len())].to_string())
         }
 
         // ── Hacker and Lorem ──
         "randomNoun" => {
-            let nouns = ["protocol", "interface", "system", "array", "bus", "port",
-                         "driver", "firewall", "bandwidth", "pixel", "matrix", "capacitor"];
+            let nouns = [
+                "protocol",
+                "interface",
+                "system",
+                "array",
+                "bus",
+                "port",
+                "driver",
+                "firewall",
+                "bandwidth",
+                "pixel",
+                "matrix",
+                "capacitor",
+            ];
             Some(nouns[rng.gen_range(0..nouns.len())].to_string())
         }
         "randomVerb" => {
-            let verbs = ["hack", "override", "parse", "reboot", "compress", "generate",
-                         "quantify", "calculate", "synthesize", "transmit", "program", "navigate"];
+            let verbs = [
+                "hack",
+                "override",
+                "parse",
+                "reboot",
+                "compress",
+                "generate",
+                "quantify",
+                "calculate",
+                "synthesize",
+                "transmit",
+                "program",
+                "navigate",
+            ];
             Some(verbs[rng.gen_range(0..verbs.len())].to_string())
         }
         "randomIngverb" => {
-            let verbs = ["hacking", "overriding", "parsing", "rebooting", "compressing",
-                         "generating", "quantifying", "calculating", "synthesizing", "transmitting"];
+            let verbs = [
+                "hacking",
+                "overriding",
+                "parsing",
+                "rebooting",
+                "compressing",
+                "generating",
+                "quantifying",
+                "calculating",
+                "synthesizing",
+                "transmitting",
+            ];
             Some(verbs[rng.gen_range(0..verbs.len())].to_string())
         }
         "randomAdjective" => {
-            let adjs = ["digital", "virtual", "wireless", "neural", "optical", "haptic",
-                        "auxiliary", "primary", "redundant", "mobile", "bluetooth", "solid state"];
+            let adjs = [
+                "digital",
+                "virtual",
+                "wireless",
+                "neural",
+                "optical",
+                "haptic",
+                "auxiliary",
+                "primary",
+                "redundant",
+                "mobile",
+                "bluetooth",
+                "solid state",
+            ];
             Some(adjs[rng.gen_range(0..adjs.len())].to_string())
         }
         "randomPhrase" => {
-            let verbs = ["hack", "override", "parse", "reboot", "compress", "generate"];
-            let adjs = ["digital", "virtual", "wireless", "neural", "optical", "haptic"];
+            let verbs = [
+                "hack", "override", "parse", "reboot", "compress", "generate",
+            ];
+            let adjs = [
+                "digital", "virtual", "wireless", "neural", "optical", "haptic",
+            ];
             let nouns = ["protocol", "interface", "system", "array", "bus", "port"];
-            Some(format!("Try to {} the {} {}",
+            Some(format!(
+                "Try to {} the {} {}",
                 verbs[rng.gen_range(0..verbs.len())],
                 adjs[rng.gen_range(0..adjs.len())],
-                nouns[rng.gen_range(0..nouns.len())]))
+                nouns[rng.gen_range(0..nouns.len())]
+            ))
         }
         "randomLoremWord" => {
             let word: String = fake::faker::lorem::en::Word().fake_with_rng(&mut rng);
@@ -467,51 +791,137 @@ mod tests {
     /// All known dynamic variable names — must match Bruno's complete list.
     const ALL_DYNAMIC_VARS: &[&str] = &[
         // Basic Data Types
-        "guid", "timestamp", "isoTimestamp", "randomUUID", "randomNanoId",
-        "randomAlphaNumeric", "randomBoolean", "randomInt", "randomColor",
-        "randomHexColor", "randomAbbreviation", "randomWord", "randomWords",
+        "guid",
+        "timestamp",
+        "isoTimestamp",
+        "randomUUID",
+        "randomNanoId",
+        "randomAlphaNumeric",
+        "randomBoolean",
+        "randomInt",
+        "randomColor",
+        "randomHexColor",
+        "randomAbbreviation",
+        "randomWord",
+        "randomWords",
         // Internet and Network
-        "randomIP", "randomIPV4", "randomIPV6", "randomMACAddress", "randomPassword",
-        "randomLocale", "randomUserAgent", "randomProtocol", "randomSemver",
-        "randomDomainName", "randomDomainSuffix", "randomDomainWord",
-        "randomExampleEmail", "randomEmail", "randomUserName", "randomUrl",
+        "randomIP",
+        "randomIPV4",
+        "randomIPV6",
+        "randomMACAddress",
+        "randomPassword",
+        "randomLocale",
+        "randomUserAgent",
+        "randomProtocol",
+        "randomSemver",
+        "randomDomainName",
+        "randomDomainSuffix",
+        "randomDomainWord",
+        "randomExampleEmail",
+        "randomEmail",
+        "randomUserName",
+        "randomUrl",
         // Names
-        "randomFirstName", "randomLastName", "randomFullName", "randomNamePrefix",
-        "randomNameSuffix", "randomJobArea", "randomJobDescriptor", "randomJobTitle",
-        "randomJobType", "randomPhoneNumber", "randomPhoneNumberExt",
+        "randomFirstName",
+        "randomLastName",
+        "randomFullName",
+        "randomNamePrefix",
+        "randomNameSuffix",
+        "randomJobArea",
+        "randomJobDescriptor",
+        "randomJobTitle",
+        "randomJobType",
+        "randomPhoneNumber",
+        "randomPhoneNumberExt",
         // Location
-        "randomCity", "randomStreetName", "randomStreetAddress", "randomCountry",
-        "randomCountryCode", "randomLatitude", "randomLongitude",
+        "randomCity",
+        "randomStreetName",
+        "randomStreetAddress",
+        "randomCountry",
+        "randomCountryCode",
+        "randomLatitude",
+        "randomLongitude",
         // Images
-        "randomAvatarImage", "randomImageUrl", "randomAbstractImage",
-        "randomAnimalsImage", "randomBusinessImage", "randomCatsImage",
-        "randomCityImage", "randomFoodImage", "randomNightlifeImage",
-        "randomFashionImage", "randomPeopleImage", "randomNatureImage",
-        "randomSportsImage", "randomTransportImage", "randomImageDataUri",
+        "randomAvatarImage",
+        "randomImageUrl",
+        "randomAbstractImage",
+        "randomAnimalsImage",
+        "randomBusinessImage",
+        "randomCatsImage",
+        "randomCityImage",
+        "randomFoodImage",
+        "randomNightlifeImage",
+        "randomFashionImage",
+        "randomPeopleImage",
+        "randomNatureImage",
+        "randomSportsImage",
+        "randomTransportImage",
+        "randomImageDataUri",
         // Finance
-        "randomBankAccount", "randomBankAccountName", "randomCreditCardMask",
-        "randomBankAccountBic", "randomBankAccountIban", "randomTransactionType",
-        "randomCurrencyCode", "randomCurrencyName", "randomCurrencySymbol", "randomBitcoin",
+        "randomBankAccount",
+        "randomBankAccountName",
+        "randomCreditCardMask",
+        "randomBankAccountBic",
+        "randomBankAccountIban",
+        "randomTransactionType",
+        "randomCurrencyCode",
+        "randomCurrencyName",
+        "randomCurrencySymbol",
+        "randomBitcoin",
         // Business
-        "randomCompanyName", "randomCompanySuffix", "randomBs", "randomBsAdjective",
-        "randomBsBuzz", "randomBsNoun", "randomCatchPhrase", "randomCatchPhraseAdjective",
-        "randomCatchPhraseDescriptor", "randomCatchPhraseNoun",
+        "randomCompanyName",
+        "randomCompanySuffix",
+        "randomBs",
+        "randomBsAdjective",
+        "randomBsBuzz",
+        "randomBsNoun",
+        "randomCatchPhrase",
+        "randomCatchPhraseAdjective",
+        "randomCatchPhraseDescriptor",
+        "randomCatchPhraseNoun",
         // Database
-        "randomDatabaseColumn", "randomDatabaseType", "randomDatabaseCollation", "randomDatabaseEngine",
+        "randomDatabaseColumn",
+        "randomDatabaseType",
+        "randomDatabaseCollation",
+        "randomDatabaseEngine",
         // Dates
-        "randomDateFuture", "randomDatePast", "randomDateRecent", "randomWeekday", "randomMonth",
+        "randomDateFuture",
+        "randomDatePast",
+        "randomDateRecent",
+        "randomWeekday",
+        "randomMonth",
         // Files
-        "randomFileName", "randomFileType", "randomFileExt", "randomCommonFileName",
-        "randomCommonFileType", "randomCommonFileExt", "randomFilePath",
-        "randomDirectoryPath", "randomMimeType",
+        "randomFileName",
+        "randomFileType",
+        "randomFileExt",
+        "randomCommonFileName",
+        "randomCommonFileType",
+        "randomCommonFileExt",
+        "randomFilePath",
+        "randomDirectoryPath",
+        "randomMimeType",
         // Commerce
-        "randomPrice", "randomProduct", "randomProductAdjective", "randomProductMaterial",
-        "randomProductName", "randomDepartment",
+        "randomPrice",
+        "randomProduct",
+        "randomProductAdjective",
+        "randomProductMaterial",
+        "randomProductName",
+        "randomDepartment",
         // Hacker and Lorem
-        "randomNoun", "randomVerb", "randomIngverb", "randomAdjective", "randomPhrase",
-        "randomLoremWord", "randomLoremWords", "randomLoremSentence", "randomLoremSentences",
-        "randomLoremParagraph", "randomLoremParagraphs", "randomLoremText",
-        "randomLoremSlug", "randomLoremLines",
+        "randomNoun",
+        "randomVerb",
+        "randomIngverb",
+        "randomAdjective",
+        "randomPhrase",
+        "randomLoremWord",
+        "randomLoremWords",
+        "randomLoremSentence",
+        "randomLoremSentences",
+        "randomLoremParagraph",
+        "randomLoremParagraphs",
+        "randomLoremText",
+        "randomLoremSlug",
+        "randomLoremLines",
     ];
 
     #[test]
@@ -543,26 +953,41 @@ mod tests {
     #[test]
     fn guid_is_valid_uuid() {
         let val = generate("guid").unwrap();
-        assert!(uuid::Uuid::parse_str(&val).is_ok(), "guid '{}' is not valid UUID", val);
+        assert!(
+            uuid::Uuid::parse_str(&val).is_ok(),
+            "guid '{}' is not valid UUID",
+            val
+        );
     }
 
     #[test]
     fn random_uuid_is_valid_uuid() {
         let val = generate("randomUUID").unwrap();
-        assert!(uuid::Uuid::parse_str(&val).is_ok(), "randomUUID '{}' is not valid UUID", val);
+        assert!(
+            uuid::Uuid::parse_str(&val).is_ok(),
+            "randomUUID '{}' is not valid UUID",
+            val
+        );
     }
 
     #[test]
     fn timestamp_is_valid_i64() {
         let val = generate("timestamp").unwrap();
-        assert!(val.parse::<i64>().is_ok(), "timestamp '{}' is not valid i64", val);
+        assert!(
+            val.parse::<i64>().is_ok(),
+            "timestamp '{}' is not valid i64",
+            val
+        );
     }
 
     #[test]
     fn iso_timestamp_is_valid_rfc3339() {
         let val = generate("isoTimestamp").unwrap();
-        assert!(chrono::DateTime::parse_from_rfc3339(&val).is_ok(),
-            "isoTimestamp '{}' is not valid RFC 3339", val);
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&val).is_ok(),
+            "isoTimestamp '{}' is not valid RFC 3339",
+            val
+        );
     }
 
     #[test]
@@ -577,7 +1002,11 @@ mod tests {
     fn random_boolean_valid() {
         for _ in 0..20 {
             let val = generate("randomBoolean").unwrap();
-            assert!(val == "true" || val == "false", "randomBoolean '{}' invalid", val);
+            assert!(
+                val == "true" || val == "false",
+                "randomBoolean '{}' invalid",
+                val
+            );
         }
     }
 
@@ -586,6 +1015,9 @@ mod tests {
         // Probabilistic: 10 GUIDs should not all be identical
         let vals: Vec<String> = (0..10).map(|_| generate("guid").unwrap()).collect();
         let first = &vals[0];
-        assert!(vals.iter().any(|v| v != first), "10 guid calls all returned same value");
+        assert!(
+            vals.iter().any(|v| v != first),
+            "10 guid calls all returned same value"
+        );
     }
 }

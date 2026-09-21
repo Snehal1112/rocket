@@ -24,14 +24,14 @@ pub struct OcVariable {
 /// OpenCollection SecretVariable — schema: { secret: true, name, description, disabled, type }.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcSecretVariable {
-    pub secret: bool,  // always true
+    pub secret: bool, // always true
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub secret_type: Option<String>,  // "string"|"number"|"boolean"|"null"|"object"
+    pub secret_type: Option<String>, // "string"|"number"|"boolean"|"null"|"object"
 }
 
 /// One entry in an Environment's `variables` list. The OpenCollection spec

@@ -1,5 +1,5 @@
-use deno_core::OpState;
 use crate::scripting::state::ScriptInputState;
+use deno_core::OpState;
 
 pub mod console;
 pub mod fs;
@@ -33,7 +33,11 @@ pub(crate) fn redact(state: &OpState, msg: String) -> String {
     if secrets.is_empty() {
         return msg;
     }
-    let mut ordered: Vec<&str> = secrets.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
+    let mut ordered: Vec<&str> = secrets
+        .iter()
+        .map(String::as_str)
+        .filter(|s| !s.is_empty())
+        .collect();
     ordered.sort_unstable_by_key(|s| std::cmp::Reverse(s.len()));
     let mut out = msg;
     for s in ordered {

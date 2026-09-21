@@ -4,41 +4,108 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
     // Collection events
-    CollectionCreated { name: String },
-    CollectionDeleted { name: String },
-    CollectionRenamed { old_name: String, new_name: String },
+    CollectionCreated {
+        name: String,
+    },
+    CollectionDeleted {
+        name: String,
+    },
+    CollectionRenamed {
+        old_name: String,
+        new_name: String,
+    },
 
     // Request events
-    RequestSaved { collection: String, path: String },
-    RequestDeleted { collection: String, path: String },
-    ItemMoved { src_collection: String, src_path: String, dst_collection: String, dst_path: String },
+    RequestSaved {
+        collection: String,
+        path: String,
+    },
+    RequestDeleted {
+        collection: String,
+        path: String,
+    },
+    ItemMoved {
+        src_collection: String,
+        src_path: String,
+        dst_collection: String,
+        dst_path: String,
+    },
 
     // Folder events
-    FolderCreated { collection: String, path: String },
-    FolderDeleted { collection: String, path: String },
-    ItemsReordered { collection: String, folder_path: String },
+    FolderCreated {
+        collection: String,
+        path: String,
+    },
+    FolderDeleted {
+        collection: String,
+        path: String,
+    },
+    ItemsReordered {
+        collection: String,
+        folder_path: String,
+    },
 
     // Collection settings/variable events
-    CollectionSettingsSaved { collection: String },
-    FolderVariablesSaved { collection: String, folder_path: String },
-    RequestVariablesSaved { collection: String, request_path: String },
+    CollectionSettingsSaved {
+        collection: String,
+    },
+    FolderVariablesSaved {
+        collection: String,
+        folder_path: String,
+    },
+    RequestVariablesSaved {
+        collection: String,
+        request_path: String,
+    },
 
     // Environment events
-    EnvironmentSaved { name: String },
-    EnvironmentDeleted { name: String },
+    EnvironmentSaved {
+        name: String,
+    },
+    EnvironmentDeleted {
+        name: String,
+    },
 
     // Workspace events
-    WorkspaceCreated  { id: String, name: String, path: String },
-    WorkspaceSwitched { id: String, name: String, path: String },
-    WorkspaceRenamed  { id: String, old_name: String, new_name: String },
-    WorkspaceClosed   { id: String },
-    WorkspaceDeleted  { id: String },
-    WorkspacePinned   { id: String },
-    WorkspaceUnpinned { id: String },
-    WorkspaceDescriptionUpdated { id: String, description: Option<String> },
+    WorkspaceCreated {
+        id: String,
+        name: String,
+        path: String,
+    },
+    WorkspaceSwitched {
+        id: String,
+        name: String,
+        path: String,
+    },
+    WorkspaceRenamed {
+        id: String,
+        old_name: String,
+        new_name: String,
+    },
+    WorkspaceClosed {
+        id: String,
+    },
+    WorkspaceDeleted {
+        id: String,
+    },
+    WorkspacePinned {
+        id: String,
+    },
+    WorkspaceUnpinned {
+        id: String,
+    },
+    WorkspaceDescriptionUpdated {
+        id: String,
+        description: Option<String>,
+    },
 
     // HTTP execution events
-    RequestExecuted { method: String, url: String, status: u16, duration_ms: u64 },
+    RequestExecuted {
+        method: String,
+        url: String,
+        status: u16,
+        duration_ms: u64,
+    },
 
     // Collection Runner events
     /// Emitted once when a run starts, before its first step.
@@ -81,23 +148,60 @@ pub enum DomainEvent {
     },
 
     // File system events
-    FileChanged { path: String, event_type: FileChangeKind, collection: Option<String> },
+    FileChanged {
+        path: String,
+        event_type: FileChangeKind,
+        collection: Option<String>,
+    },
 
     // History events
     HistoryCleared,
 
     // Git events
-    GitStatusChanged { collection: String },
-    GitCommit { collection: String, message: String, sha: String },
-    GitPush { collection: String, remote: String },
-    GitPull { collection: String, remote: String },
-    BranchSwitched { collection: String, branch: String },
-    BranchMerged { collection: String, branch: String },
-    GitStashChanged { collection: String },
-    GitConflictDetected { collection: String, files: Vec<String> },
-    GitCloned { url: String, dest: String },
-    GitRemoteAdded { collection: String, name: String, url: String },
-    GitRemoteRemoved { collection: String, name: String },
+    GitStatusChanged {
+        collection: String,
+    },
+    GitCommit {
+        collection: String,
+        message: String,
+        sha: String,
+    },
+    GitPush {
+        collection: String,
+        remote: String,
+    },
+    GitPull {
+        collection: String,
+        remote: String,
+    },
+    BranchSwitched {
+        collection: String,
+        branch: String,
+    },
+    BranchMerged {
+        collection: String,
+        branch: String,
+    },
+    GitStashChanged {
+        collection: String,
+    },
+    GitConflictDetected {
+        collection: String,
+        files: Vec<String>,
+    },
+    GitCloned {
+        url: String,
+        dest: String,
+    },
+    GitRemoteAdded {
+        collection: String,
+        name: String,
+        url: String,
+    },
+    GitRemoteRemoved {
+        collection: String,
+        name: String,
+    },
 
     // Script events
     /// Emitted after all script phases complete. Carries combined console output.
@@ -136,7 +240,10 @@ pub enum DomainEvent {
     /// `rok.setCollectionVar` / `runtime.actions` collection-scope writes; manual
     /// collection-settings saves publish `CollectionSettingsSaved` instead, not
     /// this variant).
-    CollectionVariableWritten { collection: String, key: String },
+    CollectionVariableWritten {
+        collection: String,
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,28 +332,36 @@ mod tests {
 
     #[test]
     fn workspace_closed_serializes() {
-        let event = DomainEvent::WorkspaceClosed { id: "abc-123".into() };
+        let event = DomainEvent::WorkspaceClosed {
+            id: "abc-123".into(),
+        };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("abc-123"));
     }
 
     #[test]
     fn workspace_deleted_serializes() {
-        let event = DomainEvent::WorkspaceDeleted { id: "abc-123".into() };
+        let event = DomainEvent::WorkspaceDeleted {
+            id: "abc-123".into(),
+        };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("abc-123"));
     }
 
     #[test]
     fn workspace_pinned_serializes() {
-        let event = DomainEvent::WorkspacePinned { id: "ws-123".into() };
+        let event = DomainEvent::WorkspacePinned {
+            id: "ws-123".into(),
+        };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("ws-123"));
     }
 
     #[test]
     fn workspace_unpinned_serializes() {
-        let event = DomainEvent::WorkspaceUnpinned { id: "ws-123".into() };
+        let event = DomainEvent::WorkspaceUnpinned {
+            id: "ws-123".into(),
+        };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("ws-123"));
     }
@@ -283,7 +398,10 @@ mod tests {
             key: "BASE_URL".into(),
         };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains("collectionVariableWritten") || json.contains("CollectionVariableWritten"));
+        assert!(
+            json.contains("collectionVariableWritten")
+                || json.contains("CollectionVariableWritten")
+        );
         assert!(json.contains("my-api"));
         assert!(json.contains("BASE_URL"));
     }
@@ -345,43 +463,78 @@ mod tests {
 
     #[test]
     fn folder_created_wire_shape() {
-        let event = DomainEvent::FolderCreated { collection: "my-api".into(), path: "auth".into() };
+        let event = DomainEvent::FolderCreated {
+            collection: "my-api".into(),
+            path: "auth".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"folderCreated","collection":"my-api","path":"auth"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"folderCreated","collection":"my-api","path":"auth"}"#
+        );
     }
 
     #[test]
     fn folder_deleted_wire_shape() {
-        let event = DomainEvent::FolderDeleted { collection: "my-api".into(), path: "auth".into() };
+        let event = DomainEvent::FolderDeleted {
+            collection: "my-api".into(),
+            path: "auth".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"folderDeleted","collection":"my-api","path":"auth"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"folderDeleted","collection":"my-api","path":"auth"}"#
+        );
     }
 
     #[test]
     fn items_reordered_wire_shape() {
-        let event = DomainEvent::ItemsReordered { collection: "my-api".into(), folder_path: "auth".into() };
+        let event = DomainEvent::ItemsReordered {
+            collection: "my-api".into(),
+            folder_path: "auth".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"itemsReordered","collection":"my-api","folder_path":"auth"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"itemsReordered","collection":"my-api","folder_path":"auth"}"#
+        );
     }
 
     #[test]
     fn collection_settings_saved_wire_shape() {
-        let event = DomainEvent::CollectionSettingsSaved { collection: "my-api".into() };
+        let event = DomainEvent::CollectionSettingsSaved {
+            collection: "my-api".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"collectionSettingsSaved","collection":"my-api"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"collectionSettingsSaved","collection":"my-api"}"#
+        );
     }
 
     #[test]
     fn folder_variables_saved_wire_shape() {
-        let event = DomainEvent::FolderVariablesSaved { collection: "my-api".into(), folder_path: "auth".into() };
+        let event = DomainEvent::FolderVariablesSaved {
+            collection: "my-api".into(),
+            folder_path: "auth".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"folderVariablesSaved","collection":"my-api","folder_path":"auth"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"folderVariablesSaved","collection":"my-api","folder_path":"auth"}"#
+        );
     }
 
     #[test]
     fn request_variables_saved_wire_shape() {
-        let event = DomainEvent::RequestVariablesSaved { collection: "my-api".into(), request_path: "users.yml".into() };
+        let event = DomainEvent::RequestVariablesSaved {
+            collection: "my-api".into(),
+            request_path: "users.yml".into(),
+        };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#
+        );
     }
 }

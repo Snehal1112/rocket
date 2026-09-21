@@ -15,7 +15,8 @@ pub fn convert(name: &str, doc: &BruDocument) -> Environment {
     }
 
     for secret_name in &doc.secret_vars {
-        env.variables.push(Variable::secret(secret_name.clone(), ""));
+        env.variables
+            .push(Variable::secret(secret_name.clone(), ""));
     }
 
     env
@@ -30,8 +31,16 @@ mod tests {
     fn converts_plain_vars() {
         let doc = BruDocument {
             vars: vec![
-                BruKeyValue { key: "baseUrl".into(), value: "http://localhost:3000".into(), disabled: false },
-                BruKeyValue { key: "apiKey".into(), value: "abc123".into(), disabled: true },
+                BruKeyValue {
+                    key: "baseUrl".into(),
+                    value: "http://localhost:3000".into(),
+                    disabled: false,
+                },
+                BruKeyValue {
+                    key: "apiKey".into(),
+                    value: "abc123".into(),
+                    disabled: true,
+                },
             ],
             ..BruDocument::default()
         };

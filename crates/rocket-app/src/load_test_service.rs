@@ -197,12 +197,7 @@ mod tests {
         fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
             Err(DomainError::NotFound("stub".into()))
         }
-        fn save_request(
-            &self,
-            _: &str,
-            path: &str,
-            _: &CollectionRequest,
-        ) -> DomainResult<String> {
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
             Ok(path.to_string())
         }
         fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
@@ -236,11 +231,7 @@ mod tests {
         ) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
-        fn get_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
         fn save_folder_variables(
@@ -251,11 +242,7 @@ mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
-        fn get_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
         fn save_request_variables(

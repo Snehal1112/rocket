@@ -14,7 +14,7 @@ pub struct OcWebSocketRequestInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub request_type: Option<String>,  // "websocket"
+    pub request_type: Option<String>, // "websocket"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -25,7 +25,7 @@ pub struct OcWebSocketRequestInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcWebSocketMessage {
     #[serde(rename = "type")]
-    pub message_type: String,  // "text" | "json" | "xml" | "binary"
+    pub message_type: String, // "text" | "json" | "xml" | "binary"
     pub data: String,
 }
 

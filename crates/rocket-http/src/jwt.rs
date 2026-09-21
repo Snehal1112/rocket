@@ -86,8 +86,14 @@ pub fn decode_jwt(token: &str) -> Result<JwtClaims, DomainError> {
         serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string());
 
     Ok(JwtClaims {
-        subject: payload.get("sub").and_then(|v| v.as_str()).map(String::from),
-        issuer: payload.get("iss").and_then(|v| v.as_str()).map(String::from),
+        subject: payload
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        issuer: payload
+            .get("iss")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         audience,
         expiry: payload.get("exp").and_then(|v| v.as_u64()),
         issued_at: payload.get("iat").and_then(|v| v.as_u64()),
@@ -139,10 +145,7 @@ mod tests {
 
     #[test]
     fn decodes_array_audience() {
-        let token = fake_jwt(
-            r#"{"alg":"RS256"}"#,
-            r#"{"aud":["client-1","client-2"]}"#,
-        );
+        let token = fake_jwt(r#"{"alg":"RS256"}"#, r#"{"aud":["client-1","client-2"]}"#);
         let claims = decode_jwt(&token).unwrap();
         assert_eq!(claims.audience.as_deref(), Some("client-1 client-2"));
     }

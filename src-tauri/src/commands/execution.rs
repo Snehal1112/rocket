@@ -47,22 +47,30 @@ impl From<ExecuteRequestOutput> for ExecuteRequestResponse {
             duration_ms: out.response.duration_ms,
             ttfb_ms: out.response.ttfb_ms,
             size_bytes: out.response.size_bytes,
-            test_results: out.test_results.iter().map(|t| IpcTestResult {
-                name: t.name.clone(),
-                status: match t.status {
-                    TestStatus::Passed => "passed".into(),
-                    TestStatus::Failed => "failed".into(),
-                },
-                error: t.error.clone(),
-            }).collect(),
-            console_entries: out.console_entries.iter().map(|e| IpcConsoleEntry {
-                level: match e.level {
-                    ConsoleLevel::Log   => "log".into(),
-                    ConsoleLevel::Warn  => "warn".into(),
-                    ConsoleLevel::Error => "error".into(),
-                },
-                message: e.message.clone(),
-            }).collect(),
+            test_results: out
+                .test_results
+                .iter()
+                .map(|t| IpcTestResult {
+                    name: t.name.clone(),
+                    status: match t.status {
+                        TestStatus::Passed => "passed".into(),
+                        TestStatus::Failed => "failed".into(),
+                    },
+                    error: t.error.clone(),
+                })
+                .collect(),
+            console_entries: out
+                .console_entries
+                .iter()
+                .map(|e| IpcConsoleEntry {
+                    level: match e.level {
+                        ConsoleLevel::Log => "log".into(),
+                        ConsoleLevel::Warn => "warn".into(),
+                        ConsoleLevel::Error => "error".into(),
+                    },
+                    message: e.message.clone(),
+                })
+                .collect(),
             script_error: out.script_error,
         }
     }

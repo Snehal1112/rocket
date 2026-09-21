@@ -43,8 +43,8 @@ pub async fn oauth2_auth_code_flow(
     let skip_tls_verify = !verify_ssl.unwrap_or(true);
     let pkce = generate_pkce();
     let state = uuid::Uuid::new_v4().to_string();
-    let redirect_uri = callback_url
-        .unwrap_or_else(|| "https://exchange4all.local/webapp/#oidc-callback".into());
+    let redirect_uri =
+        callback_url.unwrap_or_else(|| "https://exchange4all.local/webapp/#oidc-callback".into());
 
     let auth_url = build_auth_url(
         &authorization_url,
@@ -127,7 +127,9 @@ pub async fn oauth2_auth_code_flow(
     let auth_result = match result {
         Ok(Ok(Ok(r))) => r,
         Ok(Ok(Err(err))) => {
-            return Err(DomainError::Internal(format!("Authorization denied: {err}")))
+            return Err(DomainError::Internal(format!(
+                "Authorization denied: {err}"
+            )))
         }
         Ok(Err(_)) => {
             return Err(DomainError::Internal(
@@ -208,8 +210,7 @@ fn redirect_uri_prefix(redirect_uri: &str) -> String {
 
 /// Checks that the URL has OAuth2 callback params (code or error).
 fn has_auth_params(url: &url::Url) -> bool {
-    url.query_pairs()
-        .any(|(k, _)| k == "code" || k == "error")
+    url.query_pairs().any(|(k, _)| k == "code" || k == "error")
 }
 
 /// Extracts code+state or an error description from the callback URL.
@@ -513,7 +514,9 @@ async fn auth_code_via_webview(
     let auth_result = match result {
         Ok(Ok(Ok(r))) => r,
         Ok(Ok(Err(err))) => {
-            return Err(DomainError::Internal(format!("Authorization denied: {err}")))
+            return Err(DomainError::Internal(format!(
+                "Authorization denied: {err}"
+            )))
         }
         Ok(Err(_)) => {
             return Err(DomainError::Internal(
@@ -588,18 +591,18 @@ async fn auth_code_via_system_browser(
 
         if let Some(error) = params.get("error") {
             let desc = params.get("error_description").unwrap_or(error).clone();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_ERROR_HTML}"
-            );
+            let response =
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_ERROR_HTML}");
             let _ = stream.write_all(response.as_bytes()).await;
-            return Err(DomainError::Internal(format!("Authorization denied: {desc}")));
+            return Err(DomainError::Internal(format!(
+                "Authorization denied: {desc}"
+            )));
         }
 
         let state = params.get("state").map(|s| s.as_str()).unwrap_or("");
         if state != expected {
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_ERROR_HTML}"
-            );
+            let response =
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_ERROR_HTML}");
             let _ = stream.write_all(response.as_bytes()).await;
             return Err(DomainError::Internal(
                 "State mismatch — possible CSRF attack.".into(),
@@ -611,9 +614,8 @@ async fn auth_code_via_system_browser(
             .cloned()
             .ok_or_else(|| DomainError::Internal("No authorization code in callback.".into()))?;
 
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_CALLBACK_HTML}"
-        );
+        let response =
+            format!("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{BROWSER_CALLBACK_HTML}");
         let _ = stream.write_all(response.as_bytes()).await;
 
         Ok(code)

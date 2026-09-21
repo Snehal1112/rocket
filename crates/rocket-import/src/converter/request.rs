@@ -24,15 +24,24 @@ pub fn convert(doc: &BruDocument) -> (Option<Request>, Vec<SkipReason>) {
     }
 
     // Unsupported type: bail entirely, no Request produced.
-    if skipped.iter().any(|s| matches!(s, SkipReason::UnsupportedRequestType(_))) {
+    if skipped
+        .iter()
+        .any(|s| matches!(s, SkipReason::UnsupportedRequestType(_)))
+    {
         return (None, skipped);
     }
 
-    let name = doc.meta.as_ref()
+    let name = doc
+        .meta
+        .as_ref()
         .map(|m| m.name.clone())
         .unwrap_or_else(|| "Untitled".into());
 
-    let method = doc.method.as_ref().map(bru_method_to_domain).unwrap_or(HttpMethod::Get);
+    let method = doc
+        .method
+        .as_ref()
+        .map(bru_method_to_domain)
+        .unwrap_or(HttpMethod::Get);
     let url = doc.url.clone().unwrap_or_default();
 
     let mut req = Request::new(name, method, url);
@@ -45,9 +54,11 @@ pub fn convert(doc: &BruDocument) -> (Option<Request>, Vec<SkipReason>) {
     // Headers — include both enabled and disabled.
     for h in &doc.headers {
         if h.disabled {
-            req.headers.push(Header::disabled(h.key.clone(), h.value.clone()));
+            req.headers
+                .push(Header::disabled(h.key.clone(), h.value.clone()));
         } else {
-            req.headers.push(Header::new(h.key.clone(), h.value.clone()));
+            req.headers
+                .push(Header::new(h.key.clone(), h.value.clone()));
         }
     }
 
@@ -57,7 +68,9 @@ pub fn convert(doc: &BruDocument) -> (Option<Request>, Vec<SkipReason>) {
     }
 
     // Auth — only set if no unsupported-auth skip was recorded.
-    let has_auth_skip = skipped.iter().any(|s| matches!(s, SkipReason::UnsupportedAuthType(_)));
+    let has_auth_skip = skipped
+        .iter()
+        .any(|s| matches!(s, SkipReason::UnsupportedAuthType(_)));
     if !has_auth_skip {
         if let Some(auth) = &doc.auth {
             req.auth = bru_auth_to_domain(auth);
@@ -73,12 +86,12 @@ pub fn convert(doc: &BruDocument) -> (Option<Request>, Vec<SkipReason>) {
 
 fn bru_method_to_domain(m: &BruMethod) -> HttpMethod {
     match m {
-        BruMethod::Get     => HttpMethod::Get,
-        BruMethod::Post    => HttpMethod::Post,
-        BruMethod::Put     => HttpMethod::Put,
-        BruMethod::Patch   => HttpMethod::Patch,
-        BruMethod::Delete  => HttpMethod::Delete,
-        BruMethod::Head    => HttpMethod::Head,
+        BruMethod::Get => HttpMethod::Get,
+        BruMethod::Post => HttpMethod::Post,
+        BruMethod::Put => HttpMethod::Put,
+        BruMethod::Patch => HttpMethod::Patch,
+        BruMethod::Delete => HttpMethod::Delete,
+        BruMethod::Head => HttpMethod::Head,
         BruMethod::Options => HttpMethod::Options,
     }
 }
@@ -108,7 +121,8 @@ fn bru_body_to_domain(body: &BruBody) -> Body {
             // BodyMode stores the body as a flat string, so disabled fields cannot
             // be represented — they are included here regardless of kv.disabled.
             // Multipart avoids this because FormDataEntry carries an `enabled` flag.
-            let encoded = kvs.iter()
+            let encoded = kvs
+                .iter()
                 .map(|kv| format!("{}={}", kv.key, kv.value))
                 .collect::<Vec<_>>()
                 .join("&");
@@ -120,14 +134,17 @@ fn bru_body_to_domain(body: &BruBody) -> Body {
             }
         }
         BruBody::Multipart(kvs) => {
-            let entries = kvs.iter().map(|kv| FormDataEntry {
-                key: kv.key.clone(),
-                value: kv.value.clone(),
-                entry_type: FormDataType::Text,
-                enabled: !kv.disabled,
-                content_type: None,
-                description: None,
-            }).collect();
+            let entries = kvs
+                .iter()
+                .map(|kv| FormDataEntry {
+                    key: kv.key.clone(),
+                    value: kv.value.clone(),
+                    entry_type: FormDataType::Text,
+                    enabled: !kv.disabled,
+                    content_type: None,
+                    description: None,
+                })
+                .collect();
             Body {
                 mode: BodyMode::FormData,
                 content: None,
@@ -140,7 +157,9 @@ fn bru_body_to_domain(body: &BruBody) -> Body {
 
 fn bru_auth_to_domain(auth: &BruAuth) -> Auth {
     match auth {
-        BruAuth::Bearer { token } => Auth::Bearer { token: token.clone() },
+        BruAuth::Bearer { token } => Auth::Bearer {
+            token: token.clone(),
+        },
         BruAuth::Basic { username, password } => Auth::Basic {
             username: username.clone(),
             password: password.clone(),
@@ -149,7 +168,11 @@ fn bru_auth_to_domain(auth: &BruAuth) -> Auth {
             username: username.clone(),
             password: password.clone(),
         },
-        BruAuth::ApiKey { key, value, placement } => Auth::ApiKey {
+        BruAuth::ApiKey {
+            key,
+            value,
+            placement,
+        } => Auth::ApiKey {
             key: key.clone(),
             value: value.clone(),
             placement: placement.clone(),
@@ -204,7 +227,9 @@ mod tests {
     #[test]
     fn converts_bearer_auth() {
         let mut doc = doc_with_method(BruMethod::Get, "https://example.com");
-        doc.auth = Some(BruAuth::Bearer { token: "{{token}}".into() });
+        doc.auth = Some(BruAuth::Bearer {
+            token: "{{token}}".into(),
+        });
         let (req, skipped) = convert(&doc);
         assert!(skipped.is_empty());
         let req = req.unwrap();
@@ -261,8 +286,16 @@ mod tests {
     fn disabled_headers_are_preserved() {
         let mut doc = doc_with_method(BruMethod::Get, "https://example.com");
         doc.headers = vec![
-            BruKeyValue { key: "Accept".into(), value: "application/json".into(), disabled: false },
-            BruKeyValue { key: "X-Debug".into(), value: "true".into(), disabled: true },
+            BruKeyValue {
+                key: "Accept".into(),
+                value: "application/json".into(),
+                disabled: false,
+            },
+            BruKeyValue {
+                key: "X-Debug".into(),
+                value: "true".into(),
+                disabled: true,
+            },
         ];
         let (req, _) = convert(&doc);
         let req = req.unwrap();

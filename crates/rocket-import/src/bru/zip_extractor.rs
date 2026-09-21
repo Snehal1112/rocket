@@ -7,7 +7,9 @@ use crate::error::ImportResult;
 /// Bruno ZIPs always contain exactly one top-level directory (e.g. `my-workspace/`).
 /// Returns `(TempDir, inner_path)`. The caller must keep `TempDir` alive for the
 /// duration of the import — dropping it deletes the extracted files.
-pub(crate) fn extract_to_temp(zip_path: &Path) -> ImportResult<(tempfile::TempDir, std::path::PathBuf)> {
+pub(crate) fn extract_to_temp(
+    zip_path: &Path,
+) -> ImportResult<(tempfile::TempDir, std::path::PathBuf)> {
     use crate::error::ImportError;
     use std::fs;
 
@@ -105,7 +107,10 @@ mod tests {
         // Reproduces the "new workspace.zip" case: no wrapper folder, workspace.yml at root.
         let tmp = make_test_zip(&[
             ("workspace.yml", "opencollection: 1.0.0\n"),
-            ("collections/my-col/opencollection.yml", "opencollection: 1.0.0\n"),
+            (
+                "collections/my-col/opencollection.yml",
+                "opencollection: 1.0.0\n",
+            ),
         ]);
         let zip_path = tmp.path().join("test.zip");
 

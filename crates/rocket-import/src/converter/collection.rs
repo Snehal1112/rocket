@@ -6,13 +6,15 @@ use crate::bru::ast::BruKeyValue;
 /// Deferred: not yet called from ImportService; wired once workspace-level bruno.json parsing lands.
 #[allow(dead_code)]
 pub fn convert_variables(vars: &[BruKeyValue]) -> Vec<CollectionVariable> {
-    vars.iter().map(|kv| CollectionVariable {
-        key: kv.key.clone(),
-        value: String::new(),
-        initial_value: kv.value.clone(),
-        enabled: !kv.disabled,
-        secret: false,
-    }).collect()
+    vars.iter()
+        .map(|kv| CollectionVariable {
+            key: kv.key.clone(),
+            value: String::new(),
+            initial_value: kv.value.clone(),
+            enabled: !kv.disabled,
+            secret: false,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -22,7 +24,11 @@ mod tests {
 
     #[test]
     fn converts_enabled_var() {
-        let kvs = vec![BruKeyValue { key: "base".into(), value: "url".into(), disabled: false }];
+        let kvs = vec![BruKeyValue {
+            key: "base".into(),
+            value: "url".into(),
+            disabled: false,
+        }];
         let vars = convert_variables(&kvs);
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].key, "base");
@@ -33,7 +39,11 @@ mod tests {
 
     #[test]
     fn disabled_var_maps_to_enabled_false() {
-        let kvs = vec![BruKeyValue { key: "unused".into(), value: "x".into(), disabled: true }];
+        let kvs = vec![BruKeyValue {
+            key: "unused".into(),
+            value: "x".into(),
+            disabled: true,
+        }];
         let vars = convert_variables(&kvs);
         assert!(!vars[0].enabled);
     }

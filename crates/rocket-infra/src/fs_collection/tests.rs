@@ -1,10 +1,10 @@
 use super::*;
-use std::fs;
-use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 use rocket_collection::settings::SandboxMode;
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionVariable};
 use rocket_shared::types::HttpMethod;
+use std::fs;
+use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 fn setup() -> (TempDir, FsCollectionRepo) {
@@ -56,7 +56,11 @@ fn rename_collection() {
 fn save_and_read_request() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();
-    let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+    let req = rocket_collection::Request::new(
+        "Get Users",
+        HttpMethod::Get,
+        "https://api.example.com/users",
+    );
     repo.save_request("my-api", "get-users.yml", &req).unwrap();
     let loaded = repo.get_request("my-api", "get-users.yml").unwrap();
     assert_eq!(loaded.name, "Get Users");
@@ -96,7 +100,8 @@ fn move_request_across_folders() {
     repo.create("my-api").unwrap();
     let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
     repo.save_request("my-api", "old/test.yml", &req).unwrap();
-    repo.move_item("my-api", "old/test.yml", "my-api", "new/test.yml").unwrap();
+    repo.move_item("my-api", "old/test.yml", "my-api", "new/test.yml")
+        .unwrap();
     assert!(repo.get_request("my-api", "old/test.yml").is_err());
     assert!(repo.get_request("my-api", "new/test.yml").is_ok());
 }
@@ -120,7 +125,9 @@ fn settings_roundtrip() {
 
     let original = rocket_collection::CollectionSettings {
         docs: None,
-        auth: Some(Auth::Bearer { token: "tok_abc".into() }),
+        auth: Some(Auth::Bearer {
+            token: "tok_abc".into(),
+        }),
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
         sandbox_mode: SandboxMode::Safe,
@@ -160,7 +167,9 @@ fn settings_stored_in_opencollection_yml() {
 
     let settings = CollectionSettings {
         docs: Some("My API docs".into()),
-        auth: Some(Auth::Bearer { token: "tok".into() }),
+        auth: Some(Auth::Bearer {
+            token: "tok".into(),
+        }),
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
         sandbox_mode: SandboxMode::Safe,
@@ -190,7 +199,8 @@ fn settings_sandbox_mode_developer_roundtrips() {
         sandbox_mode: SandboxMode::Developer,
         ..Default::default()
     };
-    repo.save_settings("my-api", &settings).expect("save settings");
+    repo.save_settings("my-api", &settings)
+        .expect("save settings");
 
     let loaded = repo.get_settings("my-api").expect("get settings");
     assert_eq!(loaded.sandbox_mode, SandboxMode::Developer);
@@ -226,7 +236,8 @@ fn save_settings_preserves_unrelated_extensions_data() {
         sandbox_mode: SandboxMode::Developer,
         ..Default::default()
     };
-    repo.save_settings("my-api", &settings).expect("save settings");
+    repo.save_settings("my-api", &settings)
+        .expect("save settings");
 
     let content = fs::read_to_string(&path).expect("read back opencollection.yml");
     assert!(content.contains("someOtherTool"));
@@ -604,16 +615,31 @@ fn folder_variables_roundtrip() {
     repo.create_folder("my-api", "auth").unwrap();
 
     let vars = vec![
-        CollectionVariable { key: "BASE_URL".into(), value: "https://api.example.com".into(), initial_value: "".into(), enabled: true, secret: false },
-        CollectionVariable { key: "TIMEOUT".into(), value: "30".into(), initial_value: "".into(), enabled: true, secret: false },
+        CollectionVariable {
+            key: "BASE_URL".into(),
+            value: "https://api.example.com".into(),
+            initial_value: "".into(),
+            enabled: true,
+            secret: false,
+        },
+        CollectionVariable {
+            key: "TIMEOUT".into(),
+            value: "30".into(),
+            initial_value: "".into(),
+            enabled: true,
+            secret: false,
+        },
     ];
-    repo.save_folder_variables("my-api", "auth", vars.clone()).unwrap();
+    repo.save_folder_variables("my-api", "auth", vars.clone())
+        .unwrap();
 
     // save_folder_variables doesn't expose a direct getter; verify via get_folder_chain_variables.
     let req = rocket_collection::Request::new("Login", HttpMethod::Get, "/login");
     repo.save_request("my-api", "auth/login.yml", &req).unwrap();
 
-    let chain = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+    let chain = repo
+        .get_folder_chain_variables("my-api", "auth/login.yml")
+        .unwrap();
     assert_eq!(chain.len(), 2);
     let keys: Vec<&str> = chain.iter().map(|v| v.key.as_str()).collect();
     assert!(keys.contains(&"BASE_URL"));
@@ -627,21 +653,36 @@ fn save_request_preserves_variables_written_by_save_request_variables() {
     let (_dir, repo) = setup();
     repo.create("my-api").expect("create collection");
     let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
-    repo.save_request("my-api", "get-users.yml", &req).expect("initial save");
+    repo.save_request("my-api", "get-users.yml", &req)
+        .expect("initial save");
 
-    let vars = vec![
-        CollectionVariable { key: "TOKEN".into(), value: "abc".into(), initial_value: "".into(), enabled: true, secret: true },
-    ];
-    repo.save_request_variables("my-api", "get-users.yml", vars).expect("save vars");
+    let vars = vec![CollectionVariable {
+        key: "TOKEN".into(),
+        value: "abc".into(),
+        initial_value: "".into(),
+        enabled: true,
+        secret: true,
+    }];
+    repo.save_request_variables("my-api", "get-users.yml", vars)
+        .expect("save vars");
 
     // Simulate the frontend auto-save payload — variables field is intentionally empty.
-    let mut req_without_vars = repo.get_request("my-api", "get-users.yml").expect("load request");
+    let mut req_without_vars = repo
+        .get_request("my-api", "get-users.yml")
+        .expect("load request");
     req_without_vars.variables = vec![];
     req_without_vars.pre_request_script = Some("console.log('pre');".into());
-    repo.save_request("my-api", "get-users.yml", &req_without_vars).expect("save request after scripts edit");
+    repo.save_request("my-api", "get-users.yml", &req_without_vars)
+        .expect("save request after scripts edit");
 
-    let preserved = repo.get_request_variables("my-api", "get-users.yml").expect("load vars");
-    assert_eq!(preserved.len(), 1, "variables must survive save_request when payload carries none");
+    let preserved = repo
+        .get_request_variables("my-api", "get-users.yml")
+        .expect("load vars");
+    assert_eq!(
+        preserved.len(),
+        1,
+        "variables must survive save_request when payload carries none"
+    );
     assert_eq!(preserved[0].key, "TOKEN");
     assert_eq!(preserved[0].value, "abc");
 }
@@ -653,12 +694,19 @@ fn request_variables_roundtrip() {
     let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
     repo.save_request("my-api", "get-users.yml", &req).unwrap();
 
-    let vars = vec![
-        CollectionVariable { key: "PAGE".into(), value: "2".into(), initial_value: "1".into(), enabled: true, secret: false },
-    ];
-    repo.save_request_variables("my-api", "get-users.yml", vars).unwrap();
+    let vars = vec![CollectionVariable {
+        key: "PAGE".into(),
+        value: "2".into(),
+        initial_value: "1".into(),
+        enabled: true,
+        secret: false,
+    }];
+    repo.save_request_variables("my-api", "get-users.yml", vars)
+        .unwrap();
 
-    let loaded = repo.get_request_variables("my-api", "get-users.yml").unwrap();
+    let loaded = repo
+        .get_request_variables("my-api", "get-users.yml")
+        .unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].key, "PAGE");
     // Both initial and current values must survive the roundtrip independently.
@@ -674,19 +722,32 @@ fn folder_chain_walks_disk_and_merges() {
     repo.create_folder("my-api", "outer").unwrap();
     repo.create_folder("my-api", "outer/inner").unwrap();
 
-    let outer_vars = vec![
-        CollectionVariable { key: "k".into(), value: "outer".into(), initial_value: "outer".into(), enabled: true, secret: false },
-    ];
-    let inner_vars = vec![
-        CollectionVariable { key: "k".into(), value: "inner".into(), initial_value: "inner".into(), enabled: true, secret: false },
-    ];
-    repo.save_folder_variables("my-api", "outer", outer_vars).unwrap();
-    repo.save_folder_variables("my-api", "outer/inner", inner_vars).unwrap();
+    let outer_vars = vec![CollectionVariable {
+        key: "k".into(),
+        value: "outer".into(),
+        initial_value: "outer".into(),
+        enabled: true,
+        secret: false,
+    }];
+    let inner_vars = vec![CollectionVariable {
+        key: "k".into(),
+        value: "inner".into(),
+        initial_value: "inner".into(),
+        enabled: true,
+        secret: false,
+    }];
+    repo.save_folder_variables("my-api", "outer", outer_vars)
+        .unwrap();
+    repo.save_folder_variables("my-api", "outer/inner", inner_vars)
+        .unwrap();
 
     let req = rocket_collection::Request::new("Test", HttpMethod::Get, "/test");
-    repo.save_request("my-api", "outer/inner/req.yml", &req).unwrap();
+    repo.save_request("my-api", "outer/inner/req.yml", &req)
+        .unwrap();
 
-    let result = repo.get_folder_chain_variables("my-api", "outer/inner/req.yml").unwrap();
+    let result = repo
+        .get_folder_chain_variables("my-api", "outer/inner/req.yml")
+        .unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].key, "k");
     assert_eq!(result[0].value, "inner");
@@ -700,15 +761,21 @@ fn rename_folder_updates_folder_yml_name() {
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "old-name").unwrap();
 
-    repo.move_item("my-api", "old-name", "my-api", "new-name").unwrap();
+    repo.move_item("my-api", "old-name", "my-api", "new-name")
+        .unwrap();
 
     let collection = repo.get("my-api").unwrap();
     let folder = collection.root.items.iter().find_map(|item| {
-        if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
+        if let rocket_collection::CollectionItem::Folder(f) = item {
+            Some(f)
+        } else {
+            None
+        }
     });
     assert!(folder.is_some(), "folder should still exist after rename");
     assert_eq!(
-        folder.unwrap().name, "new-name",
+        folder.unwrap().name,
+        "new-name",
         "folder name should reflect the new directory name, not the stale folder.yml value"
     );
 }
@@ -720,14 +787,28 @@ fn rename_nested_folder_updates_folder_yml_name() {
     repo.create_folder("my-api", "parent").unwrap();
     repo.create_folder("my-api", "parent/child").unwrap();
 
-    repo.move_item("my-api", "parent/child", "my-api", "parent/renamed-child").unwrap();
+    repo.move_item("my-api", "parent/child", "my-api", "parent/renamed-child")
+        .unwrap();
 
     let collection = repo.get("my-api").unwrap();
-    let parent = collection.root.items.iter().find_map(|item| {
-        if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
-    }).unwrap();
+    let parent = collection
+        .root
+        .items
+        .iter()
+        .find_map(|item| {
+            if let rocket_collection::CollectionItem::Folder(f) = item {
+                Some(f)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     let child = parent.items.iter().find_map(|item| {
-        if let rocket_collection::CollectionItem::Folder(f) = item { Some(f) } else { None }
+        if let rocket_collection::CollectionItem::Folder(f) = item {
+            Some(f)
+        } else {
+            None
+        }
     });
     assert!(child.is_some(), "child folder should exist after rename");
     assert_eq!(child.unwrap().name, "renamed-child");
@@ -737,14 +818,22 @@ fn rename_nested_folder_updates_folder_yml_name() {
 fn get_rejects_path_traversal_in_collection_name() {
     let (_dir, repo) = setup();
     let err = repo.get("../evil").unwrap_err();
-    assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    assert!(
+        matches!(err, DomainError::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
+        err
+    );
 }
 
 #[test]
 fn delete_rejects_path_traversal_in_collection_name() {
     let (_dir, repo) = setup();
     let err = repo.delete("../evil").unwrap_err();
-    assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    assert!(
+        matches!(err, DomainError::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
+        err
+    );
 }
 
 #[test]
@@ -758,7 +847,11 @@ fn delete_rejects_symlinked_collection() {
     let link = dir.path().join("evil-collection");
     symlink(&target, &link).unwrap();
     let err = repo.delete("evil-collection").unwrap_err();
-    assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    assert!(
+        matches!(err, DomainError::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
+        err
+    );
     assert!(target.exists());
 }
 
@@ -774,7 +867,11 @@ fn delete_folder_rejects_symlinked_folder() {
     let link = dir.path().join("my-api").join("evil-folder");
     symlink(&target, &link).unwrap();
     let err = repo.delete_folder("my-api", "evil-folder").unwrap_err();
-    assert!(matches!(err, DomainError::InvalidInput(_)), "expected InvalidInput, got {:?}", err);
+    assert!(
+        matches!(err, DomainError::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
+        err
+    );
     assert!(target.exists());
 }
 
@@ -786,10 +883,16 @@ fn save_folder_variables_rejects_corrupt_folder_yml() {
     let folder_yml = dir.path().join("my-api").join("auth").join("folder.yml");
     fs::write(&folder_yml, b"{{{{not valid yaml: [[[").unwrap();
     let result = repo.save_folder_variables("my-api", "auth", vec![]);
-    assert!(result.is_err(), "expected error on corrupt folder.yml, got Ok");
+    assert!(
+        result.is_err(),
+        "expected error on corrupt folder.yml, got Ok"
+    );
     // File must NOT have been silently overwritten.
     let content = fs::read_to_string(&folder_yml).unwrap();
-    assert!(content.contains("not valid yaml"), "file was silently overwritten");
+    assert!(
+        content.contains("not valid yaml"),
+        "file was silently overwritten"
+    );
 }
 
 #[test]
@@ -802,15 +905,24 @@ fn build_folder_tree_skips_corrupt_request_file() {
     let bad_path = dir.path().join("my-api").join("bad.yml");
     fs::write(&bad_path, b"http:\n  method: [[[unclosed").unwrap();
     let collection = repo.get("my-api").unwrap();
-    let names: Vec<&str> = collection.root.items.iter().filter_map(|item| {
-        if let rocket_collection::CollectionItem::Request(r) = item {
-            Some(r.name.as_str())
-        } else {
-            None
-        }
-    }).collect();
+    let names: Vec<&str> = collection
+        .root
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let rocket_collection::CollectionItem::Request(r) = item {
+                Some(r.name.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
     assert!(names.contains(&"Good"), "good request missing: {:?}", names);
-    assert!(!names.contains(&"bad"), "corrupt file should be skipped: {:?}", names);
+    assert!(
+        !names.contains(&"bad"),
+        "corrupt file should be skipped: {:?}",
+        names
+    );
 }
 
 #[test]
@@ -818,21 +930,26 @@ fn build_folder_tree_respects_order_yml() {
     let (_dir, repo) = setup();
     repo.create("ordered").unwrap();
     let req_a = rocket_collection::Request::new("Alpha", HttpMethod::Get, "https://a.test");
-    let req_b = rocket_collection::Request::new("Beta",  HttpMethod::Get, "https://b.test");
+    let req_b = rocket_collection::Request::new("Beta", HttpMethod::Get, "https://b.test");
     let req_c = rocket_collection::Request::new("Gamma", HttpMethod::Get, "https://c.test");
     repo.save_request("ordered", "c-gamma.yml", &req_c).unwrap();
-    repo.save_request("ordered", "b-beta.yml",  &req_b).unwrap();
+    repo.save_request("ordered", "b-beta.yml", &req_b).unwrap();
     repo.save_request("ordered", "a-alpha.yml", &req_a).unwrap();
     let order_path = _dir.path().join("ordered").join("_order.yml");
     std::fs::write(&order_path, "- c-gamma.yml\n- b-beta.yml\n- a-alpha.yml\n").unwrap();
     let col = repo.get("ordered").unwrap();
-    let names: Vec<_> = col.root.items.iter().filter_map(|item| {
-        if let rocket_collection::CollectionItem::Request(r) = item {
-            Some(r.name.as_str())
-        } else {
-            None
-        }
-    }).collect();
+    let names: Vec<_> = col
+        .root
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let rocket_collection::CollectionItem::Request(r) = item {
+                Some(r.name.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
     assert_eq!(names, vec!["Gamma", "Beta", "Alpha"]);
 }
 
@@ -843,8 +960,14 @@ fn get_folder_chain_variables_empty_for_root_request() {
     let req = rocket_collection::Request::new("Root", HttpMethod::Get, "https://example.com");
     repo.save_request("my-api", "root.yml", &req).unwrap();
     // Root-level request has no ancestor folders, so chain variables must be empty.
-    let vars = repo.get_folder_chain_variables("my-api", "root.yml").unwrap();
-    assert!(vars.is_empty(), "expected no chain vars for root request, got {:?}", vars);
+    let vars = repo
+        .get_folder_chain_variables("my-api", "root.yml")
+        .unwrap();
+    assert!(
+        vars.is_empty(),
+        "expected no chain vars for root request, got {:?}",
+        vars
+    );
 }
 
 #[test]
@@ -853,19 +976,24 @@ fn concurrent_save_settings_does_not_corrupt_file() {
 
     let dir = TempDir::new().unwrap();
     let locks: Arc<DashMap<String, Arc<Mutex<()>>>> = Arc::new(DashMap::new());
-    let repo = Arc::new(FsCollectionRepo::new(dir.path().to_path_buf(), Arc::clone(&locks)));
+    let repo = Arc::new(FsCollectionRepo::new(
+        dir.path().to_path_buf(),
+        Arc::clone(&locks),
+    ));
     repo.create("race-api").unwrap();
 
-    let threads: Vec<_> = (0..8).map(|i| {
-        let repo = Arc::clone(&repo);
-        thread::spawn(move || {
-            let _ = i;
-            let settings = rocket_collection::CollectionSettings::default();
-            repo.save_settings("race-api", &settings).unwrap();
-            // Verify get_settings also works without panic.
-            repo.get_settings("race-api").unwrap();
+    let threads: Vec<_> = (0..8)
+        .map(|i| {
+            let repo = Arc::clone(&repo);
+            thread::spawn(move || {
+                let _ = i;
+                let settings = rocket_collection::CollectionSettings::default();
+                repo.save_settings("race-api", &settings).unwrap();
+                // Verify get_settings also works without panic.
+                repo.get_settings("race-api").unwrap();
+            })
         })
-    }).collect();
+        .collect();
 
     for t in threads {
         t.join().unwrap();
@@ -878,18 +1006,23 @@ fn get_folder_chain_variables_returns_folder_vars() {
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "auth").unwrap();
     // Save a variable on the auth folder.
-    repo.save_folder_variables("my-api", "auth", vec![
-        rocket_collection::CollectionVariable {
+    repo.save_folder_variables(
+        "my-api",
+        "auth",
+        vec![rocket_collection::CollectionVariable {
             key: "token".to_string(),
             value: "secret".to_string(),
             initial_value: String::new(),
             enabled: true,
             secret: false,
-        },
-    ]).unwrap();
+        }],
+    )
+    .unwrap();
     let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://example.com");
     repo.save_request("my-api", "auth/login.yml", &req).unwrap();
-    let vars = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+    let vars = repo
+        .get_folder_chain_variables("my-api", "auth/login.yml")
+        .unwrap();
     assert_eq!(vars.len(), 1);
     assert_eq!(vars[0].key, "token");
 }
@@ -898,7 +1031,11 @@ fn get_folder_chain_variables_returns_folder_vars() {
 fn get_summaries_returns_collection_with_summary_items() {
     let (_dir, repo) = setup();
     repo.create("pets").unwrap();
-    let req = rocket_collection::Request::new("List Pets", HttpMethod::Get, "https://api.example.com/pets");
+    let req = rocket_collection::Request::new(
+        "List Pets",
+        HttpMethod::Get,
+        "https://api.example.com/pets",
+    );
     repo.save_request("pets", "list-pets.yml", &req).unwrap();
 
     let col = repo.get_summaries("pets").unwrap();
@@ -915,8 +1052,17 @@ fn get_summaries_returns_collection_with_summary_items() {
 fn get_summaries_does_not_load_body_or_auth() {
     let (_dir, repo) = setup();
     repo.create("api").unwrap();
-    let mut req = rocket_collection::Request::new("Post Data", HttpMethod::Post, "https://api.example.com/data");
-    req.body = Some(rocket_shared::types::Body { mode: rocket_shared::types::BodyMode::Json, content: Some(r#"{"x":1}"#.to_string()), form_data: None, file_path: None });
+    let mut req = rocket_collection::Request::new(
+        "Post Data",
+        HttpMethod::Post,
+        "https://api.example.com/data",
+    );
+    req.body = Some(rocket_shared::types::Body {
+        mode: rocket_shared::types::BodyMode::Json,
+        content: Some(r#"{"x":1}"#.to_string()),
+        form_data: None,
+        file_path: None,
+    });
     repo.save_request("api", "post-data.yml", &req).unwrap();
 
     // get_summaries must succeed and return name/method/url — body is not loaded.
@@ -932,12 +1078,20 @@ fn get_summaries_preserves_folder_structure() {
     let (_dir, repo) = setup();
     repo.create("api").unwrap();
     repo.create_folder("api", "auth").unwrap();
-    let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+    let req =
+        rocket_collection::Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
     repo.save_request("api", "auth/login.yml", &req).unwrap();
 
     let col = repo.get_summaries("api").unwrap();
-    let auth_folder = col.root.subfolders().into_iter().find(|f| f.dir_name.as_deref() == Some("auth"));
-    assert!(auth_folder.is_some(), "auth folder missing from summaries tree");
+    let auth_folder = col
+        .root
+        .subfolders()
+        .into_iter()
+        .find(|f| f.dir_name.as_deref() == Some("auth"));
+    assert!(
+        auth_folder.is_some(),
+        "auth folder missing from summaries tree"
+    );
     let summaries = auth_folder.unwrap().request_summaries();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].name, "Login");
@@ -995,12 +1149,14 @@ fn script_roundtrip_matches_bruno_oc_spec() {
     let (_dir, repo) = setup();
     repo.create("api").expect("create collection");
 
-    let mut req = rocket_collection::Request::new("Test Scripts", HttpMethod::Get, "https://example.com");
+    let mut req =
+        rocket_collection::Request::new("Test Scripts", HttpMethod::Get, "https://example.com");
     req.pre_request_script = Some("req.setHeader('X-Trace', '1');".into());
     req.post_response_script = Some("res.status;".into());
     req.tests = Some("expect(res.status).to.equal(200);".into());
 
-    repo.save_request("api", "test-scripts.yml", &req).expect("save request");
+    repo.save_request("api", "test-scripts.yml", &req)
+        .expect("save request");
 
     // Inspect the raw YAML to confirm it matches the Bruno OpenCollection spec format.
     let col_dir = repo.collection_path("api");
@@ -1008,30 +1164,63 @@ fn script_roundtrip_matches_bruno_oc_spec() {
     // Spec requires: runtime.scripts[].type and runtime.scripts[].code
     assert!(raw.contains("runtime:"), "missing runtime block:\n{raw}");
     assert!(raw.contains("scripts:"), "missing scripts key:\n{raw}");
-    assert!(raw.contains("type: before-request"), "missing before-request type:\n{raw}");
-    assert!(raw.contains("type: after-response"), "missing after-response type:\n{raw}");
+    assert!(
+        raw.contains("type: before-request"),
+        "missing before-request type:\n{raw}"
+    );
+    assert!(
+        raw.contains("type: after-response"),
+        "missing after-response type:\n{raw}"
+    );
     assert!(raw.contains("type: tests"), "missing tests type:\n{raw}");
     // Bruno always uses |- (strip chomping) — assert no bare '| ' block scalars remain.
-    assert!(!raw.contains("code: |\n"), "tests script must use |- not |:\n{raw}");
+    assert!(
+        !raw.contains("code: |\n"),
+        "tests script must use |- not |:\n{raw}"
+    );
 
     // Confirm full roundtrip preserves all three scripts.
-    let loaded = repo.get_request("api", "test-scripts.yml").expect("load request");
-    assert_eq!(loaded.pre_request_script.as_deref(), Some("req.setHeader('X-Trace', '1');"));
+    let loaded = repo
+        .get_request("api", "test-scripts.yml")
+        .expect("load request");
+    assert_eq!(
+        loaded.pre_request_script.as_deref(),
+        Some("req.setHeader('X-Trace', '1');")
+    );
     assert_eq!(loaded.post_response_script.as_deref(), Some("res.status;"));
-    assert_eq!(loaded.tests.as_deref(), Some("expect(res.status).to.equal(200);"));
+    assert_eq!(
+        loaded.tests.as_deref(),
+        Some("expect(res.status).to.equal(200);")
+    );
 
     // Scripts entered with trailing newlines (as Monaco produces) must be normalized to |-
     // so the file matches the Bruno format regardless of editor behavior.
-    let mut req2 = rocket_collection::Request::new("Trailing NL", HttpMethod::Get, "https://example.com");
+    let mut req2 =
+        rocket_collection::Request::new("Trailing NL", HttpMethod::Get, "https://example.com");
     req2.pre_request_script = Some("console.log('pre');\n".into());
     req2.post_response_script = Some("console.log('post');\n".into());
     req2.tests = Some("expect(res.status).to.equal(200);\n".into());
-    repo.save_request("api", "trailing-nl.yml", &req2).expect("save trailing-nl");
+    repo.save_request("api", "trailing-nl.yml", &req2)
+        .expect("save trailing-nl");
     let raw2 = std::fs::read_to_string(col_dir.join("trailing-nl.yml")).expect("read trailing-nl");
-    assert!(!raw2.contains("code: |\n"), "trailing-newline scripts must serialize as |-:\n{raw2}");
-    let loaded2 = repo.get_request("api", "trailing-nl.yml").expect("load trailing-nl");
+    assert!(
+        !raw2.contains("code: |\n"),
+        "trailing-newline scripts must serialize as |-:\n{raw2}"
+    );
+    let loaded2 = repo
+        .get_request("api", "trailing-nl.yml")
+        .expect("load trailing-nl");
     // Trailing newline is stripped on write, so readback does not have it.
-    assert_eq!(loaded2.pre_request_script.as_deref(), Some("console.log('pre');"));
-    assert_eq!(loaded2.post_response_script.as_deref(), Some("console.log('post');"));
-    assert_eq!(loaded2.tests.as_deref(), Some("expect(res.status).to.equal(200);"));
+    assert_eq!(
+        loaded2.pre_request_script.as_deref(),
+        Some("console.log('pre');")
+    );
+    assert_eq!(
+        loaded2.post_response_script.as_deref(),
+        Some("console.log('post');")
+    );
+    assert_eq!(
+        loaded2.tests.as_deref(),
+        Some("expect(res.status).to.equal(200);")
+    );
 }

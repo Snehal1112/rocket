@@ -41,14 +41,22 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
         framework: Framework::Soc2,
         code: "CC8.1",
         title: "Change management",
-        kinds: &["contract_attached", "contract_deleted", "contract_violation"],
+        kinds: &[
+            "contract_attached",
+            "contract_deleted",
+            "contract_violation",
+        ],
     },
     // ISO 27001:2022 — Annex A controls.
     ControlEntry {
         framework: Framework::Iso27001,
         code: "A.8.15",
         title: "Logging",
-        kinds: &["contract_violation", "sensitive_auth_used", "collection_deleted"],
+        kinds: &[
+            "contract_violation",
+            "sensitive_auth_used",
+            "collection_deleted",
+        ],
     },
     ControlEntry {
         framework: Framework::Iso27001,

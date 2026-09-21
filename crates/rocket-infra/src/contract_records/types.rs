@@ -1,7 +1,9 @@
 //! Persistence records for `Contract` and its sub-types (`ContractParty`,
 //! `ContractPolicy`, `ContractScope`, plus the four enums).
 
-use rocket_collection::contract::types::{BreakingChangePolicy, ContractParty, ContractPolicy, PartyKind};
+use rocket_collection::contract::types::{
+    BreakingChangePolicy, ContractParty, ContractPolicy, PartyKind,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -158,8 +160,14 @@ mod party_tests {
             avatar_color: None,
         };
         let yaml = serde_yaml::to_string(&r).unwrap();
-        assert!(yaml.contains("avatarSeed"), "expected camelCase field, got:\n{yaml}");
-        assert!(!yaml.contains("avatar_seed"), "snake_case must not leak into YAML, got:\n{yaml}");
+        assert!(
+            yaml.contains("avatarSeed"),
+            "expected camelCase field, got:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("avatar_seed"),
+            "snake_case must not leak into YAML, got:\n{yaml}"
+        );
     }
 
     #[test]
@@ -256,7 +264,10 @@ mod policy_tests {
     #[test]
     fn policy_record_defaults_from_empty_yaml() {
         let p: ContractPolicyRecord = serde_yaml::from_str("{}").unwrap();
-        assert_eq!(p.breaking_change_policy, BreakingChangePolicyRecord::Lenient);
+        assert_eq!(
+            p.breaking_change_policy,
+            BreakingChangePolicyRecord::Lenient
+        );
         assert_eq!(p.notice_days, 30);
         assert!(p.uptime_sla.is_none());
     }
@@ -312,8 +323,12 @@ impl From<&ContractScope> for ContractScopeRecord {
     fn from(s: &ContractScope) -> Self {
         match s {
             ContractScope::Collection => ContractScopeRecord::Collection,
-            ContractScope::Folder { rel_path } => ContractScopeRecord::Folder { rel_path: rel_path.clone() },
-            ContractScope::Request { rel_path } => ContractScopeRecord::Request { rel_path: rel_path.clone() },
+            ContractScope::Folder { rel_path } => ContractScopeRecord::Folder {
+                rel_path: rel_path.clone(),
+            },
+            ContractScope::Request { rel_path } => ContractScopeRecord::Request {
+                rel_path: rel_path.clone(),
+            },
         }
     }
 }
@@ -334,15 +349,22 @@ mod scope_tests {
 
     #[test]
     fn scope_record_folder_yaml_uses_snake_case_rel_path() {
-        let s = ContractScopeRecord::Folder { rel_path: PathBuf::from("auth/login.yml") };
+        let s = ContractScopeRecord::Folder {
+            rel_path: PathBuf::from("auth/login.yml"),
+        };
         let yaml = serde_yaml::to_string(&s).unwrap();
         assert!(yaml.contains("rel_path:"), "expected rel_path in:\n{yaml}");
-        assert!(!yaml.contains("relPath:"), "camelCase relPath must NOT appear in:\n{yaml}");
+        assert!(
+            !yaml.contains("relPath:"),
+            "camelCase relPath must NOT appear in:\n{yaml}"
+        );
     }
 
     #[test]
     fn scope_record_request_yaml_uses_snake_case_rel_path() {
-        let s = ContractScopeRecord::Request { rel_path: PathBuf::from("users/get.yml") };
+        let s = ContractScopeRecord::Request {
+            rel_path: PathBuf::from("users/get.yml"),
+        };
         let yaml = serde_yaml::to_string(&s).unwrap();
         assert!(yaml.contains("rel_path:"));
     }
@@ -357,7 +379,9 @@ mod scope_tests {
 
     #[test]
     fn domain_scope_record_roundtrip() {
-        let domain = ContractScope::Folder { rel_path: PathBuf::from("a/b.yml") };
+        let domain = ContractScope::Folder {
+            rel_path: PathBuf::from("a/b.yml"),
+        };
         let r: ContractScopeRecord = (&domain).into();
         let back: ContractScope = r.into();
         assert_eq!(domain, back);
@@ -476,7 +500,11 @@ mod enum_tests {
 
     #[test]
     fn enforcement_mode_record_roundtrip() {
-        for m in [ContractEnforcementMode::Informational, ContractEnforcementMode::Warn, ContractEnforcementMode::Block] {
+        for m in [
+            ContractEnforcementMode::Informational,
+            ContractEnforcementMode::Warn,
+            ContractEnforcementMode::Block,
+        ] {
             let r: ContractEnforcementModeRecord = (&m).into();
             let back: ContractEnforcementMode = r.into();
             assert_eq!(m, back);
@@ -596,7 +624,9 @@ impl<'de> serde::Deserialize<'de> for ContractRecord {
                         "createdBy" => created_by = map.next_value()?,
                         "createdAt" => created_at = map.next_value()?,
                         "updatedAt" => updated_at = map.next_value()?,
-                        _ => { let _ = map.next_value::<serde::de::IgnoredAny>()?; }
+                        _ => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
                     }
                 }
 
@@ -612,7 +642,8 @@ impl<'de> serde::Deserialize<'de> for ContractRecord {
                     project: project.unwrap_or_default(),
                     version: version.unwrap_or_else(default_version_record),
                     status: status.unwrap_or_default(),
-                    effective_date: effective_date.ok_or_else(|| A::Error::missing_field("effectiveDate"))?,
+                    effective_date: effective_date
+                        .ok_or_else(|| A::Error::missing_field("effectiveDate"))?,
                     expiry_date,
                     document_paths: document_paths.unwrap_or_default(),
                     enforcement_mode: enforcement_mode.unwrap_or_default(),
@@ -756,7 +787,8 @@ updatedAt: null
     #[test]
     fn domain_to_record_to_domain_roundtrip() {
         use rocket_collection::contract::types::{
-            BreakingChangePolicy, ContractEnforcementMode, ContractPolicy, ContractScope, ContractStatus,
+            BreakingChangePolicy, ContractEnforcementMode, ContractPolicy, ContractScope,
+            ContractStatus,
         };
         let domain = Contract {
             id: Ulid::new(),
@@ -790,7 +822,9 @@ updatedAt: null
 
     #[test]
     fn yaml_roundtrip_preserves_camel_case_field_names() {
-        use rocket_collection::contract::types::{ContractEnforcementMode, ContractScope, ContractStatus};
+        use rocket_collection::contract::types::{
+            ContractEnforcementMode, ContractScope, ContractStatus,
+        };
         let domain = Contract {
             id: Ulid::new(),
             title: "Y".into(),
@@ -803,7 +837,9 @@ updatedAt: null
             expiry_date: Some(NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()),
             document_paths: vec![],
             enforcement_mode: ContractEnforcementMode::Informational,
-            scope: ContractScope::Folder { rel_path: PathBuf::from("a.yml") },
+            scope: ContractScope::Folder {
+                rel_path: PathBuf::from("a.yml"),
+            },
             policy: ContractPolicy::default(),
             drift_count: 0,
             breach_count: 0,
@@ -814,10 +850,16 @@ updatedAt: null
         };
         let r: ContractRecord = (&domain).into();
         let yaml = serde_yaml::to_string(&r).unwrap();
-        assert!(yaml.contains("effectiveDate:"), "expected camelCase in:\n{yaml}");
+        assert!(
+            yaml.contains("effectiveDate:"),
+            "expected camelCase in:\n{yaml}"
+        );
         assert!(yaml.contains("expiryDate:"));
         assert!(yaml.contains("enforcementMode:"));
-        assert!(yaml.contains("rel_path:"), "scope rel_path must remain snake_case in:\n{yaml}");
+        assert!(
+            yaml.contains("rel_path:"),
+            "scope rel_path must remain snake_case in:\n{yaml}"
+        );
         let back: ContractRecord = serde_yaml::from_str(&yaml).unwrap();
         let back_domain: Contract = back.into();
         assert_eq!(domain, back_domain);

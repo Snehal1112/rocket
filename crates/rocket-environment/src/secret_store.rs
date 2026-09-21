@@ -41,7 +41,9 @@ mod tests {
     #[test]
     fn null_store_never_returns_a_value() {
         let store = NullSecretStore;
-        store.set("scope", "API_KEY", "sk-live-123").expect("null set");
+        store
+            .set("scope", "API_KEY", "sk-live-123")
+            .expect("null set");
         assert_eq!(store.get("scope", "API_KEY").expect("null get"), None);
     }
 

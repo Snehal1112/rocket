@@ -5,7 +5,7 @@ use rocket_shared::description::Description as OcDescription;
 use serde::{Deserialize, Serialize};
 
 use super::auth::OcAuth;
-use super::http::{OcScript};
+use super::http::OcScript;
 use super::variables::OcVariable;
 
 /// gRPC request info.
@@ -15,7 +15,7 @@ pub struct OcGrpcRequestInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub request_type: Option<String>,  // "grpc"
+    pub request_type: Option<String>, // "grpc"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -58,7 +58,7 @@ pub struct OcGrpcRequestDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub method_type: Option<String>,  // "unary" | "client-streaming" | "server-streaming" | "bidi-streaming"
+    pub method_type: Option<String>, // "unary" | "client-streaming" | "server-streaming" | "bidi-streaming"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proto_file_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

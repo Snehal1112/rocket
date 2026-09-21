@@ -2,7 +2,9 @@ use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
-use rocket_collection::{Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request};
+use rocket_collection::{
+    Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request,
+};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -28,7 +30,11 @@ impl CollectionService {
         events: Box<dyn EventPublisher>,
         audit: Arc<dyn SecurityAuditPublisher>,
     ) -> Self {
-        Self { repo, events, audit }
+        Self {
+            repo,
+            events,
+            audit,
+        }
     }
 
     pub fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
@@ -47,7 +53,9 @@ impl CollectionService {
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         let collection = self.repo.create(name)?;
-        self.events.publish(DomainEvent::CollectionCreated { name: name.to_string() });
+        self.events.publish(DomainEvent::CollectionCreated {
+            name: name.to_string(),
+        });
         Ok(collection)
     }
 
@@ -56,9 +64,13 @@ impl CollectionService {
         self.audit.publish(
             "system".into(),
             None,
-            AuditEventKind::CollectionDeleted { collection: name.to_string() },
+            AuditEventKind::CollectionDeleted {
+                collection: name.to_string(),
+            },
         );
-        self.events.publish(DomainEvent::CollectionDeleted { name: name.to_string() });
+        self.events.publish(DomainEvent::CollectionDeleted {
+            name: name.to_string(),
+        });
         Ok(())
     }
 
@@ -72,7 +84,12 @@ impl CollectionService {
         Ok(())
     }
 
-    pub fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<Request> {
+    pub fn save_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<Request> {
         let actual_path = self.repo.save_request(collection, path, request)?;
         self.events.publish(DomainEvent::RequestSaved {
             collection: collection.to_string(),
@@ -81,7 +98,12 @@ impl CollectionService {
         self.repo.get_request(collection, &actual_path)
     }
 
-    pub fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
+    pub fn rename_request(
+        &self,
+        collection: &str,
+        old_path: &str,
+        new_name: &str,
+    ) -> DomainResult<()> {
         // Only update the name field inside the JSON. The filename stays the same.
         // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
@@ -94,7 +116,12 @@ impl CollectionService {
         Ok(())
     }
 
-    pub fn update_request_docs(&self, collection: &str, path: &str, docs: Option<String>) -> DomainResult<()> {
+    pub fn update_request_docs(
+        &self,
+        collection: &str,
+        path: &str,
+        docs: Option<String>,
+    ) -> DomainResult<()> {
         let mut request = self.repo.get_request(collection, path)?;
         request.docs = docs.map(Documentation::text);
         let actual_path = self.repo.save_request(collection, path, &request)?;
@@ -139,7 +166,8 @@ impl CollectionService {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        self.repo.move_item(src_collection, src_path, dst_collection, dst_path)?;
+        self.repo
+            .move_item(src_collection, src_path, dst_collection, dst_path)?;
         self.events.publish(DomainEvent::ItemMoved {
             src_collection: src_collection.to_string(),
             src_path: src_path.to_string(),
@@ -149,8 +177,14 @@ impl CollectionService {
         Ok(())
     }
 
-    pub fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
-        self.repo.reorder_items(collection, folder_path, ordered_names)?;
+    pub fn reorder_items(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        ordered_names: &[String],
+    ) -> DomainResult<()> {
+        self.repo
+            .reorder_items(collection, folder_path, ordered_names)?;
         self.events.publish(DomainEvent::ItemsReordered {
             collection: collection.to_string(),
             folder_path: folder_path.to_string(),
@@ -168,20 +202,37 @@ impl CollectionService {
         settings: &rocket_collection::CollectionSettings,
     ) -> DomainResult<()> {
         self.repo.save_settings(name, settings)?;
-        self.events.publish(DomainEvent::CollectionSettingsSaved { collection: name.to_string() });
+        self.events.publish(DomainEvent::CollectionSettingsSaved {
+            collection: name.to_string(),
+        });
         Ok(())
     }
 
-    pub fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
-        self.repo.get_folder_chain_variables(collection, request_path)
+    pub fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.repo
+            .get_folder_chain_variables(collection, request_path)
     }
 
-    pub fn get_folder_variables(&self, collection: &str, folder_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+    pub fn get_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         self.repo.get_folder_variables(collection, folder_path)
     }
 
-    pub fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
-        self.repo.save_folder_variables(collection, folder_path, vars)?;
+    pub fn save_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.repo
+            .save_folder_variables(collection, folder_path, vars)?;
         self.events.publish(DomainEvent::FolderVariablesSaved {
             collection: collection.to_string(),
             folder_path: folder_path.to_string(),
@@ -189,12 +240,22 @@ impl CollectionService {
         Ok(())
     }
 
-    pub fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+    pub fn get_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         self.repo.get_request_variables(collection, request_path)
     }
 
-    pub fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
-        self.repo.save_request_variables(collection, request_path, vars)?;
+    pub fn save_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.repo
+            .save_request_variables(collection, request_path, vars)?;
         self.events.publish(DomainEvent::RequestVariablesSaved {
             collection: collection.to_string(),
             request_path: request_path.to_string(),
@@ -218,7 +279,10 @@ mod tests {
 
     impl MockCollectionRepo {
         fn new() -> Self {
-            Self { collections: Mutex::new(Vec::new()), requests: Mutex::new(Vec::new()) }
+            Self {
+                collections: Mutex::new(Vec::new()),
+                requests: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -227,7 +291,9 @@ mod tests {
             let cols = self.collections.lock().unwrap();
             Ok(cols
                 .iter()
-                .map(|c| CollectionSummary::new(String::new(), &c.name, "", c.request_count(), None))
+                .map(|c| {
+                    CollectionSummary::new(String::new(), &c.name, "", c.request_count(), None)
+                })
                 .collect())
         }
 
@@ -278,13 +344,20 @@ mod tests {
                 .map(|(_, _, r)| r.clone())
                 .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
         }
-        fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String> {
+        fn save_request(
+            &self,
+            collection: &str,
+            path: &str,
+            request: &Request,
+        ) -> DomainResult<String> {
             let mut requests = self.requests.lock().expect("lock");
             requests.retain(|(c, p, _)| !(c == collection && p == path));
             requests.push((collection.to_string(), path.to_string(), request.clone()));
             Ok(path.to_string())
         }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { unimplemented!() }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
         fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
             let mut requests = self.requests.lock().expect("lock");
             let len_before = requests.len();
@@ -294,25 +367,64 @@ mod tests {
             }
             Ok(())
         }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
         fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
             Ok(rocket_collection::CollectionSettings::default())
         }
-        fn save_settings(&self, _: &str, _: &rocket_collection::CollectionSettings) -> DomainResult<()> {
+        fn save_settings(
+            &self,
+            _: &str,
+            _: &rocket_collection::CollectionSettings,
+        ) -> DomainResult<()> {
             Ok(())
         }
-        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_folder_chain_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     fn make_service() -> CollectionService {
-        CollectionService::new(Box::new(MockCollectionRepo::new()), Box::new(NullEventPublisher))
+        CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        )
     }
 
     #[test]
@@ -359,15 +471,24 @@ mod tests {
     fn get_nonexistent_collection_returns_error() {
         let svc = make_service();
         let result = svc.get("ghost");
-        assert!(result.is_err(), "getting a non-existent collection must fail");
+        assert!(
+            result.is_err(),
+            "getting a non-existent collection must fail"
+        );
     }
 
     #[test]
     fn rename_validates_new_name() {
         let svc = make_service();
         svc.create("col").unwrap();
-        assert!(svc.rename("col", "").is_err(), "empty new name must be rejected");
-        assert!(svc.rename("col", "bad/name").is_err(), "slash in new name must be rejected");
+        assert!(
+            svc.rename("col", "").is_err(),
+            "empty new name must be rejected"
+        );
+        assert!(
+            svc.rename("col", "bad/name").is_err(),
+            "slash in new name must be rejected"
+        );
     }
 
     #[test]
@@ -402,7 +523,9 @@ mod tests {
 
     #[test]
     fn create_emits_collection_created() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -410,14 +533,19 @@ mod tests {
         svc.create("my-api").expect("create");
         let published = publisher.events.lock().expect("lock");
         assert!(
-            published.iter().any(|e| matches!(e, DomainEvent::CollectionCreated { name } if name == "my-api")),
-            "expected CollectionCreated, got {:?}", *published
+            published
+                .iter()
+                .any(|e| matches!(e, DomainEvent::CollectionCreated { name } if name == "my-api")),
+            "expected CollectionCreated, got {:?}",
+            *published
         );
     }
 
     #[test]
     fn delete_emits_collection_deleted() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -426,14 +554,19 @@ mod tests {
         svc.delete("temp").expect("delete");
         let published = publisher.events.lock().expect("lock");
         assert!(
-            published.iter().any(|e| matches!(e, DomainEvent::CollectionDeleted { name } if name == "temp")),
-            "expected CollectionDeleted, got {:?}", *published
+            published
+                .iter()
+                .any(|e| matches!(e, DomainEvent::CollectionDeleted { name } if name == "temp")),
+            "expected CollectionDeleted, got {:?}",
+            *published
         );
     }
 
     #[test]
     fn rename_emits_collection_renamed() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -452,13 +585,20 @@ mod tests {
 
     #[test]
     fn save_request_emits_request_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
-        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        svc.save_request("my-api", "users.yml", &request)
+            .expect("save_request");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -471,14 +611,22 @@ mod tests {
 
     #[test]
     fn delete_request_emits_request_deleted() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
-        svc.save_request("my-api", "users.yml", &request).expect("save_request");
-        svc.delete_request("my-api", "users.yml").expect("delete_request");
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        svc.save_request("my-api", "users.yml", &request)
+            .expect("save_request");
+        svc.delete_request("my-api", "users.yml")
+            .expect("delete_request");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -491,27 +639,40 @@ mod tests {
 
     #[test]
     fn delete_request_on_missing_request_publishes_nothing() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let result = svc.delete_request("my-api", "ghost.yml");
         assert!(result.is_err(), "deleting a nonexistent request must fail");
-        assert!(publisher.events.lock().expect("lock").is_empty(), "no event should publish on failure");
+        assert!(
+            publisher.events.lock().expect("lock").is_empty(),
+            "no event should publish on failure"
+        );
     }
 
     #[test]
     fn rename_request_emits_request_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
-        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        svc.save_request("my-api", "users.yml", &request)
+            .expect("save_request");
         publisher.events.lock().expect("lock").clear();
-        svc.rename_request("my-api", "users.yml", "List Users").expect("rename_request");
+        svc.rename_request("my-api", "users.yml", "List Users")
+            .expect("rename_request");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -524,15 +685,23 @@ mod tests {
 
     #[test]
     fn update_request_docs_emits_request_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        let request = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
-        svc.save_request("my-api", "users.yml", &request).expect("save_request");
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        svc.save_request("my-api", "users.yml", &request)
+            .expect("save_request");
         publisher.events.lock().expect("lock").clear();
-        svc.update_request_docs("my-api", "users.yml", Some("Fetches all users.".into())).expect("update_request_docs");
+        svc.update_request_docs("my-api", "users.yml", Some("Fetches all users.".into()))
+            .expect("update_request_docs");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -545,12 +714,15 @@ mod tests {
 
     #[test]
     fn move_item_emits_item_moved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        svc.move_item("my-api", "users.yml", "other-api", "users.yml").expect("move_item");
+        svc.move_item("my-api", "users.yml", "other-api", "users.yml")
+            .expect("move_item");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -559,13 +731,16 @@ mod tests {
                     if src_collection == "my-api" && src_path == "users.yml"
                         && dst_collection == "other-api" && dst_path == "users.yml"
             )),
-            "expected ItemMoved, got {:?}", *published
+            "expected ItemMoved, got {:?}",
+            *published
         );
     }
 
     #[test]
     fn create_folder_emits_folder_created() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -583,7 +758,9 @@ mod tests {
 
     #[test]
     fn delete_folder_emits_folder_deleted() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -601,12 +778,19 @@ mod tests {
 
     #[test]
     fn reorder_items_emits_items_reordered() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        svc.reorder_items("my-api", "auth", &["login.yml".to_string(), "logout.yml".to_string()]).expect("reorder_items");
+        svc.reorder_items(
+            "my-api",
+            "auth",
+            &["login.yml".to_string(), "logout.yml".to_string()],
+        )
+        .expect("reorder_items");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -619,30 +803,37 @@ mod tests {
 
     #[test]
     fn save_settings_emits_collection_settings_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        svc.save_settings("my-api", &rocket_collection::CollectionSettings::default()).expect("save_settings");
+        svc.save_settings("my-api", &rocket_collection::CollectionSettings::default())
+            .expect("save_settings");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
                 e,
                 DomainEvent::CollectionSettingsSaved { collection } if collection == "my-api"
             )),
-            "expected CollectionSettingsSaved, got {:?}", *published
+            "expected CollectionSettingsSaved, got {:?}",
+            *published
         );
     }
 
     #[test]
     fn save_folder_variables_emits_folder_variables_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        svc.save_folder_variables("my-api", "auth", vec![]).expect("save_folder_variables");
+        svc.save_folder_variables("my-api", "auth", vec![])
+            .expect("save_folder_variables");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -655,12 +846,15 @@ mod tests {
 
     #[test]
     fn save_request_variables_emits_request_variables_saved() {
-        let publisher = Arc::new(RecordingEventPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new(
             Box::new(MockCollectionRepo::new()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
-        svc.save_request_variables("my-api", "users.yml", vec![]).expect("save_request_variables");
+        svc.save_request_variables("my-api", "users.yml", vec![])
+            .expect("save_request_variables");
         let published = publisher.events.lock().expect("lock");
         assert!(
             published.iter().any(|e| matches!(
@@ -673,7 +867,9 @@ mod tests {
 
     #[test]
     fn delete_emits_security_audit_event() {
-        let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
+        let publisher = Arc::new(CapturingPublisher {
+            captured: Mutex::new(vec![]),
+        });
         let svc = CollectionService::new_with_audit(
             Box::new(MockCollectionRepo::new()),
             Box::new(NullEventPublisher),

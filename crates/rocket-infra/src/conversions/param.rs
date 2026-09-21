@@ -64,8 +64,11 @@ pub fn split_params(params: Vec<OcHttpRequestParam>) -> (Vec<QueryParam>, Vec<Pa
 /// Merge query and path params back into a single OC param list.
 /// Query params come first, path params follow.
 pub fn merge_params(query: &[QueryParam], path: &[PathParam]) -> Vec<OcHttpRequestParam> {
-    let mut params: Vec<OcHttpRequestParam> =
-        query.iter().cloned().map(OcHttpRequestParam::from).collect();
+    let mut params: Vec<OcHttpRequestParam> = query
+        .iter()
+        .cloned()
+        .map(OcHttpRequestParam::from)
+        .collect();
     params.extend(path.iter().cloned().map(OcHttpRequestParam::from));
     params
 }

@@ -17,10 +17,10 @@ use rocket_scripting::{
     ScriptEngine, ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::DomainResult;
-use std::sync::Arc;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,7 +234,10 @@ impl RequestExecutionService {
     /// `global_env_name`) is involved. Falls back to `env_repo` when no
     /// factory or no collection is available, so existing tests/mocks that
     /// construct the service directly keep working unchanged.
-    fn regular_env_repo<'a>(&'a self, collection: Option<&str>) -> Box<dyn EnvironmentRepository + 'a> {
+    fn regular_env_repo<'a>(
+        &'a self,
+        collection: Option<&str>,
+    ) -> Box<dyn EnvironmentRepository + 'a> {
         match (&self.collection_env_repo_factory, collection) {
             (Some(factory), Some(col)) => factory.for_collection(col),
             _ => Box::new(RefEnvRepo(self.env_repo.as_ref())),
@@ -321,7 +324,8 @@ impl RequestExecutionService {
         environment_name: Option<&str>,
         request_path: Option<&str>,
     ) -> std::collections::HashMap<String, String> {
-        self.build_variable_scopes(collection, environment_name, request_path).flatten()
+        self.build_variable_scopes(collection, environment_name, request_path)
+            .flatten()
     }
 
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
@@ -399,7 +403,12 @@ impl RequestExecutionService {
         // Apply global-environment writes (always persisted — modifying a shared env).
         if !result.global_env_var_writes.is_empty() {
             if let Some(name) = global_env_name {
-                self.apply_env_writes(self.env_repo.as_ref(), name, &result.global_env_var_writes, true);
+                self.apply_env_writes(
+                    self.env_repo.as_ref(),
+                    name,
+                    &result.global_env_var_writes,
+                    true,
+                );
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -411,7 +420,9 @@ impl RequestExecutionService {
         if !result.collection_var_writes.is_empty() {
             if let Some(col) = collection {
                 for write in &result.collection_var_writes {
-                    let str_val = write.value.as_str()
+                    let str_val = write
+                        .value
+                        .as_str()
                         .map(str::to_owned)
                         .unwrap_or_else(|| write.value.to_string());
                     if let Err(e) = self.apply_collection_var_write(col, &write.key, &str_val) {
@@ -433,7 +444,12 @@ impl RequestExecutionService {
     ///
     /// Shared by script-side-effect application (`rok.setCollectionVar`) and
     /// the `runtime.actions` set-variable pipeline.
-    fn apply_collection_var_write(&self, collection: &str, key: &str, value: &str) -> DomainResult<()> {
+    fn apply_collection_var_write(
+        &self,
+        collection: &str,
+        key: &str,
+        value: &str,
+    ) -> DomainResult<()> {
         let mut settings = self.collection_repo.get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
         self.collection_repo.save_settings(collection, &settings)?;
@@ -683,7 +699,10 @@ impl RequestExecutionService {
             let Some(value) = result.runtime_vars.get("__jsonq_result__") else {
                 continue;
             };
-            let str_val = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+            let str_val = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
             let var_name = &action.variable.name;
 
             match action.variable.scope.as_str() {
@@ -723,11 +742,17 @@ impl RequestExecutionService {
                         match self.collection_repo.get_folder_variables(col, folder_path) {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) = self.collection_repo.save_folder_variables(col, folder_path, vars) {
+                                if let Err(e) = self.collection_repo.save_folder_variables(
+                                    col,
+                                    folder_path,
+                                    vars,
+                                ) {
                                     tracing::warn!(error = %e, variable = %var_name, "failed to persist folder var from action");
                                 }
                             }
-                            Err(e) => tracing::warn!(error = %e, variable = %var_name, "failed to read folder vars for action"),
+                            Err(e) => {
+                                tracing::warn!(error = %e, variable = %var_name, "failed to read folder vars for action")
+                            }
                         }
                     }
                 }
@@ -736,11 +761,15 @@ impl RequestExecutionService {
                         match self.collection_repo.get_request_variables(col, path) {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) = self.collection_repo.save_request_variables(col, path, vars) {
+                                if let Err(e) =
+                                    self.collection_repo.save_request_variables(col, path, vars)
+                                {
                                     tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
                                 }
                             }
-                            Err(e) => tracing::warn!(error = %e, variable = %var_name, "failed to read request vars for action"),
+                            Err(e) => {
+                                tracing::warn!(error = %e, variable = %var_name, "failed to read request vars for action")
+                            }
                         }
                     }
                 }
@@ -828,7 +857,9 @@ impl RequestExecutionService {
         if let Some(name) = input.global_env_name.as_deref() {
             if let Ok(global_env) = self.env_repo.get(name) {
                 for var in global_env.variables.iter().filter(|v| v.enabled) {
-                    var_ctx.global_env.insert(var.key.clone(), var.value.clone());
+                    var_ctx
+                        .global_env
+                        .insert(var.key.clone(), var.value.clone());
                     if var.secret && var.value.len() >= MIN_REDACTION_LEN {
                         var_ctx.secret_values.insert(var.value.clone());
                     }
@@ -837,7 +868,12 @@ impl RequestExecutionService {
         }
 
         let sandbox_mode = match input.collection.as_deref() {
-            Some(col) => match self.collection_repo.get_settings(col).unwrap_or_default().sandbox_mode {
+            Some(col) => match self
+                .collection_repo
+                .get_settings(col)
+                .unwrap_or_default()
+                .sandbox_mode
+            {
                 CollectionSandboxMode::Safe => SandboxMode::Safe,
                 CollectionSandboxMode::Developer => SandboxMode::Developer,
             },
@@ -884,9 +920,15 @@ impl RequestExecutionService {
                 )
                 .with_execution_mode(mode)
                 .with_sandbox_mode(state.sandbox_mode);
-                let result = self.run_script_phase(
-                    code, ctx, &request_name, "before-request", &mut state.console,
-                ).await;
+                let result = self
+                    .run_script_phase(
+                        code,
+                        ctx,
+                        &request_name,
+                        "before-request",
+                        &mut state.console,
+                    )
+                    .await;
 
                 // Apply request mutations.
                 if let Some(ref mutations) = result.request_mutations {
@@ -919,7 +961,10 @@ impl RequestExecutionService {
                     for mutation in &mutations.headers {
                         match mutation {
                             rocket_scripting::HeaderMutation::Set { name, value } => {
-                                if let Some(h) = state.http_request.headers.iter_mut()
+                                if let Some(h) = state
+                                    .http_request
+                                    .headers
+                                    .iter_mut()
                                     .find(|h| h.key.eq_ignore_ascii_case(name))
                                 {
                                     h.value = value.clone();
@@ -928,7 +973,10 @@ impl RequestExecutionService {
                                 }
                             }
                             rocket_scripting::HeaderMutation::Delete { name } => {
-                                state.http_request.headers.retain(|h| !h.key.eq_ignore_ascii_case(name));
+                                state
+                                    .http_request
+                                    .headers
+                                    .retain(|h| !h.key.eq_ignore_ascii_case(name));
                             }
                         }
                     }
@@ -945,7 +993,8 @@ impl RequestExecutionService {
                         } else {
                             body_mode_from_content_type(&state.http_request.headers)
                         };
-                        let content = body_val.as_str()
+                        let content = body_val
+                            .as_str()
                             .map(str::to_owned)
                             .unwrap_or_else(|| body_val.to_string());
                         state.http_request.body = Some(rocket_shared::types::Body {
@@ -997,7 +1046,8 @@ impl RequestExecutionService {
             &mut state.var_ctx,
             &input.tags,
             &input.path_params,
-        ).await;
+        )
+        .await;
 
         Ok(())
     }
@@ -1041,9 +1091,15 @@ impl RequestExecutionService {
                 )
                 .with_execution_mode(mode)
                 .with_sandbox_mode(state.sandbox_mode);
-                let result = self.run_script_phase(
-                    code, ctx, &request_name, "after-response", &mut state.console,
-                ).await;
+                let result = self
+                    .run_script_phase(
+                        code,
+                        ctx,
+                        &request_name,
+                        "after-response",
+                        &mut state.console,
+                    )
+                    .await;
                 self.apply_script_side_effects(
                     &result,
                     input.environment_name.as_deref(),
@@ -1086,9 +1142,9 @@ impl RequestExecutionService {
                 )
                 .with_execution_mode(mode)
                 .with_sandbox_mode(state.sandbox_mode);
-                let result = self.run_script_phase(
-                    code, ctx, &request_name, "tests", &mut state.console,
-                ).await;
+                let result = self
+                    .run_script_phase(code, ctx, &request_name, "tests", &mut state.console)
+                    .await;
                 self.apply_script_side_effects(
                     &result,
                     input.environment_name.as_deref(),
@@ -1114,14 +1170,17 @@ impl RequestExecutionService {
         if entries.is_empty() {
             return;
         }
-        let entries = entries.iter().map(|e| {
-            let level = match e.level {
-                ConsoleLevel::Log => "log",
-                ConsoleLevel::Warn => "warn",
-                ConsoleLevel::Error => "error",
-            };
-            serde_json::json!({ "level": level, "message": e.message })
-        }).collect();
+        let entries = entries
+            .iter()
+            .map(|e| {
+                let level = match e.level {
+                    ConsoleLevel::Log => "log",
+                    ConsoleLevel::Warn => "warn",
+                    ConsoleLevel::Error => "error",
+                };
+                serde_json::json!({ "level": level, "message": e.message })
+            })
+            .collect();
         self.events.publish(DomainEvent::ConsoleOutput {
             request_name: request_name.to_string(),
             entries,
@@ -1152,27 +1211,30 @@ impl RequestExecutionService {
             &mut state.var_ctx,
             &input.tags,
             &input.path_params,
-        ).await;
+        )
+        .await;
 
         // ── Declarative assertions ────────────────────────────────────────────
         // Run after tests script so JS test results appear first in TestsPanel.
-        let assertion_results = crate::assertion_evaluator::evaluate_assertions(
-            &input.assertions,
-            &response,
-        );
+        let assertion_results =
+            crate::assertion_evaluator::evaluate_assertions(&input.assertions, &response);
         state.test_results.extend(assertion_results);
 
         // ── Emit events ───────────────────────────────────────────────────────
         self.publish_console(&request_name, &state.console);
 
         if !state.test_results.is_empty() {
-            let results = state.test_results.iter().map(|t| {
-                let status = match t.status {
-                    TestStatus::Passed => "passed",
-                    TestStatus::Failed => "failed",
-                };
-                serde_json::json!({ "name": t.name, "status": status, "error": t.error })
-            }).collect();
+            let results = state
+                .test_results
+                .iter()
+                .map(|t| {
+                    let status = match t.status {
+                        TestStatus::Passed => "passed",
+                        TestStatus::Failed => "failed",
+                    };
+                    serde_json::json!({ "name": t.name, "status": status, "error": t.error })
+                })
+                .collect();
             self.events.publish(DomainEvent::TestsCompleted {
                 request_name: request_name.clone(),
                 results,
@@ -1221,10 +1283,13 @@ impl RequestExecutionService {
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
         let mut state = self.begin_phases(&input)?;
-        self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state).await?;
+        self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
+            .await?;
         let response = self.send_request(&state).await?;
-        self.run_after_response_phase(&input, ExecutionMode::Standalone, &response, &mut state).await;
-        self.run_tests_phase(&input, ExecutionMode::Standalone, &response, &mut state).await;
+        self.run_after_response_phase(&input, ExecutionMode::Standalone, &response, &mut state)
+            .await;
+        self.run_tests_phase(&input, ExecutionMode::Standalone, &response, &mut state)
+            .await;
         Ok(self.finish_phases(&input, response, &mut state).await)
     }
 
@@ -1259,14 +1324,17 @@ impl RequestExecutionService {
         let mut var_ctx = VariableContext::default();
         if let Ok(settings) = self.collection_repo.get_settings(collection_root) {
             for cv in settings.variables.iter().filter(|v| v.enabled) {
-                let val = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                let val = if cv.value.is_empty() {
+                    cv.initial_value.clone()
+                } else {
+                    cv.value.clone()
+                };
                 var_ctx.collection.insert(cv.key.clone(), val);
             }
         }
 
-        let code = format!(
-            "rok.setVar('__jsonq_result__', (function(){{ return ({expression}); }})());"
-        );
+        let code =
+            format!("rok.setVar('__jsonq_result__', (function(){{ return ({expression}); }})());");
         let ctx = ScriptContext::after_response(
             code,
             var_ctx,
@@ -1288,7 +1356,6 @@ impl RequestExecutionService {
             .cloned()
             .unwrap_or(serde_json::Value::Null))
     }
-
 }
 
 /// Map an `Auth` variant to a short kebab-case label for audit events.
@@ -1377,7 +1444,10 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use rocket_collection::{Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable, Request as CollectionRequest};
+    use rocket_collection::{
+        Collection, CollectionRepository, CollectionSettings, CollectionSummary,
+        CollectionVariable, Request as CollectionRequest,
+    };
     use rocket_environment::{Environment, Variable};
     use rocket_http::{CookieJar, HttpResponse};
     use rocket_shared::error::{DomainError, DomainResult};
@@ -1456,7 +1526,9 @@ mod tests {
 
     impl MockHistoryRepo {
         fn new() -> Self {
-            Self { entries: Mutex::new(Vec::new()) }
+            Self {
+                entries: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -1513,11 +1585,19 @@ mod tests {
 
     impl StubCollectionRepo {
         fn empty() -> Self {
-            Self { settings: CollectionSettings::default(), folder_vars: vec![], request_vars: vec![] }
+            Self {
+                settings: CollectionSettings::default(),
+                folder_vars: vec![],
+                request_vars: vec![],
+            }
         }
 
         fn with_settings(settings: CollectionSettings) -> Self {
-            Self { settings, folder_vars: vec![], request_vars: vec![] }
+            Self {
+                settings,
+                folder_vars: vec![],
+                request_vars: vec![],
+            }
         }
 
         fn with_folder_vars(mut self, vars: Vec<CollectionVariable>) -> Self {
@@ -1532,7 +1612,9 @@ mod tests {
     }
 
     impl CollectionRepository for StubCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> { Ok(vec![]) }
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            Ok(vec![])
+        }
         fn get(&self, _: &str) -> DomainResult<Collection> {
             Err(DomainError::NotFound("stub".into()))
         }
@@ -1542,31 +1624,71 @@ mod tests {
         fn create(&self, _: &str) -> DomainResult<Collection> {
             Err(DomainError::NotFound("stub".into()))
         }
-        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
         fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
             Err(DomainError::NotFound("stub".into()))
         }
-        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> { Ok(path.to_string()) }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
+            Ok(path.to_string())
+        }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.clone())
         }
-        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> { Ok(()) }
-        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_folder_chain_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
             Ok(self.folder_vars.clone())
         }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
         fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(self.request_vars.clone())
         }
-        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn save_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     fn sample_input(url: &str, env_name: Option<&str>) -> ExecuteRequestInput {
@@ -1622,7 +1744,12 @@ mod tests {
         let mut input = sample_input("{{oidc-baseurl}}/api/data", Some("staging"));
         input.collection = None;
 
-        let config = rocket_http::LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0, duration_cap_secs: None };
+        let config = rocket_http::LoadTestConfig {
+            concurrency: 1,
+            total_requests: 1,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = svc.run_load_test(input, config).await.unwrap();
 
         assert_eq!(result.total_requests, 1);
@@ -1694,7 +1821,10 @@ mod tests {
             fn clear(&self) -> DomainResult<()> {
                 self.0.clear()
             }
-            fn search(&self, filter: &rocket_history::HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
+            fn search(
+                &self,
+                filter: &rocket_history::HistoryFilter,
+            ) -> DomainResult<Vec<HistoryEntry>> {
                 self.0.search(filter)
             }
         }
@@ -1709,7 +1839,9 @@ mod tests {
             Box::new(NullEventPublisher),
         );
 
-        svc.execute(sample_input("https://example.com", None)).await.unwrap();
+        svc.execute(sample_input("https://example.com", None))
+            .await
+            .unwrap();
 
         assert_eq!(history_arc.entries.lock().unwrap().len(), 1);
     }
@@ -1718,7 +1850,9 @@ mod tests {
     async fn execute_publishes_event() {
         use rocket_shared::events::DomainEvent;
 
-        let publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
 
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
@@ -1737,11 +1871,16 @@ mod tests {
             Box::new(SharedPublisher(publisher)),
         );
 
-        svc.execute(sample_input("https://example.com/items", None)).await.unwrap();
+        svc.execute(sample_input("https://example.com/items", None))
+            .await
+            .unwrap();
 
         let events = pub_arc.events.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], DomainEvent::RequestExecuted { status: 201, .. }));
+        assert!(matches!(
+            events[0],
+            DomainEvent::RequestExecuted { status: 201, .. }
+        ));
     }
 
     // -------------------------------------------------------------------------
@@ -1761,7 +1900,9 @@ mod tests {
         assert_eq!(merged.len(), 2);
         let accept = merged.iter().find(|h| h.key == "Accept").unwrap();
         assert_eq!(accept.value, "text/plain");
-        assert!(merged.iter().any(|h| h.key == "X-Tenant" && h.value == "acme"));
+        assert!(merged
+            .iter()
+            .any(|h| h.key == "X-Tenant" && h.value == "acme"));
     }
 
     #[test]
@@ -1790,15 +1931,27 @@ mod tests {
 
     #[test]
     fn merge_auth_uses_collection_when_request_is_none() {
-        let collection_auth = Some(Auth::Bearer { token: "col_tok".into() });
+        let collection_auth = Some(Auth::Bearer {
+            token: "col_tok".into(),
+        });
         let result = merge_auth(Auth::None, collection_auth);
-        assert_eq!(result, Auth::Bearer { token: "col_tok".into() });
+        assert_eq!(
+            result,
+            Auth::Bearer {
+                token: "col_tok".into()
+            }
+        );
     }
 
     #[test]
     fn merge_auth_request_takes_precedence_over_collection() {
-        let collection_auth = Some(Auth::Bearer { token: "col_tok".into() });
-        let request_auth = Auth::Basic { username: "user".into(), password: "pass".into() };
+        let collection_auth = Some(Auth::Bearer {
+            token: "col_tok".into(),
+        });
+        let request_auth = Auth::Basic {
+            username: "user".into(),
+            password: "pass".into(),
+        };
         let result = merge_auth(request_auth.clone(), collection_auth);
         assert_eq!(result, request_auth);
     }
@@ -1810,7 +1963,13 @@ mod tests {
     }
 
     fn cv(key: &str, value: &str) -> CollectionVariable {
-        CollectionVariable { key: key.into(), value: value.into(), initial_value: String::new(), enabled: true, secret: false }
+        CollectionVariable {
+            key: key.into(),
+            value: value.into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        }
     }
 
     #[tokio::test]
@@ -1936,7 +2095,9 @@ mod tests {
 
         let settings = CollectionSettings {
             docs: None,
-            auth: Some(Auth::Bearer { token: "col_tok".into() }),
+            auth: Some(Auth::Bearer {
+                token: "col_tok".into(),
+            }),
             headers: vec![],
             variables: vec![],
             sandbox_mode: rocket_collection::settings::SandboxMode::Safe,
@@ -1963,7 +2124,9 @@ mod tests {
             }
         }
 
-        let executor = Arc::new(CapturingExecutor { last_auth: Mutex::new(None) });
+        let executor = Arc::new(CapturingExecutor {
+            last_auth: Mutex::new(None),
+        });
 
         struct SharedExecutor(Arc<CapturingExecutor>);
         #[async_trait]
@@ -1988,7 +2151,12 @@ mod tests {
         svc.execute(input).await.unwrap();
 
         let captured = exec_arc.last_auth.lock().unwrap().clone().unwrap();
-        assert_eq!(captured, Auth::Bearer { token: "col_tok".into() });
+        assert_eq!(
+            captured,
+            Auth::Bearer {
+                token: "col_tok".into()
+            }
+        );
     }
 
     struct CapturingAuditPublisher {
@@ -2011,7 +2179,9 @@ mod tests {
 
     #[tokio::test]
     async fn execute_emits_security_audit_event_for_sensitive_auth() {
-        let publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let publisher = Arc::new(CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        });
 
         let svc = RequestExecutionService::new_with_audit(
             Box::new(MockEnvRepo::empty()),
@@ -2024,7 +2194,9 @@ mod tests {
         );
 
         let mut input = sample_input("https://api.example.com/users", None);
-        input.auth = Auth::Bearer { token: "tok".into() };
+        input.auth = Auth::Bearer {
+            token: "tok".into(),
+        };
         input.collection = Some("my-api".into());
         input.request_path = Some("users.yml".into());
         svc.execute(input).await.unwrap();
@@ -2043,7 +2215,9 @@ mod tests {
 
     #[tokio::test]
     async fn execute_does_not_emit_audit_for_none_or_inherit_auth() {
-        let publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let publisher = Arc::new(CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        });
 
         let svc = RequestExecutionService::new_with_audit(
             Box::new(MockEnvRepo::empty()),
@@ -2084,7 +2258,9 @@ mod tests {
 
     impl MockScriptEngine {
         fn returning_post_response(result: ScriptResult) -> Self {
-            Self { post_response_result: Mutex::new(result) }
+            Self {
+                post_response_result: Mutex::new(result),
+            }
         }
     }
 
@@ -2096,7 +2272,11 @@ mod tests {
         ) -> rocket_shared::error::DomainResult<ScriptResult> {
             use rocket_scripting::ScriptPhase;
             if ctx.phase == ScriptPhase::AfterResponse {
-                Ok(self.post_response_result.lock().expect("lock poisoned").clone())
+                Ok(self
+                    .post_response_result
+                    .lock()
+                    .expect("lock poisoned")
+                    .clone())
             } else {
                 Ok(ScriptResult::default())
             }
@@ -2137,15 +2317,25 @@ mod tests {
             self.saved.lock().expect("lock").push(env.clone());
             Ok(())
         }
-        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     struct SharedEnvRepo(Arc<RecordingEnvRepo>);
     impl rocket_environment::EnvironmentRepository for SharedEnvRepo {
-        fn list(&self) -> DomainResult<Vec<Environment>> { self.0.list() }
-        fn get(&self, name: &str) -> DomainResult<Environment> { self.0.get(name) }
-        fn save(&self, env: &Environment) -> DomainResult<()> { self.0.save(env) }
-        fn delete(&self, name: &str) -> DomainResult<()> { self.0.delete(name) }
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            self.0.list()
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.0.get(name)
+        }
+        fn save(&self, env: &Environment) -> DomainResult<()> {
+            self.0.save(env)
+        }
+        fn delete(&self, name: &str) -> DomainResult<()> {
+            self.0.delete(name)
+        }
     }
 
     struct RecordingCollectionRepo {
@@ -2166,57 +2356,168 @@ mod tests {
     }
 
     impl CollectionRepository for RecordingCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> { Ok(vec![]) }
-        fn get(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
-        fn get_summaries(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
-        fn create(&self, _: &str) -> DomainResult<Collection> { Err(DomainError::NotFound("stub".into())) }
-        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> { Err(DomainError::NotFound("stub".into())) }
-        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> { Ok(path.to_string()) }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            Ok(vec![])
+        }
+        fn get(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn get_summaries(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn create(&self, _: &str) -> DomainResult<Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
+            Ok(path.to_string())
+        }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.lock().expect("lock").clone())
         }
         fn save_settings(&self, _: &str, settings: &CollectionSettings) -> DomainResult<()> {
-            self.saved_settings.lock().expect("lock").push(settings.clone());
+            self.saved_settings
+                .lock()
+                .expect("lock")
+                .push(settings.clone());
             Ok(())
         }
-        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> { Ok(vec![]) }
-        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> { Ok(()) }
+        fn get_folder_chain_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     struct SharedCollectionRepo(Arc<RecordingCollectionRepo>);
     impl CollectionRepository for SharedCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> { self.0.list() }
-        fn get(&self, n: &str) -> DomainResult<Collection> { self.0.get(n) }
-        fn get_summaries(&self, n: &str) -> DomainResult<Collection> { self.0.get_summaries(n) }
-        fn create(&self, n: &str) -> DomainResult<Collection> { self.0.create(n) }
-        fn delete(&self, n: &str) -> DomainResult<()> { self.0.delete(n) }
-        fn rename(&self, a: &str, b: &str) -> DomainResult<()> { self.0.rename(a, b) }
-        fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> { self.0.get_request(a, b) }
-        fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> { self.0.save_request(a, b, c) }
-        fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> { self.0.rename_request(a, b, c) }
-        fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_request(a, b) }
-        fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.create_folder(a, b) }
-        fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_folder(a, b) }
-        fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> { self.0.move_item(a, b, c, d) }
-        fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> { self.0.reorder_items(a, b, c) }
-        fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> { self.0.get_settings(n) }
-        fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> { self.0.save_settings(n, s) }
-        fn get_folder_chain_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_chain_variables(a, b) }
-        fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_variables(a, b) }
-        fn save_folder_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_folder_variables(a, b, c) }
-        fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_request_variables(a, b) }
-        fn save_request_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_request_variables(a, b, c) }
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            self.0.list()
+        }
+        fn get(&self, n: &str) -> DomainResult<Collection> {
+            self.0.get(n)
+        }
+        fn get_summaries(&self, n: &str) -> DomainResult<Collection> {
+            self.0.get_summaries(n)
+        }
+        fn create(&self, n: &str) -> DomainResult<Collection> {
+            self.0.create(n)
+        }
+        fn delete(&self, n: &str) -> DomainResult<()> {
+            self.0.delete(n)
+        }
+        fn rename(&self, a: &str, b: &str) -> DomainResult<()> {
+            self.0.rename(a, b)
+        }
+        fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> {
+            self.0.get_request(a, b)
+        }
+        fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> {
+            self.0.save_request(a, b, c)
+        }
+        fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> {
+            self.0.rename_request(a, b, c)
+        }
+        fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> {
+            self.0.delete_request(a, b)
+        }
+        fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> {
+            self.0.create_folder(a, b)
+        }
+        fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> {
+            self.0.delete_folder(a, b)
+        }
+        fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> {
+            self.0.move_item(a, b, c, d)
+        }
+        fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
+            self.0.reorder_items(a, b, c)
+        }
+        fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
+            self.0.get_settings(n)
+        }
+        fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> {
+            self.0.save_settings(n, s)
+        }
+        fn get_folder_chain_variables(
+            &self,
+            a: &str,
+            b: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_folder_chain_variables(a, b)
+        }
+        fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_folder_variables(a, b)
+        }
+        fn save_folder_variables(
+            &self,
+            a: &str,
+            b: &str,
+            c: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.0.save_folder_variables(a, b, c)
+        }
+        fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_request_variables(a, b)
+        }
+        fn save_request_variables(
+            &self,
+            a: &str,
+            b: &str,
+            c: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.0.save_request_variables(a, b, c)
+        }
     }
 
     /// Script engine that returns a custom ScriptResult for the before-request phase.
@@ -2226,7 +2527,9 @@ mod tests {
 
     impl MockBeforeRequestEngine {
         fn returning(result: ScriptResult) -> Self {
-            Self { result: Mutex::new(result) }
+            Self {
+                result: Mutex::new(result),
+            }
         }
     }
 
@@ -2252,7 +2555,9 @@ mod tests {
 
     impl BodyCapturingExecutor {
         fn new() -> Arc<Self> {
-            Arc::new(Self { last_body: Mutex::new(None) })
+            Arc::new(Self {
+                last_body: Mutex::new(None),
+            })
         }
         fn last_body(&self) -> Option<rocket_shared::types::Body> {
             self.last_body.lock().expect("lock").clone()
@@ -2316,7 +2621,8 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved()
+        let saved = env_repo
+            .last_saved()
             .expect("env_repo.save() should have been called");
         assert_eq!(saved.get_value("TOKEN"), Some("new-token"));
     }
@@ -2347,7 +2653,8 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved()
+        let saved = env_repo
+            .last_saved()
             .expect("env_repo.save() must be called for all active-env writes");
         assert_eq!(saved.get_value("TOKEN"), Some("new-value"));
     }
@@ -2379,14 +2686,24 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
-        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        let saved = env_repo
+            .last_saved()
+            .expect("env_repo.save() should have been called");
+        let var = saved
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY present");
         assert_eq!(var.value, "sk-new");
-        assert!(var.secret, "secret flag must be preserved across a script write");
+        assert!(
+            var.secret,
+            "secret flag must be preserved across a script write"
+        );
     }
 
     #[tokio::test]
-    async fn post_response_script_env_var_delete_then_set_preserves_secret_flag_and_publishes_audit() {
+    async fn post_response_script_env_var_delete_then_set_preserves_secret_flag_and_publishes_audit(
+    ) {
         // rok.deleteEnvVar('K') followed by rok.setEnvVar('K', v) in the same
         // script queues a Null write then a value write for the same key in
         // one env_var_writes batch. Metadata lookup must use the pre-batch
@@ -2413,7 +2730,9 @@ mod tests {
             ..Default::default()
         };
 
-        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let audit_publisher = Arc::new(CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        });
         let svc = RequestExecutionService::new_with_audit(
             Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
             Arc::new(MockExecutor::new(200)),
@@ -2429,10 +2748,19 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
-        let var = saved.variables.iter().find(|v| v.key == "API_KEY").expect("API_KEY present");
+        let saved = env_repo
+            .last_saved()
+            .expect("env_repo.save() should have been called");
+        let var = saved
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("API_KEY present");
         assert_eq!(var.value, "sk-new");
-        assert!(var.secret, "secret flag must survive a delete-then-recreate within one script");
+        assert!(
+            var.secret,
+            "secret flag must survive a delete-then-recreate within one script"
+        );
 
         let captured = audit_publisher.captured.lock().expect("lock");
         assert!(
@@ -2471,9 +2799,18 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
-        let var = saved.variables.iter().find(|v| v.key == "NEW_TOKEN").expect("NEW_TOKEN present");
-        assert!(!var.secret, "a script must not be able to implicitly create a secret variable");
+        let saved = env_repo
+            .last_saved()
+            .expect("env_repo.save() should have been called");
+        let var = saved
+            .variables
+            .iter()
+            .find(|v| v.key == "NEW_TOKEN")
+            .expect("NEW_TOKEN present");
+        assert!(
+            !var.secret,
+            "a script must not be able to implicitly create a secret variable"
+        );
     }
 
     #[tokio::test]
@@ -2491,14 +2828,18 @@ mod tests {
             ..Default::default()
         };
 
-        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        let event_publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
             fn publish(&self, event: DomainEvent) {
                 self.0.publish(event);
             }
         }
-        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let audit_publisher = Arc::new(CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        });
 
         let svc = RequestExecutionService::new_with_audit(
             Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
@@ -2517,8 +2858,11 @@ mod tests {
 
         let published = event_publisher.events.lock().expect("lock");
         assert!(
-            published.iter().any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
-            "expected EnvironmentSaved, got {:?}", *published
+            published
+                .iter()
+                .any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            "expected EnvironmentSaved, got {:?}",
+            *published
         );
         assert!(
             published.iter().any(|e| matches!(
@@ -2536,7 +2880,8 @@ mod tests {
                 AuditEventKind::SecretVariableWritten { environment, variable_key }
                     if environment == "prod" && variable_key == "API_KEY"
             )),
-            "expected SecretVariableWritten, got {:?}", *captured
+            "expected SecretVariableWritten, got {:?}",
+            *captured
         );
     }
 
@@ -2555,7 +2900,9 @@ mod tests {
             ..Default::default()
         };
 
-        let audit_publisher = Arc::new(CapturingAuditPublisher { captured: Mutex::new(vec![]) });
+        let audit_publisher = Arc::new(CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        });
         let svc = RequestExecutionService::new_with_audit(
             Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
             Arc::new(MockExecutor::new(200)),
@@ -2573,8 +2920,11 @@ mod tests {
 
         let captured = audit_publisher.captured.lock().expect("lock");
         assert!(
-            !captured.iter().any(|k| matches!(k, AuditEventKind::SecretVariableWritten { .. })),
-            "a non-secret write must not publish SecretVariableWritten, got {:?}", *captured
+            !captured
+                .iter()
+                .any(|k| matches!(k, AuditEventKind::SecretVariableWritten { .. })),
+            "a non-secret write must not publish SecretVariableWritten, got {:?}",
+            *captured
         );
     }
 
@@ -2611,10 +2961,14 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = col_repo.last_saved_settings()
+        let saved = col_repo
+            .last_saved_settings()
             .expect("save_settings should have been called");
         let written = saved.variables.iter().find(|v| v.key == "BASE_URL");
-        assert_eq!(written.map(|v| v.value.as_str()), Some("https://new.example.com"));
+        assert_eq!(
+            written.map(|v| v.value.as_str()),
+            Some("https://new.example.com")
+        );
     }
 
     #[tokio::test]
@@ -2639,7 +2993,9 @@ mod tests {
             ..Default::default()
         };
 
-        let event_publisher = Arc::new(RecordingPublisher { events: Mutex::new(vec![]) });
+        let event_publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
             fn publish(&self, event: DomainEvent) {
@@ -2669,7 +3025,8 @@ mod tests {
                 DomainEvent::CollectionVariableWritten { collection, key }
                     if collection == "my-api" && key == "BASE_URL"
             )),
-            "expected CollectionVariableWritten, got {:?}", *published
+            "expected CollectionVariableWritten, got {:?}",
+            *published
         );
         assert!(
             published.iter().any(|e| matches!(
@@ -2707,7 +3064,8 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let saved = env_repo.last_saved()
+        let saved = env_repo
+            .last_saved()
             .expect("env_repo.save() should have been called for global env write");
         assert_eq!(saved.get_value("API_KEY"), Some("new-key"));
     }
@@ -2741,9 +3099,17 @@ mod tests {
         input.pre_request_script = Some("// pre".into());
         let output = svc.execute(input).await.expect("execute failed");
 
-        assert_eq!(output.response.status, 200, "the original method must still be used, unmodified");
-        let err = output.script_error.expect("an invalid setMethod() must surface a script_error");
-        assert!(err.contains("PACTH"), "error should name the invalid method: {err}");
+        assert_eq!(
+            output.response.status, 200,
+            "the original method must still be used, unmodified"
+        );
+        let err = output
+            .script_error
+            .expect("an invalid setMethod() must surface a script_error");
+        assert!(
+            err.contains("PACTH"),
+            "error should name the invalid method: {err}"
+        );
     }
 
     #[tokio::test]
@@ -2771,7 +3137,10 @@ mod tests {
         let mut input = sample_input("https://example.com", None);
         input.pre_request_script = Some("// pre".into());
         // request_guard_policy left at its Default — fully permissive.
-        let output = svc.execute(input).await.expect("execute should succeed — policy is off");
+        let output = svc
+            .execute(input)
+            .await
+            .expect("execute should succeed — policy is off");
         assert_eq!(output.response.status, 200);
     }
 
@@ -2837,7 +3206,10 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
         };
-        let output = svc.execute(input).await.expect("private ranges must be allowed by default");
+        let output = svc
+            .execute(input)
+            .await
+            .expect("private ranges must be allowed by default");
         assert_eq!(output.response.status, 200);
     }
 
@@ -2870,7 +3242,10 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
         };
-        let err = svc.execute(input).await.expect_err("must be blocked with both flags on");
+        let err = svc
+            .execute(input)
+            .await
+            .expect_err("must be blocked with both flags on");
         assert!(err.to_string().contains("192.168.1.1"));
     }
 
@@ -2895,7 +3270,10 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
         };
-        let output = svc.execute(input).await.expect("manual URLs are never checked");
+        let output = svc
+            .execute(input)
+            .await
+            .expect("manual URLs are never checked");
         assert_eq!(output.response.status, 200);
     }
 
@@ -2931,7 +3309,10 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
         };
-        let output = svc.execute(input).await.expect("no URL mutation means nothing to check");
+        let output = svc
+            .execute(input)
+            .await
+            .expect("no URL mutation means nothing to check");
         assert_eq!(output.response.status, 200);
     }
 
@@ -2965,7 +3346,9 @@ mod tests {
         input.pre_request_script = Some("// pre".into());
         svc.execute(input).await.expect("execute failed");
 
-        let body = body_capturing.last_body().expect("executor should have received a body");
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
         assert_eq!(body.mode, BodyMode::Json);
         assert_eq!(body.content.as_deref(), Some(r#"{"injected":true}"#));
     }
@@ -3005,7 +3388,9 @@ mod tests {
         input.pre_request_script = Some("// pre".into());
         svc.execute(input).await.expect("execute failed");
 
-        let body = body_capturing.last_body().expect("executor should have received a body");
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
         assert_eq!(
             body.mode,
             BodyMode::Xml,
@@ -3056,7 +3441,10 @@ mod tests {
         );
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("169.254.169.254"), "error should name the blocked host: {msg}");
+        assert!(
+            msg.contains("169.254.169.254"),
+            "error should name the blocked host: {msg}"
+        );
     }
 
     #[test]
@@ -3074,11 +3462,8 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
         };
-        let result = svc.check_request_guard(
-            "https://example.com/",
-            "http://192.168.1.1/",
-            &policy,
-        );
+        let result =
+            svc.check_request_guard("https://example.com/", "http://192.168.1.1/", &policy);
         assert!(result.is_ok());
     }
 
@@ -3097,11 +3482,8 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
         };
-        let result = svc.check_request_guard(
-            "https://example.com/",
-            "http://192.168.1.1/",
-            &policy,
-        );
+        let result =
+            svc.check_request_guard("https://example.com/", "http://192.168.1.1/", &policy);
         assert!(result.is_err());
     }
 
@@ -3123,11 +3505,8 @@ mod tests {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
         };
-        let result = svc.check_request_guard(
-            "http://192.168.1.1/foo",
-            "http://192.168.1.1/bar",
-            &policy,
-        );
+        let result =
+            svc.check_request_guard("http://192.168.1.1/foo", "http://192.168.1.1/bar", &policy);
         assert!(result.is_ok());
     }
 
@@ -3171,7 +3550,10 @@ mod tests {
             also_block_private_ranges: false,
         };
         let result = svc.check_request_guard("https://example.com/", "http://[::1]/", &policy);
-        assert!(result.is_err(), "a bracketed IPv6 loopback URL must be blocked");
+        assert!(
+            result.is_err(),
+            "a bracketed IPv6 loopback URL must be blocked"
+        );
     }
 
     #[test]
@@ -3196,7 +3578,10 @@ mod tests {
             "http://[::ffff:169.254.169.254]/latest/meta-data/",
             &policy,
         );
-        assert!(result.is_err(), "the IPv4-mapped metadata endpoint must be blocked");
+        assert!(
+            result.is_err(),
+            "the IPv4-mapped metadata endpoint must be blocked"
+        );
     }
 
     #[test]
@@ -3220,7 +3605,10 @@ mod tests {
             also_block_private_ranges: false,
         };
         let result = svc.check_request_guard("https://example.com/", "http://0/", &policy);
-        assert!(result.is_err(), "the unspecified-address shorthand '0' must be blocked");
+        assert!(
+            result.is_err(),
+            "the unspecified-address shorthand '0' must be blocked"
+        );
     }
 
     #[test]
@@ -3239,7 +3627,10 @@ mod tests {
             also_block_private_ranges: false,
         };
         let result = svc.check_request_guard("https://example.com/", "http://localhost./", &policy);
-        assert!(result.is_err(), "'localhost.' must be blocked exactly like 'localhost'");
+        assert!(
+            result.is_err(),
+            "'localhost.' must be blocked exactly like 'localhost'"
+        );
     }
 
     /// Executor that captures the RequestOptions it received.
@@ -3249,7 +3640,9 @@ mod tests {
 
     impl OptionsCapturingExecutor {
         fn new() -> Arc<Self> {
-            Arc::new(Self { last_options: Mutex::new(None) })
+            Arc::new(Self {
+                last_options: Mutex::new(None),
+            })
         }
         fn last_options(&self) -> Option<RequestOptions> {
             self.last_options.lock().expect("lock").clone()
@@ -3328,7 +3721,9 @@ mod tests {
         input.pre_request_script = Some("// pre".into());
         svc.execute(input).await.expect("execute failed");
 
-        let opts = options_capturing.last_options().expect("executor should have received options");
+        let opts = options_capturing
+            .last_options()
+            .expect("executor should have received options");
         assert_eq!(opts.max_redirects, Some(3));
     }
 
@@ -3344,10 +3739,16 @@ mod tests {
 
     #[async_trait]
     impl ScriptEngine for FixedJsonqEngine {
-        async fn execute(&self, _ctx: ScriptContext) -> rocket_shared::error::DomainResult<ScriptResult> {
+        async fn execute(
+            &self,
+            _ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
             let mut vars = std::collections::HashMap::new();
             vars.insert("__jsonq_result__".to_string(), self.value.clone());
-            Ok(ScriptResult { runtime_vars: vars, ..Default::default() })
+            Ok(ScriptResult {
+                runtime_vars: vars,
+                ..Default::default()
+            })
         }
     }
 
@@ -3356,8 +3757,14 @@ mod tests {
 
     #[async_trait]
     impl ScriptEngine for ErrorJsonqEngine {
-        async fn execute(&self, _ctx: ScriptContext) -> rocket_shared::error::DomainResult<ScriptResult> {
-            Ok(ScriptResult { error: Some("ReferenceError: nope".into()), ..Default::default() })
+        async fn execute(
+            &self,
+            _ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
+            Ok(ScriptResult {
+                error: Some("ReferenceError: nope".into()),
+                ..Default::default()
+            })
         }
     }
 
@@ -3395,7 +3802,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
             Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
-            Box::new(FixedJsonqEngine { value: serde_json::json!("extracted-value") }),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("extracted-value"),
+            }),
         );
 
         let actions = vec![stub_action("collection", "after-response", false)];
@@ -3404,11 +3813,23 @@ mod tests {
         let mut var_ctx = VariableContext::default();
 
         svc.apply_actions(
-            &actions, "after-response", "Get User", &http_request, Some(&response),
-            None, Some("my-api"), None, &mut var_ctx, &[], &[],
-        ).await;
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            None,
+            Some("my-api"),
+            None,
+            &mut var_ctx,
+            &[],
+            &[],
+        )
+        .await;
 
-        let saved = col_repo.last_saved_settings().expect("save_settings should have been called");
+        let saved = col_repo
+            .last_saved_settings()
+            .expect("save_settings should have been called");
         let written = saved.variables.iter().find(|v| v.key == "extracted");
         assert_eq!(written.map(|v| v.value.as_str()), Some("extracted-value"));
     }
@@ -3420,7 +3841,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
             Box::new(StubCollectionRepo::empty()),
-            Box::new(FixedJsonqEngine { value: serde_json::json!("token-123") }),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("token-123"),
+            }),
         );
 
         let actions = vec![stub_action("environment", "after-response", false)];
@@ -3429,11 +3852,23 @@ mod tests {
         let mut var_ctx = VariableContext::default();
 
         svc.apply_actions(
-            &actions, "after-response", "Get User", &http_request, Some(&response),
-            Some("dev"), None, None, &mut var_ctx, &[], &[],
-        ).await;
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            &[],
+            &[],
+        )
+        .await;
 
-        let saved = env_repo.last_saved().expect("env_repo.save() should have been called");
+        let saved = env_repo
+            .last_saved()
+            .expect("env_repo.save() should have been called");
         assert_eq!(saved.get_value("extracted"), Some("token-123"));
     }
 
@@ -3443,7 +3878,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
             Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
-            Box::new(FixedJsonqEngine { value: serde_json::json!("in-memory-value") }),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("in-memory-value"),
+            }),
         );
 
         let actions = vec![stub_action("runtime", "after-response", false)];
@@ -3452,12 +3889,28 @@ mod tests {
         let mut var_ctx = VariableContext::default();
 
         svc.apply_actions(
-            &actions, "after-response", "Get User", &http_request, Some(&response),
-            None, None, None, &mut var_ctx, &[], &[],
-        ).await;
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            None,
+            None,
+            None,
+            &mut var_ctx,
+            &[],
+            &[],
+        )
+        .await;
 
-        assert_eq!(var_ctx.runtime.get("extracted"), Some(&"in-memory-value".to_string()));
-        assert!(col_repo.last_saved_settings().is_none(), "runtime scope must never persist");
+        assert_eq!(
+            var_ctx.runtime.get("extracted"),
+            Some(&"in-memory-value".to_string())
+        );
+        assert!(
+            col_repo.last_saved_settings().is_none(),
+            "runtime scope must never persist"
+        );
     }
 
     #[tokio::test]
@@ -3466,7 +3919,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
             Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
-            Box::new(FixedJsonqEngine { value: serde_json::json!("should-not-be-written") }),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("should-not-be-written"),
+            }),
         );
 
         let actions = vec![stub_action("collection", "after-response", true)];
@@ -3475,11 +3930,24 @@ mod tests {
         let mut var_ctx = VariableContext::default();
 
         svc.apply_actions(
-            &actions, "after-response", "Get User", &http_request, Some(&response),
-            None, Some("my-api"), None, &mut var_ctx, &[], &[],
-        ).await;
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            None,
+            Some("my-api"),
+            None,
+            &mut var_ctx,
+            &[],
+            &[],
+        )
+        .await;
 
-        assert!(col_repo.last_saved_settings().is_none(), "disabled action must not run");
+        assert!(
+            col_repo.last_saved_settings().is_none(),
+            "disabled action must not run"
+        );
     }
 
     #[tokio::test]
@@ -3488,7 +3956,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
             Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
-            Box::new(FixedJsonqEngine { value: serde_json::json!("should-not-be-written") }),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("should-not-be-written"),
+            }),
         );
 
         // A before-request action must not fire during the after-response pass.
@@ -3498,11 +3968,24 @@ mod tests {
         let mut var_ctx = VariableContext::default();
 
         svc.apply_actions(
-            &actions, "after-response", "Get User", &http_request, Some(&response),
-            None, Some("my-api"), None, &mut var_ctx, &[], &[],
-        ).await;
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            None,
+            Some("my-api"),
+            None,
+            &mut var_ctx,
+            &[],
+            &[],
+        )
+        .await;
 
-        assert!(col_repo.last_saved_settings().is_none(), "wrong-phase action must not run");
+        assert!(
+            col_repo.last_saved_settings().is_none(),
+            "wrong-phase action must not run"
+        );
     }
 
     // Environment repo backed by a map, so a test can look up both the active
@@ -3513,7 +3996,9 @@ mod tests {
 
     impl MultiEnvRepo {
         fn new(envs: Vec<Environment>) -> Self {
-            Self { envs: envs.into_iter().map(|e| (e.name.clone(), e)).collect() }
+            Self {
+                envs: envs.into_iter().map(|e| (e.name.clone(), e)).collect(),
+            }
         }
     }
 
@@ -3522,10 +4007,17 @@ mod tests {
             Ok(self.envs.values().cloned().collect())
         }
         fn get(&self, name: &str) -> DomainResult<Environment> {
-            self.envs.get(name).cloned().ok_or_else(|| DomainError::NotFound(name.into()))
+            self.envs
+                .get(name)
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(name.into()))
         }
-        fn save(&self, _: &Environment) -> DomainResult<()> { Ok(()) }
-        fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+        fn save(&self, _: &Environment) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     // Script engine that records the VariableContext it was invoked with.
@@ -3555,7 +4047,9 @@ mod tests {
         global_env.set_variable(Variable::new("ORG_ID", "acme"));
         let env_repo = MultiEnvRepo::new(vec![active_env, global_env]);
 
-        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        let engine = Arc::new(CapturingEngine {
+            captured: Mutex::new(None),
+        });
         struct SharedCapturingEngine(Arc<CapturingEngine>);
         #[async_trait]
         impl ScriptEngine for SharedCapturingEngine {
@@ -3593,7 +4087,10 @@ mod tests {
             Some(&"col-secret".to_string()),
             "collection scope must stay separate, not be flattened into env"
         );
-        assert_eq!(captured.env.get("BASE_URL"), Some(&"https://dev.local".to_string()));
+        assert_eq!(
+            captured.env.get("BASE_URL"),
+            Some(&"https://dev.local".to_string())
+        );
         assert_eq!(
             captured.global_env.get("ORG_ID"),
             Some(&"acme".to_string()),
@@ -3627,7 +4124,9 @@ mod tests {
         active_env.set_variable(Variable::new("PLAIN", "plain-not-secret"));
         let env_repo = MockEnvRepo::with_env(active_env);
 
-        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        let engine = Arc::new(CapturingEngine {
+            captured: Mutex::new(None),
+        });
         struct SharedCapturingEngineSecrets(Arc<CapturingEngine>);
         #[async_trait]
         impl ScriptEngine for SharedCapturingEngineSecrets {
@@ -3653,11 +4152,28 @@ mod tests {
 
         svc.execute(input).await.expect("execute should succeed");
 
-        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
-        assert!(captured.secret_values.contains("sk-live-abcdef123"), "secret env var value must be in secret_values");
-        assert!(captured.secret_values.contains("col-secret-val"), "secret collection var value must be in secret_values");
-        assert!(!captured.secret_values.contains("plain-not-secret"), "non-secret env var value must not be in secret_values");
-        assert!(!captured.secret_values.contains("col-plain-val"), "non-secret collection var value must not be in secret_values");
+        let captured = engine_arc
+            .captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("engine was called");
+        assert!(
+            captured.secret_values.contains("sk-live-abcdef123"),
+            "secret env var value must be in secret_values"
+        );
+        assert!(
+            captured.secret_values.contains("col-secret-val"),
+            "secret collection var value must be in secret_values"
+        );
+        assert!(
+            !captured.secret_values.contains("plain-not-secret"),
+            "non-secret env var value must not be in secret_values"
+        );
+        assert!(
+            !captured.secret_values.contains("col-plain-val"),
+            "non-secret collection var value must not be in secret_values"
+        );
     }
 
     #[tokio::test]
@@ -3670,7 +4186,9 @@ mod tests {
         active_env.set_variable(Variable::secret("SHORT", "abc")); // 3 chars < MIN_REDACTION_LEN
         let env_repo = MockEnvRepo::with_env(active_env);
 
-        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        let engine = Arc::new(CapturingEngine {
+            captured: Mutex::new(None),
+        });
         struct SharedCapturingEngineShort(Arc<CapturingEngine>);
         #[async_trait]
         impl ScriptEngine for SharedCapturingEngineShort {
@@ -3695,8 +4213,16 @@ mod tests {
 
         svc.execute(input).await.expect("execute should succeed");
 
-        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
-        assert!(!captured.secret_values.contains("abc"), "secrets shorter than MIN_REDACTION_LEN must not be added to secret_values");
+        let captured = engine_arc
+            .captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("engine was called");
+        assert!(
+            !captured.secret_values.contains("abc"),
+            "secrets shorter than MIN_REDACTION_LEN must not be added to secret_values"
+        );
     }
 
     #[tokio::test]
@@ -3709,7 +4235,9 @@ mod tests {
         active_env.set_variable(Variable::secret("EXACT", "abcdef")); // 6 chars == MIN_REDACTION_LEN
         let env_repo = MockEnvRepo::with_env(active_env);
 
-        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        let engine = Arc::new(CapturingEngine {
+            captured: Mutex::new(None),
+        });
         struct SharedCapturingEngineExact(Arc<CapturingEngine>);
         #[async_trait]
         impl ScriptEngine for SharedCapturingEngineExact {
@@ -3734,8 +4262,16 @@ mod tests {
 
         svc.execute(input).await.expect("execute should succeed");
 
-        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
-        assert!(captured.secret_values.contains("abcdef"), "a secret exactly MIN_REDACTION_LEN characters long must be added to secret_values");
+        let captured = engine_arc
+            .captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("engine was called");
+        assert!(
+            captured.secret_values.contains("abcdef"),
+            "a secret exactly MIN_REDACTION_LEN characters long must be added to secret_values"
+        );
     }
 
     #[tokio::test]
@@ -3747,7 +4283,9 @@ mod tests {
         global_env.set_variable(Variable::new("GLOBAL_PLAIN", "glbl-plain-val"));
         let env_repo = MultiEnvRepo::new(vec![active_env, global_env]);
 
-        let engine = Arc::new(CapturingEngine { captured: Mutex::new(None) });
+        let engine = Arc::new(CapturingEngine {
+            captured: Mutex::new(None),
+        });
         struct SharedCapturingEngineGlobal(Arc<CapturingEngine>);
         #[async_trait]
         impl ScriptEngine for SharedCapturingEngineGlobal {
@@ -3773,9 +4311,20 @@ mod tests {
 
         svc.execute(input).await.expect("execute should succeed");
 
-        let captured = engine_arc.captured.lock().expect("lock").clone().expect("engine was called");
-        assert!(captured.secret_values.contains("glbl-secret-999"), "secret global env var value must be in secret_values");
-        assert!(!captured.secret_values.contains("glbl-plain-val"), "non-secret global env var value must not be in secret_values");
+        let captured = engine_arc
+            .captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("engine was called");
+        assert!(
+            captured.secret_values.contains("glbl-secret-999"),
+            "secret global env var value must be in secret_values"
+        );
+        assert!(
+            !captured.secret_values.contains("glbl-plain-val"),
+            "non-secret global env var value must not be in secret_values"
+        );
     }
 
     #[tokio::test]
@@ -3789,7 +4338,10 @@ mod tests {
         let mut input = sample_input("https://example.com", None);
         input.actions = vec![stub_action("runtime", "after-response", false)];
 
-        let output = svc.execute(input).await.expect("execute must succeed despite a bad jsonq expression");
+        let output = svc
+            .execute(input)
+            .await
+            .expect("execute must succeed despite a bad jsonq expression");
         assert_eq!(output.response.status, 200);
     }
 
@@ -3842,7 +4394,10 @@ mod tests {
     impl ScriptEngine for ModeProbeEngine {
         async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
             use rocket_scripting::ScriptPhase;
-            self.seen_modes.lock().expect("lock").push(ctx.execution_mode.clone());
+            self.seen_modes
+                .lock()
+                .expect("lock")
+                .push(ctx.execution_mode.clone());
             if ctx.phase == ScriptPhase::BeforeRequest {
                 Ok(self.before_request_result.clone())
             } else {
@@ -3903,7 +4458,9 @@ mod tests {
 
     #[tokio::test]
     async fn before_request_script_receives_collection_sandbox_mode() {
-        let engine = Arc::new(SandboxModeProbeEngine { seen_modes: Mutex::new(vec![]) });
+        let engine = Arc::new(SandboxModeProbeEngine {
+            seen_modes: Mutex::new(vec![]),
+        });
         let collection_repo = StubCollectionRepo::with_settings(CollectionSettings {
             sandbox_mode: rocket_collection::settings::SandboxMode::Developer,
             ..Default::default()
@@ -3920,7 +4477,10 @@ mod tests {
         svc.execute(input).await.expect("execute");
 
         let modes = engine.seen_modes.lock().expect("lock").clone();
-        assert_eq!(modes, vec![rocket_scripting::context::SandboxMode::Developer]);
+        assert_eq!(
+            modes,
+            vec![rocket_scripting::context::SandboxMode::Developer]
+        );
     }
 
     #[tokio::test]
@@ -3929,7 +4489,10 @@ mod tests {
         // start honouring it.
         let engine = Arc::new(ModeProbeEngine {
             seen_modes: Mutex::new(vec![]),
-            before_request_result: ScriptResult { skip_request: true, ..Default::default() },
+            before_request_result: ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
         });
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
@@ -3940,7 +4503,10 @@ mod tests {
         let mut input = sample_input("https://example.com", None);
         input.pre_request_script = Some("// pre".into());
         let out = svc.execute(input).await.expect("execute");
-        assert_eq!(out.response.status, 200, "single send must ignore skipRequest()");
+        assert_eq!(
+            out.response.status, 200,
+            "single send must ignore skipRequest()"
+        );
     }
 
     #[tokio::test]
@@ -3962,7 +4528,8 @@ mod tests {
         let mut input = sample_input("https://example.com", None);
         input.pre_request_script = Some("// pre".into());
         let mut state = svc.begin_phases(&input).expect("begin");
-        svc.run_before_request_phase(&input, rocket_scripting::ExecutionMode::Runner, &mut state).await
+        svc.run_before_request_phase(&input, rocket_scripting::ExecutionMode::Runner, &mut state)
+            .await
             .expect("run_before_request_phase");
 
         assert!(state.skip_request);
@@ -3986,6 +4553,9 @@ mod tests {
         carried.insert("TOKEN".to_string(), "from-step-1".to_string());
         state.seed_runtime(&carried);
 
-        assert_eq!(state.var_ctx.runtime.get("TOKEN"), Some(&"from-step-1".to_string()));
+        assert_eq!(
+            state.var_ctx.runtime.get("TOKEN"),
+            Some(&"from-step-1".to_string())
+        );
     }
 }

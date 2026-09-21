@@ -34,24 +34,21 @@ impl WorkspaceConfigRepository for FsWorkspaceConfigRepo {
             return Ok(WorkspaceConfig::new(name));
         }
 
-        let content = fs::read_to_string(&config_path).map_err(|e| {
-            DomainError::Io(format!("Failed to read workspace.yml: {e}"))
-        })?;
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| DomainError::Io(format!("Failed to read workspace.yml: {e}")))?;
 
         // Try new format (has info.name block — OcWorkspaceConfig)
         if let Ok(oc) = serde_yaml::from_str::<OcWorkspaceConfig>(&content) {
             return Ok(WorkspaceConfig::from(oc));
         }
         // Fall back to old format (flat name: at root)
-        serde_yaml::from_str::<WorkspaceConfig>(&content).map_err(|e| {
-            DomainError::InvalidInput(format!("Failed to parse workspace.yml: {e}"))
-        })
+        serde_yaml::from_str::<WorkspaceConfig>(&content)
+            .map_err(|e| DomainError::InvalidInput(format!("Failed to parse workspace.yml: {e}")))
     }
 
     fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()> {
-        fs::create_dir_all(workspace_path).map_err(|e| {
-            DomainError::Io(format!("Failed to create workspace directory: {e}"))
-        })?;
+        fs::create_dir_all(workspace_path)
+            .map_err(|e| DomainError::Io(format!("Failed to create workspace directory: {e}")))?;
 
         let config_path = workspace_path.join("workspace.yml");
         let oc = OcWorkspaceConfig::from(config.clone());
@@ -68,13 +65,15 @@ impl WorkspaceConfigRepository for FsWorkspaceConfigRepo {
         if !oc_path.exists() {
             return Ok(None);
         }
-        let content = fs::read_to_string(&oc_path).map_err(|e| {
-            DomainError::Io(format!("Failed to read opencollection.yml: {e}"))
-        })?;
+        let content = fs::read_to_string(&oc_path)
+            .map_err(|e| DomainError::Io(format!("Failed to read opencollection.yml: {e}")))?;
         let value: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
             DomainError::InvalidInput(format!("Failed to parse opencollection.yml: {e}"))
         })?;
-        Ok(value.get("name").and_then(|v| v.as_str()).map(str::to_owned))
+        Ok(value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned))
     }
 }
 
@@ -139,15 +138,24 @@ mod tests {
         repo.save(&ws_path, &cfg).unwrap();
 
         let raw = fs::read_to_string(ws_path.join("workspace.yml")).unwrap();
-        assert!(raw.contains("opencollection:"), "missing opencollection header:\n{raw}");
+        assert!(
+            raw.contains("opencollection:"),
+            "missing opencollection header:\n{raw}"
+        );
         assert!(raw.contains("info:"), "missing info block:\n{raw}");
         assert!(
             raw.contains("name: My API") || raw.contains("name: \"My API\""),
             "missing info.name:\n{raw}"
         );
         assert!(raw.contains("docs:"), "missing docs field:\n{raw}");
-        assert!(!raw.contains("\nname: "), "unexpected root-level name:\n{raw}");
-        assert!(!raw.contains("description:"), "description field should be renamed to docs:\n{raw}");
+        assert!(
+            !raw.contains("\nname: "),
+            "unexpected root-level name:\n{raw}"
+        );
+        assert!(
+            !raw.contains("description:"),
+            "description field should be renamed to docs:\n{raw}"
+        );
     }
 
     #[test]
@@ -165,7 +173,10 @@ mod tests {
         assert_eq!(loaded.description.as_deref(), Some("My desc"));
         assert_eq!(loaded.collections.len(), 1);
         assert_eq!(loaded.collections[0].name, "my-api");
-        assert_eq!(loaded.collections[0].ref_type, rocket_workspace::CollectionRefType::Embedded);
+        assert_eq!(
+            loaded.collections[0].ref_type,
+            rocket_workspace::CollectionRefType::Embedded
+        );
     }
 
     #[test]
@@ -179,8 +190,14 @@ mod tests {
 
         let loaded = repo.load(&ws_path).unwrap();
         assert_eq!(loaded.collections.len(), 1);
-        assert_eq!(loaded.collections[0].ref_type, rocket_workspace::CollectionRefType::External);
-        assert_eq!(loaded.collections[0].path, Some(std::path::PathBuf::from("/abs/path/to/shared")));
+        assert_eq!(
+            loaded.collections[0].ref_type,
+            rocket_workspace::CollectionRefType::External
+        );
+        assert_eq!(
+            loaded.collections[0].path,
+            Some(std::path::PathBuf::from("/abs/path/to/shared"))
+        );
     }
 
     #[test]
@@ -240,7 +257,10 @@ mod tests {
 
         let repo = FsWorkspaceConfigRepo::new();
         let cfg = repo.load(&ws_path).expect("load");
-        assert_eq!(cfg.request_guard_policy, rocket_workspace::RequestGuardPolicy::default());
+        assert_eq!(
+            cfg.request_guard_policy,
+            rocket_workspace::RequestGuardPolicy::default()
+        );
     }
 
     #[test]
@@ -252,7 +272,8 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let ws_path = tmp.path().join("unguarded-ws");
         let repo = FsWorkspaceConfigRepo::new();
-        repo.save(&ws_path, &WorkspaceConfig::new("Unguarded")).expect("save");
+        repo.save(&ws_path, &WorkspaceConfig::new("Unguarded"))
+            .expect("save");
 
         let raw = fs::read_to_string(ws_path.join("workspace.yml")).expect("read");
         assert!(

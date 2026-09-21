@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use rocket_shared::error::DomainResult;
 use crate::workspace::WorkspaceRegistry;
+use rocket_shared::error::DomainResult;
 
 pub trait WorkspaceRepository: Send + Sync {
     fn load(&self) -> DomainResult<WorkspaceRegistry>;

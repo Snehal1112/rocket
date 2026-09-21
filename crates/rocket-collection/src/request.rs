@@ -1,7 +1,9 @@
 use rocket_shared::action::{ActionSetVariable, HttpRequestExample};
 use rocket_shared::assertion::Assertion;
 use rocket_shared::description::{Description, Documentation};
-use rocket_shared::types::{Auth, Body, Header, HttpMethod, PathParam, QueryParam, RequestSettings};
+use rocket_shared::types::{
+    Auth, Body, Header, HttpMethod, PathParam, QueryParam, RequestSettings,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::settings::CollectionVariable;
@@ -91,11 +93,7 @@ pub fn candidate_filename(stem: &str, counter: u32) -> String {
 }
 
 impl Request {
-    pub fn new(
-        name: impl Into<String>,
-        method: HttpMethod,
-        url: impl Into<String>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, method: HttpMethod, url: impl Into<String>) -> Self {
         Self {
             uid: crate::generate_uid(),
             name: name.into(),
@@ -149,7 +147,11 @@ mod tests {
 
     #[test]
     fn new_request_has_defaults() {
-        let req = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        let req = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
         assert_eq!(req.name, "Get Users");
         assert_eq!(req.method, HttpMethod::Get);
         assert_eq!(req.url, "https://api.example.com/users");
@@ -169,8 +171,8 @@ mod tests {
 
     #[test]
     fn request_serialization_roundtrip() {
-        let req = Request::new("Test", HttpMethod::Post, "https://api.example.com")
-            .with_body(Body {
+        let req =
+            Request::new("Test", HttpMethod::Post, "https://api.example.com").with_body(Body {
                 mode: BodyMode::Json,
                 content: Some("{\"key\":\"val\"}".into()),
                 form_data: None,
@@ -231,5 +233,4 @@ mod tests {
     fn candidate_filename_format() {
         assert_eq!(candidate_filename("login", 1), "login 1.yml");
     }
-
 }

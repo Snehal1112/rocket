@@ -69,8 +69,8 @@ impl PhaseScheduler {
                     end_conc
                 } else {
                     let progress = step as f64 / steps as f64;
-                    (start_conc as f64 + (end_conc as f64 - start_conc as f64) * progress)
-                        .round() as u32
+                    (start_conc as f64 + (end_conc as f64 - start_conc as f64) * progress).round()
+                        as u32
                 };
                 result.push((t, conc));
             }
@@ -302,12 +302,18 @@ pub struct LoadTestConfigV2 {
     pub max_requests: Option<u32>,
 }
 
-fn default_ring_buffer_size() -> usize { 5000 }
+fn default_ring_buffer_size() -> usize {
+    5000
+}
 
 impl LoadTestConfigV2 {
     /// Returns the maximum concurrency across all phases.
     pub fn max_concurrency(&self) -> u32 {
-        self.phases.iter().map(|p| p.target.value()).max().unwrap_or(1)
+        self.phases
+            .iter()
+            .map(|p| p.target.value())
+            .max()
+            .unwrap_or(1)
     }
 
     /// Returns total planned duration in seconds.
@@ -319,7 +325,9 @@ impl LoadTestConfigV2 {
     /// Mixed-unit configs (some Concurrency, some Rps) are not supported.
     pub fn has_uniform_target_unit(&self) -> bool {
         let mut iter = self.phases.iter();
-        let Some(first) = iter.next() else { return true };
+        let Some(first) = iter.next() else {
+            return true;
+        };
         let first_is_rps = first.target.is_rps();
         iter.all(|p| p.target.is_rps() == first_is_rps)
     }
@@ -327,7 +335,11 @@ impl LoadTestConfigV2 {
     /// Returns the target unit of the run, or `None` if there are no phases.
     pub fn target_unit(&self) -> Option<TargetUnit> {
         self.phases.first().map(|p| {
-            if p.target.is_rps() { TargetUnit::Rps } else { TargetUnit::Concurrency }
+            if p.target.is_rps() {
+                TargetUnit::Rps
+            } else {
+                TargetUnit::Concurrency
+            }
         })
     }
 }
@@ -589,7 +601,10 @@ pub async fn run_load_test_v2(
 
     let phase_handle = match target_unit {
         TargetUnit::Concurrency => {
-            let phase_sem = semaphore.as_ref().expect("semaphore present in concurrency mode").clone();
+            let phase_sem = semaphore
+                .as_ref()
+                .expect("semaphore present in concurrency mode")
+                .clone();
             let initial_conc = phase_sem.available_permits() as u32;
             let phase_perm = Arc::new(AtomicU32::new(initial_conc));
             tokio::spawn(async move {
@@ -618,7 +633,11 @@ pub async fn run_load_test_v2(
             })
         }
         TargetUnit::Rps => {
-            let driver = Arc::clone(rate_driver.as_ref().expect("rate driver present in rps mode"));
+            let driver = Arc::clone(
+                rate_driver
+                    .as_ref()
+                    .expect("rate driver present in rps mode"),
+            );
             tokio::spawn(async move {
                 let phase_start = std::time::Instant::now();
                 let mut last_rate = driver.rate_per_ms.load(Ordering::Acquire) as u32;
@@ -740,9 +759,11 @@ pub async fn run_load_test_v2(
         // Gate spawn rate by the active mode.
         let owned_permit = match (&semaphore, &rate_driver) {
             (Some(sem), _) => {
-                let Ok(permit) = sem.clone().acquire_owned().await else { break };
+                let Ok(permit) = sem.clone().acquire_owned().await else {
+                    break;
+                };
                 Some(permit)
-            },
+            }
             (None, Some(driver)) => {
                 let remaining = total_duration.saturating_sub(loop_start.elapsed());
                 if remaining.is_zero() {
@@ -944,7 +965,9 @@ pub async fn run_load_test(
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
     let total = config.total_requests as usize;
     let start = std::time::Instant::now();
-    let cap = config.duration_cap_secs.map(|s| Duration::from_secs(s as u64));
+    let cap = config
+        .duration_cap_secs
+        .map(|s| Duration::from_secs(s as u64));
 
     let mut handles = Vec::new();
     let mut seq: u32 = 0;
@@ -957,7 +980,9 @@ pub async fn run_load_test(
             }
         }
 
-        let Ok(permit) = semaphore.clone().acquire_owned().await else { break };
+        let Ok(permit) = semaphore.clone().acquire_owned().await else {
+            break;
+        };
         let req = request.clone();
         let exec = executor.clone();
         let current_seq = seq;
@@ -1136,9 +1161,21 @@ mod tests {
     #[test]
     fn phase_index_at_correct_boundaries() {
         let sched = PhaseScheduler::new(vec![
-            LoadTestPhase { kind: PhaseKind::RampUp, duration_secs: 10, target: PhaseTarget::Concurrency(25) },
-            LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 40, target: PhaseTarget::Concurrency(25) },
-            LoadTestPhase { kind: PhaseKind::RampDown, duration_secs: 10, target: PhaseTarget::Concurrency(0) },
+            LoadTestPhase {
+                kind: PhaseKind::RampUp,
+                duration_secs: 10,
+                target: PhaseTarget::Concurrency(25),
+            },
+            LoadTestPhase {
+                kind: PhaseKind::Hold,
+                duration_secs: 40,
+                target: PhaseTarget::Concurrency(25),
+            },
+            LoadTestPhase {
+                kind: PhaseKind::RampDown,
+                duration_secs: 10,
+                target: PhaseTarget::Concurrency(0),
+            },
         ]);
         assert_eq!(sched.phase_index_at(0), 0);
         assert_eq!(sched.phase_index_at(9), 0);
@@ -1232,12 +1269,22 @@ mod tests {
         struct FailingExecutor;
         #[async_trait::async_trait]
         impl HttpExecutor for FailingExecutor {
-            async fn execute(&self, _: &HttpRequest) -> rocket_shared::error::DomainResult<HttpResponse> {
-                Err(rocket_shared::error::DomainError::Internal("simulated failure".into()))
+            async fn execute(
+                &self,
+                _: &HttpRequest,
+            ) -> rocket_shared::error::DomainResult<HttpResponse> {
+                Err(rocket_shared::error::DomainError::Internal(
+                    "simulated failure".into(),
+                ))
             }
         }
         let executor: Arc<dyn HttpExecutor> = Arc::new(FailingExecutor);
-        let config = LoadTestConfig { concurrency: 2, total_requests: 5, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 2,
+            total_requests: 5,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 5);
         assert_eq!(result.failed, 5);
@@ -1249,7 +1296,12 @@ mod tests {
     #[tokio::test]
     async fn load_test_single_request() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 1,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.total_requests, 1);
         assert_eq!(result.succeeded, 1);
@@ -1261,7 +1313,12 @@ mod tests {
     #[tokio::test]
     async fn load_test_4xx_counts_as_failed_status() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(404));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 1,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed_status, 1);
@@ -1274,7 +1331,12 @@ mod tests {
     #[tokio::test]
     async fn load_test_5xx_counts_as_failed_status() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(502));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 1,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.failed_status, 1);
         assert_eq!(result.failed_transport, 0);
@@ -1285,7 +1347,12 @@ mod tests {
     #[tokio::test]
     async fn load_test_3xx_counts_as_success() {
         let executor: Arc<dyn HttpExecutor> = Arc::new(StatusExecutor(301));
-        let config = LoadTestConfig { concurrency: 1, total_requests: 1, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 1,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
         assert_eq!(result.succeeded, 1);
         assert_eq!(result.failed, 0);
@@ -1307,7 +1374,9 @@ mod tests {
         #[async_trait]
         impl HttpExecutor for AlternatingExecutor {
             async fn execute(&self, _: &HttpRequest) -> DomainResult<HttpResponse> {
-                let n = self.counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let n = self
+                    .counter
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let (status, duration_ms) = if n % 2 == 0 { (200, 10) } else { (500, 20) };
                 Ok(HttpResponse {
                     status,
@@ -1324,7 +1393,12 @@ mod tests {
         let executor: Arc<dyn HttpExecutor> = Arc::new(AlternatingExecutor {
             counter: std::sync::atomic::AtomicUsize::new(0),
         });
-        let config = LoadTestConfig { concurrency: 1, total_requests: 10, interval_ms: 0, duration_cap_secs: None };
+        let config = LoadTestConfig {
+            concurrency: 1,
+            total_requests: 10,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
         let result = run_load_test(executor, &test_request(), &config).await;
 
         assert_eq!(result.total_requests, 10);
@@ -1366,9 +1440,21 @@ mod tests {
     fn config_v2_max_concurrency() {
         let config = LoadTestConfigV2 {
             phases: vec![
-                LoadTestPhase { kind: PhaseKind::RampUp, duration_secs: 10, target: PhaseTarget::Concurrency(25) },
-                LoadTestPhase { kind: PhaseKind::Hold,   duration_secs: 40, target: PhaseTarget::Concurrency(25) },
-                LoadTestPhase { kind: PhaseKind::RampDown, duration_secs: 10, target: PhaseTarget::Concurrency(0) },
+                LoadTestPhase {
+                    kind: PhaseKind::RampUp,
+                    duration_secs: 10,
+                    target: PhaseTarget::Concurrency(25),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 40,
+                    target: PhaseTarget::Concurrency(25),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::RampDown,
+                    duration_secs: 10,
+                    target: PhaseTarget::Concurrency(0),
+                },
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 5000,
@@ -1465,8 +1551,16 @@ mod tests {
     fn uniform_target_unit_all_concurrency() {
         let cfg = LoadTestConfigV2 {
             phases: vec![
-                LoadTestPhase { kind: PhaseKind::RampUp, duration_secs: 10, target: PhaseTarget::Concurrency(0) },
-                LoadTestPhase { kind: PhaseKind::Hold,   duration_secs: 10, target: PhaseTarget::Concurrency(10) },
+                LoadTestPhase {
+                    kind: PhaseKind::RampUp,
+                    duration_secs: 10,
+                    target: PhaseTarget::Concurrency(0),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 10,
+                    target: PhaseTarget::Concurrency(10),
+                },
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
@@ -1480,8 +1574,16 @@ mod tests {
     fn uniform_target_unit_all_rps() {
         let cfg = LoadTestConfigV2 {
             phases: vec![
-                LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 10, target: PhaseTarget::Rps(50) },
-                LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 10, target: PhaseTarget::Rps(100) },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 10,
+                    target: PhaseTarget::Rps(50),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 10,
+                    target: PhaseTarget::Rps(100),
+                },
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
@@ -1495,8 +1597,16 @@ mod tests {
     fn uniform_target_unit_mixed_rejected() {
         let cfg = LoadTestConfigV2 {
             phases: vec![
-                LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 10, target: PhaseTarget::Concurrency(10) },
-                LoadTestPhase { kind: PhaseKind::Hold, duration_secs: 10, target: PhaseTarget::Rps(50) },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 10,
+                    target: PhaseTarget::Concurrency(10),
+                },
+                LoadTestPhase {
+                    kind: PhaseKind::Hold,
+                    duration_secs: 10,
+                    target: PhaseTarget::Rps(50),
+                },
             ],
             success_rule: SuccessRule::default(),
             ring_buffer_size: 100,
@@ -1518,7 +1628,10 @@ mod tests {
         }
         // 100 rps × 0.5 s = 50, allow ±25% tolerance for scheduling jitter.
         assert!(count >= 35, "got only {count} requests in 500ms at 100rps");
-        assert!(count <= 80, "got {count} requests in 500ms at 100rps (over-firing)");
+        assert!(
+            count <= 80,
+            "got {count} requests in 500ms at 100rps (over-firing)"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1550,7 +1663,10 @@ mod tests {
             count += 1;
         }
         // 200 rps × 0.3 s = 60. Allow generous tolerance.
-        assert!(count >= 30, "set_rate(200) yielded only {count} acquires in 300ms");
+        assert!(
+            count >= 30,
+            "set_rate(200) yielded only {count} acquires in 300ms"
+        );
     }
 
     #[test]
@@ -1655,10 +1771,16 @@ mod tests {
         assert_eq!(config.target_unit(), Some(TargetUnit::Rps));
 
         let result = run_load_test_v2(executor, &test_request(), &config, None).await;
-        assert!(result.total_requests >= 30,
-            "expected ≥30 requests at 50rps for 1s, got {}", result.total_requests);
-        assert!(result.total_requests <= 75,
-            "expected ≤75 requests at 50rps for 1s (over-firing), got {}", result.total_requests);
+        assert!(
+            result.total_requests >= 30,
+            "expected ≥30 requests at 50rps for 1s, got {}",
+            result.total_requests
+        );
+        assert!(
+            result.total_requests <= 75,
+            "expected ≤75 requests at 50rps for 1s (over-firing), got {}",
+            result.total_requests
+        );
         assert_eq!(result.failed, 0);
         assert_eq!(result.succeeded, result.total_requests);
     }

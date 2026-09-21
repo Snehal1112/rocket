@@ -7,7 +7,9 @@ use rocket_collection::Request;
 use rocket_environment::environment::Environment;
 use rocket_environment::variable::Variable;
 use rocket_shared::description::Description;
-use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, PathParam, QueryParam, RequestSettingValue};
+use rocket_shared::types::{
+    Auth, Body, BodyMode, Header, HttpMethod, PathParam, QueryParam, RequestSettingValue,
+};
 use rocket_shared::variable_value::VariableValue;
 
 #[test]
@@ -34,7 +36,7 @@ fn header_domain_to_oc() {
     };
     let oc: OcHttpRequestHeader = h.into();
     assert_eq!(oc.name, "Accept");
-    assert_eq!(oc.disabled, None);  // Enabled → no disabled field.
+    assert_eq!(oc.disabled, None); // Enabled → no disabled field.
 }
 
 #[test]
@@ -80,7 +82,7 @@ fn param_split_by_type() {
     assert_eq!(path.len(), 1);
     assert_eq!(query[0].key, "page");
     assert!(query[0].enabled);
-    assert!(!query[1].enabled);  // disabled: true → enabled: false.
+    assert!(!query[1].enabled); // disabled: true → enabled: false.
     assert_eq!(path[0].name, "id");
 }
 
@@ -121,7 +123,9 @@ fn param_default_type_is_query() {
 
 #[test]
 fn body_json_oc_to_domain() {
-    let oc = OcHttpRequestBody::Json { data: r#"{"key":"val"}"#.into() };
+    let oc = OcHttpRequestBody::Json {
+        data: r#"{"key":"val"}"#.into(),
+    };
     let body: Body = oc.into();
     assert_eq!(body.mode, BodyMode::Json);
     assert_eq!(body.content.unwrap(), r#"{"key":"val"}"#);
@@ -129,20 +133,39 @@ fn body_json_oc_to_domain() {
 
 #[test]
 fn body_sparql_roundtrip() {
-    let oc = OcHttpRequestBody::Sparql { data: "SELECT ?s WHERE { ?s ?p ?o }".into() };
+    let oc = OcHttpRequestBody::Sparql {
+        data: "SELECT ?s WHERE { ?s ?p ?o }".into(),
+    };
     let body: Body = oc.into();
     assert_eq!(body.mode, BodyMode::Sparql);
-    assert_eq!(body.content.as_deref(), Some("SELECT ?s WHERE { ?s ?p ?o }"));
+    assert_eq!(
+        body.content.as_deref(),
+        Some("SELECT ?s WHERE { ?s ?p ?o }")
+    );
     let back: OcHttpRequestBody = body.into();
-    assert!(matches!(back, OcHttpRequestBody::Sparql { ref data } if data == "SELECT ?s WHERE { ?s ?p ?o }"));
+    assert!(
+        matches!(back, OcHttpRequestBody::Sparql { ref data } if data == "SELECT ?s WHERE { ?s ?p ?o }")
+    );
 }
 
 #[test]
 fn body_form_urlencoded_oc_to_domain() {
-    let oc = OcHttpRequestBody::FormUrlEncoded { data: vec![
-        OcFormField { name: "user".into(), value: "admin".into(), description: None, disabled: None },
-        OcFormField { name: "pass".into(), value: "secret".into(), description: None, disabled: Some(true) },
-    ]};
+    let oc = OcHttpRequestBody::FormUrlEncoded {
+        data: vec![
+            OcFormField {
+                name: "user".into(),
+                value: "admin".into(),
+                description: None,
+                disabled: None,
+            },
+            OcFormField {
+                name: "pass".into(),
+                value: "secret".into(),
+                description: None,
+                disabled: Some(true),
+            },
+        ],
+    };
     let body: Body = oc.into();
     assert_eq!(body.mode, BodyMode::FormUrlEncoded);
     let fd = body.form_data.unwrap();
@@ -156,9 +179,18 @@ fn body_form_urlencoded_oc_to_domain() {
 
 #[test]
 fn auth_basic_oc_to_domain() {
-    let oc = OcAuth::Typed(OcAuthTyped::Basic { username: "u".into(), password: "p".into() });
+    let oc = OcAuth::Typed(OcAuthTyped::Basic {
+        username: "u".into(),
+        password: "p".into(),
+    });
     let auth: Auth = oc.into();
-    assert_eq!(auth, Auth::Basic { username: "u".into(), password: "p".into() });
+    assert_eq!(
+        auth,
+        Auth::Basic {
+            username: "u".into(),
+            password: "p".into()
+        }
+    );
 }
 
 #[test]
@@ -171,13 +203,22 @@ fn auth_inherit_oc_to_domain() {
 #[test]
 fn auth_awsv4_oc_to_domain() {
     let oc = OcAuth::Typed(OcAuthTyped::AwsV4 {
-        access_key_id: "AK".into(), secret_access_key: "SK".into(),
-        region: Some("us-east-1".into()), service: Some("s3".into()),
-        session_token: None, profile_name: None,
+        access_key_id: "AK".into(),
+        secret_access_key: "SK".into(),
+        region: Some("us-east-1".into()),
+        service: Some("s3".into()),
+        session_token: None,
+        profile_name: None,
     });
     let auth: Auth = oc.into();
     match auth {
-        Auth::AwsSigV4 { access_key, secret_key, region, service, .. } => {
+        Auth::AwsSigV4 {
+            access_key,
+            secret_key,
+            region,
+            service,
+            ..
+        } => {
             assert_eq!(access_key, "AK");
             assert_eq!(secret_key, "SK");
             assert_eq!(region, "us-east-1");
@@ -195,7 +236,11 @@ fn auth_oauth2_client_credentials_oc_to_domain() {
         refresh_token_url: None,
         authorization_url: None,
         callback_url: None,
-        credentials: Some(OcOAuth2Credentials { client_id: "id".into(), client_secret: "s".into(), placement: None }),
+        credentials: Some(OcOAuth2Credentials {
+            client_id: "id".into(),
+            client_secret: "s".into(),
+            placement: None,
+        }),
         resource_owner: None,
         scope: Some("read".into()),
         state: None,
@@ -207,7 +252,10 @@ fn auth_oauth2_client_credentials_oc_to_domain() {
     let auth: Auth = oc.into();
     match auth {
         Auth::OAuth2(flow) => {
-            assert!(matches!(flow, rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }));
+            assert!(matches!(
+                flow,
+                rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }
+            ));
         }
         _ => panic!("expected OAuth2"),
     }
@@ -227,10 +275,16 @@ fn collection_variable_save_persists_current_value_in_value_field() {
         secret: false,
     };
     let oc = OcVariable::from(cv);
-    assert_eq!(oc.value.as_ref().map(|v| v.data()), Some("http://production.com"),
-        "YAML `value` field should store the current value.");
-    assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
-        "YAML `initial` field should store the initial value.");
+    assert_eq!(
+        oc.value.as_ref().map(|v| v.data()),
+        Some("http://production.com"),
+        "YAML `value` field should store the current value."
+    );
+    assert_eq!(
+        oc.initial.as_ref().map(|v| v.data()),
+        Some("http://localhost"),
+        "YAML `initial` field should store the initial value."
+    );
 }
 
 #[test]
@@ -245,10 +299,15 @@ fn collection_variable_save_omits_value_when_empty() {
         secret: false,
     };
     let oc = OcVariable::from(cv);
-    assert_eq!(oc.value, None,
-        "YAML `value` should be absent when current value is empty.");
-    assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("http://localhost"),
-        "YAML `initial` should be set from initial_value.");
+    assert_eq!(
+        oc.value, None,
+        "YAML `value` should be absent when current value is empty."
+    );
+    assert_eq!(
+        oc.initial.as_ref().map(|v| v.data()),
+        Some("http://localhost"),
+        "YAML `initial` should be set from initial_value."
+    );
 }
 
 #[test]
@@ -263,10 +322,14 @@ fn collection_variable_roundtrip_preserves_both_fields_distinct() {
     };
     let oc = OcVariable::from(cv);
     let back = CollectionVariable::from(oc);
-    assert_eq!(back.value, "http://production.com",
-        "current value must round-trip correctly.");
-    assert_eq!(back.initial_value, "http://localhost:8080",
-        "initial value must round-trip correctly.");
+    assert_eq!(
+        back.value, "http://production.com",
+        "current value must round-trip correctly."
+    );
+    assert_eq!(
+        back.initial_value, "http://localhost:8080",
+        "initial value must round-trip correctly."
+    );
 }
 
 #[test]
@@ -281,9 +344,14 @@ fn collection_variable_backward_compat_old_yaml_without_initial() {
         disabled: None,
     };
     let cv = CollectionVariable::from(oc);
-    assert_eq!(cv.value, "2", "current value should be loaded from YAML `value`.");
-    assert_eq!(cv.initial_value, "2",
-        "initial_value should fall back to `value` when `initial` is absent.");
+    assert_eq!(
+        cv.value, "2",
+        "current value should be loaded from YAML `value`."
+    );
+    assert_eq!(
+        cv.initial_value, "2",
+        "initial_value should fall back to `value` when `initial` is absent."
+    );
 }
 
 #[test]
@@ -303,8 +371,14 @@ fn collection_variable_both_values_distinct_yaml_roundtrip() {
     assert_eq!(oc.initial.as_ref().map(|v| v.data()), Some("default"));
     // Verify YAML string contains both fields.
     let yaml_str = serde_yaml::to_string(&oc).unwrap();
-    assert!(yaml_str.contains("value:"), "YAML must contain `value` field.");
-    assert!(yaml_str.contains("initial:"), "YAML must contain `initial` field.");
+    assert!(
+        yaml_str.contains("value:"),
+        "YAML must contain `value` field."
+    );
+    assert!(
+        yaml_str.contains("initial:"),
+        "YAML must contain `initial` field."
+    );
     // Verify loading back produces correct distinct values.
     let back = CollectionVariable::from(oc);
     assert_eq!(back.value, "override");
@@ -361,9 +435,13 @@ fn environment_oc_to_domain() {
         name: "production".into(),
         color: Some("#FF0000".into()),
         description: Some(Description::text("Prod env")),
-        variables: vec![
-            OcEnvVariableEntry::Plain(OcVariable { name: "HOST".into(), value: Some(VariableValue::simple("api.prod.com")), initial: None, description: None, disabled: None }),
-        ],
+        variables: vec![OcEnvVariableEntry::Plain(OcVariable {
+            name: "HOST".into(),
+            value: Some(VariableValue::simple("api.prod.com")),
+            initial: None,
+            description: None,
+            disabled: None,
+        })],
         client_certificates: Vec::new(),
         extends: Some("base".into()),
         dot_env_file_path: Some(".env.prod".into()),
@@ -417,7 +495,10 @@ fn environment_secret_variable_to_oc_drops_the_value() {
     }
 
     let yaml = serde_yaml::to_string(&oc).expect("serialize environment");
-    assert!(!yaml.contains("sk-live-123"), "secret value leaked into YAML:\n{yaml}");
+    assert!(
+        !yaml.contains("sk-live-123"),
+        "secret value leaked into YAML:\n{yaml}"
+    );
 }
 
 #[test]
@@ -456,7 +537,10 @@ fn environment_oc_secret_entry_converts_back_with_secret_flag_set() {
     assert_eq!(env.variables.len(), 1);
     assert!(env.variables[0].secret);
     assert_eq!(env.variables[0].key, "API_KEY");
-    assert_eq!(env.variables[0].value, "", "YAML must not be a source of secret values");
+    assert_eq!(
+        env.variables[0].value, "",
+        "YAML must not be a source of secret values"
+    );
     assert_eq!(env.variables[0].secret_type, Some("string".into()));
     assert!(env.variables[0].enabled);
 }
@@ -550,7 +634,10 @@ runtime:
     let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
     let req = oc_http_request_to_request(oc);
     assert_eq!(req.pre_request_script, Some("let x = 1;".into()));
-    assert_eq!(req.post_response_script, Some("console.log(res.status);".into()));
+    assert_eq!(
+        req.post_response_script,
+        Some("console.log(res.status);".into())
+    );
     assert_eq!(req.tests, Some("expect(res.status).to.equal(200);".into()));
     assert_eq!(req.assertions.len(), 1);
     assert_eq!(req.actions.len(), 1);
@@ -780,14 +867,22 @@ http:
     let req = oc_http_request_to_request(oc);
     match &req.auth {
         Auth::OAuth2(flow) => {
-            assert!(matches!(flow, rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }));
+            assert!(matches!(
+                flow,
+                rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }
+            ));
         }
         _ => panic!("expected OAuth2"),
     }
     let back = request_to_oc_http_request(&req);
     let auth = back.http.auth.unwrap();
     match auth {
-        OcAuth::Typed(OcAuthTyped::OAuth2 { additional_parameters, token_config, settings, .. }) => {
+        OcAuth::Typed(OcAuthTyped::OAuth2 {
+            additional_parameters,
+            token_config,
+            settings,
+            ..
+        }) => {
             assert!(additional_parameters.is_some());
             assert!(token_config.is_some());
             assert!(settings.is_some());
@@ -799,8 +894,8 @@ http:
 #[test]
 fn oauth2_auth_code_full_roundtrip() {
     use rocket_shared::oauth2::{
-        OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials,
-        OAuth2Flow, OAuth2PKCE, OAuth2Settings, OAuth2TokenConfig, OAuth2TokenPlacement,
+        OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow,
+        OAuth2PKCE, OAuth2Settings, OAuth2TokenConfig, OAuth2TokenPlacement,
     };
 
     let original = Auth::OAuth2(OAuth2Flow::AuthorizationCode {
@@ -872,14 +967,23 @@ settings:
     let oc: OcHttpRequest = serde_yaml::from_str(yaml).unwrap();
     let req = oc_http_request_to_request(oc);
     let s = req.settings.as_ref().unwrap();
-    assert!(matches!(s.encode_url, Some(RequestSettingValue::Value(true))));
-    assert!(matches!(s.follow_redirects, Some(RequestSettingValue::Inherit(_))));
+    assert!(matches!(
+        s.encode_url,
+        Some(RequestSettingValue::Value(true))
+    ));
+    assert!(matches!(
+        s.follow_redirects,
+        Some(RequestSettingValue::Inherit(_))
+    ));
 
     let back = request_to_oc_http_request(&req);
     let os = back.settings.unwrap();
     assert_eq!(os.encode_url, Some(InheritableBoolean::Value(true)));
     assert_eq!(os.timeout, Some(InheritableNumber::Value(30000.0)));
-    assert_eq!(os.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
+    assert_eq!(
+        os.follow_redirects,
+        Some(InheritableBoolean::Inherit("inherit".into()))
+    );
     assert_eq!(os.max_redirects, Some(InheritableNumber::Value(5.0)));
 }
 
@@ -957,16 +1061,16 @@ items:
 
 #[test]
 fn body_multipart_form_uses_formdata_mode() {
-    let oc = OcHttpRequestBody::MultipartForm { data: vec![
-        OcMultipartFormPart {
+    let oc = OcHttpRequestBody::MultipartForm {
+        data: vec![OcMultipartFormPart {
             name: "file".into(),
             part_type: "file".into(),
             value: OcMultipartValue::Single("/tmp/test.txt".into()),
             description: None,
             content_type: Some("text/plain".into()),
             disabled: None,
-        },
-    ]};
+        }],
+    };
     let body: Body = oc.into();
     assert_eq!(body.mode, BodyMode::FormData);
 }
@@ -1018,7 +1122,12 @@ fn collection_to_oc_has_correct_version() {
     use rocket_collection::Folder;
     let col = Collection {
         name: "Test".into(),
-        root: Folder { uid: "uid".into(), name: "Test".into(), dir_name: None, items: vec![] },
+        root: Folder {
+            uid: "uid".into(),
+            name: "Test".into(),
+            dir_name: None,
+            items: vec![],
+        },
         settings: CollectionSettings::default(),
     };
     let oc = super::collection_to_oc_collection(col);
@@ -1071,10 +1180,23 @@ fn workspace_config_to_oc_workspace_config() {
     assert_eq!(oc.docs.as_deref(), Some("A great API"));
     assert_eq!(oc.collections.len(), 2);
     // Embedded → relative path collections/<name>
-    assert_eq!(oc.collections[0].path, Some(PathBuf::from("collections/users")));
+    assert_eq!(
+        oc.collections[0].path,
+        Some(PathBuf::from("collections/users"))
+    );
     // External → absolute path preserved
-    assert_eq!(oc.collections[1].path, Some(PathBuf::from("/abs/path/shared")));
-    assert_eq!(oc.environments.as_ref().unwrap().active_environment.as_deref(), Some("Production"));
+    assert_eq!(
+        oc.collections[1].path,
+        Some(PathBuf::from("/abs/path/shared"))
+    );
+    assert_eq!(
+        oc.environments
+            .as_ref()
+            .unwrap()
+            .active_environment
+            .as_deref(),
+        Some("Production")
+    );
     assert_eq!(oc.global_environment.as_deref(), Some("Prod Global"));
 }
 
@@ -1085,13 +1207,24 @@ fn oc_workspace_config_to_workspace_config() {
 
     let oc = OcWorkspaceConfig {
         opencollection: Some("1.0.0".into()),
-        info: OcWorkspaceInfo { name: "Acme".into(), workspace_type: Some("workspace".into()) },
+        info: OcWorkspaceInfo {
+            name: "Acme".into(),
+            workspace_type: Some("workspace".into()),
+        },
         collections: vec![
-            OcWorkspaceCollectionRef { name: "api".into(), path: Some(PathBuf::from("collections/api")) },
-            OcWorkspaceCollectionRef { name: "ext".into(), path: Some(PathBuf::from("/abs/ext")) },
+            OcWorkspaceCollectionRef {
+                name: "api".into(),
+                path: Some(PathBuf::from("collections/api")),
+            },
+            OcWorkspaceCollectionRef {
+                name: "ext".into(),
+                path: Some(PathBuf::from("/abs/ext")),
+            },
         ],
         docs: Some("Docs here".into()),
-        environments: Some(OcWorkspaceEnvironments { active_environment: Some("Staging".into()) }),
+        environments: Some(OcWorkspaceEnvironments {
+            active_environment: Some("Staging".into()),
+        }),
         global_environment: Some("Global".into()),
         request_guard_policy: OcRequestGuardPolicy::default(),
     };
@@ -1103,7 +1236,10 @@ fn oc_workspace_config_to_workspace_config() {
     assert_eq!(cfg.collections[0].ref_type, CollectionRefType::Embedded);
     // Absolute path → External
     assert_eq!(cfg.collections[1].ref_type, CollectionRefType::External);
-    assert_eq!(cfg.environments.active_environment.as_deref(), Some("Staging"));
+    assert_eq!(
+        cfg.environments.active_environment.as_deref(),
+        Some("Staging")
+    );
     assert_eq!(cfg.global_environment.as_deref(), Some("Global"));
 }
 
@@ -1140,38 +1276,49 @@ fn oc_request_missing_uid_gets_empty_not_minted() {
     // Both calls must return the same (empty) uid — not two different minted uids.
     assert_eq!(req1.uid, req2.uid, "uid must be stable across loads");
     // The uid must be empty — not a freshly-minted UUID.
-    assert!(req1.uid.is_empty(), "expected empty uid for missing uid field, got: {}", req1.uid);
+    assert!(
+        req1.uid.is_empty(),
+        "expected empty uid for missing uid field, got: {}",
+        req1.uid
+    );
 }
 
 #[test]
 fn request_examples_survive_oc_roundtrip() {
     use rocket_shared::action::HttpRequestExample;
     let mut req = Request::new("With Examples", HttpMethod::Get, "https://example.com");
-    req.examples = vec![
-        HttpRequestExample {
-            name: "Success".to_string(),
-            description: None,
-            request: Some(serde_yaml::Value::Mapping({
-                let mut m = serde_yaml::Mapping::new();
-                m.insert("method".into(), "GET".into());
-                m.insert("url".into(), "https://example.com".into());
-                m
-            })),
-            response: Some(serde_yaml::Value::Mapping({
-                let mut m = serde_yaml::Mapping::new();
-                m.insert("status".into(), serde_yaml::Value::Number(200.into()));
-                m
-            })),
-        },
-    ];
+    req.examples = vec![HttpRequestExample {
+        name: "Success".to_string(),
+        description: None,
+        request: Some(serde_yaml::Value::Mapping({
+            let mut m = serde_yaml::Mapping::new();
+            m.insert("method".into(), "GET".into());
+            m.insert("url".into(), "https://example.com".into());
+            m
+        })),
+        response: Some(serde_yaml::Value::Mapping({
+            let mut m = serde_yaml::Mapping::new();
+            m.insert("status".into(), serde_yaml::Value::Number(200.into()));
+            m
+        })),
+    }];
     let oc = request_to_oc_http_request(&req);
     let back = oc_http_request_to_request(oc);
     assert_eq!(back.examples.len(), 1);
     assert_eq!(back.examples[0].name, "Success");
-    let req_snap = back.examples[0].request.as_ref().expect("request snapshot missing");
+    let req_snap = back.examples[0]
+        .request
+        .as_ref()
+        .expect("request snapshot missing");
     assert_eq!(req_snap["method"], serde_yaml::Value::String("GET".into()));
-    assert_eq!(req_snap["url"], serde_yaml::Value::String("https://example.com".into()));
-    let resp_snap = back.examples[0].response.as_ref().expect("response snapshot missing");
+    assert_eq!(
+        req_snap["url"],
+        serde_yaml::Value::String("https://example.com".into())
+    );
+    let resp_snap = back.examples[0]
+        .response
+        .as_ref()
+        .expect("response snapshot missing");
     assert_eq!(resp_snap["status"], serde_yaml::Value::Number(200.into()));
 }
 
@@ -1180,14 +1327,12 @@ fn environment_client_certificates_survive_oc_roundtrip() {
     use rocket_shared::certificate::ClientCertificate;
 
     let mut env = Environment::new("prod");
-    env.client_certificates = vec![
-        ClientCertificate::Pem {
-            domain: "api.example.com".to_string(),
-            certificate_file_path: "/certs/client.pem".to_string(),
-            private_key_file_path: "/certs/key.pem".to_string(),
-            passphrase: None,
-        },
-    ];
+    env.client_certificates = vec![ClientCertificate::Pem {
+        domain: "api.example.com".to_string(),
+        certificate_file_path: "/certs/client.pem".to_string(),
+        private_key_file_path: "/certs/key.pem".to_string(),
+        passphrase: None,
+    }];
     let oc: OcEnvironment = env.clone().into();
     let back: Environment = oc.into();
     assert_eq!(back.client_certificates.len(), 1);

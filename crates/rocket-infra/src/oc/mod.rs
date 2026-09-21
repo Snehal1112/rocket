@@ -32,15 +32,19 @@ pub use workspace::*;
 
 // Re-export the type aliases that opencollection.rs re-exported from shared crates.
 #[allow(unused_imports)]
-pub use rocket_shared::description::{Description as OcDescription, Documentation as OcDocumentation};
-#[allow(unused_imports)]
-pub use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
-#[allow(unused_imports)]
-pub use rocket_shared::variable_value::{VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant};
-#[allow(unused_imports)]
 pub use rocket_shared::assertion::Assertion as OcAssertion;
 #[allow(unused_imports)]
 pub use rocket_shared::certificate::ClientCertificate as OcClientCertificate;
+#[allow(unused_imports)]
+pub use rocket_shared::description::{
+    Description as OcDescription, Documentation as OcDocumentation,
+};
+#[allow(unused_imports)]
+pub use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
+#[allow(unused_imports)]
+pub use rocket_shared::variable_value::{
+    VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant,
+};
 
 #[cfg(test)]
 mod tests {
@@ -75,7 +79,10 @@ mod tests {
         let yaml = "name: BASE_URL\nvalue: https://api.example.com";
         let var: OcVariable = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(var.name, "BASE_URL");
-        assert_eq!(var.value.as_ref().unwrap().data(), "https://api.example.com");
+        assert_eq!(
+            var.value.as_ref().unwrap().data(),
+            "https://api.example.com"
+        );
     }
 
     #[test]
@@ -255,7 +262,10 @@ mod tests {
         let settings: OcHttpRequestSettings = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(true)));
         assert_eq!(settings.timeout, Some(InheritableNumber::Value(30000.0)));
-        assert_eq!(settings.follow_redirects, Some(InheritableBoolean::Inherit("inherit".into())));
+        assert_eq!(
+            settings.follow_redirects,
+            Some(InheritableBoolean::Inherit("inherit".into()))
+        );
         assert_eq!(settings.max_redirects, Some(InheritableNumber::Value(5.0)));
     }
 
@@ -278,7 +288,10 @@ mod tests {
         let yaml = "encodeUrl: false\ntimeout: inherit";
         let settings: OcGraphQLRequestSettings = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(false)));
-        assert_eq!(settings.timeout, Some(InheritableNumber::Inherit("inherit".into())));
+        assert_eq!(
+            settings.timeout,
+            Some(InheritableNumber::Inherit("inherit".into()))
+        );
     }
 
     #[test]
@@ -374,7 +387,12 @@ mod tests {
         let yaml = "type: set-variable\nphase: after-response\nselector:\n  expression: res.body.token\n  method: jsonq\nvariable:\n  name: authToken\n  scope: collection";
         let action: OcAction = serde_yaml::from_str(yaml).unwrap();
         match action {
-            OcAction::SetVariable { phase, selector, variable, .. } => {
+            OcAction::SetVariable {
+                phase,
+                selector,
+                variable,
+                ..
+            } => {
                 assert_eq!(phase, "after-response");
                 assert_eq!(selector.expression, "res.body.token");
                 assert_eq!(variable.scope, "collection");
@@ -474,7 +492,10 @@ docs: "Creates a new user in the system."
         let settings = request.settings.unwrap();
         assert_eq!(settings.encode_url, Some(InheritableBoolean::Value(true)));
         assert_eq!(request.examples.as_ref().unwrap().len(), 1);
-        assert_eq!(request.docs, Some("Creates a new user in the system.".into()));
+        assert_eq!(
+            request.docs,
+            Some("Creates a new user in the system.".into())
+        );
     }
 
     #[test]
@@ -684,7 +705,10 @@ docs: "Main API collection documentation."
         assert!(request.auth.is_some());
         assert!(request.settings.is_some());
         assert_eq!(collection.items.as_ref().unwrap().len(), 1);
-        assert_eq!(collection.docs, Some("Main API collection documentation.".into()));
+        assert_eq!(
+            collection.docs,
+            Some("Main API collection documentation.".into())
+        );
     }
 
     #[test]
@@ -779,7 +803,10 @@ dotEnvFilePath: .env.prod
         let yaml = serde_yaml::to_string(&plain).expect("serialize plain entry");
         assert!(yaml.contains("name: HOST"), "got:\n{yaml}");
         assert!(yaml.contains("value: api.example.com"), "got:\n{yaml}");
-        assert!(!yaml.contains("Plain"), "untagged enum must not emit a variant key:\n{yaml}");
+        assert!(
+            !yaml.contains("Plain"),
+            "untagged enum must not emit a variant key:\n{yaml}"
+        );
 
         let secret = OcEnvVariableEntry::Secret(OcSecretVariable {
             secret: true,
@@ -791,8 +818,14 @@ dotEnvFilePath: .env.prod
         let yaml = serde_yaml::to_string(&secret).expect("serialize secret entry");
         assert!(yaml.contains("secret: true"), "got:\n{yaml}");
         assert!(yaml.contains("name: API_KEY"), "got:\n{yaml}");
-        assert!(!yaml.contains("value:"), "a secret entry must never carry a value:\n{yaml}");
-        assert!(!yaml.contains("Secret"), "untagged enum must not emit a variant key:\n{yaml}");
+        assert!(
+            !yaml.contains("value:"),
+            "a secret entry must never carry a value:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("Secret"),
+            "untagged enum must not emit a variant key:\n{yaml}"
+        );
     }
 
     #[test]
@@ -831,16 +864,33 @@ globalEnvironment: Production
         assert_eq!(cfg.collections.len(), 2);
         assert_eq!(cfg.collections[0].name, "main-api");
         assert_eq!(cfg.docs.as_deref(), Some("Project description"));
-        assert_eq!(cfg.environments.as_ref().unwrap().active_environment.as_deref(), Some("Staging"));
+        assert_eq!(
+            cfg.environments
+                .as_ref()
+                .unwrap()
+                .active_environment
+                .as_deref(),
+            Some("Staging")
+        );
         assert_eq!(cfg.global_environment.as_deref(), Some("Production"));
         // Roundtrip
-        let back: OcWorkspaceConfig = serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
+        let back: OcWorkspaceConfig =
+            serde_yaml::from_str(&serde_yaml::to_string(&cfg).unwrap()).unwrap();
         assert_eq!(cfg, back);
         // Verify camelCase output for Bruno interop
         let yaml_out = serde_yaml::to_string(&cfg).unwrap();
-        assert!(yaml_out.contains("globalEnvironment:"), "spec requires camelCase, got:\n{yaml_out}");
-        assert!(yaml_out.contains("activeEnvironment:"), "spec requires camelCase, got:\n{yaml_out}");
-        assert!(!yaml_out.contains("global_environment:"), "snake_case is not spec-compliant");
+        assert!(
+            yaml_out.contains("globalEnvironment:"),
+            "spec requires camelCase, got:\n{yaml_out}"
+        );
+        assert!(
+            yaml_out.contains("activeEnvironment:"),
+            "spec requires camelCase, got:\n{yaml_out}"
+        );
+        assert!(
+            !yaml_out.contains("global_environment:"),
+            "snake_case is not spec-compliant"
+        );
     }
 
     #[test]
@@ -848,6 +898,9 @@ globalEnvironment: Production
         // Old format (no `info:` key) must fail to parse as OcWorkspaceConfig.
         let old_yaml = "name: My Workspace\ncollections: []\n";
         let result = serde_yaml::from_str::<OcWorkspaceConfig>(old_yaml);
-        assert!(result.is_err(), "old format should not parse as OcWorkspaceConfig");
+        assert!(
+            result.is_err(),
+            "old format should not parse as OcWorkspaceConfig"
+        );
     }
 }

@@ -1,15 +1,13 @@
-use deno_core::{op2, OpState};
-use crate::scripting::state::ScriptInputState;
 use crate::scripting::ops::ScriptOpError;
+use crate::scripting::state::ScriptInputState;
+use deno_core::{op2, OpState};
 
 fn get_response(state: &OpState) -> Result<rocket_http::HttpResponse, ScriptOpError> {
     state
         .borrow::<ScriptInputState>()
         .response
         .clone()
-        .ok_or_else(|| ScriptOpError(
-            "res is not available in before-request scripts".into()
-        ))
+        .ok_or_else(|| ScriptOpError("res is not available in before-request scripts".into()))
 }
 
 #[op2(fast)]
@@ -25,10 +23,7 @@ pub fn op_res_get_status_text(state: &OpState) -> Result<String, ScriptOpError> 
 
 #[op2]
 #[string]
-pub fn op_res_get_header(
-    state: &OpState,
-    #[string] name: String,
-) -> Result<String, ScriptOpError> {
+pub fn op_res_get_header(state: &OpState, #[string] name: String) -> Result<String, ScriptOpError> {
     let res = get_response(state)?;
     Ok(res
         .headers

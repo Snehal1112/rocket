@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::description::Description;
+use serde::{Deserialize, Serialize};
 
 /// OpenCollection Assertion — full spec with disabled + description.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,7 +15,11 @@ pub struct Assertion {
 }
 
 impl Assertion {
-    pub fn new(expression: impl Into<String>, operator: impl Into<String>, value: Option<String>) -> Self {
+    pub fn new(
+        expression: impl Into<String>,
+        operator: impl Into<String>,
+        value: Option<String>,
+    ) -> Self {
         Self {
             expression: expression.into(),
             operator: operator.into(),
@@ -51,7 +55,10 @@ mod tests {
             description: Some(Description::text("Check name is string")),
         };
         assert_eq!(a.disabled, Some(true));
-        assert_eq!(a.description.as_ref().unwrap().content(), Some("Check name is string"));
+        assert_eq!(
+            a.description.as_ref().unwrap().content(),
+            Some("Check name is string")
+        );
     }
 
     #[test]

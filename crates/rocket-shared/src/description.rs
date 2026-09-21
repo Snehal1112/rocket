@@ -6,14 +6,24 @@ use serde::{Deserialize, Serialize};
 pub enum Description {
     None,
     Text(String),
-    Typed { content: String, content_type: String },
+    Typed {
+        content: String,
+        content_type: String,
+    },
 }
 
 impl Description {
-    pub fn none() -> Self { Self::None }
-    pub fn text(s: impl Into<String>) -> Self { Self::Text(s.into()) }
+    pub fn none() -> Self {
+        Self::None
+    }
+    pub fn text(s: impl Into<String>) -> Self {
+        Self::Text(s.into())
+    }
     pub fn typed(content: impl Into<String>, content_type: impl Into<String>) -> Self {
-        Self::Typed { content: content.into(), content_type: content_type.into() }
+        Self::Typed {
+            content: content.into(),
+            content_type: content_type.into(),
+        }
     }
     pub fn content(&self) -> Option<&str> {
         match self {
@@ -38,7 +48,10 @@ impl Serialize for Description {
         match self {
             Self::None => serializer.serialize_none(),
             Self::Text(s) => serializer.serialize_str(s),
-            Self::Typed { content, content_type } => {
+            Self::Typed {
+                content,
+                content_type,
+            } => {
                 use serde::ser::SerializeMap;
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("content", content)?;
@@ -58,10 +71,18 @@ impl<'de> Deserialize<'de> for Description {
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "a string, null, or object with content and type")
             }
-            fn visit_unit<E: de::Error>(self) -> Result<Description, E> { Ok(Description::None) }
-            fn visit_none<E: de::Error>(self) -> Result<Description, E> { Ok(Description::None) }
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<Description, E> { Ok(Description::text(v)) }
-            fn visit_string<E: de::Error>(self, v: String) -> Result<Description, E> { Ok(Description::Text(v)) }
+            fn visit_unit<E: de::Error>(self) -> Result<Description, E> {
+                Ok(Description::None)
+            }
+            fn visit_none<E: de::Error>(self) -> Result<Description, E> {
+                Ok(Description::None)
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Description, E> {
+                Ok(Description::text(v))
+            }
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Description, E> {
+                Ok(Description::Text(v))
+            }
             fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Description, A::Error> {
                 let mut content = None;
                 let mut content_type = None;
@@ -69,7 +90,9 @@ impl<'de> Deserialize<'de> for Description {
                     match key.as_str() {
                         "content" => content = Some(map.next_value::<String>()?),
                         "type" => content_type = Some(map.next_value::<String>()?),
-                        _ => { let _ = map.next_value::<serde::de::IgnoredAny>()?; }
+                        _ => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
                     }
                 }
                 match (content, content_type) {
@@ -84,7 +107,9 @@ impl<'de> Deserialize<'de> for Description {
 }
 
 impl Default for Description {
-    fn default() -> Self { Self::None }
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 /// OpenCollection Documentation — same polymorphic shape as Description.

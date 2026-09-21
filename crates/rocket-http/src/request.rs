@@ -29,8 +29,12 @@ pub struct RequestOptions {
     pub max_redirects: Option<u32>,
 }
 
-fn default_true() -> bool { true }
-fn default_timeout() -> u64 { 30_000 }
+fn default_true() -> bool {
+    true
+}
+fn default_timeout() -> u64 {
+    30_000
+}
 
 impl Default for RequestOptions {
     fn default() -> Self {

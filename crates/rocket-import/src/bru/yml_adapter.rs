@@ -1,6 +1,6 @@
-use serde::Deserialize;
 use crate::bru::ast::*;
 use crate::error::{ImportError, ImportResult};
+use serde::Deserialize;
 
 // ─── Request structs ──────────────────────────────────────────────────────────
 
@@ -123,27 +123,27 @@ pub struct BruYmlEnvVar {
     pub enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 // ─── Public adapter functions ─────────────────────────────────────────────────
 
 /// Parse a Bruno .yml request file string into a BruDocument.
 pub fn bru_document_from_yml_str(input: &str) -> ImportResult<BruDocument> {
-    let yml: BruYmlRequest = serde_yaml::from_str(input)
-        .map_err(|e| ImportError::ParseError {
-            path: std::path::PathBuf::new(),
-            message: e.to_string(),
-        })?;
+    let yml: BruYmlRequest = serde_yaml::from_str(input).map_err(|e| ImportError::ParseError {
+        path: std::path::PathBuf::new(),
+        message: e.to_string(),
+    })?;
     Ok(adapt_request(yml))
 }
 
 /// Parse a Bruno .yml environment file string into a BruDocument.
 pub fn bru_document_from_yml_env_str(input: &str) -> ImportResult<BruDocument> {
-    let yml: BruYmlEnv = serde_yaml::from_str(input)
-        .map_err(|e| ImportError::ParseError {
-            path: std::path::PathBuf::new(),
-            message: e.to_string(),
-        })?;
+    let yml: BruYmlEnv = serde_yaml::from_str(input).map_err(|e| ImportError::ParseError {
+        path: std::path::PathBuf::new(),
+        message: e.to_string(),
+    })?;
     Ok(adapt_env(yml))
 }
 
@@ -169,15 +169,21 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     }
 
     if let Some(http) = yml.http {
-        doc.method = http.method.as_deref().and_then(|m| BruMethod::from_block_name(&m.to_lowercase()));
+        doc.method = http
+            .method
+            .as_deref()
+            .and_then(|m| BruMethod::from_block_name(&m.to_lowercase()));
         doc.url = http.url;
 
         if let Some(headers) = http.headers {
-            doc.headers = headers.into_iter().map(|h| BruKeyValue {
-                key: h.name,
-                value: h.value,
-                disabled: h.disabled,
-            }).collect();
+            doc.headers = headers
+                .into_iter()
+                .map(|h| BruKeyValue {
+                    key: h.name,
+                    value: h.value,
+                    disabled: h.disabled,
+                })
+                .collect();
         }
 
         if let Some(body) = http.body {
@@ -190,10 +196,14 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
 
         if let Some(script) = http.script {
             if let Some(req) = script.req {
-                if !req.is_empty() { doc.pre_request_script = Some(req); }
+                if !req.is_empty() {
+                    doc.pre_request_script = Some(req);
+                }
             }
             if let Some(res) = script.res {
-                if !res.is_empty() { doc.post_response_script = Some(res); }
+                if !res.is_empty() {
+                    doc.post_response_script = Some(res);
+                }
             }
         }
     }
@@ -203,18 +213,30 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
 
 fn adapt_body(body: BruYmlBody, unknown: &mut Vec<BruRawBlock>) -> Option<BruBody> {
     match body.mode.as_deref() {
-        Some("json")           => Some(BruBody::Json(body.json.unwrap_or_default())),
-        Some("text")           => Some(BruBody::Text(body.text.unwrap_or_default())),
-        Some("xml")            => Some(BruBody::Xml(body.xml.unwrap_or_default())),
+        Some("json") => Some(BruBody::Json(body.json.unwrap_or_default())),
+        Some("text") => Some(BruBody::Text(body.text.unwrap_or_default())),
+        Some("xml") => Some(BruBody::Xml(body.xml.unwrap_or_default())),
         Some("formUrlEncoded") => Some(BruBody::FormUrlEncoded(
-            body.form_url_encoded.unwrap_or_default().into_iter()
-                .map(|f| BruKeyValue { key: f.name, value: f.value, disabled: f.disabled })
-                .collect()
+            body.form_url_encoded
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| BruKeyValue {
+                    key: f.name,
+                    value: f.value,
+                    disabled: f.disabled,
+                })
+                .collect(),
         )),
         Some("multipart") => Some(BruBody::Multipart(
-            body.multipart.unwrap_or_default().into_iter()
-                .map(|f| BruKeyValue { key: f.name, value: f.value, disabled: f.disabled })
-                .collect()
+            body.multipart
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| BruKeyValue {
+                    key: f.name,
+                    value: f.value,
+                    disabled: f.disabled,
+                })
+                .collect(),
         )),
         Some(other) => {
             unknown.push(BruRawBlock {
@@ -232,7 +254,9 @@ fn adapt_auth(auth: BruYmlAuth, unknown: &mut Vec<BruRawBlock>) -> Option<BruAut
     match auth.mode.as_deref() {
         Some("bearer") => {
             let b = auth.bearer.unwrap_or_default_bearer();
-            Some(BruAuth::Bearer { token: b.token.unwrap_or_default() })
+            Some(BruAuth::Bearer {
+                token: b.token.unwrap_or_default(),
+            })
         }
         Some("basic") => {
             let b = auth.basic.unwrap_or_default_basic();
@@ -243,8 +267,12 @@ fn adapt_auth(auth: BruYmlAuth, unknown: &mut Vec<BruRawBlock>) -> Option<BruAut
         }
         Some("awsv4") => {
             let a = auth.awsv4.unwrap_or(BruYmlAwsV4Auth {
-                access_key_id: None, secret_access_key: None,
-                session_token: None, service: None, region: None, profile_name: None,
+                access_key_id: None,
+                secret_access_key: None,
+                session_token: None,
+                service: None,
+                region: None,
+                profile_name: None,
             });
             Some(BruAuth::AwsV4 {
                 access_key_id: a.access_key_id.unwrap_or_default(),
@@ -257,7 +285,9 @@ fn adapt_auth(auth: BruYmlAuth, unknown: &mut Vec<BruRawBlock>) -> Option<BruAut
         }
         Some("apikey") => {
             let a = auth.apikey.unwrap_or(BruYmlApiKeyAuth {
-                key: None, value: None, placement: None,
+                key: None,
+                value: None,
+                placement: None,
             });
             Some(BruAuth::ApiKey {
                 key: a.key.unwrap_or_default(),
@@ -285,17 +315,24 @@ fn adapt_auth(auth: BruYmlAuth, unknown: &mut Vec<BruRawBlock>) -> Option<BruAut
 }
 
 // Helper traits to avoid repeated Option::unwrap_or boilerplate.
-trait DefaultBearer { fn unwrap_or_default_bearer(self) -> BruYmlBearerAuth; }
+trait DefaultBearer {
+    fn unwrap_or_default_bearer(self) -> BruYmlBearerAuth;
+}
 impl DefaultBearer for Option<BruYmlBearerAuth> {
     fn unwrap_or_default_bearer(self) -> BruYmlBearerAuth {
         self.unwrap_or(BruYmlBearerAuth { token: None })
     }
 }
 
-trait DefaultBasic { fn unwrap_or_default_basic(self) -> BruYmlBasicAuth; }
+trait DefaultBasic {
+    fn unwrap_or_default_basic(self) -> BruYmlBasicAuth;
+}
 impl DefaultBasic for Option<BruYmlBasicAuth> {
     fn unwrap_or_default_basic(self) -> BruYmlBasicAuth {
-        self.unwrap_or(BruYmlBasicAuth { username: None, password: None })
+        self.unwrap_or(BruYmlBasicAuth {
+            username: None,
+            password: None,
+        })
     }
 }
 

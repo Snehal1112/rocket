@@ -60,7 +60,10 @@ fn set_sandbox_mode_in_extensions(
     Some(serde_yaml::Value::Mapping(root))
 }
 
-pub(super) fn get_settings(repo: &FsCollectionRepo, name: &str) -> DomainResult<CollectionSettings> {
+pub(super) fn get_settings(
+    repo: &FsCollectionRepo,
+    name: &str,
+) -> DomainResult<CollectionSettings> {
     Collection::validate_name(name)?;
     let path = repo.settings_path(name);
     if !path.exists() {
@@ -99,7 +102,11 @@ pub(super) fn get_settings(repo: &FsCollectionRepo, name: &str) -> DomainResult<
     }
 }
 
-pub(super) fn save_settings(repo: &FsCollectionRepo, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
+pub(super) fn save_settings(
+    repo: &FsCollectionRepo,
+    name: &str,
+    settings: &CollectionSettings,
+) -> DomainResult<()> {
     Collection::validate_name(name)?;
     let mutex = repo.collection_mutex(name);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -107,8 +114,9 @@ pub(super) fn save_settings(repo: &FsCollectionRepo, name: &str, settings: &Coll
 
     let mut oc: OcCollection = if path.exists() {
         let content = fs::read_to_string(&path)?;
-        serde_yaml::from_str(&content)
-            .map_err(|e| DomainError::Internal(format!("Failed to parse opencollection.yml: {e}")))?
+        serde_yaml::from_str(&content).map_err(|e| {
+            DomainError::Internal(format!("Failed to parse opencollection.yml: {e}"))
+        })?
     } else {
         OcCollection {
             opencollection: Some("1.0.0".into()),
@@ -169,8 +177,9 @@ pub(super) fn save_settings(repo: &FsCollectionRepo, name: &str, settings: &Coll
     oc.docs = settings.docs.clone();
     oc.extensions = set_sandbox_mode_in_extensions(oc.extensions.take(), settings.sandbox_mode);
 
-    let yaml = serde_yaml::to_string(&oc)
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+    let yaml = serde_yaml::to_string(&oc).map_err(|e| {
+        DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
+    })?;
     atomic_write(&path, yaml.as_bytes())?;
 
     // Clean up legacy collection.json.
@@ -205,7 +214,10 @@ mod tests {
     fn sandbox_mode_from_extensions_unrecognized_value_falls_back_to_safe() {
         let yaml = "rocketapi:\n  sandboxMode: yolo\n";
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse fixture yaml");
-        assert_eq!(sandbox_mode_from_extensions(&Some(value)), SandboxMode::Safe);
+        assert_eq!(
+            sandbox_mode_from_extensions(&Some(value)),
+            SandboxMode::Safe
+        );
     }
 
     #[test]

@@ -113,11 +113,13 @@ impl From<Body> for OcHttpRequestBody {
             BodyMode::Binary => OcHttpRequestBody::File {
                 data: b
                     .file_path
-                    .map(|fp| vec![OcFileBodyVariant {
-                        file_path: fp,
-                        content_type: None,
-                        selected: true,
-                    }])
+                    .map(|fp| {
+                        vec![OcFileBodyVariant {
+                            file_path: fp,
+                            content_type: None,
+                            selected: true,
+                        }]
+                    })
                     .unwrap_or_default(),
             },
             BodyMode::None => OcHttpRequestBody::Text {

@@ -25,7 +25,10 @@ pub enum ImportError {
     NotAPostmanCollection(std::path::PathBuf),
 
     #[error("JSON parse error in {path}: {message}")]
-    JsonParseError { path: std::path::PathBuf, message: String },
+    JsonParseError {
+        path: std::path::PathBuf,
+        message: String,
+    },
 }
 
 pub type ImportResult<T> = Result<T, ImportError>;

@@ -1120,8 +1120,7 @@ fn resolve_conflict_theirs_preserves_executable_mode() {
         .create_branch(fixture.path(), "exec-branch")
         .expect("create exec branch");
     fs::write(&script_path, "executable version\n").expect("write executable version");
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
-        .expect("make executable");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).expect("make executable");
     service
         .stage(fixture.path(), &[TRACKED_FILE])
         .expect("stage executable version");

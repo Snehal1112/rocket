@@ -36,7 +36,8 @@ pub trait CollectionRepository: Send + Sync {
     /// **Variables ownership:** `request.variables` is NOT authoritative for the stored
     /// `runtime.variables` block. Use `save_request_variables` to mutate variables; callers
     /// that pass an empty `request.variables` will have the existing on-disk variables preserved.
-    fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String>;
+    fn save_request(&self, collection: &str, path: &str, request: &Request)
+        -> DomainResult<String>;
 
     /// Rename a request file within a collection (fs::rename, single event).
     fn rename_request(&self, collection: &str, old_path: &str, new_path: &str) -> DomainResult<()>;
@@ -62,7 +63,12 @@ pub trait CollectionRepository: Send + Sync {
     /// Write an explicit ordering for items in a folder within a collection.
     /// `folder_path` is relative to the collection root; pass `""` for the root.
     /// `ordered_names` is the full ordered list of entry names (files include `.json`).
-    fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()>;
+    fn reorder_items(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        ordered_names: &[String],
+    ) -> DomainResult<()>;
 
     /// Read collection-level settings (auth, headers) from collection.json.
     /// Returns default settings if the file does not exist.
@@ -73,20 +79,42 @@ pub trait CollectionRepository: Send + Sync {
 
     /// Walk the full folder ancestor chain for a request path and return
     /// merged variables (outer folder first; inner folder wins on collision).
-    fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+    fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>>;
 
     /// Read only this folder's own variables from its folder.yml (no chain walk).
     /// Returns an empty vec if the folder or its folder.yml does not exist.
-    fn get_folder_variables(&self, collection: &str, folder_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+    fn get_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>>;
 
     /// Persist folder-level variables to the folder's folder.yml.
-    fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()>;
+    fn save_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()>;
 
     /// Read request-level variables from a request .yml file's runtime.variables[].
-    fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>>;
+    fn get_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>>;
 
     /// Persist request-level variables to a request .yml file's runtime.variables[].
-    fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()>;
+    fn save_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()>;
 }
 
 #[cfg(test)]

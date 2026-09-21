@@ -35,7 +35,9 @@ impl InMemoryCollectionRepo {
 }
 
 impl CollectionRepository for InMemoryCollectionRepo {
-    fn list(&self) -> DomainResult<Vec<CollectionSummary>> { Ok(vec![]) }
+    fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+        Ok(vec![])
+    }
     fn get(&self, name: &str) -> DomainResult<Collection> {
         if name == self.collection.name {
             Ok(self.collection.clone())
@@ -43,41 +45,75 @@ impl CollectionRepository for InMemoryCollectionRepo {
             Err(DomainError::NotFound(name.into()))
         }
     }
-    fn get_summaries(&self, name: &str) -> DomainResult<Collection> { self.get(name) }
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        self.get(name)
+    }
     fn create(&self, _: &str) -> DomainResult<Collection> {
         Err(DomainError::NotFound("stub".into()))
     }
-    fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
-    fn rename(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
     fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
         Err(DomainError::NotFound("stub".into()))
     }
     fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
         Ok(path.to_string())
     }
-    fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-    fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-    fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-    fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-    fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> { Ok(()) }
-    fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> { Ok(()) }
+    fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+        Ok(())
+    }
     fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
         Ok(self.collection.settings.clone())
     }
-    fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> { Ok(()) }
-    fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+    fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+        Ok(())
+    }
+    fn get_folder_chain_variables(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
     }
     fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
     }
-    fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
+    fn save_folder_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
         Ok(())
     }
     fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
     }
-    fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
+    fn save_request_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
         Ok(())
     }
 }
@@ -86,27 +122,83 @@ impl CollectionRepository for InMemoryCollectionRepo {
 pub struct SharedCollectionRepo(pub Arc<InMemoryCollectionRepo>);
 
 impl CollectionRepository for SharedCollectionRepo {
-    fn list(&self) -> DomainResult<Vec<CollectionSummary>> { self.0.list() }
-    fn get(&self, n: &str) -> DomainResult<Collection> { self.0.get(n) }
-    fn get_summaries(&self, n: &str) -> DomainResult<Collection> { self.0.get_summaries(n) }
-    fn create(&self, n: &str) -> DomainResult<Collection> { self.0.create(n) }
-    fn delete(&self, n: &str) -> DomainResult<()> { self.0.delete(n) }
-    fn rename(&self, a: &str, b: &str) -> DomainResult<()> { self.0.rename(a, b) }
-    fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> { self.0.get_request(a, b) }
-    fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> { self.0.save_request(a, b, c) }
-    fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> { self.0.rename_request(a, b, c) }
-    fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_request(a, b) }
-    fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.create_folder(a, b) }
-    fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> { self.0.delete_folder(a, b) }
-    fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> { self.0.move_item(a, b, c, d) }
-    fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> { self.0.reorder_items(a, b, c) }
-    fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> { self.0.get_settings(n) }
-    fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> { self.0.save_settings(n, s) }
-    fn get_folder_chain_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_chain_variables(a, b) }
-    fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_folder_variables(a, b) }
-    fn save_folder_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_folder_variables(a, b, c) }
-    fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> { self.0.get_request_variables(a, b) }
-    fn save_request_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> { self.0.save_request_variables(a, b, c) }
+    fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+        self.0.list()
+    }
+    fn get(&self, n: &str) -> DomainResult<Collection> {
+        self.0.get(n)
+    }
+    fn get_summaries(&self, n: &str) -> DomainResult<Collection> {
+        self.0.get_summaries(n)
+    }
+    fn create(&self, n: &str) -> DomainResult<Collection> {
+        self.0.create(n)
+    }
+    fn delete(&self, n: &str) -> DomainResult<()> {
+        self.0.delete(n)
+    }
+    fn rename(&self, a: &str, b: &str) -> DomainResult<()> {
+        self.0.rename(a, b)
+    }
+    fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> {
+        self.0.get_request(a, b)
+    }
+    fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> {
+        self.0.save_request(a, b, c)
+    }
+    fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> {
+        self.0.rename_request(a, b, c)
+    }
+    fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> {
+        self.0.delete_request(a, b)
+    }
+    fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> {
+        self.0.create_folder(a, b)
+    }
+    fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> {
+        self.0.delete_folder(a, b)
+    }
+    fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> {
+        self.0.move_item(a, b, c, d)
+    }
+    fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
+        self.0.reorder_items(a, b, c)
+    }
+    fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
+        self.0.get_settings(n)
+    }
+    fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> {
+        self.0.save_settings(n, s)
+    }
+    fn get_folder_chain_variables(
+        &self,
+        a: &str,
+        b: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.0.get_folder_chain_variables(a, b)
+    }
+    fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
+        self.0.get_folder_variables(a, b)
+    }
+    fn save_folder_variables(
+        &self,
+        a: &str,
+        b: &str,
+        c: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.0.save_folder_variables(a, b, c)
+    }
+    fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
+        self.0.get_request_variables(a, b)
+    }
+    fn save_request_variables(
+        &self,
+        a: &str,
+        b: &str,
+        c: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.0.save_request_variables(a, b, c)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,12 +209,18 @@ impl CollectionRepository for SharedCollectionRepo {
 pub struct NullEnvRepo;
 
 impl EnvironmentRepository for NullEnvRepo {
-    fn list(&self) -> DomainResult<Vec<Environment>> { Ok(vec![]) }
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        Ok(vec![])
+    }
     fn get(&self, name: &str) -> DomainResult<Environment> {
         Err(DomainError::NotFound(name.into()))
     }
-    fn save(&self, _: &Environment) -> DomainResult<()> { Ok(()) }
-    fn delete(&self, _: &str) -> DomainResult<()> { Ok(()) }
+    fn save(&self, _: &Environment) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
 }
 
 /// History repo that records everything saved to it.
@@ -132,7 +230,9 @@ pub struct InMemoryHistoryRepo {
 
 impl InMemoryHistoryRepo {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { entries: Mutex::new(Vec::new()) })
+        Arc::new(Self {
+            entries: Mutex::new(Vec::new()),
+        })
     }
     pub fn saved_count(&self) -> usize {
         self.entries.lock().expect("lock").len()
@@ -144,7 +244,12 @@ impl HistoryRepository for InMemoryHistoryRepo {
         Ok(self.entries.lock().expect("lock").clone())
     }
     fn get(&self, id: &str) -> DomainResult<HistoryEntry> {
-        self.entries.lock().expect("lock").iter().find(|e| e.id == id).cloned()
+        self.entries
+            .lock()
+            .expect("lock")
+            .iter()
+            .find(|e| e.id == id)
+            .cloned()
             .ok_or_else(|| DomainError::NotFound(id.into()))
     }
     fn save(&self, entry: &HistoryEntry) -> DomainResult<()> {
@@ -164,21 +269,39 @@ impl HistoryRepository for InMemoryHistoryRepo {
 pub struct SharedHistoryRepo(pub Arc<InMemoryHistoryRepo>);
 
 impl HistoryRepository for SharedHistoryRepo {
-    fn list(&self, limit: Option<usize>) -> DomainResult<Vec<HistoryEntry>> { self.0.list(limit) }
-    fn get(&self, id: &str) -> DomainResult<HistoryEntry> { self.0.get(id) }
-    fn save(&self, entry: &HistoryEntry) -> DomainResult<()> { self.0.save(entry) }
-    fn clear(&self) -> DomainResult<()> { self.0.clear() }
-    fn search(&self, f: &HistoryFilter) -> DomainResult<Vec<HistoryEntry>> { self.0.search(f) }
+    fn list(&self, limit: Option<usize>) -> DomainResult<Vec<HistoryEntry>> {
+        self.0.list(limit)
+    }
+    fn get(&self, id: &str) -> DomainResult<HistoryEntry> {
+        self.0.get(id)
+    }
+    fn save(&self, entry: &HistoryEntry) -> DomainResult<()> {
+        self.0.save(entry)
+    }
+    fn clear(&self) -> DomainResult<()> {
+        self.0.clear()
+    }
+    fn search(&self, f: &HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
+        self.0.search(f)
+    }
 }
 
 /// Cookie repo that stores nothing.
 pub struct NullCookieRepo;
 
 impl CookieRepository for NullCookieRepo {
-    fn get_all(&self) -> DomainResult<Vec<CookieJar>> { Ok(vec![]) }
-    fn get_by_domain(&self, _: &str) -> DomainResult<Option<CookieJar>> { Ok(None) }
-    fn save(&self, _: &CookieJar) -> DomainResult<()> { Ok(()) }
-    fn clear(&self) -> DomainResult<()> { Ok(()) }
+    fn get_all(&self) -> DomainResult<Vec<CookieJar>> {
+        Ok(vec![])
+    }
+    fn get_by_domain(&self, _: &str) -> DomainResult<Option<CookieJar>> {
+        Ok(None)
+    }
+    fn save(&self, _: &CookieJar) -> DomainResult<()> {
+        Ok(())
+    }
+    fn clear(&self) -> DomainResult<()> {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,13 +318,19 @@ pub struct RecordingExecutor {
 
 impl RecordingExecutor {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { sent: Mutex::new(Vec::new()), statuses: Mutex::new(HashMap::new()) })
+        Arc::new(Self {
+            sent: Mutex::new(Vec::new()),
+            statuses: Mutex::new(HashMap::new()),
+        })
     }
     /// Registers a status for any URL containing `url_substring`. A status of
     /// `0` makes the send fail with a transport error instead.
     /// Takes `&self` so it can be called straight through the `Arc`.
     pub fn set_status(&self, url_substring: &str, status: u16) {
-        self.statuses.lock().expect("lock").insert(url_substring.to_string(), status);
+        self.statuses
+            .lock()
+            .expect("lock")
+            .insert(url_substring.to_string(), status);
     }
     pub fn sent_urls(&self) -> Vec<String> {
         self.sent.lock().expect("lock").clone()
@@ -271,7 +400,10 @@ impl ProgrammableEngine {
     /// `"after-response"`, or `"tests"`. Takes `&self` so it can be called
     /// straight through the `Arc`.
     pub fn on(&self, request_name: &str, phase: &str, result: ScriptResult) {
-        self.results.lock().expect("lock").insert(format!("{request_name}|{phase}"), result);
+        self.results
+            .lock()
+            .expect("lock")
+            .insert(format!("{request_name}|{phase}"), result);
     }
     pub fn modes(&self) -> Vec<String> {
         self.modes.lock().expect("lock").clone()
@@ -290,10 +422,22 @@ impl ProgrammableEngine {
 impl ScriptEngine for ProgrammableEngine {
     async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
         let key = format!("{}|{}", ctx.request_name, ctx.phase.as_str());
-        self.modes.lock().expect("lock").push(ctx.execution_mode.clone());
+        self.modes
+            .lock()
+            .expect("lock")
+            .push(ctx.execution_mode.clone());
         self.calls.lock().expect("lock").push(key.clone());
-        self.runtime_reads.lock().expect("lock").push(ctx.variables.runtime.clone());
-        Ok(self.results.lock().expect("lock").get(&key).cloned().unwrap_or_default())
+        self.runtime_reads
+            .lock()
+            .expect("lock")
+            .push(ctx.variables.runtime.clone());
+        Ok(self
+            .results
+            .lock()
+            .expect("lock")
+            .get(&key)
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
@@ -318,7 +462,9 @@ pub struct RecordingPublisher {
 
 impl RecordingPublisher {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { events: Mutex::new(Vec::new()) })
+        Arc::new(Self {
+            events: Mutex::new(Vec::new()),
+        })
     }
     pub fn events(&self) -> Vec<DomainEvent> {
         self.events.lock().expect("lock").clone()

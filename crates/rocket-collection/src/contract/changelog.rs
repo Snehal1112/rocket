@@ -40,7 +40,10 @@ pub struct ContractChangelog {
 
 impl ContractChangelog {
     pub fn new(contract_id: Ulid) -> Self {
-        Self { contract_id, entries: Vec::new() }
+        Self {
+            contract_id,
+            entries: Vec::new(),
+        }
     }
 
     /// Appends entries — never removes. Returns count added.

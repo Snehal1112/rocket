@@ -1,7 +1,7 @@
 use rocket_git::service::GitService;
 use rocket_git::{
-    BranchList, CommitInfo, ConflictFile, ConflictResolution,
-    FetchResult, FileDiff, GitCredentials, RemoteInfo, RepoStatus, StashEntry,
+    BranchList, CommitInfo, ConflictFile, ConflictResolution, FetchResult, FileDiff,
+    GitCredentials, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -25,7 +25,12 @@ impl GitAppService {
         self.git.init(path)
     }
 
-    pub fn clone_repo(&self, url: &str, dest_path: &str, creds: &GitCredentials) -> DomainResult<()> {
+    pub fn clone_repo(
+        &self,
+        url: &str,
+        dest_path: &str,
+        creds: &GitCredentials,
+    ) -> DomainResult<()> {
         self.git.clone_repo(url, dest_path, creds)?;
         self.events.publish(DomainEvent::GitCloned {
             url: url.to_string(),
@@ -146,7 +151,12 @@ impl GitAppService {
         Ok(())
     }
 
-    pub fn fetch(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<FetchResult> {
+    pub fn fetch(
+        &self,
+        path: &str,
+        remote: &str,
+        creds: &GitCredentials,
+    ) -> DomainResult<FetchResult> {
         self.git.fetch(path, remote, creds)
     }
 
@@ -171,7 +181,8 @@ impl GitAppService {
         force: bool,
         as_name: Option<&str>,
     ) -> DomainResult<()> {
-        self.git.checkout_remote_branch(path, name, force, as_name)?;
+        self.git
+            .checkout_remote_branch(path, name, force, as_name)?;
         self.events.publish(DomainEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
@@ -255,7 +266,12 @@ impl GitAppService {
         Ok(files)
     }
 
-    pub fn resolve_conflict(&self, path: &str, file: &str, resolution: &ConflictResolution) -> DomainResult<()> {
+    pub fn resolve_conflict(
+        &self,
+        path: &str,
+        file: &str,
+        resolution: &ConflictResolution,
+    ) -> DomainResult<()> {
         self.git.resolve_conflict(path, file, resolution)
     }
 

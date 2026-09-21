@@ -5,17 +5,23 @@ use rocket_shared::variable_value::VariableValue;
 
 impl From<OcVariable> for CollectionVariable {
     fn from(v: OcVariable) -> Self {
-        let current = v.value.as_ref().map(|vv| vv.data().to_string()).unwrap_or_default();
+        let current = v
+            .value
+            .as_ref()
+            .map(|vv| vv.data().to_string())
+            .unwrap_or_default();
         // Fall back to the current value if initial is absent (backward compat with old files).
-        let initial = v.initial.as_ref()
+        let initial = v
+            .initial
+            .as_ref()
             .map(|vv| vv.data().to_string())
             .unwrap_or_else(|| current.clone());
         CollectionVariable {
-            key:           v.name,
-            value:         current,
+            key: v.name,
+            value: current,
             initial_value: initial,
-            enabled:       !v.disabled.unwrap_or(false),
-            secret:        false,
+            enabled: !v.disabled.unwrap_or(false),
+            secret: false,
         }
     }
 }
@@ -23,11 +29,19 @@ impl From<OcVariable> for CollectionVariable {
 impl From<CollectionVariable> for OcVariable {
     fn from(cv: CollectionVariable) -> Self {
         OcVariable {
-            name:        cv.key,
-            value:       if cv.value.is_empty() { None } else { Some(VariableValue::simple(cv.value)) },
-            initial:     if cv.initial_value.is_empty() { None } else { Some(VariableValue::simple(cv.initial_value)) },
+            name: cv.key,
+            value: if cv.value.is_empty() {
+                None
+            } else {
+                Some(VariableValue::simple(cv.value))
+            },
+            initial: if cv.initial_value.is_empty() {
+                None
+            } else {
+                Some(VariableValue::simple(cv.initial_value))
+            },
             description: None,
-            disabled:    if cv.enabled { None } else { Some(true) },
+            disabled: if cv.enabled { None } else { Some(true) },
         }
     }
 }
@@ -38,7 +52,11 @@ impl From<OcVariable> for Variable {
     fn from(oc: OcVariable) -> Self {
         Variable {
             key: oc.name,
-            value: oc.value.as_ref().map(|v| v.data().to_string()).unwrap_or_default(),
+            value: oc
+                .value
+                .as_ref()
+                .map(|v| v.data().to_string())
+                .unwrap_or_default(),
             enabled: !oc.disabled.unwrap_or(false),
             secret: false,
             description: oc.description,

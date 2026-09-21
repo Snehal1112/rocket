@@ -57,7 +57,11 @@ impl ImportService {
         collection_repo: Box<dyn CollectionRepository>,
         env_factory: Box<dyn EnvironmentRepositoryFactory>,
     ) -> Self {
-        Self { workspace_path, collection_repo, env_factory }
+        Self {
+            workspace_path,
+            collection_repo,
+            env_factory,
+        }
     }
 
     /// Test-only constructor — wires up `FsCollectionRepo` and `FsEnvironmentRepo` directly.
@@ -69,24 +73,28 @@ impl ImportService {
         impl EnvironmentRepositoryFactory for FsFactory {
             fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
                 Box::new(FsEnvironmentRepo::new(
-                    self.0.join("collections").join(collection_name).join("environments"),
+                    self.0
+                        .join("collections")
+                        .join(collection_name)
+                        .join("environments"),
                 ))
             }
         }
 
         let workspace_path = path.to_path_buf();
-        let collection_repo =
-            Box::new(FsCollectionRepo::new_standalone(workspace_path.join("collections")));
+        let collection_repo = Box::new(FsCollectionRepo::new_standalone(
+            workspace_path.join("collections"),
+        ));
         let env_factory = Box::new(FsFactory(workspace_path.clone()));
-        Self { workspace_path, collection_repo, env_factory }
+        Self {
+            workspace_path,
+            collection_repo,
+            env_factory,
+        }
     }
 
     /// Import a single Bruno collection directory into the given workspace.
-    pub fn import_collection(
-        &self,
-        path: &Path,
-        workspace_id: &str,
-    ) -> ImportResult<ImportReport> {
+    pub fn import_collection(&self, path: &Path, workspace_id: &str) -> ImportResult<ImportReport> {
         self.import_collection_with_name(path, workspace_id, None)
     }
 
@@ -99,8 +107,12 @@ impl ImportService {
     ) -> ImportResult<ImportReport> {
         match detect_collection(path) {
             None => Err(ImportError::NotABrunoDirectory(path.to_path_buf())),
-            Some(BrunoFormat::Modern) => self.import_modern_collection(path, workspace_id, name_hint),
-            Some(BrunoFormat::Legacy) => self.import_legacy_collection(path, workspace_id, name_hint),
+            Some(BrunoFormat::Modern) => {
+                self.import_modern_collection(path, workspace_id, name_hint)
+            }
+            Some(BrunoFormat::Legacy) => {
+                self.import_legacy_collection(path, workspace_id, name_hint)
+            }
         }
     }
 
@@ -120,11 +132,19 @@ impl ImportService {
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name)?;
-        self.collection_repo.create(&resolved_name).map_err(ImportError::DomainError)?;
+        self.collection_repo
+            .create(&resolved_name)
+            .map_err(ImportError::DomainError)?;
         report.created_collections.push(resolved_name.clone());
 
         // Walk request files.
-        self.walk_requests(path, path, &resolved_name, self.collection_repo.as_ref(), &mut report)?;
+        self.walk_requests(
+            path,
+            path,
+            &resolved_name,
+            self.collection_repo.as_ref(),
+            &mut report,
+        )?;
 
         // Import environments.
         let env_dir = path.join("environments");
@@ -237,7 +257,12 @@ impl ImportService {
         if detect_collection(path).is_some() {
             self.import_collection_with_name(path, workspace_id, name_hint)
         } else if detect_workspace(path).is_some() {
-            self.import_workspace_with_name(path, create_new_workspace, Some(workspace_id), name_hint)
+            self.import_workspace_with_name(
+                path,
+                create_new_workspace,
+                Some(workspace_id),
+                name_hint,
+            )
         } else {
             Err(ImportError::NotABrunoDirectory(path.to_path_buf()))
         }
@@ -263,7 +288,8 @@ impl ImportService {
             .map(|n| n.to_string_lossy().to_string());
         let name_hint = zip_name.as_deref();
 
-        let report = self.import_auto_with_name(&inner, workspace_id, create_new_workspace, name_hint)?;
+        let report =
+            self.import_auto_with_name(&inner, workspace_id, create_new_workspace, name_hint)?;
         tracing::info!(
             total_files = report.total_files,
             imported = report.imported,
@@ -306,7 +332,10 @@ impl ImportService {
             // Skip Bruno metadata files.
             // Skip Bruno metadata files — not requests.
             if p.file_name().map_or(false, |n| {
-                matches!(n.to_str(), Some("bruno.json" | "_order.yml" | "folder.bru" | "collection.bru"))
+                matches!(
+                    n.to_str(),
+                    Some("bruno.json" | "_order.yml" | "folder.bru" | "collection.bru")
+                )
             }) {
                 continue;
             }
@@ -358,7 +387,8 @@ impl ImportService {
                 continue;
             }
 
-            let env_name = p.file_stem()
+            let env_name = p
+                .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "env".into());
 
@@ -417,7 +447,9 @@ impl ImportService {
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name)?;
-        self.collection_repo.create(&resolved_name).map_err(ImportError::DomainError)?;
+        self.collection_repo
+            .create(&resolved_name)
+            .map_err(ImportError::DomainError)?;
         report.created_collections.push(resolved_name.clone());
 
         let dest_root = self.workspace_path.join("collections").join(&resolved_name);
@@ -636,7 +668,6 @@ fn sanitize_postman_filename(name: &str) -> String {
         .collect()
 }
 
-
 #[cfg(test)]
 mod modern_tests {
     use super::*;
@@ -674,9 +705,18 @@ mod modern_tests {
 
         assert_eq!(report.detected_type, "collection");
         assert!(report.created_collections.contains(&"my-col".to_string()));
-        assert!(ws_dir.path().join("collections/my-col/opencollection.yml").exists());
-        assert!(ws_dir.path().join("collections/my-col/get-users.yml").exists());
-        assert!(ws_dir.path().join("collections/my-col/environments/local.yml").exists());
+        assert!(ws_dir
+            .path()
+            .join("collections/my-col/opencollection.yml")
+            .exists());
+        assert!(ws_dir
+            .path()
+            .join("collections/my-col/get-users.yml")
+            .exists());
+        assert!(ws_dir
+            .path()
+            .join("collections/my-col/environments/local.yml")
+            .exists());
         assert_eq!(report.imported, 1);
     }
 
@@ -689,7 +729,9 @@ mod modern_tests {
 
         let ws_dir = TempDir::new().unwrap();
         let service = ImportService::new_with_workspace_path(ws_dir.path());
-        service.import_modern_collection(&col_src, "default", None).unwrap();
+        service
+            .import_modern_collection(&col_src, "default", None)
+            .unwrap();
 
         let oc_path = ws_dir.path().join("collections/col/opencollection.yml");
         assert!(oc_path.exists());
@@ -749,9 +791,15 @@ mod auto_tests {
             .expect("workspace import should succeed");
 
         assert_eq!(report.detected_type, "workspace");
-        assert_eq!(report.imported, 1, "should import the request inside collections/");
+        assert_eq!(
+            report.imported, 1,
+            "should import the request inside collections/"
+        );
         assert!(
-            report.created_collections.iter().any(|c| c.contains("MyCollection")),
+            report
+                .created_collections
+                .iter()
+                .any(|c| c.contains("MyCollection")),
             "should create MyCollection, got: {:?}",
             report.created_collections
         );
@@ -779,14 +827,20 @@ mod detection_tests {
     fn detect_workspace_modern() {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("workspace.yml"), "").unwrap();
-        assert!(matches!(detect_workspace(d.path()), Some(BrunoFormat::Modern)));
+        assert!(matches!(
+            detect_workspace(d.path()),
+            Some(BrunoFormat::Modern)
+        ));
     }
 
     #[test]
     fn detect_workspace_legacy() {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
-        assert!(matches!(detect_workspace(d.path()), Some(BrunoFormat::Legacy)));
+        assert!(matches!(
+            detect_workspace(d.path()),
+            Some(BrunoFormat::Legacy)
+        ));
     }
 
     #[test]
@@ -799,14 +853,20 @@ mod detection_tests {
     fn detect_collection_modern() {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("opencollection.yml"), "").unwrap();
-        assert!(matches!(detect_collection(d.path()), Some(BrunoFormat::Modern)));
+        assert!(matches!(
+            detect_collection(d.path()),
+            Some(BrunoFormat::Modern)
+        ));
     }
 
     #[test]
     fn detect_collection_legacy() {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
-        assert!(matches!(detect_collection(d.path()), Some(BrunoFormat::Legacy)));
+        assert!(matches!(
+            detect_collection(d.path()),
+            Some(BrunoFormat::Legacy)
+        ));
     }
 
     #[test]

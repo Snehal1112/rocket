@@ -24,7 +24,9 @@ mod tests {
         p.publish(
             "a".into(),
             None,
-            AuditEventKind::CollectionDeleted { collection: "x".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "x".into(),
+            },
         );
     }
 }

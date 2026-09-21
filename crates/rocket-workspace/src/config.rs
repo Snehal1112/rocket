@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Whether a collection is embedded (inside workspace dir) or external.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -204,7 +204,10 @@ mod tests {
         cfg.add_external_collection("Shared Auth", PathBuf::from("/home/user/shared"));
         assert_eq!(cfg.collections.len(), 1);
         assert_eq!(cfg.collections[0].ref_type, CollectionRefType::External);
-        assert_eq!(cfg.collections[0].path, Some(PathBuf::from("/home/user/shared")));
+        assert_eq!(
+            cfg.collections[0].path,
+            Some(PathBuf::from("/home/user/shared"))
+        );
     }
 
     #[test]

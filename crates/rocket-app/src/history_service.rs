@@ -44,7 +44,9 @@ mod tests {
 
     impl MockHistoryRepo {
         fn new() -> Self {
-            Self { entries: Mutex::new(Vec::new()) }
+            Self {
+                entries: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -111,7 +113,10 @@ mod tests {
     }
 
     fn make_service() -> HistoryService {
-        HistoryService::new(Box::new(MockHistoryRepo::new()), Box::new(NullEventPublisher))
+        HistoryService::new(
+            Box::new(MockHistoryRepo::new()),
+            Box::new(NullEventPublisher),
+        )
     }
 
     #[test]
@@ -154,7 +159,10 @@ mod tests {
             entries.push(HistoryEntry::new("POST", "/users", 201, 10, 0));
         }
         let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
-        let filter = HistoryFilter { method: Some("POST".to_string()), ..Default::default() };
+        let filter = HistoryFilter {
+            method: Some("POST".to_string()),
+            ..Default::default()
+        };
         let results = svc.search(&filter).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].method, "POST");
@@ -201,7 +209,10 @@ mod tests {
             entries.push(HistoryEntry::new("GET", "/health", 200, 10, 0));
         }
         let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
-        let filter = HistoryFilter { url_contains: Some("/api/".to_string()), ..Default::default() };
+        let filter = HistoryFilter {
+            url_contains: Some("/api/".to_string()),
+            ..Default::default()
+        };
         let results = svc.search(&filter).unwrap();
         assert_eq!(results.len(), 2, "only /api/* entries should match");
     }
@@ -216,7 +227,11 @@ mod tests {
             entries.push(HistoryEntry::new("GET", "/c", 500, 10, 0));
         }
         let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
-        let filter = HistoryFilter { status_min: Some(400), status_max: Some(499), ..Default::default() };
+        let filter = HistoryFilter {
+            status_min: Some(400),
+            status_max: Some(499),
+            ..Default::default()
+        };
         let results = svc.search(&filter).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, 404);
@@ -225,9 +240,15 @@ mod tests {
     #[test]
     fn search_method_is_case_insensitive() {
         let repo = MockHistoryRepo::new();
-        repo.entries.lock().unwrap().push(HistoryEntry::new("GET", "/", 200, 10, 0));
+        repo.entries
+            .lock()
+            .unwrap()
+            .push(HistoryEntry::new("GET", "/", 200, 10, 0));
         let svc = HistoryService::new(Box::new(repo), Box::new(NullEventPublisher));
-        let filter = HistoryFilter { method: Some("get".to_string()), ..Default::default() };
+        let filter = HistoryFilter {
+            method: Some("get".to_string()),
+            ..Default::default()
+        };
         let results = svc.search(&filter).unwrap();
         assert_eq!(results.len(), 1, "method filter must be case-insensitive");
     }

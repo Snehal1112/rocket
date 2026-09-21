@@ -49,12 +49,7 @@ impl ExportService {
             let error = Self::csv_quote(entry.error.as_deref().unwrap_or(""));
             out.push_str(&format!(
                 "{},{},{:.2},{},{},{}\n",
-                entry.seq,
-                status,
-                entry.latency_ms,
-                entry.response_bytes,
-                error,
-                entry.phase_index,
+                entry.seq, status, entry.latency_ms, entry.response_bytes, error, entry.phase_index,
             ));
         }
         out
@@ -180,12 +175,20 @@ mod tests {
             phase_timeline: vec![],
             request_log: vec![
                 RequestLogEntry {
-                    seq: 0, status: Some(200), latency_ms: 10.0,
-                    response_bytes: 100, error: None, phase_index: 0,
+                    seq: 0,
+                    status: Some(200),
+                    latency_ms: 10.0,
+                    response_bytes: 100,
+                    error: None,
+                    phase_index: 0,
                 },
                 RequestLogEntry {
-                    seq: 1, status: Some(500), latency_ms: 30.0,
-                    response_bytes: 50, error: None, phase_index: 0,
+                    seq: 1,
+                    status: Some(500),
+                    latency_ms: 30.0,
+                    response_bytes: 50,
+                    error: None,
+                    phase_index: 0,
                 },
             ],
             time_series: vec![],

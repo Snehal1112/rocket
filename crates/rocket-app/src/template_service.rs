@@ -45,7 +45,9 @@ mod tests {
 
     impl MockTemplateRepo {
         fn new() -> Self {
-            Self { templates: Mutex::new(Vec::new()) }
+            Self {
+                templates: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -81,7 +83,10 @@ mod tests {
     }
 
     fn make_service() -> TemplateService {
-        TemplateService::new(Box::new(MockTemplateRepo::new()), Box::new(NullEventPublisher))
+        TemplateService::new(
+            Box::new(MockTemplateRepo::new()),
+            Box::new(NullEventPublisher),
+        )
     }
 
     #[test]
@@ -104,7 +109,8 @@ mod tests {
     #[test]
     fn delete_template() {
         let svc = make_service();
-        svc.save(&Template::new("Temp", HttpMethod::Delete, "/x")).unwrap();
+        svc.save(&Template::new("Temp", HttpMethod::Delete, "/x"))
+            .unwrap();
         svc.delete("Temp").unwrap();
         assert!(svc.list().unwrap().is_empty());
     }

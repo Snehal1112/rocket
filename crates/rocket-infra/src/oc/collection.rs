@@ -72,7 +72,7 @@ pub struct OcCollectionConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcCollection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opencollection: Option<String>,  // spec version
+    pub opencollection: Option<String>, // spec version
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,4 +90,3 @@ pub struct OcCollection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extensions: Option<serde_yaml::Value>,
 }
-

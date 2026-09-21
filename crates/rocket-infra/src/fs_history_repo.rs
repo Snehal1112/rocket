@@ -154,8 +154,10 @@ mod tests {
     #[test]
     fn clear_history() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0)).unwrap();
+        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0))
+            .unwrap();
         repo.clear().unwrap();
         assert!(repo.list(None).unwrap().is_empty());
     }
@@ -163,8 +165,10 @@ mod tests {
     #[test]
     fn search_empty_filter_returns_all() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0)).unwrap();
+        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0))
+            .unwrap();
         let results = repo.search(&HistoryFilter::default()).unwrap();
         assert_eq!(results.len(), 2);
     }
@@ -172,10 +176,16 @@ mod tests {
     #[test]
     fn search_by_method_returns_matching_entries() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0)).unwrap();
-        repo.save(&HistoryEntry::new("get", "/c", 204, 5, 0)).unwrap();
-        let filter = HistoryFilter { method: Some("GET".to_string()), ..Default::default() };
+        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("POST", "/b", 201, 20, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("get", "/c", 204, 5, 0))
+            .unwrap();
+        let filter = HistoryFilter {
+            method: Some("GET".to_string()),
+            ..Default::default()
+        };
         let results = repo.search(&filter).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|e| e.method.to_uppercase() == "GET"));
@@ -184,10 +194,34 @@ mod tests {
     #[test]
     fn search_by_url_contains_returns_matching_entries() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "https://api.example.com/users", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "https://api.example.com/items", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "https://other.io/users", 200, 10, 0)).unwrap();
-        let filter = HistoryFilter { url_contains: Some("example.com".to_string()), ..Default::default() };
+        repo.save(&HistoryEntry::new(
+            "GET",
+            "https://api.example.com/users",
+            200,
+            10,
+            0,
+        ))
+        .unwrap();
+        repo.save(&HistoryEntry::new(
+            "GET",
+            "https://api.example.com/items",
+            200,
+            10,
+            0,
+        ))
+        .unwrap();
+        repo.save(&HistoryEntry::new(
+            "GET",
+            "https://other.io/users",
+            200,
+            10,
+            0,
+        ))
+        .unwrap();
+        let filter = HistoryFilter {
+            url_contains: Some("example.com".to_string()),
+            ..Default::default()
+        };
         let results = repo.search(&filter).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|e| e.url.contains("example.com")));
@@ -196,11 +230,19 @@ mod tests {
     #[test]
     fn search_by_status_range_returns_2xx_only() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "/ok", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "/created", 201, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "/not-found", 404, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "/error", 500, 10, 0)).unwrap();
-        let filter = HistoryFilter { status_min: Some(200), status_max: Some(299), ..Default::default() };
+        repo.save(&HistoryEntry::new("GET", "/ok", 200, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("GET", "/created", 201, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("GET", "/not-found", 404, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("GET", "/error", 500, 10, 0))
+            .unwrap();
+        let filter = HistoryFilter {
+            status_min: Some(200),
+            status_max: Some(299),
+            ..Default::default()
+        };
         let results = repo.search(&filter).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|e| e.status >= 200 && e.status <= 299));
@@ -209,9 +251,12 @@ mod tests {
     #[test]
     fn search_combined_method_and_status_filters() {
         let (_dir, repo) = setup();
-        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("GET", "/b", 404, 10, 0)).unwrap();
-        repo.save(&HistoryEntry::new("POST", "/c", 200, 10, 0)).unwrap();
+        repo.save(&HistoryEntry::new("GET", "/a", 200, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("GET", "/b", 404, 10, 0))
+            .unwrap();
+        repo.save(&HistoryEntry::new("POST", "/c", 200, 10, 0))
+            .unwrap();
         let filter = HistoryFilter {
             method: Some("GET".to_string()),
             status_min: Some(200),
@@ -236,9 +281,14 @@ mod tests {
         }
         let list = repo.list(Some(3)).unwrap();
         assert_eq!(list.len(), 3);
-        let returned_ids: std::collections::HashSet<_> = list.iter().map(|e| e.id.as_str()).collect();
+        let returned_ids: std::collections::HashSet<_> =
+            list.iter().map(|e| e.id.as_str()).collect();
         for id in &ids[7..] {
-            assert!(returned_ids.contains(id.as_str()), "expected id {} in results", id);
+            assert!(
+                returned_ids.contains(id.as_str()),
+                "expected id {} in results",
+                id
+            );
         }
     }
 }

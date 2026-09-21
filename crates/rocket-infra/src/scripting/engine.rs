@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use deno_core::{extension, v8, JsRuntime, OpState, RuntimeOptions, op2};
+use deno_core::{extension, op2, v8, JsRuntime, OpState, RuntimeOptions};
 use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
-use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use crate::scripting::ops::{console, fs, process, redact, req, res, rok};
+use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 
 /// JS scripting engine backed by `deno_core` (V8).
 ///
@@ -71,8 +71,9 @@ async fn run_script_with_timeout(
     let join = tokio::task::spawn_blocking(move || run_script(ctx, handle_tx));
 
     match tokio::time::timeout(timeout, join).await {
-        Ok(join_result) => join_result
-            .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?,
+        Ok(join_result) => {
+            join_result.map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?
+        }
         Err(_elapsed) => {
             // Terminate whenever the handle arrives, however late. Bounding
             // this wait would abandon a script that had not started yet: it
@@ -114,31 +115,37 @@ fn op_test_run(#[string] _name: String) {
 #[op2(fast)]
 fn op_test_pass(state: &mut OpState, #[string] name: String) {
     let redacted_name = redact(state, name);
-    state.borrow_mut::<ScriptOutputState>().add_test_result(redacted_name, true, None);
+    state
+        .borrow_mut::<ScriptOutputState>()
+        .add_test_result(redacted_name, true, None);
 }
 
 #[op2(fast)]
 fn op_test_fail(state: &mut OpState, #[string] name: String, #[string] error: String) {
     let redacted_name = redact(state, name);
     let redacted_error = redact(state, error);
-    state.borrow_mut::<ScriptOutputState>().add_test_result(redacted_name, false, Some(redacted_error));
+    state.borrow_mut::<ScriptOutputState>().add_test_result(
+        redacted_name,
+        false,
+        Some(redacted_error),
+    );
 }
 
 #[op2]
 #[string]
 fn op_require_module(#[string] name: String) -> String {
     match name.as_str() {
-        "chai"          => include_str!("modules/chai.js").to_string(),
-        "crypto-js"     => include_str!("modules/crypto-js.js").to_string(),
-        "jsonwebtoken"  => include_str!("modules/jsonwebtoken.js").to_string(),
-        "jsrsasign"     => include_str!("modules/jsrsasign.js").to_string(),
-        "uuid"          => include_str!("modules/uuid.js").to_string(),
-        "moment"        => include_str!("modules/moment.js").to_string(),
-        "nanoid"        => include_str!("modules/nanoid.js").to_string(),
-        "tv4"           => include_str!("modules/tv4.js").to_string(),
-        "axios"         => include_str!("modules/axios.js").to_string(),
+        "chai" => include_str!("modules/chai.js").to_string(),
+        "crypto-js" => include_str!("modules/crypto-js.js").to_string(),
+        "jsonwebtoken" => include_str!("modules/jsonwebtoken.js").to_string(),
+        "jsrsasign" => include_str!("modules/jsrsasign.js").to_string(),
+        "uuid" => include_str!("modules/uuid.js").to_string(),
+        "moment" => include_str!("modules/moment.js").to_string(),
+        "nanoid" => include_str!("modules/nanoid.js").to_string(),
+        "tv4" => include_str!("modules/tv4.js").to_string(),
+        "axios" => include_str!("modules/axios.js").to_string(),
         "atob" | "btoa" => include_str!("modules/atob-btoa.js").to_string(),
-        _               => String::new(),
+        _ => String::new(),
     }
 }
 
@@ -237,9 +244,7 @@ fn run_script(
 
     let mut runtime = JsRuntime::new(RuntimeOptions {
         extensions,
-        create_params: Some(
-            v8::CreateParams::default().heap_limits(0, SCRIPT_HEAP_LIMIT_BYTES),
-        ),
+        create_params: Some(v8::CreateParams::default().heap_limits(0, SCRIPT_HEAP_LIMIT_BYTES)),
         ..Default::default()
     });
 
@@ -321,9 +326,9 @@ fn run_script(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_scripting::{ScriptContext, ScriptPhase};
     use rocket_environment::VariableContext;
     use rocket_http::HttpRequest;
+    use rocket_scripting::{ScriptContext, ScriptPhase};
     use rocket_shared::types::HttpMethod;
 
     fn minimal_ctx(code: &str) -> ScriptContext {
@@ -349,7 +354,9 @@ mod tests {
         let ctx = minimal_ctx("console.log('hello from script')");
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.console_entries.len(), 1);
-        assert!(result.console_entries[0].message.contains("hello from script"));
+        assert!(result.console_entries[0]
+            .message
+            .contains("hello from script"));
     }
 
     #[tokio::test]
@@ -375,7 +382,8 @@ mod tests {
     async fn rok_get_env_var_reads_from_context() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("BASE_URL".into(), "https://api.example.com".into());
+        vars.env
+            .insert("BASE_URL".into(), "https://api.example.com".into());
         let mut ctx = minimal_ctx("rok.setVar('url', rok.getEnvVar('BASE_URL'))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
@@ -409,7 +417,10 @@ mod tests {
         let mut ctx = minimal_ctx("rok.setVar('found', rok.hasEnvVar('EXISTS') ? '1' : '0')");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("found").expect("found present"), "1");
+        assert_eq!(
+            result.runtime_vars.get("found").expect("found present"),
+            "1"
+        );
     }
 
     #[tokio::test]
@@ -420,7 +431,10 @@ mod tests {
         let mut ctx = minimal_ctx("rok.setVar('url', rok.interpolate('https://{{host}}/users'))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("url").expect("url present"), "https://api.example.com/users");
+        assert_eq!(
+            result.runtime_vars.get("url").expect("url present"),
+            "https://api.example.com/users"
+        );
     }
 
     #[tokio::test]
@@ -436,7 +450,9 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = minimal_ctx("rok.runner.setNextRequest('Poll Status')");
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(matches!(result.next_request, Some(rocket_scripting::NextRequest::Name(s)) if s == "Poll Status"));
+        assert!(
+            matches!(result.next_request, Some(rocket_scripting::NextRequest::Name(s)) if s == "Poll Status")
+        );
     }
 
     #[tokio::test]
@@ -445,15 +461,22 @@ mod tests {
         let ctx = minimal_ctx("console.warn('watch out'); console.error('bad thing')");
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.console_entries.len(), 2);
-        assert_eq!(result.console_entries[0].level, rocket_scripting::ConsoleLevel::Warn);
-        assert_eq!(result.console_entries[1].level, rocket_scripting::ConsoleLevel::Error);
+        assert_eq!(
+            result.console_entries[0].level,
+            rocket_scripting::ConsoleLevel::Warn
+        );
+        assert_eq!(
+            result.console_entries[1].level,
+            rocket_scripting::ConsoleLevel::Error
+        );
     }
 
     #[tokio::test]
     async fn console_log_redacts_secret_env_var() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx("console.log(rok.getEnvVar('API_KEY'))");
         ctx.variables = vars;
@@ -466,7 +489,8 @@ mod tests {
     async fn console_log_redacts_secret_substring_in_larger_string() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx("console.log('token=' + rok.getEnvVar('API_KEY'))");
         ctx.variables = vars;
@@ -481,7 +505,8 @@ mod tests {
         // was originally read is still caught.
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.runtime.insert("copy".into(), "sk-live-abcdef123".into());
+        vars.runtime
+            .insert("copy".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx("console.log(rok.getVar('copy'))");
         ctx.variables = vars;
@@ -501,7 +526,8 @@ mod tests {
         let engine = DenoScriptEngine::new();
 
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
 
         let mut ctx1 = minimal_ctx("rok.setVar('copy', rok.getEnvVar('API_KEY'))");
@@ -529,7 +555,8 @@ mod tests {
     async fn console_warn_and_error_redact_secret_values() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx(
             "console.warn(rok.getEnvVar('API_KEY')); console.error('key: ' + rok.getEnvVar('API_KEY'))",
@@ -571,7 +598,10 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         let message = &result.console_entries[0].message;
         assert!(!message.contains("abcdef123456"));
-        assert!(!message.contains("23456"), "a fragment of the longer secret must not survive: {message}");
+        assert!(
+            !message.contains("23456"),
+            "a fragment of the longer secret must not survive: {message}"
+        );
         assert_eq!(message, "••••••");
     }
 
@@ -598,7 +628,8 @@ mod tests {
     async fn rok_test_failure_message_redacts_secret_value() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx(
             "rok.test('leaks secret', () => { throw new Error(rok.getEnvVar('API_KEY')) })",
@@ -606,8 +637,14 @@ mod tests {
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.test_results.len(), 1);
-        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Failed);
-        let err = result.test_results[0].error.as_ref().expect("error message present");
+        assert_eq!(
+            result.test_results[0].status,
+            rocket_scripting::TestStatus::Failed
+        );
+        let err = result.test_results[0]
+            .error
+            .as_ref()
+            .expect("error message present");
         // JS `String(new Error(msg))` formats as "Error: <msg>".
         assert_eq!(err, "Error: ••••••");
     }
@@ -619,11 +656,11 @@ mod tests {
         // actual outgoing HTTP request functions correctly.
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
-        let mut ctx = minimal_ctx(
-            "req.setHeader('Authorization', 'Bearer ' + rok.getEnvVar('API_KEY'))",
-        );
+        let mut ctx =
+            minimal_ctx("req.setHeader('Authorization', 'Bearer ' + rok.getEnvVar('API_KEY'))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         let mutations = result.request_mutations.expect("mutations present");
@@ -641,13 +678,17 @@ mod tests {
         // name (e.g. rok.test(apiKey, () => {...})) must be redacted too.
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
         let mut ctx = minimal_ctx("rok.test(rok.getEnvVar('API_KEY'), () => {})");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.test_results.len(), 1);
-        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Passed);
+        assert_eq!(
+            result.test_results[0].status,
+            rocket_scripting::TestStatus::Passed
+        );
         assert_eq!(result.test_results[0].name, "••••••");
     }
 
@@ -655,43 +696,59 @@ mod tests {
     async fn rok_test_failing_name_redacts_secret_value() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.env.insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
         vars.secret_values.insert("sk-live-abcdef123".into());
-        let mut ctx = minimal_ctx(
-            "rok.test(rok.getEnvVar('API_KEY'), () => { throw new Error('boom') })",
-        );
+        let mut ctx =
+            minimal_ctx("rok.test(rok.getEnvVar('API_KEY'), () => { throw new Error('boom') })");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.test_results.len(), 1);
-        assert_eq!(result.test_results[0].status, rocket_scripting::TestStatus::Failed);
+        assert_eq!(
+            result.test_results[0].status,
+            rocket_scripting::TestStatus::Failed
+        );
         assert_eq!(result.test_results[0].name, "••••••");
     }
 
     #[tokio::test]
     async fn require_chai_and_use_expect() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const chai = require('chai');
             const chaiExpect = chai.expect;
             rok.setVar('result', 'pass');
             chaiExpect(1 + 1).to.equal(2);
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("result").expect("result"), "pass");
     }
 
     #[tokio::test]
     async fn require_uuid_v4() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const { v4: uuidv4 } = require('uuid');
             const id = uuidv4();
             rok.setVar('id', id);
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
         assert!(result.error.is_none());
-        let id = result.runtime_vars.get("id").expect("id present").as_str().expect("id is string");
+        let id = result
+            .runtime_vars
+            .get("id")
+            .expect("id present")
+            .as_str()
+            .expect("id is string");
         assert_eq!(id.len(), 36);
         assert_eq!(&id[14..15], "4");
     }
@@ -702,12 +759,16 @@ mod tests {
         // require() itself must succeed (there's no wiring gap like the old
         // jsrsasign bug), but calling it must fail immediately and clearly —
         // there is no outbound-HTTP bridge from inside the script sandbox.
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const axios = require('axios');
             axios.get('https://example.com');
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
-        let err = result.error.expect("axios.get() must throw, not silently succeed");
+        let err = result
+            .error
+            .expect("axios.get() must throw, not silently succeed");
         assert!(
             err.contains("not supported in RocketAPI scripts"),
             "unexpected error message: {err}"
@@ -720,7 +781,11 @@ mod tests {
         let ctx = minimal_ctx("require('not-a-real-module')");
         let result = engine.execute(ctx).await.expect("execute");
         assert!(result.error.is_some());
-        assert!(result.error.as_ref().expect("error").contains("Module not found"));
+        assert!(result
+            .error
+            .as_ref()
+            .expect("error")
+            .contains("Module not found"));
     }
 
     #[tokio::test]
@@ -728,49 +793,77 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = minimal_ctx("rok.setVar('r', atob(btoa('hello world!')))");
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("r").expect("r"), "hello world!");
     }
 
     #[tokio::test]
     async fn require_jsonwebtoken_sign_and_verify_roundtrip() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const jwt = require('jsonwebtoken');
             const token = jwt.sign({ sub: '123' }, 'my-secret');
             rok.setVar('ok', jwt.verify(token, 'my-secret'));
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("ok").expect("ok"), true);
     }
 
     #[tokio::test]
     async fn require_jsonwebtoken_verify_rejects_tampered_token() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const jwt = require('jsonwebtoken');
             const token = jwt.sign({ sub: '123' }, 'my-secret');
             rok.setVar('wrongSecret', jwt.verify(token, 'not-the-secret'));
             rok.setVar('tampered', jwt.verify(token + 'x', 'my-secret'));
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
-        assert_eq!(result.runtime_vars.get("wrongSecret").expect("wrongSecret"), false);
-        assert_eq!(result.runtime_vars.get("tampered").expect("tampered"), false);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        assert_eq!(
+            result.runtime_vars.get("wrongSecret").expect("wrongSecret"),
+            false
+        );
+        assert_eq!(
+            result.runtime_vars.get("tampered").expect("tampered"),
+            false
+        );
     }
 
     #[tokio::test]
     async fn require_jsonwebtoken_decode_reads_claims_without_verifying() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(r#"
+        let ctx = minimal_ctx(
+            r#"
             const jwt = require('jsonwebtoken');
             const token = jwt.sign({ sub: 'abc123' }, 'my-secret');
             const claims = jwt.decode(token);
             rok.setVar('sub', claims.sub);
-        "#);
+        "#,
+        );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("sub").expect("sub"), "abc123");
     }
 
@@ -802,7 +895,9 @@ mod tests {
     #[tokio::test]
     async fn req_delete_then_set_header_preserves_order() {
         let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx("req.deleteHeader('Authorization'); req.setHeader('Authorization', 'Bearer tok')");
+        let ctx = minimal_ctx(
+            "req.deleteHeader('Authorization'); req.setHeader('Authorization', 'Bearer tok')",
+        );
         let result = engine.execute(ctx).await.expect("execute");
         let mutations = result.request_mutations.expect("mutations present");
         assert!(matches!(
@@ -897,7 +992,11 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = minimal_ctx("rok.setVar('typeofDeno', typeof Deno)");
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(
             result
                 .runtime_vars
@@ -955,9 +1054,17 @@ mod tests {
              typeof k === 'string' && (k === 'Deno' || k.startsWith('__'))))",
         );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(
-            result.runtime_vars.get("leaks").expect("leaks present").to_string(),
+            result
+                .runtime_vars
+                .get("leaks")
+                .expect("leaks present")
+                .to_string(),
             "[]"
         );
     }
@@ -972,10 +1079,20 @@ mod tests {
             "rok.setVar('typeofFs', typeof fs); rok.setVar('typeofProcess', typeof process)",
         );
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
-        assert_eq!(result.runtime_vars.get("typeofFs").expect("typeofFs"), "undefined");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(
-            result.runtime_vars.get("typeofProcess").expect("typeofProcess"),
+            result.runtime_vars.get("typeofFs").expect("typeofFs"),
+            "undefined"
+        );
+        assert_eq!(
+            result
+                .runtime_vars
+                .get("typeofProcess")
+                .expect("typeofProcess"),
             "undefined"
         );
     }
@@ -983,7 +1100,11 @@ mod tests {
     #[tokio::test]
     async fn fs_write_then_read_roundtrips_in_developer_mode() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let path = dir.path().join("script-output.txt").to_string_lossy().to_string();
+        let path = dir
+            .path()
+            .join("script-output.txt")
+            .to_string_lossy()
+            .to_string();
         let path_json = serde_json::to_string(&path).expect("json path");
         let code = format!(
             "fs.writeFile({path_json}, 'hello from script'); \
@@ -995,7 +1116,11 @@ mod tests {
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(
             result.runtime_vars.get("content").expect("content"),
             "hello from script"
@@ -1019,7 +1144,11 @@ mod tests {
             )
         };
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(
             result
                 .runtime_vars
@@ -1048,7 +1177,11 @@ mod tests {
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("exists").expect("exists"), true);
     }
 
@@ -1087,7 +1220,11 @@ mod tests {
             .await
             .expect("a fast script must not be affected by the timeout");
 
-        assert!(result.error.is_none(), "unexpected error: {:?}", result.error);
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
         assert_eq!(result.runtime_vars.get("x").expect("x present"), "ok");
         assert_eq!(result.console_entries.len(), 1);
         assert!(result.console_entries[0].message.contains("quick"));
@@ -1110,7 +1247,10 @@ mod tests {
         let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
             .await
             .expect("engine must still work after repeated terminations");
-        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+        assert_eq!(
+            result.runtime_vars.get("alive").expect("alive present"),
+            "yes"
+        );
     }
 
     #[tokio::test]
@@ -1148,7 +1288,10 @@ mod tests {
         let result = run_script_with_timeout(ctx, TEST_TIMEOUT)
             .await
             .expect("engine must still work after a heap-limit termination");
-        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+        assert_eq!(
+            result.runtime_vars.get("alive").expect("alive present"),
+            "yes"
+        );
     }
 
     #[test]
@@ -1174,7 +1317,10 @@ mod tests {
 
             let ctx = minimal_ctx("while (true) {}");
             let outcome = run_script_with_timeout(ctx, TEST_TIMEOUT).await;
-            assert!(outcome.is_err(), "a queued script must still report a timeout");
+            assert!(
+                outcome.is_err(),
+                "a queued script must still report a timeout"
+            );
 
             occupier.await.expect("occupier task");
 
@@ -1198,7 +1344,10 @@ mod tests {
                  the pool forever",
             )
             .expect("engine must still work after a queued-then-terminated script");
-            assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+            assert_eq!(
+                result.runtime_vars.get("alive").expect("alive present"),
+                "yes"
+            );
         });
     }
 }

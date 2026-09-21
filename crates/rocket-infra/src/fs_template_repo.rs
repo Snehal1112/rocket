@@ -76,7 +76,11 @@ mod tests {
     #[test]
     fn get_by_name() {
         let (_dir, repo) = setup();
-        let t = Template::new("GET Users", HttpMethod::Get, "https://api.example.com/users");
+        let t = Template::new(
+            "GET Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
         repo.save(&t).unwrap();
         let loaded = repo.get("GET Users").unwrap();
         assert_eq!(loaded.url, "https://api.example.com/users");

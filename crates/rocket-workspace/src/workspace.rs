@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use rocket_shared::error::{DomainError, DomainResult};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -74,8 +74,7 @@ impl WorkspaceRegistry {
 
     pub fn name_exists(&self, name: &str, exclude_id: Option<&str>) -> bool {
         self.workspaces.iter().any(|w| {
-            w.name.to_lowercase() == name.to_lowercase()
-                && exclude_id.is_none_or(|id| w.id != id)
+            w.name.to_lowercase() == name.to_lowercase() && exclude_id.is_none_or(|id| w.id != id)
         })
     }
 }

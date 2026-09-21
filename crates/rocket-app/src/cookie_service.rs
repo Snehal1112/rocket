@@ -43,7 +43,9 @@ mod tests {
 
     impl MockCookieRepo {
         fn new() -> Self {
-            Self { jars: Mutex::new(Vec::new()) }
+            Self {
+                jars: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -53,7 +55,13 @@ mod tests {
         }
 
         fn get_by_domain(&self, domain: &str) -> DomainResult<Option<CookieJar>> {
-            Ok(self.jars.lock().unwrap().iter().find(|j| j.domain == domain).cloned())
+            Ok(self
+                .jars
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|j| j.domain == domain)
+                .cloned())
         }
 
         fn save(&self, jar: &CookieJar) -> DomainResult<()> {
@@ -73,7 +81,10 @@ mod tests {
     }
 
     fn make_service() -> CookieService {
-        CookieService::new(Box::new(MockCookieRepo::new()), Box::new(NullEventPublisher))
+        CookieService::new(
+            Box::new(MockCookieRepo::new()),
+            Box::new(NullEventPublisher),
+        )
     }
 
     #[test]

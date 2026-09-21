@@ -218,7 +218,12 @@ mod tests {
         std::fs::write(&path, format!("{valid_a}\nnot valid json\n{valid_b}\n")).unwrap();
 
         let events = repo.load_all().unwrap();
-        assert_eq!(events.len(), 2, "expected 2 valid events, got {}", events.len());
+        assert_eq!(
+            events.len(),
+            2,
+            "expected 2 valid events, got {}",
+            events.len()
+        );
         assert_eq!(events[0].hash, a.hash);
         assert_eq!(events[1].hash, b.hash);
     }

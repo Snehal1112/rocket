@@ -37,7 +37,10 @@ mod tests {
     #[test]
     fn new_template_has_empty_headers_and_no_body() {
         let t = Template::new("Ping", HttpMethod::Get, "https://example.com/ping");
-        assert!(t.headers.is_empty(), "headers must be empty on construction");
+        assert!(
+            t.headers.is_empty(),
+            "headers must be empty on construction"
+        );
         assert!(t.body.is_none(), "body must be None on construction");
     }
 
@@ -47,10 +50,17 @@ mod tests {
     /// receives snake_case keys and silently mis-parses templates.
     #[test]
     fn template_serialises_with_camel_case_and_round_trips() {
-        let t = Template::new("My Request", HttpMethod::Post, "https://api.example.com/users");
+        let t = Template::new(
+            "My Request",
+            HttpMethod::Post,
+            "https://api.example.com/users",
+        );
         let json = serde_json::to_string(&t).unwrap();
         // All top-level keys must be camelCase.
-        assert!(json.contains('"' ), "serialised output must be non-empty JSON");
+        assert!(
+            json.contains('"'),
+            "serialised output must be non-empty JSON"
+        );
         let round: Template = serde_json::from_str(&json).unwrap();
         assert_eq!(round.name, t.name);
         assert_eq!(round.method, t.method);
@@ -66,6 +76,9 @@ mod tests {
     fn templates_differing_only_by_url_are_not_equal() {
         let a = Template::new("Ping", HttpMethod::Get, "https://foo.example.com");
         let b = Template::new("Ping", HttpMethod::Get, "https://bar.example.com");
-        assert_ne!(a, b, "templates with same name but different URLs must not be equal");
+        assert_ne!(
+            a, b,
+            "templates with same name but different URLs must not be equal"
+        );
     }
 }

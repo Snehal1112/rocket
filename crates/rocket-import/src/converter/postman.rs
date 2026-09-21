@@ -188,7 +188,11 @@ pub(crate) fn convert_request_item(item: &PostmanRequestItem) -> (Request, Vec<S
 
     let method = HttpMethod::from_str(&item.request.method).unwrap_or(HttpMethod::Get);
 
-    let mut req = Request::new(item.name.clone(), method, item.request.url.raw().to_string());
+    let mut req = Request::new(
+        item.name.clone(),
+        method,
+        item.request.url.raw().to_string(),
+    );
 
     req.headers = convert_headers(&item.request.header);
     req.query_params = convert_query_params(item.request.url.query_params());

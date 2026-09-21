@@ -140,8 +140,12 @@ mod tests {
     }
 
     fn svc() -> SecurityAuditService {
-        let log = Arc::new(MemLog { events: std::sync::Mutex::new(vec![]) });
-        let profile = Arc::new(MemProfile { p: Mutex::new(default_profile()) });
+        let log = Arc::new(MemLog {
+            events: std::sync::Mutex::new(vec![]),
+        });
+        let profile = Arc::new(MemProfile {
+            p: Mutex::new(default_profile()),
+        });
         SecurityAuditService::new(log, profile).unwrap()
     }
 
@@ -151,13 +155,17 @@ mod tests {
         s.record(
             "a".into(),
             None,
-            AuditEventKind::CollectionDeleted { collection: "x".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "x".into(),
+            },
         )
         .unwrap();
         s.record(
             "a".into(),
             None,
-            AuditEventKind::CollectionDeleted { collection: "y".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "y".into(),
+            },
         )
         .unwrap();
         let events = s.list().unwrap();
@@ -176,7 +184,9 @@ mod tests {
             .record(
                 "a".into(),
                 None,
-                AuditEventKind::CollectionDeleted { collection: "x".into() },
+                AuditEventKind::CollectionDeleted {
+                    collection: "x".into(),
+                },
             )
             .unwrap();
         assert!(result.is_none());
@@ -192,7 +202,9 @@ mod tests {
         let result = s.record(
             "a".into(),
             None,
-            AuditEventKind::CollectionDeleted { collection: "x".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "x".into(),
+            },
         );
         assert!(matches!(result, Err(DomainError::InvalidInput(_))));
         // Event was still recorded — this is the audit trail.

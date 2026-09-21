@@ -36,15 +36,16 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
 /// Build the folder tree loading only the minimal fields needed for the sidebar.
 /// Skips full request body parsing for a significant speedup on large collections.
 pub(super) fn build_folder_tree_summaries(current: &Path) -> DomainResult<Folder> {
-    build_tree(current, &mut |path, entry_name| {
-        match load_request_summary(path, entry_name) {
+    build_tree(
+        current,
+        &mut |path, entry_name| match load_request_summary(path, entry_name) {
             Ok(summary) => Ok(Some(CollectionItem::Summary(summary))),
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file in summary load");
                 Ok(None)
             }
-        }
-    })
+        },
+    )
 }
 
 /// Shared folder-tree walker. Handles UID/name loading, ordering, symlink rejection, and
@@ -92,22 +93,52 @@ where
     let mut entries: Vec<_> = fs::read_dir(current)?.filter_map(|e| e.ok()).collect();
     // Apply explicit order from _order.yml (or _order.json for backward compat).
     let order_path = current.join("_order.yml");
-    let order_path = if order_path.exists() { order_path } else { current.join("_order.json") };
+    let order_path = if order_path.exists() {
+        order_path
+    } else {
+        current.join("_order.json")
+    };
     if let Ok(content) = fs::read_to_string(&order_path) {
         if let Ok(ordered) = serde_yaml::from_str::<Vec<String>>(&content) {
             let pos: std::collections::HashMap<String, usize> = ordered
-                .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| (name, i))
+                .collect();
             entries.sort_by(|a, b| {
-                let ai = a.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
-                let bi = b.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
+                let ai = a
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| pos.get(n))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                let bi = b
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| pos.get(n))
+                    .copied()
+                    .unwrap_or(usize::MAX);
                 ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
             });
         } else if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
             let pos: std::collections::HashMap<String, usize> = ordered
-                .into_iter().enumerate().map(|(i, name)| (name, i)).collect();
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| (name, i))
+                .collect();
             entries.sort_by(|a, b| {
-                let ai = a.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
-                let bi = b.file_name().to_str().and_then(|n| pos.get(n)).copied().unwrap_or(usize::MAX);
+                let ai = a
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| pos.get(n))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                let bi = b
+                    .file_name()
+                    .to_str()
+                    .and_then(|n| pos.get(n))
+                    .copied()
+                    .unwrap_or(usize::MAX);
                 ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
             });
         } else {
@@ -125,7 +156,10 @@ where
         }
         if path.is_dir() {
             // Skip symlinked directories to prevent exfiltration.
-            if std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            if std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
                 tracing::warn!(path = %path.display(), "skipping symlinked directory in folder tree");
                 continue;
             }

@@ -11,12 +11,6 @@ pub use repository::{ContractError, ContractRepository, ContractResult};
 pub use snapshot::{ContractSnapshot, RequestSignatureSnapshot};
 pub use state_machine::{transition as transition_status, InvalidTransition, StatusEvent};
 pub use types::{
-    BreakingChangePolicy,
-    Contract,
-    ContractEnforcementMode,
-    ContractParty,
-    ContractPolicy,
-    ContractScope,
-    ContractStatus,
-    PartyKind,
+    BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy,
+    ContractScope, ContractStatus, PartyKind,
 };

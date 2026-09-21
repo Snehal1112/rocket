@@ -21,7 +21,10 @@ pub fn generate_pkce() -> PkcePair {
     let digest = hasher.finalize();
     let code_challenge = URL_SAFE_NO_PAD.encode(digest);
 
-    PkcePair { code_verifier, code_challenge }
+    PkcePair {
+        code_verifier,
+        code_challenge,
+    }
 }
 
 #[cfg(test)]
@@ -56,6 +59,9 @@ mod tests {
     fn pkce_verifier_url_safe() {
         let pair = generate_pkce();
         // URL-safe base64 contains only: A-Z, a-z, 0-9, -, _
-        assert!(pair.code_verifier.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(pair
+            .code_verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 }

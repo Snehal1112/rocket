@@ -58,7 +58,10 @@ mod tests {
 
     #[test]
     fn account_namespaces_scope_and_key() {
-        assert_eq!(account("a1b2c3d4e5f60718:prod", "API_KEY"), "a1b2c3d4e5f60718:prod:API_KEY");
+        assert_eq!(
+            account("a1b2c3d4e5f60718:prod", "API_KEY"),
+            "a1b2c3d4e5f60718:prod:API_KEY"
+        );
     }
 
     #[test]
@@ -79,14 +82,22 @@ mod tests {
         let store = KeyringSecretStore;
         let scope = "rocket-infra-test-scope";
         store.set(scope, "TEST_KEY", "sk-live-123").expect("set");
-        assert_eq!(store.get(scope, "TEST_KEY").expect("get"), Some("sk-live-123".to_string()));
+        assert_eq!(
+            store.get(scope, "TEST_KEY").expect("get"),
+            Some("sk-live-123".to_string())
+        );
         store.delete(scope, "TEST_KEY").expect("delete");
-        assert_eq!(store.get(scope, "TEST_KEY").expect("get after delete"), None);
+        assert_eq!(
+            store.get(scope, "TEST_KEY").expect("get after delete"),
+            None
+        );
     }
 
     #[test]
     #[ignore = "requires a real OS keychain"]
     fn keyring_delete_of_missing_entry_is_ok() {
-        assert!(KeyringSecretStore.delete("rocket-infra-test-scope", "NO_SUCH_KEY").is_ok());
+        assert!(KeyringSecretStore
+            .delete("rocket-infra-test-scope", "NO_SUCH_KEY")
+            .is_ok());
     }
 }

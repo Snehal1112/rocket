@@ -15,7 +15,7 @@ pub struct OcGraphQLRequestInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub request_type: Option<String>,  // "graphql"
+    pub request_type: Option<String>, // "graphql"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

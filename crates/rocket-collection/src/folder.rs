@@ -82,36 +82,48 @@ impl Folder {
 
     /// Count all requests recursively.
     pub fn request_count(&self) -> usize {
-        self.items.iter().map(|item| match item {
-            CollectionItem::Request(_) => 1,
-            CollectionItem::Summary(_) => 1, // one summary = one request on disk
-            CollectionItem::Folder(f) => f.request_count(),
-            CollectionItem::OpaqueItem(_) => 0,
-        }).sum()
+        self.items
+            .iter()
+            .map(|item| match item {
+                CollectionItem::Request(_) => 1,
+                CollectionItem::Summary(_) => 1, // one summary = one request on disk
+                CollectionItem::Folder(f) => f.request_count(),
+                CollectionItem::OpaqueItem(_) => 0,
+            })
+            .sum()
     }
 
     /// List all folder names at current level.
     pub fn subfolder_names(&self) -> Vec<&str> {
-        self.items.iter().filter_map(|item| match item {
-            CollectionItem::Folder(f) => Some(f.name.as_str()),
-            _ => None,
-        }).collect()
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                CollectionItem::Folder(f) => Some(f.name.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Return all sub-folders at this folder level (non-recursive).
     pub fn subfolders(&self) -> Vec<&Folder> {
-        self.items.iter().filter_map(|item| match item {
-            CollectionItem::Folder(f) => Some(f),
-            _ => None,
-        }).collect()
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                CollectionItem::Folder(f) => Some(f),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Return all `Summary` items at this folder level (non-recursive).
     pub fn request_summaries(&self) -> Vec<&RequestSummary> {
-        self.items.iter().filter_map(|item| match item {
-            CollectionItem::Summary(s) => Some(s),
-            _ => None,
-        }).collect()
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                CollectionItem::Summary(s) => Some(s),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Add a summary item to this folder.

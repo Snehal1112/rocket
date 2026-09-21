@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::defaults::OcRequestDefaults;
 use super::graphql::OcGraphQLRequest;
 use super::grpc::OcGrpcRequest;
-use super::http::OcScriptFile;
 use super::http::OcHttpRequest;
+use super::http::OcScriptFile;
 use super::websocket::OcWebSocketRequest;
 
 /// Folder info metadata.
@@ -19,7 +19,7 @@ pub struct OcFolderInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub folder_type: Option<String>,  // "folder"
+    pub folder_type: Option<String>, // "folder"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

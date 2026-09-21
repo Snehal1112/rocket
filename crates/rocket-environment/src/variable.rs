@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use rocket_shared::description::Description;
 use rocket_shared::variable_value::VariableValueVariant;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +42,9 @@ impl<'de> Deserialize<'de> for Variable {
             secret_type: Option<String>,
         }
 
-        fn default_true() -> bool { true }
+        fn default_true() -> bool {
+            true
+        }
 
         let helper = VariableHelper::deserialize(deserializer)?;
 

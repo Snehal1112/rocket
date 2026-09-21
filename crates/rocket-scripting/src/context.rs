@@ -1,7 +1,7 @@
+use crate::ScriptPhase;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
-use crate::ScriptPhase;
 
 /// How the request carrying a script was dispatched.
 ///

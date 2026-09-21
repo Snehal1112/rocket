@@ -21,7 +21,7 @@ pub struct BruDocument {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BruMeta {
     pub name: String,
-    pub request_type: String,  // "http", "graphql", "grpc", "websocket"
+    pub request_type: String, // "http", "graphql", "grpc", "websocket"
     pub seq: Option<u32>,
 }
 
@@ -29,26 +29,32 @@ pub struct BruMeta {
 pub struct BruKeyValue {
     pub key: String,
     pub value: String,
-    pub disabled: bool,  // true when line starts with `~`
+    pub disabled: bool, // true when line starts with `~`
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BruMethod {
-    Get, Post, Put, Patch, Delete, Head, Options,
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Head,
+    Options,
 }
 
 impl BruMethod {
     /// Parse from lowercase block name ("get", "post", …).
     pub fn from_block_name(s: &str) -> Option<Self> {
         match s {
-            "get"     => Some(Self::Get),
-            "post"    => Some(Self::Post),
-            "put"     => Some(Self::Put),
-            "patch"   => Some(Self::Patch),
-            "delete"  => Some(Self::Delete),
-            "head"    => Some(Self::Head),
+            "get" => Some(Self::Get),
+            "post" => Some(Self::Post),
+            "put" => Some(Self::Put),
+            "patch" => Some(Self::Patch),
+            "delete" => Some(Self::Delete),
+            "head" => Some(Self::Head),
             "options" => Some(Self::Options),
-            _         => None,
+            _ => None,
         }
     }
 }
@@ -64,8 +70,13 @@ pub enum BruBody {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BruAuth {
-    Bearer { token: String },
-    Basic { username: String, password: String },
+    Bearer {
+        token: String,
+    },
+    Basic {
+        username: String,
+        password: String,
+    },
     AwsV4 {
         access_key_id: String,
         secret_access_key: String,
@@ -74,8 +85,15 @@ pub enum BruAuth {
         region: Option<String>,
         profile_name: Option<String>,
     },
-    ApiKey { key: String, value: String, placement: String },
-    Digest { username: String, password: String },
+    ApiKey {
+        key: String,
+        value: String,
+        placement: String,
+    },
+    Digest {
+        username: String,
+        password: String,
+    },
     /// Any auth type not listed above — lands in unknown_blocks instead.
     /// The parser never constructs this; it is kept for completeness.
     #[allow(dead_code)]

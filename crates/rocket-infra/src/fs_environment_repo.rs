@@ -48,10 +48,12 @@ impl FsEnvironmentRepo {
 
         let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
         let digest = Sha256::digest(canonical.to_string_lossy().as_bytes());
-        let prefix = digest[..8].iter().fold(String::with_capacity(16), |mut acc, b| {
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
+        let prefix = digest[..8]
+            .iter()
+            .fold(String::with_capacity(16), |mut acc, b| {
+                let _ = write!(acc, "{b:02x}");
+                acc
+            });
         format!("{prefix}:{env_name}")
     }
 
@@ -232,7 +234,11 @@ mod tests {
         }
 
         fn contains_value(&self, value: &str) -> bool {
-            self.entries.lock().expect("store lock").values().any(|v| v == value)
+            self.entries
+                .lock()
+                .expect("store lock")
+                .values()
+                .any(|v| v == value)
         }
     }
 
@@ -306,7 +312,10 @@ mod tests {
         env.set_variable(Variable::new("BASE_URL", "https://staging.example.com"));
         repo.save(&env).unwrap();
         let loaded = repo.get("staging").unwrap();
-        assert_eq!(loaded.get_value("BASE_URL"), Some("https://staging.example.com"));
+        assert_eq!(
+            loaded.get_value("BASE_URL"),
+            Some("https://staging.example.com")
+        );
     }
 
     #[test]
@@ -341,10 +350,22 @@ mod tests {
         repo.save(&env).unwrap();
 
         let raw = std::fs::read_to_string(dir.path().join("prod.yml")).unwrap();
-        assert!(raw.contains("name: BASE_URL"), "expected 'name:' field, got:\n{raw}");
-        assert!(!raw.contains("key:"), "should not contain 'key:' field:\n{raw}");
-        assert!(raw.contains("disabled: true"), "expected 'disabled: true':\n{raw}");
-        assert!(!raw.contains("enabled:"), "should not contain 'enabled:' field:\n{raw}");
+        assert!(
+            raw.contains("name: BASE_URL"),
+            "expected 'name:' field, got:\n{raw}"
+        );
+        assert!(
+            !raw.contains("key:"),
+            "should not contain 'key:' field:\n{raw}"
+        );
+        assert!(
+            raw.contains("disabled: true"),
+            "expected 'disabled: true':\n{raw}"
+        );
+        assert!(
+            !raw.contains("enabled:"),
+            "should not contain 'enabled:' field:\n{raw}"
+        );
     }
 
     #[test]
@@ -360,7 +381,8 @@ mod tests {
     #[test]
     fn load_old_format_with_key_field_still_works() {
         let (dir, repo) = setup();
-        let old_yaml = "name: legacy\nvariables:\n- key: OLD_VAR\n  value: hello\n  enabled: true\n";
+        let old_yaml =
+            "name: legacy\nvariables:\n- key: OLD_VAR\n  value: hello\n  enabled: true\n";
         std::fs::write(dir.path().join("legacy.yml"), old_yaml).unwrap();
         let env = repo.get("legacy").unwrap();
         assert_eq!(env.get_value("OLD_VAR"), Some("hello"));
@@ -369,7 +391,8 @@ mod tests {
     #[test]
     fn list_old_format_with_key_field_still_works() {
         let (dir, repo) = setup();
-        let old_yaml = "name: legacy\nvariables:\n- key: OLD_VAR\n  value: hello\n  enabled: true\n";
+        let old_yaml =
+            "name: legacy\nvariables:\n- key: OLD_VAR\n  value: hello\n  enabled: true\n";
         std::fs::write(dir.path().join("legacy.yml"), old_yaml).unwrap();
         let list = repo.list().unwrap();
         assert_eq!(list.len(), 1);
@@ -384,8 +407,14 @@ mod tests {
         repo.save(&env).expect("save");
 
         let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
-        assert!(!raw.contains("sk-live-123"), "secret value leaked to disk:\n{raw}");
-        assert!(store.contains_value("sk-live-123"), "secret value never reached the store");
+        assert!(
+            !raw.contains("sk-live-123"),
+            "secret value leaked to disk:\n{raw}"
+        );
+        assert!(
+            store.contains_value("sk-live-123"),
+            "secret value never reached the store"
+        );
     }
 
     #[test]
@@ -398,10 +427,22 @@ mod tests {
         repo.save(&env).expect("save");
 
         let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
-        assert!(raw.contains("secret: true"), "expected 'secret: true':\n{raw}");
-        assert!(raw.contains("name: API_KEY"), "expected 'name: API_KEY':\n{raw}");
-        assert!(raw.contains("type: string"), "expected the secret type hint:\n{raw}");
-        assert!(!raw.contains("value:"), "a secret entry must carry no value field:\n{raw}");
+        assert!(
+            raw.contains("secret: true"),
+            "expected 'secret: true':\n{raw}"
+        );
+        assert!(
+            raw.contains("name: API_KEY"),
+            "expected 'name: API_KEY':\n{raw}"
+        );
+        assert!(
+            raw.contains("type: string"),
+            "expected the secret type hint:\n{raw}"
+        );
+        assert!(
+            !raw.contains("value:"),
+            "a secret entry must carry no value field:\n{raw}"
+        );
     }
 
     #[test]
@@ -411,7 +452,9 @@ mod tests {
 
         let mut env = Environment::new("prod");
         env.set_variable(Variable::secret("API_KEY", "sk-live-123"));
-        let err = repo.save(&env).expect_err("save must fail when the store rejects the value");
+        let err = repo
+            .save(&env)
+            .expect_err("save must fail when the store rejects the value");
 
         assert!(matches!(err, DomainError::Internal(_)), "got {err:?}");
         assert!(
@@ -446,7 +489,11 @@ mod tests {
         let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
         assert!(raw.contains("name: HOST"), "got:\n{raw}");
         assert!(raw.contains("value: api.example.com"), "got:\n{raw}");
-        assert_eq!(store.len(), 0, "a non-secret variable must not touch the secret store");
+        assert_eq!(
+            store.len(),
+            0,
+            "a non-secret variable must not touch the secret store"
+        );
     }
 
     #[test]
@@ -499,7 +546,9 @@ mod tests {
 
         store.fail_get.store(true, Ordering::SeqCst);
         // A locked keychain must never fail an environment load.
-        let loaded = repo.get("prod").expect("get must not fail on a store error");
+        let loaded = repo
+            .get("prod")
+            .expect("get must not fail on a store error");
         let api_key = loaded
             .variables
             .iter()
@@ -552,8 +601,10 @@ mod tests {
         let store = Arc::new(InMemorySecretStore::default());
         let dir_a = TempDir::new().expect("temp dir a");
         let dir_b = TempDir::new().expect("temp dir b");
-        let repo_a = FsEnvironmentRepo::with_secret_store(dir_a.path().to_path_buf(), store.clone());
-        let repo_b = FsEnvironmentRepo::with_secret_store(dir_b.path().to_path_buf(), store.clone());
+        let repo_a =
+            FsEnvironmentRepo::with_secret_store(dir_a.path().to_path_buf(), store.clone());
+        let repo_b =
+            FsEnvironmentRepo::with_secret_store(dir_b.path().to_path_buf(), store.clone());
 
         let mut env_a = Environment::new("prod");
         env_a.set_variable(Variable::secret("API_KEY", "value-a"));
@@ -563,9 +614,19 @@ mod tests {
         env_b.set_variable(Variable::secret("API_KEY", "value-b"));
         repo_b.save(&env_b).expect("save b");
 
-        assert_eq!(store.len(), 2, "same env name in different directories must not collide");
-        assert_eq!(repo_a.get("prod").expect("get a").get_value("API_KEY"), Some("value-a"));
-        assert_eq!(repo_b.get("prod").expect("get b").get_value("API_KEY"), Some("value-b"));
+        assert_eq!(
+            store.len(),
+            2,
+            "same env name in different directories must not collide"
+        );
+        assert_eq!(
+            repo_a.get("prod").expect("get a").get_value("API_KEY"),
+            Some("value-a")
+        );
+        assert_eq!(
+            repo_b.get("prod").expect("get b").get_value("API_KEY"),
+            Some("value-b")
+        );
     }
 
     #[test]
@@ -598,7 +659,10 @@ mod tests {
         repo.save(&env).expect("second save");
 
         assert_eq!(store.len(), 1);
-        assert!(store.contains_value("tok-456"), "the surviving secret must be untouched");
+        assert!(
+            store.contains_value("tok-456"),
+            "the surviving secret must be untouched"
+        );
         assert!(!store.contains_value("sk-live-123"));
     }
 
@@ -611,7 +675,10 @@ mod tests {
         repo.save(&env).expect("second save");
 
         assert_eq!(store.len(), 1);
-        assert_eq!(repo.get("prod").expect("get").get_value("API_KEY"), Some("sk-live-123"));
+        assert_eq!(
+            repo.get("prod").expect("get").get_value("API_KEY"),
+            Some("sk-live-123")
+        );
     }
 
     #[test]
@@ -625,7 +692,11 @@ mod tests {
 
         repo.delete("prod").expect("delete");
 
-        assert_eq!(store.len(), 0, "a deleted environment must not leave secrets behind");
+        assert_eq!(
+            store.len(),
+            0,
+            "a deleted environment must not leave secrets behind"
+        );
         assert!(repo.list().expect("list").is_empty());
     }
 

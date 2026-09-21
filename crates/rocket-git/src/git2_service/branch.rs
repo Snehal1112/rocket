@@ -3,7 +3,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::branch::{Branch, BranchList};
 
-use super::helpers::{branch_name, open_repo, clear_matching_untracked_paths};
+use super::helpers::{branch_name, clear_matching_untracked_paths, open_repo};
 
 #[tracing::instrument(name = "git_branches", fields(repo_path = %path))]
 pub(super) fn branches(path: &str) -> DomainResult<BranchList> {

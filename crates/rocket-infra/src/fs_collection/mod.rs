@@ -123,7 +123,12 @@ impl CollectionRepository for FsCollectionRepo {
         requests::get_request(self, collection, path)
     }
 
-    fn save_request(&self, collection: &str, path: &str, request: &Request) -> DomainResult<String> {
+    fn save_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<String> {
         requests::save_request(self, collection, path, request)
     }
 
@@ -153,7 +158,12 @@ impl CollectionRepository for FsCollectionRepo {
         folders::move_item(self, src_collection, src_path, dst_collection, dst_path)
     }
 
-    fn reorder_items(&self, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
+    fn reorder_items(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        ordered_names: &[String],
+    ) -> DomainResult<()> {
         folders::reorder_items(self, collection, folder_path, ordered_names)
     }
 
@@ -165,23 +175,45 @@ impl CollectionRepository for FsCollectionRepo {
         settings::save_settings(self, name, s)
     }
 
-    fn get_folder_chain_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+    fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         variables::get_folder_chain_variables(self, collection, request_path)
     }
 
-    fn get_folder_variables(&self, collection: &str, folder_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+    fn get_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         variables::get_folder_variables(self, collection, folder_path)
     }
 
-    fn save_folder_variables(&self, collection: &str, folder_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
+    fn save_folder_variables(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
         variables::save_folder_variables(self, collection, folder_path, vars)
     }
 
-    fn get_request_variables(&self, collection: &str, request_path: &str) -> DomainResult<Vec<CollectionVariable>> {
+    fn get_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
         variables::get_request_variables(self, collection, request_path)
     }
 
-    fn save_request_variables(&self, collection: &str, request_path: &str, vars: Vec<CollectionVariable>) -> DomainResult<()> {
+    fn save_request_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+        vars: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
         variables::save_request_variables(self, collection, request_path, vars)
     }
 }

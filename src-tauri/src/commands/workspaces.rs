@@ -76,7 +76,10 @@ pub fn switch_workspace(
     watcher: State<'_, NotifyFileWatcher>,
     app: tauri::AppHandle,
 ) -> Result<WorkspaceDto, DomainError> {
-    let workspace = svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.switch(&id)?;
+    let workspace = svc
+        .lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .switch(&id)?;
     // Restart the file watcher on the new workspace's collections directory so
     // filesystem changes in the new workspace trigger sidebar refreshes.
     let new_collections_dir = workspace.path.join("collections");
@@ -93,7 +96,9 @@ pub fn rename_workspace(
     new_name: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.rename(&id, &new_name)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .rename(&id, &new_name)
 }
 
 #[tauri::command]
@@ -101,7 +106,9 @@ pub fn close_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.close(&id)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .close(&id)
 }
 
 #[tauri::command]
@@ -109,7 +116,9 @@ pub fn delete_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.delete(&id)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .delete(&id)
 }
 
 #[tauri::command]
@@ -117,7 +126,9 @@ pub fn pin_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.pin(&id)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .pin(&id)
 }
 
 #[tauri::command]
@@ -125,7 +136,9 @@ pub fn unpin_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.unpin(&id)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .unpin(&id)
 }
 
 #[tauri::command]
@@ -134,7 +147,9 @@ pub fn update_workspace_description(
     description: Option<String>,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.update_description(&id, description.as_deref())
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .update_description(&id, description.as_deref())
 }
 
 #[tauri::command]
@@ -153,14 +168,18 @@ pub fn get_workspace_config(
     workspace_id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<WorkspaceConfig, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.get_workspace_config(&workspace_id)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .get_workspace_config(&workspace_id)
 }
 
 #[tauri::command]
 pub fn get_multi_workspace_mode(
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<bool, DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.get_multi_workspace_mode()
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .get_multi_workspace_mode()
 }
 
 #[tauri::command]
@@ -168,7 +187,9 @@ pub fn set_multi_workspace_mode(
     enabled: bool,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.set_multi_workspace_mode(enabled)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .set_multi_workspace_mode(enabled)
 }
 
 #[tauri::command]
@@ -177,7 +198,9 @@ pub fn update_request_guard_policy(
     policy: RequestGuardPolicy,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.update_request_guard_policy(&workspace_id, policy)
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .update_request_guard_policy(&workspace_id, policy)
 }
 
 #[tauri::command]
@@ -186,7 +209,9 @@ pub fn link_external_collection(
     collection_path: String,
     svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
-    svc.lock().map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?.link_external_collection(&workspace_id, PathBuf::from(collection_path))
+    svc.lock()
+        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
+        .link_external_collection(&workspace_id, PathBuf::from(collection_path))
 }
 
 #[tauri::command]

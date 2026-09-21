@@ -1,6 +1,6 @@
-use std::path::Path;
-use rocket_shared::error::DomainResult;
 use crate::config::WorkspaceConfig;
+use rocket_shared::error::DomainResult;
+use std::path::Path;
 
 /// Repository trait for reading/writing per-workspace `workspace.yml` config.
 /// The `workspace_path` parameter is the root directory of the workspace.

@@ -1,5 +1,7 @@
 use crate::oc::*;
-use rocket_workspace::{CollectionReference, CollectionRefType, WorkspaceConfig, WorkspaceEnvironmentsConfig};
+use rocket_workspace::{
+    CollectionRefType, CollectionReference, WorkspaceConfig, WorkspaceEnvironmentsConfig,
+};
 
 impl From<OcWorkspaceCollectionRef> for CollectionReference {
     fn from(r: OcWorkspaceCollectionRef) -> Self {
@@ -39,7 +41,11 @@ impl From<OcWorkspaceConfig> for WorkspaceConfig {
         WorkspaceConfig {
             name: oc.info.name,
             description: oc.docs,
-            collections: oc.collections.into_iter().map(CollectionReference::from).collect(),
+            collections: oc
+                .collections
+                .into_iter()
+                .map(CollectionReference::from)
+                .collect(),
             environments: WorkspaceEnvironmentsConfig {
                 active_environment: oc.environments.and_then(|e| e.active_environment),
             },
@@ -63,7 +69,11 @@ impl From<WorkspaceConfig> for OcWorkspaceConfig {
                 name: w.name,
                 workspace_type: Some("workspace".into()),
             },
-            collections: w.collections.into_iter().map(OcWorkspaceCollectionRef::from).collect(),
+            collections: w
+                .collections
+                .into_iter()
+                .map(OcWorkspaceCollectionRef::from)
+                .collect(),
             docs: w.description,
             environments: if has_active_env {
                 Some(OcWorkspaceEnvironments {

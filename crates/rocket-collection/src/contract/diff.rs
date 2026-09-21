@@ -74,8 +74,16 @@ pub fn diff_signature(
             request_path: path.clone(),
             field: "auth_detail".into(),
             change_type: ChangeType::Changed,
-            old_value: if old.auth_detail.is_empty() { None } else { Some(old.auth_detail.clone()) },
-            new_value: if new.auth_detail.is_empty() { None } else { Some(new.auth_detail.clone()) },
+            old_value: if old.auth_detail.is_empty() {
+                None
+            } else {
+                Some(old.auth_detail.clone())
+            },
+            new_value: if new.auth_detail.is_empty() {
+                None
+            } else {
+                Some(new.auth_detail.clone())
+            },
             is_breaking: true,
             request_method: Some(new.method.clone()),
             http_path: Some(new.url_pattern.clone()),
@@ -90,16 +98,64 @@ pub fn diff_signature(
     // detects which format the old snapshot uses and picks the right strategy:
     //   • Both KV  → full key+value comparison
     //   • Old legacy + new KV → key-presence-only comparison (migration path)
-    diff_field(&path, "header", &old.header_keys, &old.headers, &new.header_keys, &new.headers, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
-    diff_field(&path, "query_param", &old.query_param_keys, &old.query_params, &new.query_param_keys, &new.query_params, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
-    diff_kv_list(&path, "form_field", &old.form_fields, &new.form_fields, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+    diff_field(
+        &path,
+        "header",
+        &old.header_keys,
+        &old.headers,
+        &new.header_keys,
+        &new.headers,
+        policy,
+        now,
+        &new.method,
+        &new.url_pattern,
+        author.as_deref(),
+        &mut entries,
+    );
+    diff_field(
+        &path,
+        "query_param",
+        &old.query_param_keys,
+        &old.query_params,
+        &new.query_param_keys,
+        &new.query_params,
+        policy,
+        now,
+        &new.method,
+        &new.url_pattern,
+        author.as_deref(),
+        &mut entries,
+    );
+    diff_kv_list(
+        &path,
+        "form_field",
+        &old.form_fields,
+        &new.form_fields,
+        policy,
+        now,
+        &new.method,
+        &new.url_pattern,
+        author.as_deref(),
+        &mut entries,
+    );
 
     // Legacy body_field comparison — only when BOTH snapshots carry legacy keys.
     // body_field_keys and body_content are incompatible representations; once a
     // snapshot is in the new format (body_content, empty body_field_keys) there
     // is nothing meaningful to compare here.
     if !old.body_field_keys.is_empty() && !new.body_field_keys.is_empty() {
-        diff_key_only_list(&path, "body_field", &old.body_field_keys, &new.body_field_keys, policy, now, &new.method, &new.url_pattern, author.as_deref(), &mut entries);
+        diff_key_only_list(
+            &path,
+            "body_field",
+            &old.body_field_keys,
+            &new.body_field_keys,
+            policy,
+            now,
+            &new.method,
+            &new.url_pattern,
+            author.as_deref(),
+            &mut entries,
+        );
     }
 
     // Body content diff
@@ -185,15 +241,21 @@ fn diff_field(
             // Old snapshot is legacy, new is KV → migration path.
             // Compare by key presence only; values in the old snapshot are absent
             // so a value comparison would produce false "changed → breaking" entries.
-            diff_legacy_to_kv(path, prefix, old_keys, new_kvs, policy, now, method, http_path, author, out);
+            diff_legacy_to_kv(
+                path, prefix, old_keys, new_kvs, policy, now, method, http_path, author, out,
+            );
         }
         (true, false) => {
             // Both legacy → use the key-only diff (backward compat).
-            diff_key_only_list(path, prefix, old_keys, new_keys, policy, now, method, http_path, author, out);
+            diff_key_only_list(
+                path, prefix, old_keys, new_keys, policy, now, method, http_path, author, out,
+            );
         }
         _ => {
             // Both KV (or both empty) → full key+value diff.
-            diff_kv_list(path, prefix, old_kvs, new_kvs, policy, now, method, http_path, author, out);
+            diff_kv_list(
+                path, prefix, old_kvs, new_kvs, policy, now, method, http_path, author, out,
+            );
         }
     }
 }
@@ -300,7 +362,10 @@ fn diff_kv_list(
                 // breaking under Strict. Query params and other fields remain
                 // always-breaking because their values are semantically required.
                 let is_breaking = match (prefix, policy) {
-                    ("header", BreakingChangePolicy::Lenient | BreakingChangePolicy::AdditiveOk) => false,
+                    (
+                        "header",
+                        BreakingChangePolicy::Lenient | BreakingChangePolicy::AdditiveOk,
+                    ) => false,
                     _ => true,
                 };
                 out.push(ChangelogEntry {
@@ -399,7 +464,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_kv(key: &str, value: &str) -> KeyValueEntry {
-        KeyValueEntry { key: key.into(), value: value.into() }
+        KeyValueEntry {
+            key: key.into(),
+            value: value.into(),
+        }
     }
 
     fn base_snap() -> RequestSignatureSnapshot {
@@ -426,7 +494,10 @@ mod tests {
             request_path: PathBuf::from("requests/payment.yml"),
             method: "POST".into(),
             url_pattern: "/payments".into(),
-            headers: vec![make_kv("Authorization", "Bearer old"), make_kv("Content-Type", "application/json")],
+            headers: vec![
+                make_kv("Authorization", "Bearer old"),
+                make_kv("Content-Type", "application/json"),
+            ],
             query_params: vec![make_kv("currency", "USD")],
             body_content: Some(r#"{"amount":100}"#.into()),
             form_fields: vec![],
@@ -439,7 +510,9 @@ mod tests {
         }
     }
 
-    fn lenient() -> BreakingChangePolicy { BreakingChangePolicy::Lenient }
+    fn lenient() -> BreakingChangePolicy {
+        BreakingChangePolicy::Lenient
+    }
 
     #[test]
     fn no_changes_returns_empty() {
@@ -521,7 +594,10 @@ mod tests {
         new.headers[0].value = "Bearer new".into();
         let changes = diff_signature(&old, &new, &lenient(), None);
         assert_eq!(changes.len(), 1);
-        assert!(!changes[0].is_breaking, "header value change must not be breaking under Lenient");
+        assert!(
+            !changes[0].is_breaking,
+            "header value change must not be breaking under Lenient"
+        );
     }
 
     #[test]
@@ -531,7 +607,10 @@ mod tests {
         new.headers[0].value = "Bearer new".into();
         let changes = diff_signature(&old, &new, &BreakingChangePolicy::AdditiveOk, None);
         assert_eq!(changes.len(), 1);
-        assert!(!changes[0].is_breaking, "header value change must not be breaking under AdditiveOk");
+        assert!(
+            !changes[0].is_breaking,
+            "header value change must not be breaking under AdditiveOk"
+        );
     }
 
     #[test]
@@ -541,7 +620,10 @@ mod tests {
         new.headers[0].value = "Bearer new".into();
         let changes = diff_signature(&old, &new, &BreakingChangePolicy::Strict, None);
         assert_eq!(changes.len(), 1);
-        assert!(changes[0].is_breaking, "header value change must be breaking under Strict");
+        assert!(
+            changes[0].is_breaking,
+            "header value change must be breaking under Strict"
+        );
     }
 
     #[test]
@@ -667,8 +749,12 @@ mod tests {
         let changes = diff_signature(&old, &new, &lenient(), None);
 
         assert_eq!(changes.len(), 2);
-        assert!(changes.iter().any(|e| e.field == "auth_type" && e.change_type == ChangeType::Changed));
-        assert!(changes.iter().any(|e| e.field == "auth_detail" && e.change_type == ChangeType::Changed));
+        assert!(changes
+            .iter()
+            .any(|e| e.field == "auth_type" && e.change_type == ChangeType::Changed));
+        assert!(changes
+            .iter()
+            .any(|e| e.field == "auth_detail" && e.change_type == ChangeType::Changed));
     }
 
     fn make_policy_snap(method: &str, params: Vec<&str>) -> RequestSignatureSnapshot {
@@ -677,7 +763,13 @@ mod tests {
             method: method.into(),
             url_pattern: "/test".into(),
             headers: vec![],
-            query_params: params.iter().map(|k| KeyValueEntry { key: k.to_string(), value: String::new() }).collect(),
+            query_params: params
+                .iter()
+                .map(|k| KeyValueEntry {
+                    key: k.to_string(),
+                    value: String::new(),
+                })
+                .collect(),
             body_content: None,
             form_fields: vec![],
             auth_type: "none".into(),
@@ -693,9 +785,17 @@ mod tests {
     fn method_change_always_breaking_all_policies() {
         let old = make_policy_snap("GET", vec![]);
         let new = make_policy_snap("POST", vec![]);
-        for policy in [BreakingChangePolicy::Strict, BreakingChangePolicy::Lenient, BreakingChangePolicy::AdditiveOk] {
+        for policy in [
+            BreakingChangePolicy::Strict,
+            BreakingChangePolicy::Lenient,
+            BreakingChangePolicy::AdditiveOk,
+        ] {
             let entries = diff_signature(&old, &new, &policy, None);
-            assert!(entries.iter().any(|e| e.field == "method" && e.is_breaking), "method change must be breaking for {:?}", policy);
+            assert!(
+                entries.iter().any(|e| e.field == "method" && e.is_breaking),
+                "method change must be breaking for {:?}",
+                policy
+            );
         }
     }
 
@@ -717,9 +817,17 @@ mod tests {
         old.query_param_keys = vec!["required_param".into()];
         let new = make_policy_snap("GET", vec![]);
 
-        for policy in [BreakingChangePolicy::Strict, BreakingChangePolicy::Lenient, BreakingChangePolicy::AdditiveOk] {
+        for policy in [
+            BreakingChangePolicy::Strict,
+            BreakingChangePolicy::Lenient,
+            BreakingChangePolicy::AdditiveOk,
+        ] {
             let entries = diff_signature(&old, &new, &policy, None);
-            assert!(!entries.is_empty(), "removed param must be detected for {:?}", policy);
+            assert!(
+                !entries.is_empty(),
+                "removed param must be detected for {:?}",
+                policy
+            );
         }
     }
 
@@ -729,7 +837,10 @@ mod tests {
         let new = make_policy_snap("GET", vec!["page"]);
         let entries = diff_signature(&old, &new, &BreakingChangePolicy::AdditiveOk, None);
         for e in &entries {
-            assert!(!e.is_breaking, "additive change must not be breaking under AdditiveOk");
+            assert!(
+                !e.is_breaking,
+                "additive change must not be breaking under AdditiveOk"
+            );
         }
     }
 
@@ -822,12 +933,19 @@ mod tests {
         let entries = diff_signature(&old, &new, &lenient(), None);
         // "page" existed before → must not be reported as removed
         assert!(
-            !entries.iter().any(|e| e.field == "query_param.page" && e.change_type == ChangeType::Removed),
-            "existing legacy param must not be reported as removed: {:?}", entries
+            !entries
+                .iter()
+                .any(|e| e.field == "query_param.page" && e.change_type == ChangeType::Removed),
+            "existing legacy param must not be reported as removed: {:?}",
+            entries
         );
         // Adding "limit" is non-breaking under Lenient
         let breach_count = entries.iter().filter(|e| e.is_breaking).count();
-        assert_eq!(breach_count, 0, "adding a new param to a legacy snapshot must not produce breach entries: {:?}", entries);
+        assert_eq!(
+            breach_count, 0,
+            "adding a new param to a legacy snapshot must not produce breach entries: {:?}",
+            entries
+        );
     }
 
     #[test]
@@ -835,14 +953,24 @@ mod tests {
         // Regression: old baseline has header_keys: ["Authorization"], new snapshot
         // is in KV format. Authorization must NOT appear as removed.
         let old = legacy_snap_with_header("Authorization");
-        let new = new_format_snap_with_headers(&[("Authorization", "Bearer abc"), ("X-Request-Id", "123")]);
+        let new = new_format_snap_with_headers(&[
+            ("Authorization", "Bearer abc"),
+            ("X-Request-Id", "123"),
+        ]);
         let entries = diff_signature(&old, &new, &lenient(), None);
         assert!(
-            !entries.iter().any(|e| e.field == "header.Authorization" && e.change_type == ChangeType::Removed),
-            "existing legacy header must not be reported as removed: {:?}", entries
+            !entries
+                .iter()
+                .any(|e| e.field == "header.Authorization" && e.change_type == ChangeType::Removed),
+            "existing legacy header must not be reported as removed: {:?}",
+            entries
         );
         let breach_count = entries.iter().filter(|e| e.is_breaking).count();
-        assert_eq!(breach_count, 0, "adding a new header to a legacy snapshot must not produce breach entries: {:?}", entries);
+        assert_eq!(
+            breach_count, 0,
+            "adding a new header to a legacy snapshot must not produce breach entries: {:?}",
+            entries
+        );
     }
 
     #[test]
@@ -853,8 +981,11 @@ mod tests {
         let new = new_format_snap_with_query_params(&[]);
         let entries = diff_signature(&old, &new, &lenient(), None);
         assert!(
-            entries.iter().any(|e| e.field == "query_param.required_param" && e.is_breaking),
-            "removing a param that was in legacy baseline must be breaking: {:?}", entries
+            entries
+                .iter()
+                .any(|e| e.field == "query_param.required_param" && e.is_breaking),
+            "removing a param that was in legacy baseline must be breaking: {:?}",
+            entries
         );
     }
 
@@ -866,8 +997,11 @@ mod tests {
         let new = new_format_snap_with_headers(&[]);
         let entries = diff_signature(&old, &new, &lenient(), None);
         assert!(
-            entries.iter().any(|e| e.field == "header.Authorization" && e.is_breaking),
-            "removing a header that was in legacy baseline must be breaking: {:?}", entries
+            entries
+                .iter()
+                .any(|e| e.field == "header.Authorization" && e.is_breaking),
+            "removing a header that was in legacy baseline must be breaking: {:?}",
+            entries
         );
     }
 }

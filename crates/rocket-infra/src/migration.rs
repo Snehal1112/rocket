@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::{atomic_write, atomic_write_bulk};
 use crate::conversions::request_to_oc_http_request;
 use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
+use crate::{atomic_write, atomic_write_bulk};
 
 /// Detected format of a collection directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,7 +153,12 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
         let oc = OcCollection {
             opencollection: Some("0.1".into()),
             uid: Some(uid),
-            info: Some(OcInfo { name, summary: None, version: None, authors: None }),
+            info: Some(OcInfo {
+                name,
+                summary: None,
+                version: None,
+                authors: None,
+            }),
             config: None,
             items: None,
             request: None,
@@ -161,8 +166,9 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
             bundled: None,
             extensions: None,
         };
-        let yaml = serde_yaml::to_string(&oc)
-            .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+        let yaml = serde_yaml::to_string(&oc).map_err(|e| {
+            DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
+        })?;
         atomic_write(&collection_dir.join("opencollection.yml"), yaml.as_bytes())?;
 
         let uid_path = collection_dir.join(".uid");
@@ -192,9 +198,7 @@ pub fn migrate_collection(collection_dir: &Path) -> DomainResult<()> {
 
 /// Migrate a single directory: convert .json requests to .yml, create folder.yml for subdirs.
 fn migrate_directory(dir: &Path) -> DomainResult<()> {
-    let entries: Vec<_> = fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let entries: Vec<_> = fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
 
     // Collect request file writes to batch-fsync at the end of this directory.
     let mut request_writes: Vec<(PathBuf, Vec<u8>)> = Vec::new();
@@ -210,7 +214,10 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
                 continue;
             }
             // Skip symlinked directories — following them during migration can exfiltrate or corrupt files outside the workspace.
-            if std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            if std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
                 tracing::warn!(path = %path.display(), "skipping symlinked directory during migration");
                 continue;
             }
@@ -227,8 +234,9 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
                     tags: Vec::new(),
                     request: None,
                 };
-                let yaml = serde_yaml::to_string(&info)
-                    .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
+                let yaml = serde_yaml::to_string(&info).map_err(|e| {
+                    DomainError::Internal(format!("Failed to serialize folder.yml: {e}"))
+                })?;
                 atomic_write(&folder_yml, yaml.as_bytes())?;
             }
             // Clean up legacy .uid in subfolder.
@@ -267,7 +275,9 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
 
 /// Convert a .json request file to YAML bytes without writing to disk.
 /// Returns `(yml_path, yaml_bytes)` on success, or `None` if the JSON can't be parsed.
-fn prepare_request_migration(json_path: &Path) -> DomainResult<Option<(std::path::PathBuf, Vec<u8>)>> {
+fn prepare_request_migration(
+    json_path: &Path,
+) -> DomainResult<Option<(std::path::PathBuf, Vec<u8>)>> {
     let content = fs::read_to_string(json_path)?;
     let request: rocket_collection::Request = match serde_json::from_str(&content) {
         Ok(r) => r,
@@ -290,7 +300,8 @@ fn migrate_order_file(json_path: &Path) -> DomainResult<()> {
         .map_err(|e| DomainError::Internal(format!("Failed to parse _order.json: {e}")))?;
 
     // Update .json extensions in the order list to .yml.
-    let updated: Vec<String> = order.into_iter()
+    let updated: Vec<String> = order
+        .into_iter()
         .map(|name| {
             if name.ends_with(".json") {
                 format!("{}.yml", name.strip_suffix(".json").unwrap())
@@ -334,7 +345,11 @@ mod tests {
     #[test]
     fn detect_opencollection_format() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("opencollection.yml"), "opencollection: \"0.1\"").unwrap();
+        fs::write(
+            dir.path().join("opencollection.yml"),
+            "opencollection: \"0.1\"",
+        )
+        .unwrap();
         assert_eq!(detect_format(dir.path()), CollectionFormat::OpenCollection);
     }
 
@@ -365,7 +380,11 @@ mod tests {
     #[test]
     fn opencollection_takes_priority_over_json_files() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("opencollection.yml"), "opencollection: \"0.1\"").unwrap();
+        fs::write(
+            dir.path().join("opencollection.yml"),
+            "opencollection: \"0.1\"",
+        )
+        .unwrap();
         fs::write(dir.path().join("leftover.json"), "{}").unwrap();
         assert_eq!(detect_format(dir.path()), CollectionFormat::OpenCollection);
     }
@@ -475,7 +494,10 @@ mod tests {
 
         migrate_collection(&col).unwrap();
 
-        assert!(!col.join(".migration_in_progress").exists(), "sentinel must be removed on success");
+        assert!(
+            !col.join(".migration_in_progress").exists(),
+            "sentinel must be removed on success"
+        );
         assert!(col.join("opencollection.yml").exists());
     }
 
@@ -506,7 +528,10 @@ mod tests {
 
         migrate_collection(&col).unwrap();
 
-        assert!(!col.join(".legacy_backup").exists(), ".legacy_backup must be cleaned up on success");
+        assert!(
+            !col.join(".legacy_backup").exists(),
+            ".legacy_backup must be cleaned up on success"
+        );
     }
 
     #[test]
@@ -536,7 +561,10 @@ mod tests {
         fs::write(col.join(".migration_in_progress"), b"").unwrap();
 
         let result = migrate_collection(&col);
-        assert!(result.is_err(), "retry of interrupted migration must return Err");
+        assert!(
+            result.is_err(),
+            "retry of interrupted migration must return Err"
+        );
         // Sentinel must still be there (not removed by the error path).
         assert!(col.join(".migration_in_progress").exists());
     }

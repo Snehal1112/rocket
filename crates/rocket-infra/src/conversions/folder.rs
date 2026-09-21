@@ -86,8 +86,8 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
-            CollectionItem::OpaqueItem(opaque) => {
-                Some(serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+            CollectionItem::OpaqueItem(opaque) => Some(
+                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
                         info: OcFolderInfo {
                             name: opaque.name,
@@ -102,8 +102,8 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
                         request: None,
                         docs: None,
                     })
-                }))
-            }
+                }),
+            ),
         })
         .collect();
 
@@ -242,8 +242,8 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
-            CollectionItem::OpaqueItem(opaque) => {
-                Some(serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
+            CollectionItem::OpaqueItem(opaque) => Some(
+                serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
                         info: OcFolderInfo {
                             name: opaque.name,
@@ -258,8 +258,8 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
                         request: None,
                         docs: None,
                     })
-                }))
-            }
+                }),
+            ),
         })
         .collect();
 

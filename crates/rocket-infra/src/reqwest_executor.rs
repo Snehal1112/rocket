@@ -65,10 +65,12 @@ impl ReqwestExecutor {
                 }
             }
         }
-        let canonical_existing = existing.canonicalize().map_err(|e| {
-            DomainError::InvalidInput(format!("File path cannot be resolved: {e}"))
-        })?;
-        let suffix = path.strip_prefix(existing).unwrap_or(std::path::Path::new(""));
+        let canonical_existing = existing
+            .canonicalize()
+            .map_err(|e| DomainError::InvalidInput(format!("File path cannot be resolved: {e}")))?;
+        let suffix = path
+            .strip_prefix(existing)
+            .unwrap_or(std::path::Path::new(""));
         let canonical_full = if suffix == std::path::Path::new("") {
             canonical_existing
         } else {
@@ -195,8 +197,8 @@ impl ReqwestExecutor {
                                             .file_name()
                                             .map(|n| n.to_string_lossy().into_owned())
                                             .unwrap_or_default();
-                                        let part = multipart::Part::bytes(file_bytes)
-                                            .file_name(file_name);
+                                        let part =
+                                            multipart::Part::bytes(file_bytes).file_name(file_name);
                                         form = form.part(entry.key.clone(), part);
                                     }
                                 }
@@ -225,12 +227,13 @@ impl Default for ReqwestExecutor {
 impl HttpExecutor for ReqwestExecutor {
     async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
         let client = if let Some(n) = request.options.max_redirects {
-            build_client_impl(request.options.follow_redirects, request.options.verify_ssl, Some(n))?
-        } else {
-            self.get_or_build_client(
+            build_client_impl(
                 request.options.follow_redirects,
                 request.options.verify_ssl,
+                Some(n),
             )?
+        } else {
+            self.get_or_build_client(request.options.follow_redirects, request.options.verify_ssl)?
         };
         let method = map_method(&request.method);
         let start = Instant::now();
@@ -313,7 +316,11 @@ impl HttpExecutor for ReqwestExecutor {
     }
 }
 
-fn build_client_impl(follow_redirects: bool, verify_ssl: bool, max_redirects: Option<u32>) -> DomainResult<Client> {
+fn build_client_impl(
+    follow_redirects: bool,
+    verify_ssl: bool,
+    max_redirects: Option<u32>,
+) -> DomainResult<Client> {
     let redirect_policy = if follow_redirects {
         redirect::Policy::limited(max_redirects.unwrap_or(10) as usize)
     } else {
@@ -353,7 +360,11 @@ async fn apply_auth(
         Auth::Bearer { token } => {
             builder = builder.bearer_auth(token);
         }
-        Auth::ApiKey { key, value, placement } => match placement.as_str() {
+        Auth::ApiKey {
+            key,
+            value,
+            placement,
+        } => match placement.as_str() {
             "header" => {
                 builder = builder.header(key.as_str(), value.as_str());
             }
@@ -421,7 +432,9 @@ async fn apply_auth(
                     DomainError::Internal("Cannot clone request builder for signing".into())
                 })?
                 .build()
-                .map_err(|e| DomainError::Internal(format!("Cannot build request for signing: {e}")))?
+                .map_err(|e| {
+                    DomainError::Internal(format!("Cannot build request for signing: {e}"))
+                })?
                 .url()
                 .to_string();
 
@@ -432,8 +445,7 @@ async fn apply_auth(
                 .unwrap_or("")
                 .to_string();
 
-            let headers: Vec<(String, String)> =
-                vec![("host".to_string(), host)];
+            let headers: Vec<(String, String)> = vec![("host".to_string(), host)];
 
             let signed = sign_request(&method_str, &url_str, &headers, b"", &creds, &timestamp)
                 .map_err(|e| DomainError::Internal(format!("AWS signing failed: {e}")))?;
@@ -469,11 +481,17 @@ async fn fetch_client_credentials_token(
         params.push(("scope".to_string(), s.to_string()));
     }
 
-    let placement = credentials.placement.as_deref().unwrap_or("basic_auth_header");
+    let placement = credentials
+        .placement
+        .as_deref()
+        .unwrap_or("basic_auth_header");
     let req = match placement {
         "body" => {
             params.push(("client_id".to_string(), credentials.client_id.clone()));
-            params.push(("client_secret".to_string(), credentials.client_secret.clone()));
+            params.push((
+                "client_secret".to_string(),
+                credentials.client_secret.clone(),
+            ));
             client.post(access_token_url).form(&params)
         }
         _ => {
@@ -684,13 +702,11 @@ mod oauth2_tests {
         Mock::given(method("POST"))
             .and(path("/token"))
             .and(header_exists("Authorization"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "access_token": "test-token-abc",
-                    "token_type": "bearer",
-                    "expires_in": 3600
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "test-token-abc",
+                "token_type": "bearer",
+                "expires_in": 3600
+            })))
             .mount(&mock_server)
             .await;
 
@@ -717,12 +733,10 @@ mod oauth2_tests {
 
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "access_token": "body-token-xyz",
-                    "token_type": "bearer"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "body-token-xyz",
+                "token_type": "bearer"
+            })))
             .mount(&mock_server)
             .await;
 
@@ -749,11 +763,9 @@ mod oauth2_tests {
 
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(
-                ResponseTemplate::new(401).set_body_json(serde_json::json!({
-                    "error": "invalid_client"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "invalid_client"
+            })))
             .mount(&mock_server)
             .await;
 

@@ -11,9 +11,7 @@ use crate::commands::contract_dtos::{
     types::{ContractDto, ContractPartyDto, ContractPolicyDto, ContractScopeDto},
 };
 use rocket_app::ContractService;
-use rocket_collection::contract::{
-    types::{Contract, ContractEnforcementMode, ContractStatus},
-};
+use rocket_collection::contract::types::{Contract, ContractEnforcementMode, ContractStatus};
 use std::path::PathBuf;
 use tauri::State;
 use ulid::Ulid;
@@ -53,7 +51,9 @@ pub fn attach_contract(
     let effective_date = NaiveDate::parse_from_str(&input.effective_date, "%Y-%m-%d")
         .map_err(|e| format!("invalid effectiveDate: {e}"))?;
 
-    let expiry_date = input.expiry_date.as_deref()
+    let expiry_date = input
+        .expiry_date
+        .as_deref()
         .map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d"))
         .transpose()
         .map_err(|e| format!("invalid expiryDate: {e}"))?;
@@ -88,7 +88,11 @@ pub fn attach_contract(
 
     let snapshots: Vec<rocket_collection::contract::snapshot::RequestSignatureSnapshot> =
         if input.publish_immediately {
-            input.initial_snapshots.into_iter().map(Into::into).collect()
+            input
+                .initial_snapshots
+                .into_iter()
+                .map(Into::into)
+                .collect()
         } else {
             vec![]
         };
@@ -145,7 +149,7 @@ pub fn update_contract(
         title: input.title,
         provider: input.provider.into(),
         consumers: input.consumers.into_iter().map(Into::into).collect(),
-        project: existing.project,  // preserve existing value; field superseded by ContractParty
+        project: existing.project, // preserve existing value; field superseded by ContractParty
         version: input.version,
         status: existing.status,
         effective_date,
@@ -160,12 +164,17 @@ pub fn update_contract(
         endpoint_count: existing.endpoint_count,
         created_by: existing.created_by,
         created_at: existing.created_at,
-        updated_at: existing.updated_at,  // refreshed by the service
+        updated_at: existing.updated_at, // refreshed by the service
     };
 
-    svc.update_contract(&root, updated, input.new_document_paths, input.kept_document_paths)
-        .map(|c| (&c).into())
-        .map_err(|e| e.to_string())
+    svc.update_contract(
+        &root,
+        updated,
+        input.new_document_paths,
+        input.kept_document_paths,
+    )
+    .map(|c| (&c).into())
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

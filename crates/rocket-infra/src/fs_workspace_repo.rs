@@ -26,42 +26,36 @@ impl WorkspaceRepository for FsWorkspaceRepo {
             fs::create_dir_all(&self.default_workspace_path).map_err(|e| {
                 DomainError::Io(format!("Failed to create default workspace dir: {e}"))
             })?;
-            let registry =
-                WorkspaceRegistry::new_with_default(self.default_workspace_path.clone());
+            let registry = WorkspaceRegistry::new_with_default(self.default_workspace_path.clone());
             self.save(&registry)?;
             return Ok(registry);
         }
 
-        let content = fs::read_to_string(&self.registry_path).map_err(|e| {
-            DomainError::Io(format!("Failed to read workspaces.yml: {e}"))
-        })?;
+        let content = fs::read_to_string(&self.registry_path)
+            .map_err(|e| DomainError::Io(format!("Failed to read workspaces.yml: {e}")))?;
 
-        serde_yaml::from_str(&content).map_err(|e| {
-            DomainError::InvalidInput(format!("Failed to parse workspaces.yml: {e}"))
-        })
+        serde_yaml::from_str(&content)
+            .map_err(|e| DomainError::InvalidInput(format!("Failed to parse workspaces.yml: {e}")))
     }
 
     fn save(&self, registry: &WorkspaceRegistry) -> DomainResult<()> {
         if let Some(parent) = self.registry_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                DomainError::Io(format!("Failed to create app data dir: {e}"))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| DomainError::Io(format!("Failed to create app data dir: {e}")))?;
         }
 
         let content = serde_yaml::to_string(registry).map_err(|e| {
             DomainError::InvalidInput(format!("Failed to serialize workspaces.yml: {e}"))
         })?;
 
-        atomic_write(&self.registry_path, content.as_bytes()).map_err(|e| {
-            DomainError::Io(format!("Failed to write workspaces.yml: {e}"))
-        })
+        atomic_write(&self.registry_path, content.as_bytes())
+            .map_err(|e| DomainError::Io(format!("Failed to write workspaces.yml: {e}")))
     }
 
     fn ensure_workspace_dirs(&self, path: &std::path::Path) -> DomainResult<()> {
         for subdir in [path, &path.join("collections"), &path.join("environments")] {
-            fs::create_dir_all(subdir).map_err(|e| {
-                DomainError::Io(format!("Failed to create workspace dir: {e}"))
-            })?;
+            fs::create_dir_all(subdir)
+                .map_err(|e| DomainError::Io(format!("Failed to create workspace dir: {e}")))?;
         }
         Ok(())
     }
@@ -109,7 +103,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = make_repo(&tmp);
         repo.load().unwrap(); // creates the file
-        // Second load must read the file, not recreate it.
+                              // Second load must read the file, not recreate it.
         let registry = repo.load().unwrap();
         assert_eq!(registry.workspaces.len(), 1);
     }

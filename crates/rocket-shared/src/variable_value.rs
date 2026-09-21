@@ -9,9 +9,14 @@ pub enum VariableValue {
 }
 
 impl VariableValue {
-    pub fn simple(s: impl Into<String>) -> Self { Self::Simple(s.into()) }
+    pub fn simple(s: impl Into<String>) -> Self {
+        Self::Simple(s.into())
+    }
     pub fn typed(data: impl Into<String>, value_type: impl Into<String>) -> Self {
-        Self::Typed { data: data.into(), value_type: value_type.into() }
+        Self::Typed {
+            data: data.into(),
+            value_type: value_type.into(),
+        }
     }
     pub fn data(&self) -> &str {
         match self {
@@ -28,7 +33,9 @@ impl VariableValue {
 }
 
 impl Default for VariableValue {
-    fn default() -> Self { Self::Simple(String::new()) }
+    fn default() -> Self {
+        Self::Simple(String::new())
+    }
 }
 
 // Custom Serialize: Simple → JSON string, Typed → JSON object {type, data}
@@ -63,19 +70,26 @@ impl<'de> Deserialize<'de> for VariableValue {
             fn visit_string<E: de::Error>(self, v: String) -> Result<VariableValue, E> {
                 Ok(VariableValue::Simple(v))
             }
-            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<VariableValue, A::Error> {
+            fn visit_map<A: de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<VariableValue, A::Error> {
                 let mut data = None;
                 let mut value_type = None;
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "data" => data = Some(map.next_value::<String>()?),
                         "type" => value_type = Some(map.next_value::<String>()?),
-                        _ => { let _ = map.next_value::<serde::de::IgnoredAny>()?; }
+                        _ => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
                     }
                 }
                 match (data, value_type) {
                     (Some(d), Some(t)) => Ok(VariableValue::typed(d, t)),
-                    _ => Err(de::Error::custom("object must have both 'type' and 'data' fields")),
+                    _ => Err(de::Error::custom(
+                        "object must have both 'type' and 'data' fields",
+                    )),
                 }
             }
         }
@@ -125,7 +139,10 @@ mod tests {
     #[test]
     fn variable_value_type_accessor() {
         assert_eq!(VariableValue::simple("x").value_type(), None);
-        assert_eq!(VariableValue::typed("42", "number").value_type(), Some("number"));
+        assert_eq!(
+            VariableValue::typed("42", "number").value_type(),
+            Some("number")
+        );
     }
 
     #[test]

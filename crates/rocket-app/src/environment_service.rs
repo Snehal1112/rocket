@@ -24,7 +24,11 @@ impl EnvironmentService {
         events: Box<dyn EventPublisher>,
         audit: Arc<dyn SecurityAuditPublisher>,
     ) -> Self {
-        Self { repo, events, audit }
+        Self {
+            repo,
+            events,
+            audit,
+        }
     }
 
     pub fn list(&self) -> DomainResult<Vec<Environment>> {
@@ -57,7 +61,9 @@ impl EnvironmentService {
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
         self.repo.delete(name)?;
-        self.events.publish(DomainEvent::EnvironmentDeleted { name: name.to_string() });
+        self.events.publish(DomainEvent::EnvironmentDeleted {
+            name: name.to_string(),
+        });
         Ok(())
     }
 }
@@ -77,7 +83,9 @@ mod tests {
 
     impl MockEnvRepo {
         fn new() -> Self {
-            Self { envs: Mutex::new(Vec::new()) }
+            Self {
+                envs: Mutex::new(Vec::new()),
+            }
         }
     }
 
@@ -152,7 +160,9 @@ mod tests {
 
     #[test]
     fn save_emits_security_audit_event() {
-        let publisher = Arc::new(CapturingPublisher { captured: Mutex::new(vec![]) });
+        let publisher = Arc::new(CapturingPublisher {
+            captured: Mutex::new(vec![]),
+        });
         let svc = EnvironmentService::new_with_audit(
             Box::new(MockEnvRepo::new()),
             Box::new(NullEventPublisher),

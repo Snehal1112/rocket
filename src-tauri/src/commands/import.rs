@@ -10,7 +10,10 @@ struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
     fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::with_secret_store(
-            self.0.join("collections").join(collection_name).join("environments"),
+            self.0
+                .join("collections")
+                .join(collection_name)
+                .join("environments"),
             crate::env_secret_store(),
         ))
     }

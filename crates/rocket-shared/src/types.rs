@@ -192,7 +192,7 @@ pub enum Auth {
     ApiKey {
         key: String,
         value: String,
-        placement: String,  // "header" | "query"
+        placement: String, // "header" | "query"
     },
     OAuth2(crate::oauth2::OAuth2Flow),
     #[serde(rename_all = "camelCase")]
@@ -256,7 +256,12 @@ mod tests {
 
     #[test]
     fn query_param_serialization_roundtrip() {
-        let param = QueryParam { key: "page".into(), value: "1".into(), enabled: true, description: None };
+        let param = QueryParam {
+            key: "page".into(),
+            value: "1".into(),
+            enabled: true,
+            description: None,
+        };
         let json = serde_json::to_string(&param).unwrap();
         let parsed: QueryParam = serde_json::from_str(&json).unwrap();
         assert_eq!(param, parsed);
@@ -337,7 +342,7 @@ mod tests {
 
     #[test]
     fn auth_oauth2_serialization_roundtrip() {
-        use crate::oauth2::{OAuth2Flow, OAuth2ClientCredentials};
+        use crate::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
         let auth = Auth::OAuth2(OAuth2Flow::ClientCredentials {
             access_token_url: "https://auth.example.com/token".into(),
             refresh_token_url: None,
@@ -416,7 +421,11 @@ mod tests {
 
     #[test]
     fn path_param_full() {
-        let p = PathParam { name: "id".into(), value: "123".into(), description: None };
+        let p = PathParam {
+            name: "id".into(),
+            value: "123".into(),
+            description: None,
+        };
         assert_eq!(p.name, "id");
     }
 
@@ -430,7 +439,10 @@ mod tests {
 
     #[test]
     fn auth_wsse_serde() {
-        let auth = Auth::Wsse { username: "user".into(), password: "pass".into() };
+        let auth = Auth::Wsse {
+            username: "user".into(),
+            password: "pass".into(),
+        };
         let json = serde_json::to_string(&auth).unwrap();
         let back: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, back);
@@ -438,7 +450,10 @@ mod tests {
 
     #[test]
     fn auth_digest_serde() {
-        let auth = Auth::Digest { username: "admin".into(), password: "secret".into() };
+        let auth = Auth::Digest {
+            username: "admin".into(),
+            password: "secret".into(),
+        };
         let json = serde_json::to_string(&auth).unwrap();
         let back: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, back);
@@ -458,12 +473,20 @@ mod tests {
 
     #[test]
     fn auth_apikey_placement_values() {
-        let auth = Auth::ApiKey { key: "X-Key".into(), value: "123".into(), placement: "header".into() };
+        let auth = Auth::ApiKey {
+            key: "X-Key".into(),
+            value: "123".into(),
+            placement: "header".into(),
+        };
         let json = serde_json::to_string(&auth).unwrap();
         let back: Auth = serde_json::from_str(&json).unwrap();
         assert_eq!(auth, back);
 
-        let auth2 = Auth::ApiKey { key: "token".into(), value: "abc".into(), placement: "query".into() };
+        let auth2 = Auth::ApiKey {
+            key: "token".into(),
+            value: "abc".into(),
+            placement: "query".into(),
+        };
         let json2 = serde_json::to_string(&auth2).unwrap();
         let back2: Auth = serde_json::from_str(&json2).unwrap();
         assert_eq!(auth2, back2);

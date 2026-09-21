@@ -100,7 +100,10 @@ impl RunStepResult {
             RunStepStatus::Skipped => false,
             RunStepStatus::Completed => {
                 self.test_fail_count > 0
-                    || self.status_code.map(|s| !(200..300).contains(&s)).unwrap_or(true)
+                    || self
+                        .status_code
+                        .map(|s| !(200..300).contains(&s))
+                        .unwrap_or(true)
             }
         }
     }
@@ -122,7 +125,10 @@ pub enum StoppedReason {
     StoppedOnFailure { item_name: String },
     /// `rok.runner.setNextRequest(name)` named an item that is not in the run set.
     #[serde(rename_all = "camelCase")]
-    UnknownNextRequest { item_name: String, next_request: String },
+    UnknownNextRequest {
+        item_name: String,
+        next_request: String,
+    },
     /// `stop_collection_run` was called for this run.
     Cancelled,
     /// `MAX_RUN_STEPS` executed steps were reached — almost certainly a
@@ -236,7 +242,9 @@ impl CollectionRunnerService {
                 break;
             }
             if steps.len() >= MAX_RUN_STEPS {
-                stopped_reason = StoppedReason::StepLimitReached { limit: MAX_RUN_STEPS };
+                stopped_reason = StoppedReason::StepLimitReached {
+                    limit: MAX_RUN_STEPS,
+                };
                 break;
             }
 
@@ -546,7 +554,11 @@ mod tests {
         publisher: Arc<RecordingPublisher>,
     }
 
-    fn harness(collection: Collection, engine: Arc<ProgrammableEngine>, executor: Arc<RecordingExecutor>) -> Harness {
+    fn harness(
+        collection: Collection,
+        engine: Arc<ProgrammableEngine>,
+        executor: Arc<RecordingExecutor>,
+    ) -> Harness {
         let repo = InMemoryCollectionRepo::new(collection);
         let history = InMemoryHistoryRepo::new();
         let publisher = RecordingPublisher::new();
@@ -566,13 +578,28 @@ mod tests {
             Box::new(SharedPublisher(Arc::clone(&publisher))),
         );
 
-        Harness { runner, exec, executor, engine, history, publisher }
+        Harness {
+            runner,
+            exec,
+            executor,
+            engine,
+            history,
+            publisher,
+        }
     }
 
     #[tokio::test]
     async fn runs_every_request_in_order() {
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(
             h.executor.sent_urls(),
@@ -585,13 +612,23 @@ mod tests {
         let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
         assert_eq!(names, vec!["First", "Second", "Third"]);
         assert_eq!(summary.stopped_reason, StoppedReason::Completed);
-        assert!(summary.steps.iter().all(|s| s.status == RunStepStatus::Completed));
+        assert!(summary
+            .steps
+            .iter()
+            .all(|s| s.status == RunStepStatus::Completed));
     }
 
     #[tokio::test]
     async fn every_script_phase_reports_runner_execution_mode() {
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
-        h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         let modes = h.engine.modes();
         assert_eq!(modes.len(), 9, "3 requests x 3 phases");
@@ -600,8 +637,15 @@ mod tests {
 
     #[tokio::test]
     async fn each_step_still_lands_in_history() {
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
-        h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
         assert_eq!(h.history.saved_count(), 3);
     }
 
@@ -620,7 +664,10 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         // The before-request phase of step 2 must already see step 1's write.
         let calls = h.engine.calls();
@@ -636,8 +683,16 @@ mod tests {
     async fn publishes_started_step_and_finished_events() {
         use rocket_shared::events::DomainEvent;
 
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
         let events = h.publisher.events();
 
         assert!(matches!(
@@ -651,7 +706,11 @@ mod tests {
         assert_eq!(step_events.len(), 3);
         assert!(matches!(
             events.last(),
-            Some(DomainEvent::RunnerFinished { step_count: 3, failed_count: 0, .. })
+            Some(DomainEvent::RunnerFinished {
+                step_count: 3,
+                failed_count: 0,
+                ..
+            })
         ));
         assert!(events.iter().all(|e| match e {
             DomainEvent::RunnerStarted { run_id, .. }
@@ -663,11 +722,18 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_collection_is_not_found() {
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
         let mut input = sample_run_input();
         input.collection = "missing".into();
         let err = h.runner.run(&h.exec, input).await.expect_err("must fail");
-        assert!(matches!(err, rocket_shared::error::DomainError::NotFound(_)));
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::NotFound(_)
+        ));
     }
 
     // These two lock the IPC DTO wire shapes the frontend plan is written
@@ -731,7 +797,10 @@ mod tests {
         let summary = h.runner.run(&h.exec, input).await.expect("run");
 
         assert_eq!(summary.steps[0].status, RunStepStatus::Error);
-        let err = summary.steps[0].error.as_ref().expect("guard error message");
+        let err = summary.steps[0]
+            .error
+            .as_ref()
+            .expect("guard error message");
         assert!(err.contains("169.254.169.254"), "unexpected message: {err}");
         // The run must continue past the blocked step (stop_on_failure defaults
         // to false) rather than aborting the whole run.
@@ -745,10 +814,17 @@ mod tests {
         engine.on(
             "Second",
             "before-request",
-            ScriptResult { skip_request: true, ..Default::default() },
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(
             h.executor.sent_urls(),
@@ -761,7 +837,9 @@ mod tests {
         assert_eq!(summary.steps[1].status, RunStepStatus::Skipped);
         assert_eq!(summary.steps[1].status_code, None);
         assert!(
-            !h.engine.calls().contains(&"Second|after-response".to_string()),
+            !h.engine
+                .calls()
+                .contains(&"Second|after-response".to_string()),
             "a skipped step has no response, so no later phase may run"
         );
         assert!(!h.engine.calls().contains(&"Second|tests".to_string()));
@@ -781,7 +859,11 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
         assert_eq!(names, vec!["First", "Third"], "Second must be jumped over");
@@ -803,12 +885,19 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
         assert_eq!(names, vec!["First", "Third"]);
         assert_eq!(summary.steps[0].status, RunStepStatus::Skipped);
-        assert_eq!(h.executor.sent_urls(), vec!["https://api.test/third.yml".to_string()]);
+        assert_eq!(
+            h.executor.sent_urls(),
+            vec!["https://api.test/third.yml".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -831,10 +920,18 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         let names: Vec<&str> = summary.steps.iter().map(|s| s.item_name.as_str()).collect();
-        assert_eq!(names, vec!["First", "Third"], "the last phase that ran wins");
+        assert_eq!(
+            names,
+            vec!["First", "Third"],
+            "the last phase that ran wins"
+        );
     }
 
     #[tokio::test]
@@ -843,10 +940,17 @@ mod tests {
         engine.on(
             "First",
             "after-response",
-            ScriptResult { next_request: Some(NextRequest::Stop), ..Default::default() },
+            ScriptResult {
+                next_request: Some(NextRequest::Stop),
+                ..Default::default()
+            },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps.len(), 1);
         assert_eq!(summary.stopped_reason, StoppedReason::StoppedByScript);
@@ -865,11 +969,18 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps.len(), 1);
         assert_eq!(summary.steps[0].status, RunStepStatus::Error);
-        let error = summary.steps[0].error.as_deref().expect("error recorded on the step");
+        let error = summary.steps[0]
+            .error
+            .as_deref()
+            .expect("error recorded on the step");
         assert!(error.contains("Nowhere"), "got {error}");
         assert_eq!(
             summary.stopped_reason,
@@ -900,12 +1011,18 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps.len(), MAX_RUN_STEPS);
         assert_eq!(
             summary.stopped_reason,
-            StoppedReason::StepLimitReached { limit: MAX_RUN_STEPS }
+            StoppedReason::StepLimitReached {
+                limit: MAX_RUN_STEPS
+            }
         );
     }
 
@@ -935,7 +1052,11 @@ mod tests {
         let executor = RecordingExecutor::new();
         executor.set_status("second.yml", 500);
         let h = harness(three_step_collection(), ProgrammableEngine::new(), executor);
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps.len(), 3, "every remaining item still runs");
         assert_eq!(summary.stopped_reason, StoppedReason::Completed);
@@ -955,7 +1076,9 @@ mod tests {
         assert_eq!(summary.steps.len(), 2);
         assert_eq!(
             summary.stopped_reason,
-            StoppedReason::StoppedOnFailure { item_name: "Second".into() }
+            StoppedReason::StoppedOnFailure {
+                item_name: "Second".into()
+            }
         );
     }
 
@@ -969,7 +1092,11 @@ mod tests {
             "tests",
             ScriptResult {
                 test_results: vec![
-                    TestResult { name: "ok".into(), status: TestStatus::Passed, error: None },
+                    TestResult {
+                        name: "ok".into(),
+                        status: TestStatus::Passed,
+                        error: None,
+                    },
                     TestResult {
                         name: "nope".into(),
                         status: TestStatus::Failed,
@@ -980,7 +1107,11 @@ mod tests {
             },
         );
         let h = harness(three_step_collection(), engine, RecordingExecutor::new());
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps[0].test_pass_count, 1);
         assert_eq!(summary.steps[0].test_fail_count, 1);
@@ -994,7 +1125,11 @@ mod tests {
         let executor = RecordingExecutor::new();
         executor.set_status("second.yml", 0);
         let h = harness(three_step_collection(), ProgrammableEngine::new(), executor);
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
 
         assert_eq!(summary.steps.len(), 3);
         assert_eq!(summary.steps[1].status, RunStepStatus::Error);
@@ -1036,7 +1171,10 @@ mod tests {
 
         assert_eq!(summary.steps.len(), 1, "the run stops before step 2 starts");
         assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
-        assert_eq!(executor.sent_urls(), vec!["https://api.test/first.yml".to_string()]);
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.test/first.yml".to_string()]
+        );
         assert!(
             !cancelled.lock().expect("lock").contains(&summary.run_id),
             "a finished run must not leak its id in the registry"
@@ -1045,9 +1183,17 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_an_unknown_run_id_is_a_no_op() {
-        let h = harness(three_step_collection(), ProgrammableEngine::new(), RecordingExecutor::new());
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
         h.runner.cancel("not-a-real-run");
-        let summary = h.runner.run(&h.exec, sample_run_input()).await.expect("run");
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
         assert_eq!(summary.stopped_reason, StoppedReason::Completed);
         assert_eq!(summary.steps.len(), 3);
     }
@@ -1116,6 +1262,9 @@ mod tests {
 
         assert_eq!(summary.steps.len(), 1, "the run stops before step 2 starts");
         assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
-        assert_eq!(executor.sent_urls(), vec!["https://api.test/first.yml".to_string()]);
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.test/first.yml".to_string()]
+        );
     }
 }

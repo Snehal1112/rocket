@@ -1,6 +1,6 @@
+use crate::scripting::ops::ScriptOpError;
 use deno_core::op2;
 use std::fs;
-use crate::scripting::ops::ScriptOpError;
 
 fn io_err(e: std::io::Error, path: &str) -> ScriptOpError {
     ScriptOpError(format!("{path}: {e}"))
@@ -20,7 +20,10 @@ fn read_file_impl(path: &str, encoding: &str) -> Result<String, ScriptOpError> {
 /// since the op has no way to express an omitted argument; the JS wrapper must always supply it.
 #[op2]
 #[string]
-pub fn op_fs_read_file(#[string] path: String, #[string] encoding: String) -> Result<String, ScriptOpError> {
+pub fn op_fs_read_file(
+    #[string] path: String,
+    #[string] encoding: String,
+) -> Result<String, ScriptOpError> {
     read_file_impl(&path, &encoding)
 }
 
@@ -40,7 +43,11 @@ fn write_file_impl(path: &str, content: &str, encoding: &str) -> Result<(), Scri
 /// "base64") that the JS wrapper must always supply explicitly, since the op has no way to
 /// express an omitted argument.
 #[op2(fast)]
-pub fn op_fs_write_file(#[string] path: String, #[string] content: String, #[string] encoding: String) -> Result<(), ScriptOpError> {
+pub fn op_fs_write_file(
+    #[string] path: String,
+    #[string] content: String,
+    #[string] encoding: String,
+) -> Result<(), ScriptOpError> {
     write_file_impl(&path, &content, &encoding)
 }
 
@@ -80,7 +87,11 @@ pub fn op_fs_exists(#[string] path: String) -> bool {
 }
 
 fn mkdir_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
-    let result = if recursive { fs::create_dir_all(path) } else { fs::create_dir(path) };
+    let result = if recursive {
+        fs::create_dir_all(path)
+    } else {
+        fs::create_dir(path)
+    };
     result.map_err(|e| io_err(e, path))
 }
 
@@ -97,7 +108,11 @@ fn remove_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
     // followed to its target, matching Node's rmSync behavior.
     let meta = fs::symlink_metadata(path).map_err(|e| io_err(e, path))?;
     let result = if meta.is_dir() {
-        if recursive { fs::remove_dir_all(path) } else { fs::remove_dir(path) }
+        if recursive {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_dir(path)
+        }
     } else {
         fs::remove_file(path)
     };
@@ -213,7 +228,10 @@ mod tests {
         fs::create_dir(&sub).expect("mkdir");
         fs::write(sub.join("inner.txt"), "x").expect("write inner");
         assert!(remove_impl(&sub.to_string_lossy(), false).is_err());
-        assert!(sub.exists(), "non-empty dir must survive a non-recursive remove attempt");
+        assert!(
+            sub.exists(),
+            "non-empty dir must survive a non-recursive remove attempt"
+        );
     }
 
     #[test]
@@ -238,6 +256,9 @@ mod tests {
         remove_impl(&link.to_string_lossy(), false).expect("remove symlink");
 
         assert!(!link.exists(), "symlink itself must be gone");
-        assert!(target.exists(), "remove must not follow the symlink and delete its target");
+        assert!(
+            target.exists(),
+            "remove must not follow the symlink and delete its target"
+        );
     }
 }

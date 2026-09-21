@@ -143,9 +143,7 @@ pub fn save_request(
             // prefix from the original `path`, replacing only the filename.
             let parent = std::path::Path::new(&path).parent();
             match parent {
-                Some(p) if !p.as_os_str().is_empty() => {
-                    p.join(fname).to_string_lossy().to_string()
-                }
+                Some(p) if !p.as_os_str().is_empty() => p.join(fname).to_string_lossy().to_string(),
                 _ => fname.to_string(),
             }
         })
@@ -252,8 +250,7 @@ pub fn scan_collections_in_path(path: String) -> Result<Vec<CollectionScanResult
         return Ok(vec![]);
     }
     let mut results = Vec::new();
-    let entries = fs::read_dir(dir)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let entries = fs::read_dir(dir).map_err(|e| DomainError::Internal(e.to_string()))?;
     for entry in entries {
         let entry = entry.map_err(|e| DomainError::Internal(e.to_string()))?;
         let entry_path = entry.path();
@@ -318,7 +315,8 @@ pub fn detect_cloned_structure(path: String) -> Result<ClonedRepoStructure, Doma
 
     // Case 2: Single collection at root.
     if dir.join("opencollection.yml").exists() {
-        let name = dir.file_name()
+        let name = dir
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "collection".into());
         return Ok(ClonedRepoStructure {
@@ -364,8 +362,7 @@ pub fn detect_cloned_structure(path: String) -> Result<ClonedRepoStructure, Doma
 /// Scan direct subdirectories for ones containing `opencollection.yml`.
 fn scan_opencollection_dirs(dir: &Path) -> Result<Vec<CollectionScanResult>, DomainError> {
     let mut results = Vec::new();
-    let entries = fs::read_dir(dir)
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let entries = fs::read_dir(dir).map_err(|e| DomainError::Internal(e.to_string()))?;
     for entry in entries {
         let entry = entry.map_err(|e| DomainError::Internal(e.to_string()))?;
         let entry_path = entry.path();
@@ -450,25 +447,14 @@ mod tests {
 
     #[test]
     fn collection_summary_dto_contains_scoped_repository_id() {
-        let summary = CollectionSummary::new(
-            "collection-1",
-            "Collection",
-            "/tmp/collection",
-            2,
-            None,
-        );
+        let summary =
+            CollectionSummary::new("collection-1", "Collection", "/tmp/collection", 2, None);
 
         let dto = CollectionSummaryDto::from_summary(summary, "workspace-1")
             .expect("valid collection summary DTO");
 
-        assert_eq!(
-            dto.repository_id,
-            "collection:workspace-1:collection-1"
-        );
+        assert_eq!(dto.repository_id, "collection:workspace-1:collection-1");
         let json = serde_json::to_value(dto).expect("serialize collection summary DTO");
-        assert_eq!(
-            json["repositoryId"],
-            "collection:workspace-1:collection-1"
-        );
+        assert_eq!(json["repositoryId"], "collection:workspace-1:collection-1");
     }
 }

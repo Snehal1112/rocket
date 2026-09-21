@@ -16,7 +16,9 @@ pub struct SharedCollectionEnvironmentRepo {
 
 impl SharedCollectionEnvironmentRepo {
     pub fn new(active_workspace_path: Arc<Mutex<PathBuf>>) -> Self {
-        Self { active_workspace_path }
+        Self {
+            active_workspace_path,
+        }
     }
 }
 
@@ -77,8 +79,8 @@ mod tests {
     }
 
     #[test]
-    fn variable_deduplication_across_two_independent_get_save_cycles(
-    ) -> Result<(), Box<dyn Error>> {
+    fn variable_deduplication_across_two_independent_get_save_cycles() -> Result<(), Box<dyn Error>>
+    {
         // Set up: create a factory over a temp directory.
         let tmp = TempDir::new()?;
         let ws_path = Arc::new(Mutex::new(tmp.path().to_path_buf()));

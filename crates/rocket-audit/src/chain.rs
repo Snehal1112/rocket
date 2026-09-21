@@ -15,7 +15,11 @@ pub fn hash_event(ev: &SecurityAuditEvent) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChainVerification {
     Ok,
-    Broken { index: usize, expected: String, actual: String },
+    Broken {
+        index: usize,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Walks events in order, recomputing each hash and confirming prev_hash linkage.
@@ -51,7 +55,9 @@ mod tests {
         let mut ev = SecurityAuditEvent::new(
             "actor",
             None,
-            AuditEventKind::CollectionDeleted { collection: "x".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "x".into(),
+            },
             prev,
         );
         ev.hash = hash_event(&ev);

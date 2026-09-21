@@ -29,7 +29,11 @@ impl SharedPathCollectionRepo {
     }
 
     fn repo(&self) -> FsCollectionRepo {
-        let base = self.active_workspace_path.lock().unwrap_or_else(|e| e.into_inner()).join("collections");
+        let base = self
+            .active_workspace_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .join("collections");
         FsCollectionRepo::new(base, Arc::clone(&self.collection_locks))
     }
 }
@@ -72,12 +76,7 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().save_request(collection, path, request)
     }
 
-    fn rename_request(
-        &self,
-        collection: &str,
-        old_path: &str,
-        new_name: &str,
-    ) -> DomainResult<()> {
+    fn rename_request(&self, collection: &str, old_path: &str, new_name: &str) -> DomainResult<()> {
         self.repo().rename_request(collection, old_path, new_name)
     }
 
@@ -100,7 +99,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        self.repo().move_item(src_collection, src_path, dst_collection, dst_path)
+        self.repo()
+            .move_item(src_collection, src_path, dst_collection, dst_path)
     }
 
     fn reorder_items(
@@ -109,18 +109,15 @@ impl CollectionRepository for SharedPathCollectionRepo {
         folder_path: &str,
         ordered_names: &[String],
     ) -> DomainResult<()> {
-        self.repo().reorder_items(collection, folder_path, ordered_names)
+        self.repo()
+            .reorder_items(collection, folder_path, ordered_names)
     }
 
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
         self.repo().get_settings(name)
     }
 
-    fn save_settings(
-        &self,
-        name: &str,
-        settings: &CollectionSettings,
-    ) -> DomainResult<()> {
+    fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
         self.repo().save_settings(name, settings)
     }
 
@@ -129,7 +126,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
-        self.repo().get_folder_chain_variables(collection, request_path)
+        self.repo()
+            .get_folder_chain_variables(collection, request_path)
     }
 
     fn get_folder_variables(
@@ -146,7 +144,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         folder_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
-        self.repo().save_folder_variables(collection, folder_path, vars)
+        self.repo()
+            .save_folder_variables(collection, folder_path, vars)
     }
 
     fn get_request_variables(
@@ -163,7 +162,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         request_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
-        self.repo().save_request_variables(collection, request_path, vars)
+        self.repo()
+            .save_request_variables(collection, request_path, vars)
     }
 }
 
@@ -198,7 +198,10 @@ mod tests {
         // Verify that creating a collection writes inside `<workspace>/collections/`.
         repo.create("my-api").unwrap();
         let expected = dir.path().join("collections").join("my-api");
-        assert!(expected.exists(), "collection directory should be at {expected:?}");
+        assert!(
+            expected.exists(),
+            "collection directory should be at {expected:?}"
+        );
     }
 
     // --- Runtime path switching ---
@@ -246,7 +249,11 @@ mod tests {
     fn save_and_get_request() {
         let (_dir, repo) = setup();
         repo.create("api-v1").unwrap();
-        let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        let req = rocket_collection::Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
         repo.save_request("api-v1", "get-users.yml", &req).unwrap();
         let loaded = repo.get_request("api-v1", "get-users.yml").unwrap();
         assert_eq!(loaded.name, "Get Users");
@@ -291,8 +298,12 @@ mod tests {
         let h1 = std::thread::spawn(move || r1.save_request("shared-col", "req-a.yml", &req_a));
         let h2 = std::thread::spawn(move || r2.save_request("shared-col", "req-b.yml", &req_b));
 
-        h1.join().unwrap().expect("first concurrent save_request should succeed");
-        h2.join().unwrap().expect("second concurrent save_request should succeed");
+        h1.join()
+            .unwrap()
+            .expect("first concurrent save_request should succeed");
+        h2.join()
+            .unwrap()
+            .expect("second concurrent save_request should succeed");
 
         // Both files must now be readable.
         let loaded_a = repo.get_request("shared-col", "req-a.yml").unwrap();

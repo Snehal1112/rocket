@@ -114,7 +114,7 @@ pub struct OcOAuth2PKCE {
 #[serde(untagged)]
 pub enum InheritableBoolean {
     Value(bool),
-    Inherit(String),  // "inherit"
+    Inherit(String), // "inherit"
 }
 
 /// A value that can be a number or the string "inherit".
@@ -122,7 +122,7 @@ pub enum InheritableBoolean {
 #[serde(untagged)]
 pub enum InheritableNumber {
     Value(f64),
-    Inherit(String),  // "inherit"
+    Inherit(String), // "inherit"
 }
 
 /// HTTP request execution settings.

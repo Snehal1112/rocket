@@ -25,9 +25,6 @@ pub fn save_template(
 }
 
 #[tauri::command]
-pub fn delete_template(
-    name: String,
-    svc: State<'_, TemplateService>,
-) -> Result<(), DomainError> {
+pub fn delete_template(name: String, svc: State<'_, TemplateService>) -> Result<(), DomainError> {
     svc.delete(&name)
 }

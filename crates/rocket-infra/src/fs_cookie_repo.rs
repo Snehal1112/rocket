@@ -37,14 +37,16 @@ impl CookieRepository for FsCookieRepo {
             return Ok(None);
         }
         let content = fs::read_to_string(&path)?;
-        let jar = serde_yaml::from_str(&content)
-            .map_err(|e| rocket_shared::error::DomainError::Internal(format!("Failed to parse YAML: {e}")))?;
+        let jar = serde_yaml::from_str(&content).map_err(|e| {
+            rocket_shared::error::DomainError::Internal(format!("Failed to parse YAML: {e}"))
+        })?;
         Ok(Some(jar))
     }
 
     fn save(&self, jar: &CookieJar) -> DomainResult<()> {
-        let yaml = serde_yaml::to_string(jar)
-            .map_err(|e| rocket_shared::error::DomainError::Internal(format!("Failed to serialize YAML: {e}")))?;
+        let yaml = serde_yaml::to_string(jar).map_err(|e| {
+            rocket_shared::error::DomainError::Internal(format!("Failed to serialize YAML: {e}"))
+        })?;
         atomic_write(&self.file_path(&jar.domain), yaml.as_bytes())?;
         Ok(())
     }

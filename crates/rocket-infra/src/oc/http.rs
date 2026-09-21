@@ -14,7 +14,7 @@ pub struct OcHttpRequestInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub request_type: Option<String>,  // "http"
+    pub request_type: Option<String>, // "http"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -29,7 +29,7 @@ pub struct OcHttpRequestParam {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "type")]
-    pub param_type: Option<String>,  // "query" | "path"
+    pub param_type: Option<String>, // "query" | "path"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
 }
@@ -77,7 +77,7 @@ pub enum OcMultipartValue {
 pub struct OcMultipartFormPart {
     pub name: String,
     #[serde(rename = "type")]
-    pub part_type: String,  // "text" | "file"
+    pub part_type: String, // "text" | "file"
     pub value: OcMultipartValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
@@ -132,7 +132,7 @@ pub struct OcHttpRequestBodyVariant {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcScript {
     #[serde(rename = "type")]
-    pub script_type: String,  // "before-request" | "after-response" | "tests" | "hooks"
+    pub script_type: String, // "before-request" | "after-response" | "tests" | "hooks"
     pub code: String,
 }
 
@@ -144,7 +144,7 @@ pub type OcScripts = Vec<OcScript>;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcScriptFile {
     #[serde(rename = "type")]
-    pub script_file_type: String,  // "script"
+    pub script_file_type: String, // "script"
     pub script: String,
 }
 
@@ -152,14 +152,14 @@ pub struct OcScriptFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcActionSelector {
     pub expression: String,
-    pub method: String,  // "jsonq"
+    pub method: String, // "jsonq"
 }
 
 /// Action target variable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcActionVariable {
     pub name: String,
-    pub scope: String,  // "runtime" | "request" | "folder" | "collection" | "environment"
+    pub scope: String, // "runtime" | "request" | "folder" | "collection" | "environment"
 }
 
 /// Action — currently only set-variable.
@@ -170,7 +170,7 @@ pub enum OcAction {
     SetVariable {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<OcDescription>,
-        phase: String,  // "before-request" | "after-response"
+        phase: String, // "before-request" | "after-response"
         selector: OcActionSelector,
         variable: OcActionVariable,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,7 +197,7 @@ pub struct OcHttpRequestRuntime {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcExampleResponseBody {
     #[serde(rename = "type")]
-    pub body_type: String,  // "json" | "text" | "xml" | "html" | "binary"
+    pub body_type: String, // "json" | "text" | "xml" | "html" | "binary"
     pub data: String,
 }
 

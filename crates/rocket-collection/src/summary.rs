@@ -19,7 +19,13 @@ pub struct CollectionSummary {
 }
 
 impl CollectionSummary {
-    pub fn new(uid: impl Into<String>, name: impl Into<String>, path: impl Into<String>, request_count: usize, modified_at: Option<String>) -> Self {
+    pub fn new(
+        uid: impl Into<String>,
+        name: impl Into<String>,
+        path: impl Into<String>,
+        request_count: usize,
+        modified_at: Option<String>,
+    ) -> Self {
         Self {
             uid: uid.into(),
             name: name.into(),

@@ -1,3 +1,4 @@
+use crate::scripting::ops::ScriptOpError;
 use deno_core::op2;
 use std::collections::HashMap;
 use std::io::Read;
@@ -5,7 +6,6 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
-use crate::scripting::ops::ScriptOpError;
 
 /// Runs `command` with `args`, draining stdout/stderr on background threads
 /// while polling for exit so a child that fills its OS pipe buffer before
@@ -30,7 +30,9 @@ fn exec_impl(
         cmd.env(k, v);
     }
 
-    let mut child = cmd.spawn().map_err(|e| ScriptOpError(format!("{command}: {e}")))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ScriptOpError(format!("{command}: {e}")))?;
 
     let mut stdout_pipe = child
         .stdout
@@ -62,7 +64,9 @@ fn exec_impl(
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(ScriptOpError(format!("{command}: timed out after {timeout_ms}ms")));
+                    return Err(ScriptOpError(format!(
+                        "{command}: timed out after {timeout_ms}ms"
+                    )));
                 }
                 thread::sleep(Duration::from_millis(20));
             }
@@ -91,7 +95,11 @@ pub fn op_process_exec(
 ) -> Result<String, ScriptOpError> {
     let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
     let env: HashMap<String, String> = serde_json::from_str(&env_json).unwrap_or_default();
-    let cwd_opt = if cwd.is_empty() { None } else { Some(cwd.as_str()) };
+    let cwd_opt = if cwd.is_empty() {
+        None
+    } else {
+        Some(cwd.as_str())
+    };
     let (stdout, stderr, exit_code) = exec_impl(&command, &args, cwd_opt, &env, timeout_ms as u64)?;
     Ok(serde_json::to_string(&serde_json::json!({
         "stdout": stdout,
@@ -169,7 +177,12 @@ mod tests {
     fn exec_times_out_and_returns_an_error() {
         let result = exec_impl(
             "cmd",
-            &["/C".to_string(), "timeout".to_string(), "/T".to_string(), "5".to_string()],
+            &[
+                "/C".to_string(),
+                "timeout".to_string(),
+                "/T".to_string(),
+                "5".to_string(),
+            ],
             None,
             &HashMap::new(),
             200,
@@ -194,7 +207,10 @@ mod tests {
             500,
         );
         let elapsed = start.elapsed();
-        assert!(result.is_ok(), "expected the direct child's exit to succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected the direct child's exit to succeed: {result:?}"
+        );
         assert!(
             elapsed < Duration::from_secs(1),
             "exec_impl should return promptly instead of blocking on the grandchild's held-open pipe, took {elapsed:?}"

@@ -53,13 +53,19 @@ impl RequestSignatureSnapshot {
                 .headers
                 .iter()
                 .filter(|h| h.enabled)
-                .map(|h| KeyValueEntry { key: h.key.clone(), value: h.value.clone() })
+                .map(|h| KeyValueEntry {
+                    key: h.key.clone(),
+                    value: h.value.clone(),
+                })
                 .collect(),
             query_params: request
                 .query_params
                 .iter()
                 .filter(|q| q.enabled)
-                .map(|q| KeyValueEntry { key: q.key.clone(), value: q.value.clone() })
+                .map(|q| KeyValueEntry {
+                    key: q.key.clone(),
+                    value: q.value.clone(),
+                })
                 .collect(),
             body_content: extract_body_content(&request.body),
             form_fields: extract_form_fields(&request.body),
@@ -131,7 +137,11 @@ fn auth_detail(auth: &Auth) -> String {
                 token.clone()
             }
         }
-        Auth::ApiKey { key, value, placement } => {
+        Auth::ApiKey {
+            key,
+            value,
+            placement,
+        } => {
             let truncated = if value.len() > 8 {
                 format!("{}…", value.chars().take(8).collect::<String>())
             } else {
@@ -139,7 +149,12 @@ fn auth_detail(auth: &Auth) -> String {
             };
             format!("{}={} ({})", key, truncated, placement)
         }
-        Auth::AwsSigV4 { access_key, region, service, .. } => {
+        Auth::AwsSigV4 {
+            access_key,
+            region,
+            service,
+            ..
+        } => {
             format!("{}@{}/{}", access_key, region, service)
         }
     }
@@ -170,7 +185,10 @@ fn extract_form_fields(body: &Option<Body>) -> Vec<KeyValueEntry> {
                 entries
                     .iter()
                     .filter(|e| e.enabled)
-                    .map(|e| KeyValueEntry { key: e.key.clone(), value: e.value.clone() })
+                    .map(|e| KeyValueEntry {
+                        key: e.key.clone(),
+                        value: e.value.clone(),
+                    })
                     .collect()
             })
             .unwrap_or_default(),
@@ -187,7 +205,10 @@ pub struct ContractSnapshot {
 
 impl ContractSnapshot {
     pub fn new(contract_id: Ulid) -> Self {
-        Self { contract_id, entries: Vec::new() }
+        Self {
+            contract_id,
+            entries: Vec::new(),
+        }
     }
 
     pub fn get(&self, request_path: &std::path::Path) -> Option<&RequestSignatureSnapshot> {
@@ -195,7 +216,11 @@ impl ContractSnapshot {
     }
 
     pub fn upsert(&mut self, snap: RequestSignatureSnapshot) {
-        if let Some(existing) = self.entries.iter_mut().find(|e| e.request_path == snap.request_path) {
+        if let Some(existing) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.request_path == snap.request_path)
+        {
             *existing = snap;
         } else {
             self.entries.push(snap);
@@ -206,11 +231,17 @@ impl ContractSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::types::{Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, QueryParam};
+    use rocket_shared::types::{
+        Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, QueryParam,
+    };
 
     #[test]
     fn from_request_captures_method_url_and_keys() {
-        let mut req = Request::new("Get Users", HttpMethod::Get, "https://api.example.com/users");
+        let mut req = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
         req = req.with_header("X-Trace-Id", "123");
         req.query_params.push(QueryParam {
             key: "page".into(),
@@ -243,7 +274,10 @@ mod tests {
         let snap = RequestSignatureSnapshot::from_request("create.yml", &req);
 
         // body_content now stores the raw JSON string.
-        assert_eq!(snap.body_content, Some(r#"{"name":"Ada","email":"a@b.com"}"#.to_string()));
+        assert_eq!(
+            snap.body_content,
+            Some(r#"{"name":"Ada","email":"a@b.com"}"#.to_string())
+        );
     }
 
     #[test]
@@ -259,7 +293,12 @@ mod tests {
     #[test]
     fn from_request_captures_query_param_key_and_value() {
         let mut req = Request::new("Get", HttpMethod::Get, "/search");
-        req.query_params.push(QueryParam { key: "q".into(), value: "hello".into(), enabled: true, description: None });
+        req.query_params.push(QueryParam {
+            key: "q".into(),
+            value: "hello".into(),
+            enabled: true,
+            description: None,
+        });
         let snap = RequestSignatureSnapshot::from_request("search.yml", &req);
         assert_eq!(snap.query_params.len(), 1);
         assert_eq!(snap.query_params[0].key, "q");
@@ -303,8 +342,9 @@ mod tests {
     #[test]
     fn from_request_captures_auth_detail_bearer() {
         use rocket_shared::types::Auth;
-        let req = Request::new("Get", HttpMethod::Get, "/secure")
-            .with_auth(Auth::Bearer { token: "supersecrettoken".into() });
+        let req = Request::new("Get", HttpMethod::Get, "/secure").with_auth(Auth::Bearer {
+            token: "supersecrettoken".into(),
+        });
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "supersec…");
     }
@@ -316,8 +356,22 @@ mod tests {
             mode: BodyMode::FormData,
             content: None,
             form_data: Some(vec![
-                FormDataEntry { key: "enabled".into(), value: "yes".into(), entry_type: FormDataType::Text, enabled: true, content_type: None, description: None },
-                FormDataEntry { key: "disabled".into(), value: "no".into(), entry_type: FormDataType::Text, enabled: false, content_type: None, description: None },
+                FormDataEntry {
+                    key: "enabled".into(),
+                    value: "yes".into(),
+                    entry_type: FormDataType::Text,
+                    enabled: true,
+                    content_type: None,
+                    description: None,
+                },
+                FormDataEntry {
+                    key: "disabled".into(),
+                    value: "no".into(),
+                    entry_type: FormDataType::Text,
+                    enabled: false,
+                    content_type: None,
+                    description: None,
+                },
             ]),
             file_path: None,
         });
@@ -329,8 +383,9 @@ mod tests {
     #[test]
     fn from_request_auth_detail_short_bearer() {
         use rocket_shared::types::Auth;
-        let req = Request::new("Get", HttpMethod::Get, "/x")
-            .with_auth(Auth::Bearer { token: "short".into() });
+        let req = Request::new("Get", HttpMethod::Get, "/x").with_auth(Auth::Bearer {
+            token: "short".into(),
+        });
         let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
         assert_eq!(snap.auth_detail, "short");
     }
@@ -352,8 +407,7 @@ mod tests {
             token_config: None,
             settings: None,
         };
-        let req = Request::new("Get", HttpMethod::Get, "/secure")
-            .with_auth(Auth::OAuth2(flow));
+        let req = Request::new("Get", HttpMethod::Get, "/secure").with_auth(Auth::OAuth2(flow));
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "my-client");
     }
@@ -361,10 +415,30 @@ mod tests {
     #[test]
     fn from_request_skips_disabled_headers_and_params() {
         let mut req = Request::new("Get", HttpMethod::Get, "/x");
-        req.headers.push(Header { key: "X-Enabled".into(), value: "yes".into(), enabled: true, description: None });
-        req.headers.push(Header { key: "X-Disabled".into(), value: "no".into(), enabled: false, description: None });
-        req.query_params.push(QueryParam { key: "active".into(), value: "1".into(), enabled: true, description: None });
-        req.query_params.push(QueryParam { key: "inactive".into(), value: "0".into(), enabled: false, description: None });
+        req.headers.push(Header {
+            key: "X-Enabled".into(),
+            value: "yes".into(),
+            enabled: true,
+            description: None,
+        });
+        req.headers.push(Header {
+            key: "X-Disabled".into(),
+            value: "no".into(),
+            enabled: false,
+            description: None,
+        });
+        req.query_params.push(QueryParam {
+            key: "active".into(),
+            value: "1".into(),
+            enabled: true,
+            description: None,
+        });
+        req.query_params.push(QueryParam {
+            key: "inactive".into(),
+            value: "0".into(),
+            enabled: false,
+            description: None,
+        });
         let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
         assert_eq!(snap.headers.len(), 1);
         assert_eq!(snap.headers[0].key, "X-Enabled");

@@ -12,16 +12,16 @@ use rocket_app::{
     WorkspaceService,
 };
 use rocket_audit::publisher::SecurityAuditPublisher;
-use rocket_infra::{
-    CloneDestinationCapabilities, FsAuditLogRepo, FsCollectionRepo, FsComplianceProfileRepo,
-    FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsRepositoryPathResolver,
-    FsTemplateRepo, FsWorkspaceRepo, FsWorkspaceConfigRepo, KeyringSecretStore, NotifyFileWatcher,
-    ReqwestExecutor, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
-    scripting::DenoScriptEngine,
-};
 use rocket_environment::secret_store::SecretStore;
-use rocket_workspace::WorkspaceConfigRepository;
+use rocket_infra::{
+    scripting::DenoScriptEngine, CloneDestinationCapabilities, FsAuditLogRepo, FsCollectionRepo,
+    FsComplianceProfileRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo,
+    FsRepositoryPathResolver, FsTemplateRepo, FsWorkspaceConfigRepo, FsWorkspaceRepo,
+    KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo,
+    SharedPathCollectionRepo,
+};
 use rocket_shared::events::NullEventPublisher;
+use rocket_workspace::WorkspaceConfigRepository;
 use tauri::Manager;
 
 /// OS-keychain backend for environment secret values.
@@ -52,14 +52,9 @@ pub fn run() {
     // the AppHandle is available.
     use tracing_subscriber::{fmt, prelude::*, reload, EnvFilter, Registry};
 
-    type TauriReloadLayer = reload::Layer<
-        Option<tauri_tracing_layer::TauriTracingLayer>,
-        Registry,
-    >;
-    type TauriReloadHandle = reload::Handle<
-        Option<tauri_tracing_layer::TauriTracingLayer>,
-        Registry,
-    >;
+    type TauriReloadLayer = reload::Layer<Option<tauri_tracing_layer::TauriTracingLayer>, Registry>;
+    type TauriReloadHandle =
+        reload::Handle<Option<tauri_tracing_layer::TauriTracingLayer>, Registry>;
 
     let env_filter = EnvFilter::try_from_env("ROCKET_LOG")
         .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
@@ -123,8 +118,7 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).ok();
 
             // Workspace service — manages workspace switching.
-            let active_workspace_path: Arc<Mutex<PathBuf>> =
-                Arc::new(Mutex::new(PathBuf::new()));
+            let active_workspace_path: Arc<Mutex<PathBuf>> = Arc::new(Mutex::new(PathBuf::new()));
             let workspace_repo = Box::new(FsWorkspaceRepo::new(data_dir.clone()));
             let workspace_config_repo = Box::new(FsWorkspaceConfigRepo::new());
             let workspace_svc = WorkspaceService::new_with_repository_locator(
@@ -139,7 +133,10 @@ pub fn run() {
             let active_ws = workspace_svc
                 .get_active()
                 .map_err(|e| format!("Failed to load active workspace: {e}"))?;
-            *active_workspace_path.lock().map_err(|e| format!("Workspace path lock poisoned: {e}"))? = active_ws.path.clone();
+            *active_workspace_path
+                .lock()
+                .map_err(|e| format!("Workspace path lock poisoned: {e}"))? =
+                active_ws.path.clone();
 
             // Ensure the default workspace has a workspace.yml on first launch.
             let ws_yml = active_ws.path.join("workspace.yml");
@@ -168,8 +165,7 @@ pub fn run() {
             }
 
             // Event buses — publish domain events to the frontend.
-            let watcher_bus =
-                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
+            let watcher_bus = Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
 
             // Security audit: tamper-evident event log + compliance profile.
             // Lives under data_dir (not workspace) so the log persists across
@@ -199,7 +195,9 @@ pub fn run() {
             // made outside the app; this service publishes its own events for
             // deterministic, immediate sidebar/tree refresh on success.
             let collection_svc = CollectionService::new_with_audit(
-                Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
             );
@@ -215,8 +213,9 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir.clone())),
                 Box::new(NullEventPublisher),
             );
-            let executor: Arc<dyn rocket_http::HttpExecutor> =
-                Arc::new(ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)));
+            let executor: Arc<dyn rocket_http::HttpExecutor> = Arc::new(
+                ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)),
+            );
 
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
@@ -231,9 +230,9 @@ pub fn run() {
                 audit_publisher.clone(),
             )
             .with_script_engine(Box::new(DenoScriptEngine::new()))
-            .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
-                Arc::clone(&active_workspace_path),
-            )));
+            .with_collection_env_repo_factory(Box::new(
+                SharedCollectionEnvironmentRepo::new(Arc::clone(&active_workspace_path)),
+            ));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Uses its own repo instances pointed at the same paths as the exec service.
@@ -251,7 +250,9 @@ pub fn run() {
             // collection_svc's sidebar reads do, not read whatever workspace was
             // active at process startup.
             let runner_svc = CollectionRunnerService::new(
-                Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
@@ -268,7 +269,9 @@ pub fn run() {
             // without duplicating filesystem state.
             let contract_svc = ContractService::new_with_audit(
                 Arc::new(FsContractRepo),
-                Arc::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 audit_publisher.clone(),
             );
 

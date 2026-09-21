@@ -1,8 +1,4 @@
-use crate::contract::{
-    changelog::ContractChangelog,
-    snapshot::ContractSnapshot,
-    types::Contract,
-};
+use crate::contract::{changelog::ContractChangelog, snapshot::ContractSnapshot, types::Contract};
 use std::path::Path;
 use ulid::Ulid;
 
@@ -34,16 +30,32 @@ pub trait ContractRepository: Send + Sync {
     fn delete_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<()>;
 
     /// Persist snapshot (overwrite — snapshot always tracks latest state).
-    fn save_snapshot(&self, collection_root: &Path, snapshot: &ContractSnapshot) -> ContractResult<()>;
+    fn save_snapshot(
+        &self,
+        collection_root: &Path,
+        snapshot: &ContractSnapshot,
+    ) -> ContractResult<()>;
 
     /// Load snapshot. Returns empty snapshot if file does not exist yet.
-    fn load_snapshot(&self, collection_root: &Path, contract_id: Ulid) -> ContractResult<ContractSnapshot>;
+    fn load_snapshot(
+        &self,
+        collection_root: &Path,
+        contract_id: Ulid,
+    ) -> ContractResult<ContractSnapshot>;
 
     /// Append entries to changelog (never overwrites existing entries).
-    fn append_changelog(&self, collection_root: &Path, changelog: &ContractChangelog) -> ContractResult<()>;
+    fn append_changelog(
+        &self,
+        collection_root: &Path,
+        changelog: &ContractChangelog,
+    ) -> ContractResult<()>;
 
     /// Load full changelog. Returns empty changelog if file does not exist.
-    fn load_changelog(&self, collection_root: &Path, contract_id: Ulid) -> ContractResult<ContractChangelog>;
+    fn load_changelog(
+        &self,
+        collection_root: &Path,
+        contract_id: Ulid,
+    ) -> ContractResult<ContractChangelog>;
 
     /// Load the tracking snapshot (updated on every request save).
     /// Falls back to the baseline snapshot if no tracking file exists yet.

@@ -6,7 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::credentials::GitCredentials;
 use crate::remote::{FetchResult, RemoteInfo};
 
-use super::helpers::{branch_name, build_callbacks, open_repo, clear_matching_untracked_paths};
+use super::helpers::{branch_name, build_callbacks, clear_matching_untracked_paths, open_repo};
 
 #[tracing::instrument(name = "git_list_remotes", fields(repo_path = %path))]
 pub(super) fn list_remotes(path: &str) -> DomainResult<Vec<RemoteInfo>> {

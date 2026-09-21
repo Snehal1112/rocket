@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::dynamic_vars;
+use std::collections::HashMap;
 
 /// Result of variable resolution.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,10 +74,7 @@ pub fn resolve(template: &str, variables: &HashMap<String, String>) -> ResolveRe
 }
 
 /// Convenience: resolve using an Environment's enabled variables.
-pub fn resolve_with_env(
-    template: &str,
-    env: &crate::environment::Environment,
-) -> ResolveResult {
+pub fn resolve_with_env(template: &str, env: &crate::environment::Environment) -> ResolveResult {
     let vars: HashMap<String, String> = env
         .enabled_variables()
         .into_iter()
@@ -93,7 +90,10 @@ mod tests {
     #[test]
     fn resolve_simple_variable() {
         let mut vars = HashMap::new();
-        vars.insert("BASE_URL".to_string(), "https://api.example.com".to_string());
+        vars.insert(
+            "BASE_URL".to_string(),
+            "https://api.example.com".to_string(),
+        );
         let result = resolve("{{BASE_URL}}/users", &vars);
         assert_eq!(result.output, "https://api.example.com/users");
         assert!(result.unresolved.is_empty());
@@ -136,8 +136,11 @@ mod tests {
     fn resolve_dynamic_var_guid() {
         let vars = HashMap::new();
         let result = resolve("{{$guid}}", &vars);
-        assert!(uuid::Uuid::parse_str(&result.output).is_ok(),
-            "{{{{$guid}}}} should resolve to a valid UUID, got: {}", result.output);
+        assert!(
+            uuid::Uuid::parse_str(&result.output).is_ok(),
+            "{{{{$guid}}}} should resolve to a valid UUID, got: {}",
+            result.output
+        );
         assert!(result.unresolved.is_empty());
     }
 
@@ -165,9 +168,15 @@ mod tests {
         vars.insert("baseUrl".to_string(), "https://api.test".to_string());
         let result = resolve("{{baseUrl}}/users/{{$randomUUID}}", &vars);
         assert!(result.output.starts_with("https://api.test/users/"));
-        let uuid_part = result.output.strip_prefix("https://api.test/users/").unwrap();
-        assert!(uuid::Uuid::parse_str(uuid_part).is_ok(),
-            "UUID portion '{}' is not valid", uuid_part);
+        let uuid_part = result
+            .output
+            .strip_prefix("https://api.test/users/")
+            .unwrap();
+        assert!(
+            uuid::Uuid::parse_str(uuid_part).is_ok(),
+            "UUID portion '{}' is not valid",
+            uuid_part
+        );
     }
 
     #[test]
@@ -175,20 +184,39 @@ mod tests {
         let vars = HashMap::new();
         let result = resolve("{{$guid}}-{{$guid}}", &vars);
         // Two 36-char UUIDs separated by a literal '-' = 73 chars total.
-        assert_eq!(result.output.len(), 73, "Expected two UUIDs separated by dash, got: {}", result.output);
+        assert_eq!(
+            result.output.len(),
+            73,
+            "Expected two UUIDs separated by dash, got: {}",
+            result.output
+        );
         // Verify both halves are valid, distinct UUIDs.
         let (first, rest) = result.output.split_at(36);
         let second = &rest[1..]; // skip the separator dash
-        assert!(uuid::Uuid::parse_str(first).is_ok(), "first UUID invalid: {}", first);
-        assert!(uuid::Uuid::parse_str(second).is_ok(), "second UUID invalid: {}", second);
-        assert_ne!(first, second, "two $guid calls should produce different UUIDs");
+        assert!(
+            uuid::Uuid::parse_str(first).is_ok(),
+            "first UUID invalid: {}",
+            first
+        );
+        assert!(
+            uuid::Uuid::parse_str(second).is_ok(),
+            "second UUID invalid: {}",
+            second
+        );
+        assert_ne!(
+            first, second,
+            "two $guid calls should produce different UUIDs"
+        );
     }
 
     #[test]
     fn resolve_dynamic_var_with_whitespace() {
         let vars = HashMap::new();
         let result = resolve("{{ $guid }}", &vars);
-        assert!(uuid::Uuid::parse_str(&result.output).is_ok(),
-            "Whitespace around $guid should still resolve, got: {}", result.output);
+        assert!(
+            uuid::Uuid::parse_str(&result.output).is_ok(),
+            "Whitespace around $guid should still resolve, got: {}",
+            result.output
+        );
     }
 }

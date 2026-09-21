@@ -90,15 +90,31 @@ mod tests {
         items.sort_by(|(_, a), (_, b)| a.name.cmp(&b.name));
 
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].1, Item { name: "alpha".into(), value: 1 });
-        assert_eq!(items[1].1, Item { name: "beta".into(), value: 2 });
+        assert_eq!(
+            items[0].1,
+            Item {
+                name: "alpha".into(),
+                value: 1
+            }
+        );
+        assert_eq!(
+            items[1].1,
+            Item {
+                name: "beta".into(),
+                value: 2
+            }
+        );
     }
 
     #[test]
     fn read_dir_yaml_skips_non_yml_files() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("a.yml"), b"name: alpha\nvalue: 1\n").unwrap();
-        fs::write(dir.path().join("b.json"), b"{\"name\":\"beta\",\"value\":2}").unwrap();
+        fs::write(
+            dir.path().join("b.json"),
+            b"{\"name\":\"beta\",\"value\":2}",
+        )
+        .unwrap();
         fs::write(dir.path().join("c.txt"), b"plain text").unwrap();
 
         let items: Vec<(PathBuf, Item)> = read_dir_yaml(dir.path()).unwrap();
@@ -143,7 +159,11 @@ mod tests {
         let path = dir.path().join("missing.yml");
 
         let err = delete_if_exists(&path, "item 'missing'").unwrap_err();
-        assert!(matches!(err, DomainError::NotFound(_)), "expected NotFound, got {:?}", err);
+        assert!(
+            matches!(err, DomainError::NotFound(_)),
+            "expected NotFound, got {:?}",
+            err
+        );
     }
 
     #[test]

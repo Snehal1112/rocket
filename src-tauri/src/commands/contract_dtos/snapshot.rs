@@ -40,12 +40,18 @@ pub struct RequestSignatureSnapshotDto {
 
 impl From<&KeyValueEntry> for KeyValueEntryDto {
     fn from(k: &KeyValueEntry) -> Self {
-        Self { key: k.key.clone(), value: k.value.clone() }
+        Self {
+            key: k.key.clone(),
+            value: k.value.clone(),
+        }
     }
 }
 impl From<KeyValueEntryDto> for KeyValueEntry {
     fn from(d: KeyValueEntryDto) -> Self {
-        Self { key: d.key, value: d.value }
+        Self {
+            key: d.key,
+            value: d.value,
+        }
     }
 }
 

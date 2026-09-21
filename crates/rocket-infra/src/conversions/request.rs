@@ -1,6 +1,8 @@
 use crate::oc::*;
 use rocket_collection::Request;
-use rocket_shared::action::{ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample};
+use rocket_shared::action::{
+    ActionSelector, ActionSetVariable, ActionVariable, HttpRequestExample,
+};
 use rocket_shared::description::Documentation;
 use rocket_shared::types::{Auth, Body, Header, HttpMethod};
 
@@ -16,7 +18,11 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     let tags = oc.info.tags;
 
     // HTTP section.
-    let method = oc.http.method.parse::<HttpMethod>().unwrap_or(HttpMethod::Get);
+    let method = oc
+        .http
+        .method
+        .parse::<HttpMethod>()
+        .unwrap_or(HttpMethod::Get);
     let url = oc.http.url;
     let headers: Vec<Header> = oc.http.headers.into_iter().map(Header::from).collect();
     let (query_params, path_params) = split_params(oc.http.params);
@@ -25,19 +31,34 @@ pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
 
     // Runtime section.
     let (pre_request_script, post_response_script, tests) = extract_scripts(&oc.runtime);
-    let assertions = oc.runtime.as_ref()
+    let assertions = oc
+        .runtime
+        .as_ref()
         .map(|r| r.assertions.clone())
         .unwrap_or_default();
     let actions = extract_actions(&oc.runtime);
-    let variables: Vec<rocket_collection::settings::CollectionVariable> = oc.runtime.as_ref()
-        .map(|r| r.variables.iter().cloned().map(rocket_collection::settings::CollectionVariable::from).collect())
+    let variables: Vec<rocket_collection::settings::CollectionVariable> = oc
+        .runtime
+        .as_ref()
+        .map(|r| {
+            r.variables
+                .iter()
+                .cloned()
+                .map(rocket_collection::settings::CollectionVariable::from)
+                .collect()
+        })
         .unwrap_or_default();
-    let runtime_auth = oc.runtime.as_ref()
+    let runtime_auth = oc
+        .runtime
+        .as_ref()
         .and_then(|r| r.auth.clone())
         .map(Auth::from);
 
     // Examples.
-    let examples = oc.examples.unwrap_or_default().into_iter()
+    let examples = oc
+        .examples
+        .unwrap_or_default()
+        .into_iter()
         .map(|e| HttpRequestExample {
             name: e.name,
             description: e.description,
@@ -97,32 +118,58 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
     let http = OcHttpRequestDetails {
         method: req.method.to_string(),
         url: req.url.clone(),
-        headers: req.headers.iter().cloned().map(OcHttpRequestHeader::from).collect(),
+        headers: req
+            .headers
+            .iter()
+            .cloned()
+            .map(OcHttpRequestHeader::from)
+            .collect(),
         params,
         body: req.body.clone().map(OcHttpRequestBody::from),
-        auth: if req.auth == Auth::None { None } else { Some(OcAuth::from(req.auth.clone())) },
+        auth: if req.auth == Auth::None {
+            None
+        } else {
+            Some(OcAuth::from(req.auth.clone()))
+        },
     };
 
     let mut scripts = Vec::new();
     if let Some(ref code) = req.pre_request_script {
-        scripts.push(OcScript { script_type: "before-request".into(), code: code.trim_end_matches('\n').to_string() });
+        scripts.push(OcScript {
+            script_type: "before-request".into(),
+            code: code.trim_end_matches('\n').to_string(),
+        });
     }
     if let Some(ref code) = req.post_response_script {
-        scripts.push(OcScript { script_type: "after-response".into(), code: code.trim_end_matches('\n').to_string() });
+        scripts.push(OcScript {
+            script_type: "after-response".into(),
+            code: code.trim_end_matches('\n').to_string(),
+        });
     }
     if let Some(ref code) = req.tests {
-        scripts.push(OcScript { script_type: "tests".into(), code: code.trim_end_matches('\n').to_string() });
+        scripts.push(OcScript {
+            script_type: "tests".into(),
+            code: code.trim_end_matches('\n').to_string(),
+        });
     }
 
-    let actions: Vec<OcAction> = req.actions.iter().map(|a| {
-        OcAction::SetVariable {
+    let actions: Vec<OcAction> = req
+        .actions
+        .iter()
+        .map(|a| OcAction::SetVariable {
             description: a.description.clone(),
             phase: a.phase.clone(),
-            selector: OcActionSelector { expression: a.selector.expression.clone(), method: a.selector.method.clone() },
-            variable: OcActionVariable { name: a.variable.name.clone(), scope: a.variable.scope.clone() },
+            selector: OcActionSelector {
+                expression: a.selector.expression.clone(),
+                method: a.selector.method.clone(),
+            },
+            variable: OcActionVariable {
+                name: a.variable.name.clone(),
+                scope: a.variable.scope.clone(),
+            },
             disabled: a.disabled,
-        }
-    }).collect();
+        })
+        .collect();
 
     let has_runtime = !scripts.is_empty()
         || !req.assertions.is_empty()
@@ -131,7 +178,12 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
         || runtime_auth.is_some();
     let runtime = if has_runtime {
         Some(OcHttpRequestRuntime {
-            variables: req.variables.iter().cloned().map(OcVariable::from).collect(),
+            variables: req
+                .variables
+                .iter()
+                .cloned()
+                .map(OcVariable::from)
+                .collect(),
             scripts,
             assertions: req.assertions.clone(),
             actions,
@@ -144,17 +196,29 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
     let examples = if req.examples.is_empty() {
         None
     } else {
-        Some(req.examples.iter().map(|e| {
-            OcHttpRequestExample {
-                name: e.name.clone(),
-                description: e.description.clone(),
-                request: e.request.clone().and_then(|v| serde_yaml::from_value(v).ok()),
-                response: e.response.clone().and_then(|v| serde_yaml::from_value(v).ok()),
-            }
-        }).collect())
+        Some(
+            req.examples
+                .iter()
+                .map(|e| OcHttpRequestExample {
+                    name: e.name.clone(),
+                    description: e.description.clone(),
+                    request: e
+                        .request
+                        .clone()
+                        .and_then(|v| serde_yaml::from_value(v).ok()),
+                    response: e
+                        .response
+                        .clone()
+                        .and_then(|v| serde_yaml::from_value(v).ok()),
+                })
+                .collect(),
+        )
     };
 
-    let docs = req.docs.as_ref().and_then(|d| d.content().map(String::from));
+    let docs = req
+        .docs
+        .as_ref()
+        .and_then(|d| d.content().map(String::from));
 
     OcHttpRequest {
         uid: Some(req.uid.clone()),
@@ -168,8 +232,12 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
 }
 
 /// Extract pre-request, post-response, and test scripts from runtime.
-fn extract_scripts(runtime: &Option<OcHttpRequestRuntime>) -> (Option<String>, Option<String>, Option<String>) {
-    let Some(rt) = runtime else { return (None, None, None) };
+fn extract_scripts(
+    runtime: &Option<OcHttpRequestRuntime>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let Some(rt) = runtime else {
+        return (None, None, None);
+    };
     let mut pre = None;
     let mut post = None;
     let mut tests = None;
@@ -187,23 +255,28 @@ fn extract_scripts(runtime: &Option<OcHttpRequestRuntime>) -> (Option<String>, O
 /// Extract action-set-variable entries from runtime.
 fn extract_actions(runtime: &Option<OcHttpRequestRuntime>) -> Vec<ActionSetVariable> {
     let Some(rt) = runtime else { return Vec::new() };
-    rt.actions.iter().map(|a| {
-        match a {
-            OcAction::SetVariable { description, phase, selector, variable, disabled } => {
-                ActionSetVariable {
-                    phase: phase.clone(),
-                    selector: ActionSelector {
-                        expression: selector.expression.clone(),
-                        method: selector.method.clone(),
-                    },
-                    variable: ActionVariable {
-                        name: variable.name.clone(),
-                        scope: variable.scope.clone(),
-                    },
-                    disabled: *disabled,
-                    description: description.clone(),
-                }
-            }
-        }
-    }).collect()
+    rt.actions
+        .iter()
+        .map(|a| match a {
+            OcAction::SetVariable {
+                description,
+                phase,
+                selector,
+                variable,
+                disabled,
+            } => ActionSetVariable {
+                phase: phase.clone(),
+                selector: ActionSelector {
+                    expression: selector.expression.clone(),
+                    method: selector.method.clone(),
+                },
+                variable: ActionVariable {
+                    name: variable.name.clone(),
+                    scope: variable.scope.clone(),
+                },
+                disabled: *disabled,
+                description: description.clone(),
+            },
+        })
+        .collect()
 }

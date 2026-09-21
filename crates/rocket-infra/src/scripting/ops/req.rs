@@ -1,8 +1,8 @@
-use deno_core::{op2, OpState};
-use url::Url;
-use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use crate::scripting::ops::ScriptOpError;
+use crate::scripting::state::{ScriptInputState, ScriptOutputState};
+use deno_core::{op2, OpState};
 use rocket_scripting::{HeaderMutation, ScriptPhase};
+use url::Url;
 
 fn guard_before_request(state: &OpState) -> Result<(), ScriptOpError> {
     let phase = &state.borrow::<ScriptInputState>().phase;
@@ -168,10 +168,7 @@ pub fn op_req_get_path_params(state: &OpState) -> String {
 // ── req write ops (BeforeRequest only) ───────────────────────────────────────
 
 #[op2(fast)]
-pub fn op_req_set_url(
-    state: &mut OpState,
-    #[string] url: String,
-) -> Result<(), ScriptOpError> {
+pub fn op_req_set_url(state: &mut OpState, #[string] url: String) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
     let out = state.borrow_mut::<ScriptOutputState>();
     out.request_mutations.url = Some(url);
@@ -199,7 +196,9 @@ pub fn op_req_set_header(
 ) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers.push(HeaderMutation::Set { name, value });
+    out.request_mutations
+        .headers
+        .push(HeaderMutation::Set { name, value });
     out.any_request_mutation = true;
     Ok(())
 }
@@ -215,7 +214,8 @@ pub fn op_req_set_headers(
         serde_json::from_str(&headers_json).unwrap_or_default();
     let out = state.borrow_mut::<ScriptOutputState>();
     out.request_mutations.headers.extend(
-        map.into_iter().map(|(name, value)| HeaderMutation::Set { name, value }),
+        map.into_iter()
+            .map(|(name, value)| HeaderMutation::Set { name, value }),
     );
     out.any_request_mutation = true;
     Ok(())
@@ -228,7 +228,9 @@ pub fn op_req_delete_header(
 ) -> Result<(), ScriptOpError> {
     guard_before_request(state)?;
     let out = state.borrow_mut::<ScriptOutputState>();
-    out.request_mutations.headers.push(HeaderMutation::Delete { name });
+    out.request_mutations
+        .headers
+        .push(HeaderMutation::Delete { name });
     out.any_request_mutation = true;
     Ok(())
 }
@@ -243,7 +245,9 @@ pub fn op_req_delete_headers(
     let names: Vec<String> = serde_json::from_str(&names_json).unwrap_or_default();
     let out = state.borrow_mut::<ScriptOutputState>();
     out.request_mutations.headers.extend(
-        names.into_iter().map(|name| HeaderMutation::Delete { name }),
+        names
+            .into_iter()
+            .map(|name| HeaderMutation::Delete { name }),
     );
     out.any_request_mutation = true;
     Ok(())

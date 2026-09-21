@@ -1,4 +1,6 @@
-use rocket_app::{CollectionRunnerService, RequestExecutionService, RunCollectionInput, RunSummary};
+use rocket_app::{
+    CollectionRunnerService, RequestExecutionService, RunCollectionInput, RunSummary,
+};
 use rocket_shared::error::DomainError;
 use tauri::State;
 

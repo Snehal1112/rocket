@@ -217,7 +217,12 @@ mod tests {
         let paths: Vec<&str> = items.iter().map(|i| i.request_path.as_str()).collect();
         assert_eq!(
             paths,
-            vec!["login.yml", "auth/refresh.yml", "auth/admin/purge.yml", "logout.yml"]
+            vec![
+                "login.yml",
+                "auth/refresh.yml",
+                "auth/admin/purge.yml",
+                "logout.yml"
+            ]
         );
     }
 
@@ -232,20 +237,26 @@ mod tests {
     #[test]
     fn unknown_folder_path_is_not_found() {
         let err = flatten_run_set(&sample_collection(), Some("nope")).expect_err("must fail");
-        assert!(matches!(err, rocket_shared::error::DomainError::NotFound(_)));
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::NotFound(_)
+        ));
     }
 
     #[test]
     fn opaque_protocol_items_are_never_steps() {
         let mut collection = Collection::new("my-api");
         collection.root.add_request(req("Login", "login.yml"));
-        collection.root.items.push(rocket_collection::CollectionItem::OpaqueItem(
-            OpaqueProtocolItem {
-                protocol: "graphql".into(),
-                name: "Search".into(),
-                raw: serde_yaml::Value::Null,
-            },
-        ));
+        collection
+            .root
+            .items
+            .push(rocket_collection::CollectionItem::OpaqueItem(
+                OpaqueProtocolItem {
+                    protocol: "graphql".into(),
+                    name: "Search".into(),
+                    raw: serde_yaml::Value::Null,
+                },
+            ));
 
         let items = flatten_run_set(&collection, None).expect("flatten");
         assert_eq!(items.len(), 1);
@@ -310,7 +321,10 @@ mod tests {
         assert_eq!(input.options.timeout_ms, 5000);
         assert!(!input.options.follow_redirects);
         assert_eq!(input.options.max_redirects, Some(3));
-        assert!(input.options.verify_ssl, "\"inherit\" falls back to the default");
+        assert!(
+            input.options.verify_ssl,
+            "\"inherit\" falls back to the default"
+        );
     }
 
     #[test]

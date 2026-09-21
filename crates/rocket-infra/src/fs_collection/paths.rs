@@ -84,9 +84,10 @@ pub(super) fn cleanup_legacy_uid(dir: &Path) {
 /// Return an error if `path` is a symlink. Protects destructive ops from traversal via symlink.
 pub(super) fn reject_symlink(path: &Path) -> DomainResult<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(DomainError::InvalidInput(
-            format!("Refusing operation on symlink: {}", path.display()),
-        )),
+        Ok(meta) if meta.file_type().is_symlink() => Err(DomainError::InvalidInput(format!(
+            "Refusing operation on symlink: {}",
+            path.display()
+        ))),
         Ok(_) => Ok(()),
         Err(e) => Err(DomainError::Io(e.to_string())),
     }
@@ -110,15 +111,28 @@ pub(super) fn count_request_files(dir: &Path) -> usize {
 pub(super) fn is_request_file(path: &Path) -> bool {
     // Exclude reserved sidecar and config files.
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-        if matches!(name, "collection.json" | "_order.json" | "_order.yml" | "opencollection.yml" | "folder.yml" | "workspace.yml") {
+        if matches!(
+            name,
+            "collection.json"
+                | "_order.json"
+                | "_order.yml"
+                | "opencollection.yml"
+                | "folder.yml"
+                | "workspace.yml"
+        ) {
             return false;
         }
     }
-    path.extension().is_some_and(|ext| ext == "json" || ext == "yml" || ext == "yaml" || ext == "bru")
+    path.extension()
+        .is_some_and(|ext| ext == "json" || ext == "yml" || ext == "yaml" || ext == "bru")
 }
 
 /// Resolve a request file path, trying .yml first, then .json for backward compat.
-pub(super) fn resolve_request_path(repo: &FsCollectionRepo, collection_dir: &Path, path: &str) -> DomainResult<PathBuf> {
+pub(super) fn resolve_request_path(
+    repo: &FsCollectionRepo,
+    collection_dir: &Path,
+    path: &str,
+) -> DomainResult<PathBuf> {
     // Try .yml first.
     let yml = if path.ends_with(".yml") || path.ends_with(".yaml") {
         path.to_string()
@@ -131,7 +145,11 @@ pub(super) fn resolve_request_path(repo: &FsCollectionRepo, collection_dir: &Pat
         }
     }
     // Fall back to .json.
-    let json = if path.ends_with(".json") { path.to_string() } else { format!("{}.json", path) };
+    let json = if path.ends_with(".json") {
+        path.to_string()
+    } else {
+        format!("{}.json", path)
+    };
     repo.validate_path(collection_dir, Path::new(&json))
         .or_else(|_| repo.validate_path(collection_dir, Path::new(path)))
 }

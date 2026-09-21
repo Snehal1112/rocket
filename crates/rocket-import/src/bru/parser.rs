@@ -29,7 +29,9 @@ pub fn parse(input: &str) -> ImportResult<BruDocument> {
 
                 dispatch_block(&mut doc, &name, subtype.as_deref(), &block_tokens);
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
 
@@ -68,18 +70,25 @@ fn dispatch_block(doc: &mut BruDocument, name: &str, subtype: Option<&str>, toke
 }
 
 fn kv_map(tokens: &[Token]) -> Vec<(String, String)> {
-    tokens.iter().filter_map(|t| {
-        if let Token::KeyValue { key, value } = t {
-            Some((key.clone(), value.clone()))
-        } else {
-            None
-        }
-    }).collect()
+    tokens
+        .iter()
+        .filter_map(|t| {
+            if let Token::KeyValue { key, value } = t {
+                Some((key.clone(), value.clone()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn extract_raw_text(tokens: &[Token]) -> Option<String> {
     tokens.iter().find_map(|t| {
-        if let Token::RawText(s) = t { Some(s.clone()) } else { None }
+        if let Token::RawText(s) = t {
+            Some(s.clone())
+        } else {
+            None
+        }
     })
 }
 
@@ -103,16 +112,32 @@ fn parse_method_block(doc: &mut BruDocument, tokens: &[Token]) {
 fn parse_headers(doc: &mut BruDocument, tokens: &[Token]) {
     for (key, value) in kv_map(tokens) {
         let disabled = key.starts_with('~');
-        let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
-        doc.headers.push(BruKeyValue { key, value, disabled });
+        let key = if disabled {
+            key.trim_start_matches('~').to_string()
+        } else {
+            key
+        };
+        doc.headers.push(BruKeyValue {
+            key,
+            value,
+            disabled,
+        });
     }
 }
 
 fn parse_vars(doc: &mut BruDocument, tokens: &[Token]) {
     for (key, value) in kv_map(tokens) {
         let disabled = key.starts_with('~');
-        let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
-        doc.vars.push(BruKeyValue { key, value, disabled });
+        let key = if disabled {
+            key.trim_start_matches('~').to_string()
+        } else {
+            key
+        };
+        doc.vars.push(BruKeyValue {
+            key,
+            value,
+            disabled,
+        });
     }
 }
 
@@ -133,20 +158,42 @@ fn parse_body(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
     doc.body = Some(match subtype {
         "json" => BruBody::Json(raw),
         "text" => BruBody::Text(raw),
-        "xml"  => BruBody::Xml(raw),
+        "xml" => BruBody::Xml(raw),
         "form-urlencoded" => BruBody::FormUrlEncoded(
-            kv_map(tokens).into_iter().map(|(key, value)| {
-                let disabled = key.starts_with('~');
-                let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
-                BruKeyValue { key, value, disabled }
-            }).collect()
+            kv_map(tokens)
+                .into_iter()
+                .map(|(key, value)| {
+                    let disabled = key.starts_with('~');
+                    let key = if disabled {
+                        key.trim_start_matches('~').to_string()
+                    } else {
+                        key
+                    };
+                    BruKeyValue {
+                        key,
+                        value,
+                        disabled,
+                    }
+                })
+                .collect(),
         ),
         "multipart-form" => BruBody::Multipart(
-            kv_map(tokens).into_iter().map(|(key, value)| {
-                let disabled = key.starts_with('~');
-                let key = if disabled { key.trim_start_matches('~').to_string() } else { key };
-                BruKeyValue { key, value, disabled }
-            }).collect()
+            kv_map(tokens)
+                .into_iter()
+                .map(|(key, value)| {
+                    let disabled = key.starts_with('~');
+                    let key = if disabled {
+                        key.trim_start_matches('~').to_string()
+                    } else {
+                        key
+                    };
+                    BruKeyValue {
+                        key,
+                        value,
+                        disabled,
+                    }
+                })
+                .collect(),
         ),
         other => {
             doc.unknown_blocks.push(BruRawBlock {
@@ -161,25 +208,50 @@ fn parse_body(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
 
 fn parse_auth(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
     let map = kv_map(tokens);
-    let get = |k: &str| map.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    let get = |k: &str| {
+        map.iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
 
     doc.auth = Some(match subtype {
-        "bearer" => BruAuth::Bearer { token: get("token") },
-        "basic"  => BruAuth::Basic { username: get("username"), password: get("password") },
-        "awsv4"  => BruAuth::AwsV4 {
+        "bearer" => BruAuth::Bearer {
+            token: get("token"),
+        },
+        "basic" => BruAuth::Basic {
+            username: get("username"),
+            password: get("password"),
+        },
+        "awsv4" => BruAuth::AwsV4 {
             access_key_id: get("accessKeyId"),
             secret_access_key: get("secretAccessKey"),
-            session_token: map.iter().find(|(k, _)| k == "sessionToken").map(|(_, v)| v.clone()),
-            service: map.iter().find(|(k, _)| k == "service").map(|(_, v)| v.clone()),
-            region: map.iter().find(|(k, _)| k == "region").map(|(_, v)| v.clone()),
-            profile_name: map.iter().find(|(k, _)| k == "profileName").map(|(_, v)| v.clone()),
+            session_token: map
+                .iter()
+                .find(|(k, _)| k == "sessionToken")
+                .map(|(_, v)| v.clone()),
+            service: map
+                .iter()
+                .find(|(k, _)| k == "service")
+                .map(|(_, v)| v.clone()),
+            region: map
+                .iter()
+                .find(|(k, _)| k == "region")
+                .map(|(_, v)| v.clone()),
+            profile_name: map
+                .iter()
+                .find(|(k, _)| k == "profileName")
+                .map(|(_, v)| v.clone()),
         },
         "apikey" => BruAuth::ApiKey {
             key: get("key"),
             value: get("value"),
             placement: get("placement"),
         },
-        "digest" => BruAuth::Digest { username: get("username"), password: get("password") },
+        "digest" => BruAuth::Digest {
+            username: get("username"),
+            password: get("password"),
+        },
         other => {
             // oauth2 and others land as unknown.
             doc.unknown_blocks.push(BruRawBlock {

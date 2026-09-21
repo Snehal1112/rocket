@@ -1,5 +1,5 @@
-use rocket_import::{EnvironmentRepositoryFactory, ImportService};
 use rocket_environment::EnvironmentRepository;
+use rocket_import::{EnvironmentRepositoryFactory, ImportService};
 use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -8,7 +8,10 @@ struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
     fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::new(
-            self.0.join("collections").join(collection_name).join("environments"),
+            self.0
+                .join("collections")
+                .join(collection_name)
+                .join("environments"),
         ))
     }
 }
@@ -39,15 +42,34 @@ fn imports_fixture_collection_successfully() {
         .import_collection(&fixture_path(), "default")
         .expect("import should succeed");
 
-    assert!(report.imported >= 3, "expected at least 3 requests imported, got {}", report.imported);
+    assert!(
+        report.imported >= 3,
+        "expected at least 3 requests imported, got {}",
+        report.imported
+    );
     assert!(report.created_collections.contains(&"my-api".to_string()));
 
     // Collection structure.
-    assert!(workspace_dir.path().join("collections/my-api/opencollection.yml").exists());
-    assert!(workspace_dir.path().join("collections/my-api/get-users.yml").exists());
-    assert!(workspace_dir.path().join("collections/my-api/create-user.yml").exists());
-    assert!(workspace_dir.path().join("collections/my-api/auth/login.yml").exists());
-    assert!(workspace_dir.path().join("collections/my-api/environments/local.yml").exists());
+    assert!(workspace_dir
+        .path()
+        .join("collections/my-api/opencollection.yml")
+        .exists());
+    assert!(workspace_dir
+        .path()
+        .join("collections/my-api/get-users.yml")
+        .exists());
+    assert!(workspace_dir
+        .path()
+        .join("collections/my-api/create-user.yml")
+        .exists());
+    assert!(workspace_dir
+        .path()
+        .join("collections/my-api/auth/login.yml")
+        .exists());
+    assert!(workspace_dir
+        .path()
+        .join("collections/my-api/environments/local.yml")
+        .exists());
 }
 
 #[test]
@@ -55,11 +77,17 @@ fn import_report_counts_correctly() {
     let workspace_dir = TempDir::new().unwrap();
     let service = make_service(workspace_dir.path());
 
-    let report = service.import_collection(&fixture_path(), "default").unwrap();
+    let report = service
+        .import_collection(&fixture_path(), "default")
+        .unwrap();
 
     assert_eq!(report.total_files, 3); // get-users.bru, create-user.yml, auth/login.bru
     assert_eq!(report.imported, 3);
-    assert!(report.skipped.is_empty(), "unexpected skips: {:?}", report.skipped);
+    assert!(
+        report.skipped.is_empty(),
+        "unexpected skips: {:?}",
+        report.skipped
+    );
 }
 
 #[test]
@@ -68,9 +96,13 @@ fn auto_renames_on_collection_name_conflict() {
     let service = make_service(workspace_dir.path());
 
     // First import.
-    service.import_collection(&fixture_path(), "default").unwrap();
+    service
+        .import_collection(&fixture_path(), "default")
+        .unwrap();
     // Second import — should auto-rename.
-    let report2 = service.import_collection(&fixture_path(), "default").unwrap();
+    let report2 = service
+        .import_collection(&fixture_path(), "default")
+        .unwrap();
 
     assert!(
         report2.created_collections.iter().any(|n| n == "my-api-1"),
@@ -97,25 +129,43 @@ fn import_workspace_imports_all_sub_collections() {
     let ws_path = src_dir.path();
 
     // Workspace root must have bruno.json to be detected as a workspace.
-    std::fs::write(ws_path.join("bruno.json"), r#"{"name":"ws","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        ws_path.join("bruno.json"),
+        r#"{"name":"ws","version":"1","type":"collection"}"#,
+    )
+    .unwrap();
 
     // Sub-collection A.
     let col_a = ws_path.join("col-a");
     std::fs::create_dir_all(&col_a).unwrap();
-    std::fs::write(col_a.join("bruno.json"), r#"{"name":"col-a","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        col_a.join("bruno.json"),
+        r#"{"name":"col-a","version":"1","type":"collection"}"#,
+    )
+    .unwrap();
     std::fs::write(col_a.join("req.bru"), "meta {\n  name: Req A\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com/a\n}\n").unwrap();
 
     // Sub-collection B.
     let col_b = ws_path.join("col-b");
     std::fs::create_dir_all(&col_b).unwrap();
-    std::fs::write(col_b.join("bruno.json"), r#"{"name":"col-b","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        col_b.join("bruno.json"),
+        r#"{"name":"col-b","version":"1","type":"collection"}"#,
+    )
+    .unwrap();
     std::fs::write(col_b.join("req.bru"), "meta {\n  name: Req B\n  type: http\n  seq: 1\n}\npost {\n  url: https://example.com/b\n}\n").unwrap();
 
     let workspace_dir = TempDir::new().unwrap();
     let service = make_service(workspace_dir.path());
-    let report = service.import_workspace(ws_path, false, Some("default")).unwrap();
+    let report = service
+        .import_workspace(ws_path, false, Some("default"))
+        .unwrap();
 
-    assert_eq!(report.imported, 2, "expected 2 requests imported, got {}", report.imported);
+    assert_eq!(
+        report.imported, 2,
+        "expected 2 requests imported, got {}",
+        report.imported
+    );
     assert_eq!(report.created_collections.len(), 2);
     assert!(workspace_dir.path().join("collections/col-a").exists());
     assert!(workspace_dir.path().join("collections/col-b").exists());
@@ -127,11 +177,23 @@ fn parse_error_in_file_is_reported_as_skipped() {
     // Use a named subdirectory so the collection name doesn't start with '.'.
     let col_dir = tmp.path().join("bad-col");
     std::fs::create_dir_all(&col_dir).unwrap();
-    std::fs::write(col_dir.join("bruno.json"), r#"{"name":"bad-col","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        col_dir.join("bruno.json"),
+        r#"{"name":"bad-col","version":"1","type":"collection"}"#,
+    )
+    .unwrap();
     // Malformed YAML — serde_yaml will fail to parse this.
-    std::fs::write(col_dir.join("bad.yml"), "http:\n  url: {{invalid: yaml: [unclosed").unwrap();
+    std::fs::write(
+        col_dir.join("bad.yml"),
+        "http:\n  url: {{invalid: yaml: [unclosed",
+    )
+    .unwrap();
     // A valid file alongside the bad one.
-    std::fs::write(col_dir.join("good.bru"), "meta {\n  name: Good\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n").unwrap();
+    std::fs::write(
+        col_dir.join("good.bru"),
+        "meta {\n  name: Good\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n",
+    )
+    .unwrap();
 
     let workspace_dir = TempDir::new().unwrap();
     let service = make_service(workspace_dir.path());
@@ -150,7 +212,10 @@ fn parse_error_in_file_is_reported_as_skipped() {
 fn workspace_fixture_dir_setup() {
     let p = workspace_fixture_path();
     if p.exists() {
-        assert!(p.is_dir(), "workspace fixture path exists but is not a directory");
+        assert!(
+            p.is_dir(),
+            "workspace fixture path exists but is not a directory"
+        );
     }
     // No fixture yet — that is fine; this test documents intent.
 }
@@ -191,9 +256,15 @@ fn import_auto_modern_collection_directory() {
     assert_eq!(report.detected_type, "collection");
     assert_eq!(report.imported, 3);
     assert!(report.created_collections.contains(&"my-col".to_string()));
-    assert!(ws.path().join("collections/my-col/opencollection.yml").exists());
+    assert!(ws
+        .path()
+        .join("collections/my-col/opencollection.yml")
+        .exists());
     assert!(ws.path().join("collections/my-col/req-0.yml").exists());
-    assert!(ws.path().join("collections/my-col/environments/local.yml").exists());
+    assert!(ws
+        .path()
+        .join("collections/my-col/environments/local.yml")
+        .exists());
 }
 
 #[test]
@@ -255,18 +326,25 @@ fn import_auto_from_zip_modern_collection() {
 
     w.add_directory("my-col/", opts).unwrap();
     w.start_file("my-col/opencollection.yml", opts).unwrap();
-    w.write_all(b"opencollection: \"1.0.0\"\ninfo:\n  name: my-col\n").unwrap();
+    w.write_all(b"opencollection: \"1.0.0\"\ninfo:\n  name: my-col\n")
+        .unwrap();
     w.start_file("my-col/get-users.yml", opts).unwrap();
-    w.write_all(b"name: Get Users\nmethod: GET\nurl: https://api.example.com/users\n").unwrap();
+    w.write_all(b"name: Get Users\nmethod: GET\nurl: https://api.example.com/users\n")
+        .unwrap();
     w.finish().unwrap();
 
     let ws_dir = TempDir::new().unwrap();
     let service = make_service(ws_dir.path());
-    let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
+    let report = service
+        .import_auto_from_zip(&zip_path, "default", false)
+        .unwrap();
 
     assert_eq!(report.detected_type, "collection");
     assert_eq!(report.imported, 1);
-    assert!(ws_dir.path().join("collections/my-col/get-users.yml").exists());
+    assert!(ws_dir
+        .path()
+        .join("collections/my-col/get-users.yml")
+        .exists());
 }
 
 /// Flat-root ZIP (no wrapper folder) should use ZIP filename as collection name,
@@ -286,17 +364,24 @@ fn import_flat_root_zip_uses_zip_filename_as_collection_name() {
     w.start_file("bruno.json", opts).unwrap();
     w.write_all(b"{}").unwrap();
     w.start_file("req.bru", opts).unwrap();
-    w.write_all(b"meta {\n  name: Req\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n").unwrap();
+    w.write_all(
+        b"meta {\n  name: Req\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n",
+    )
+    .unwrap();
     w.finish().unwrap();
 
     let ws_dir = TempDir::new().unwrap();
     let service = make_service(ws_dir.path());
-    let report = service.import_auto_from_zip(&zip_path, "default", false).unwrap();
+    let report = service
+        .import_auto_from_zip(&zip_path, "default", false)
+        .unwrap();
 
     assert_eq!(report.detected_type, "collection");
     assert_eq!(report.imported, 1);
     assert!(
-        report.created_collections.contains(&"Lockstep-Inbox".to_string()),
+        report
+            .created_collections
+            .contains(&"Lockstep-Inbox".to_string()),
         "expected collection named 'Lockstep-Inbox' from ZIP filename, got: {:?}",
         report.created_collections
     );
@@ -318,7 +403,11 @@ fn import_workspace_mixed_modern_and_legacy_collections() {
     // Legacy sub-collection.
     let legacy_col = ws_src.join("legacy-col");
     std::fs::create_dir_all(&legacy_col).unwrap();
-    std::fs::write(legacy_col.join("bruno.json"), r#"{"name":"legacy-col","version":"1","type":"collection"}"#).unwrap();
+    std::fs::write(
+        legacy_col.join("bruno.json"),
+        r#"{"name":"legacy-col","version":"1","type":"collection"}"#,
+    )
+    .unwrap();
     std::fs::write(
         legacy_col.join("req.bru"),
         "meta {\n  name: Req\n  type: http\n  seq: 1\n}\nget {\n  url: https://example.com\n}\n",
@@ -327,7 +416,9 @@ fn import_workspace_mixed_modern_and_legacy_collections() {
 
     let ws_dir = TempDir::new().unwrap();
     let service = make_service(ws_dir.path());
-    let report = service.import_workspace(ws_src, false, Some("default")).unwrap();
+    let report = service
+        .import_workspace(ws_src, false, Some("default"))
+        .unwrap();
 
     assert_eq!(report.detected_type, "workspace");
     assert_eq!(report.imported, 3, "2 modern + 1 legacy");

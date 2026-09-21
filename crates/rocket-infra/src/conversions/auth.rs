@@ -21,15 +21,25 @@ impl From<OcAuthTyped> for Auth {
             OcAuthTyped::None => Auth::None,
             OcAuthTyped::Basic { username, password } => Auth::Basic { username, password },
             OcAuthTyped::Bearer { token } => Auth::Bearer { token },
-            OcAuthTyped::ApiKey { key, value, placement } => Auth::ApiKey {
+            OcAuthTyped::ApiKey {
+                key,
+                value,
+                placement,
+            } => Auth::ApiKey {
                 key,
                 value,
                 placement: placement.unwrap_or_else(|| "header".into()),
             },
             OcAuthTyped::Digest { username, password } => Auth::Digest { username, password },
-            OcAuthTyped::Ntlm { username, password, domain } => {
-                Auth::Ntlm { username, password, domain }
-            }
+            OcAuthTyped::Ntlm {
+                username,
+                password,
+                domain,
+            } => Auth::Ntlm {
+                username,
+                password,
+                domain,
+            },
             OcAuthTyped::Wsse { username, password } => Auth::Wsse { username, password },
             OcAuthTyped::AwsV4 {
                 access_key_id,
@@ -78,18 +88,16 @@ impl From<OcAuthTyped> for Auth {
                         token_config,
                         settings,
                     },
-                    "resource_owner_password_credentials" => {
-                        OAuth2Flow::ResourceOwnerPassword {
-                            access_token_url: access_token_url.unwrap_or_default(),
-                            refresh_token_url,
-                            credentials: creds,
-                            resource_owner: resource_owner.map(oc_ro_to_domain),
-                            scope,
-                            additional_parameters,
-                            token_config,
-                            settings,
-                        }
-                    }
+                    "resource_owner_password_credentials" => OAuth2Flow::ResourceOwnerPassword {
+                        access_token_url: access_token_url.unwrap_or_default(),
+                        refresh_token_url,
+                        credentials: creds,
+                        resource_owner: resource_owner.map(oc_ro_to_domain),
+                        scope,
+                        additional_parameters,
+                        token_config,
+                        settings,
+                    },
                     "authorization_code" => OAuth2Flow::AuthorizationCode {
                         authorization_url: authorization_url.unwrap_or_default(),
                         access_token_url: access_token_url.unwrap_or_default(),
@@ -151,7 +159,11 @@ impl From<Auth> for OcAuth {
                 OcAuth::Typed(OcAuthTyped::Basic { username, password })
             }
             Auth::Bearer { token } => OcAuth::Typed(OcAuthTyped::Bearer { token }),
-            Auth::ApiKey { key, value, placement } => OcAuth::Typed(OcAuthTyped::ApiKey {
+            Auth::ApiKey {
+                key,
+                value,
+                placement,
+            } => OcAuth::Typed(OcAuthTyped::ApiKey {
                 key,
                 value,
                 placement: Some(placement),
@@ -159,9 +171,15 @@ impl From<Auth> for OcAuth {
             Auth::Digest { username, password } => {
                 OcAuth::Typed(OcAuthTyped::Digest { username, password })
             }
-            Auth::Ntlm { username, password, domain } => {
-                OcAuth::Typed(OcAuthTyped::Ntlm { username, password, domain })
-            }
+            Auth::Ntlm {
+                username,
+                password,
+                domain,
+            } => OcAuth::Typed(OcAuthTyped::Ntlm {
+                username,
+                password,
+                domain,
+            }),
             Auth::Wsse { username, password } => {
                 OcAuth::Typed(OcAuthTyped::Wsse { username, password })
             }
@@ -175,8 +193,16 @@ impl From<Auth> for OcAuth {
             } => OcAuth::Typed(OcAuthTyped::AwsV4 {
                 access_key_id: access_key,
                 secret_access_key: secret_key,
-                region: if region.is_empty() { None } else { Some(region) },
-                service: if service.is_empty() { None } else { Some(service) },
+                region: if region.is_empty() {
+                    None
+                } else {
+                    Some(region)
+                },
+                service: if service.is_empty() {
+                    None
+                } else {
+                    Some(service)
+                },
                 session_token,
                 profile_name,
             }),

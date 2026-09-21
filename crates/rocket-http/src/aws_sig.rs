@@ -32,8 +32,7 @@ pub fn sign_request(
     credentials: &AwsCredentials,
     timestamp: &str,
 ) -> Result<SignedHeaders, String> {
-    let parsed_url =
-        reqwest::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
+    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
 
     // Date portion is the first 8 characters of the timestamp.
     let date_stamp = &timestamp[..8];
@@ -132,8 +131,7 @@ pub fn sign_request(
 
 /// Compute HMAC-SHA256 and return the raw bytes.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any size");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }

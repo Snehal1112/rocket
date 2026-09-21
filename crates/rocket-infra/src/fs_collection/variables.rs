@@ -42,18 +42,26 @@ pub(super) fn get_folder_chain_variables(
     for segment in &dir_components {
         current = current.join(segment);
         let folder_yml = current.join("folder.yml");
-        if !folder_yml.exists() { continue; }
-        let Ok(content) = fs::read_to_string(&folder_yml) else { continue; };
-        let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) else { continue; };
-        let Some(req) = info.request else { continue; };
-        let Some(vars) = req.variables else { continue; };
-        chain.push(
-            vars.into_iter()
-                .map(CollectionVariable::from)
-                .collect(),
-        );
+        if !folder_yml.exists() {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&folder_yml) else {
+            continue;
+        };
+        let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) else {
+            continue;
+        };
+        let Some(req) = info.request else {
+            continue;
+        };
+        let Some(vars) = req.variables else {
+            continue;
+        };
+        chain.push(vars.into_iter().map(CollectionVariable::from).collect());
     }
-    Ok(rocket_collection::settings::merge_folder_chain_variables(chain))
+    Ok(rocket_collection::settings::merge_folder_chain_variables(
+        chain,
+    ))
 }
 
 pub(super) fn save_folder_variables(
@@ -82,7 +90,11 @@ pub(super) fn save_folder_variables(
     let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
     let req_defaults = info.request.take().unwrap_or_default();
     info.request = Some(OcRequestDefaults {
-        variables: if oc_vars.is_empty() { None } else { Some(oc_vars) },
+        variables: if oc_vars.is_empty() {
+            None
+        } else {
+            Some(oc_vars)
+        },
         ..req_defaults
     });
     let yaml = serde_yaml::to_string(&info)

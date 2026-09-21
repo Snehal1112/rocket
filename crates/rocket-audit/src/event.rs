@@ -11,15 +11,46 @@ pub struct AuditEventId(pub Ulid);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditEventKind {
-    ContractAttached { contract_id: String, collection: String, scope: String },
-    ContractDeleted { contract_id: String, collection: String },
-    ContractViolation { contract_id: String, request_path: String, field: String },
-    CollectionDeleted { collection: String },
-    CollectionExported { collection: String, destination: String },
-    SecretVariableWritten { environment: String, variable_key: String },
-    SensitiveAuthUsed { auth_type: String, collection: String, request_path: String },
-    AuditEvidenceExported { range_start: DateTime<Utc>, range_end: DateTime<Utc>, count: usize },
-    AuditChainBroken { at_event_id: AuditEventId, expected_hash: String, actual_hash: String },
+    ContractAttached {
+        contract_id: String,
+        collection: String,
+        scope: String,
+    },
+    ContractDeleted {
+        contract_id: String,
+        collection: String,
+    },
+    ContractViolation {
+        contract_id: String,
+        request_path: String,
+        field: String,
+    },
+    CollectionDeleted {
+        collection: String,
+    },
+    CollectionExported {
+        collection: String,
+        destination: String,
+    },
+    SecretVariableWritten {
+        environment: String,
+        variable_key: String,
+    },
+    SensitiveAuthUsed {
+        auth_type: String,
+        collection: String,
+        request_path: String,
+    },
+    AuditEvidenceExported {
+        range_start: DateTime<Utc>,
+        range_end: DateTime<Utc>,
+        count: usize,
+    },
+    AuditChainBroken {
+        at_event_id: AuditEventId,
+        expected_hash: String,
+        actual_hash: String,
+    },
 }
 
 impl AuditEventKind {
@@ -110,7 +141,9 @@ mod tests {
         let ev = SecurityAuditEvent::new(
             "a",
             None,
-            AuditEventKind::CollectionDeleted { collection: "x".into() },
+            AuditEventKind::CollectionDeleted {
+                collection: "x".into(),
+            },
             "",
         );
         let json = serde_json::to_string(&ev).unwrap();

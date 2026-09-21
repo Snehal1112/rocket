@@ -1,5 +1,5 @@
 use crate::oc::*;
-use rocket_shared::types::{RequestSettings, RequestSettingValue};
+use rocket_shared::types::{RequestSettingValue, RequestSettings};
 
 pub(super) fn oc_settings_to_domain(oc: OcHttpRequestSettings) -> RequestSettings {
     RequestSettings {

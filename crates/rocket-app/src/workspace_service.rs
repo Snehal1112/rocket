@@ -127,7 +127,8 @@ impl WorkspaceService {
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
 
         // Capture old path for rollback if persist fails.
-        let mut path_guard = self.active_path
+        let mut path_guard = self
+            .active_path
             .lock()
             .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?;
         let old_path = path_guard.clone();
@@ -184,12 +185,13 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock()
-                .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))? =
-                registry.workspaces[0].path.clone();
+            *self.active_path.lock().map_err(|_| {
+                DomainError::Internal("active workspace path lock poisoned".into())
+            })? = registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
-        self.publisher.publish(DomainEvent::WorkspaceClosed { id: id.to_string() });
+        self.publisher
+            .publish(DomainEvent::WorkspaceClosed { id: id.to_string() });
         Ok(())
     }
 
@@ -200,7 +202,8 @@ impl WorkspaceService {
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
         workspace.pinned = true;
         self.repo.save(&registry)?;
-        self.publisher.publish(DomainEvent::WorkspacePinned { id: id.to_string() });
+        self.publisher
+            .publish(DomainEvent::WorkspacePinned { id: id.to_string() });
         Ok(())
     }
 
@@ -211,7 +214,8 @@ impl WorkspaceService {
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
         workspace.pinned = false;
         self.repo.save(&registry)?;
-        self.publisher.publish(DomainEvent::WorkspaceUnpinned { id: id.to_string() });
+        self.publisher
+            .publish(DomainEvent::WorkspaceUnpinned { id: id.to_string() });
         Ok(())
     }
 
@@ -231,10 +235,11 @@ impl WorkspaceService {
         workspace.description = description.map(|s| s.to_string());
         self.repo.save(&registry)?;
 
-        self.publisher.publish(DomainEvent::WorkspaceDescriptionUpdated {
-            id: id.to_string(),
-            description: description.map(|s| s.to_string()),
-        });
+        self.publisher
+            .publish(DomainEvent::WorkspaceDescriptionUpdated {
+                id: id.to_string(),
+                description: description.map(|s| s.to_string()),
+            });
         Ok(())
     }
 
@@ -276,7 +281,9 @@ impl WorkspaceService {
         let mut registry = self.repo.load()?;
 
         if registry.workspaces.iter().any(|w| w.path == path) {
-            return Err(DomainError::AlreadyExists("This workspace is already open".into()));
+            return Err(DomainError::AlreadyExists(
+                "This workspace is already open".into(),
+            ));
         }
 
         if registry.name_exists(&config.name, None) {
@@ -297,14 +304,18 @@ impl WorkspaceService {
     }
 
     pub fn get_global_environment_name(&self) -> DomainResult<Option<String>> {
-        let path = self.active_path.lock()
+        let path = self
+            .active_path
+            .lock()
             .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
             .clone();
         Ok(self.config_repo.load(&path)?.global_environment)
     }
 
     pub fn set_global_environment(&self, name: Option<String>) -> DomainResult<()> {
-        let path = self.active_path.lock()
+        let path = self
+            .active_path
+            .lock()
             .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
             .clone();
         let mut config = self.config_repo.load(&path)?;
@@ -325,14 +336,19 @@ impl WorkspaceService {
 
     /// Link an external collection directory to a workspace.
     /// The directory must contain `opencollection.yml`.
-    pub fn link_external_collection(&self, workspace_id: &str, collection_path: PathBuf) -> DomainResult<()> {
+    pub fn link_external_collection(
+        &self,
+        workspace_id: &str,
+        collection_path: PathBuf,
+    ) -> DomainResult<()> {
         if !collection_path.join("opencollection.yml").exists() {
             return Err(DomainError::NotFound(
                 "opencollection.yml not found in the selected directory".into(),
             ));
         }
 
-        let collection_name = self.config_repo
+        let collection_name = self
+            .config_repo
             .read_collection_name(&collection_path)?
             .unwrap_or_else(|| {
                 collection_path
@@ -382,12 +398,13 @@ impl WorkspaceService {
         registry.workspaces.retain(|w| w.id != id);
         if registry.active_workspace_id == id {
             registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock()
-                .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))? =
-                registry.workspaces[0].path.clone();
+            *self.active_path.lock().map_err(|_| {
+                DomainError::Internal("active workspace path lock poisoned".into())
+            })? = registry.workspaces[0].path.clone();
         }
         self.repo.save(&registry)?;
-        self.publisher.publish(DomainEvent::WorkspaceDeleted { id: id.to_string() });
+        self.publisher
+            .publish(DomainEvent::WorkspaceDeleted { id: id.to_string() });
         Ok(())
     }
 }
@@ -397,7 +414,7 @@ mod tests {
     use super::*;
     use rocket_shared::error::DomainResult;
     use rocket_shared::events::NullEventPublisher;
-    use rocket_workspace::{WorkspaceRegistry, WorkspaceConfig, WorkspaceConfigRepository};
+    use rocket_workspace::{WorkspaceConfig, WorkspaceConfigRepository, WorkspaceRegistry};
     use std::path::Path;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
@@ -440,15 +457,15 @@ mod tests {
                     .map_err(|e| DomainError::Io(e.to_string()))?;
                 serde_yaml::from_str(&content).map_err(|e| DomainError::InvalidInput(e.to_string()))
             } else {
-                let name = workspace_path.file_name()
+                let name = workspace_path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "Test".into());
                 Ok(WorkspaceConfig::new(name))
             }
         }
         fn save(&self, workspace_path: &Path, config: &WorkspaceConfig) -> DomainResult<()> {
-            std::fs::create_dir_all(workspace_path)
-                .map_err(|e| DomainError::Io(e.to_string()))?;
+            std::fs::create_dir_all(workspace_path).map_err(|e| DomainError::Io(e.to_string()))?;
             let content = serde_yaml::to_string(config)
                 .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
             std::fs::write(workspace_path.join("workspace.yml"), content)
@@ -459,7 +476,8 @@ mod tests {
             if !oc.exists() {
                 return Ok(None);
             }
-            let content = std::fs::read_to_string(&oc).map_err(|e| DomainError::Io(e.to_string()))?;
+            let content =
+                std::fs::read_to_string(&oc).map_err(|e| DomainError::Io(e.to_string()))?;
             let v: serde_yaml::Value = serde_yaml::from_str(&content)
                 .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
             Ok(v.get("name").and_then(|x| x.as_str()).map(str::to_owned))
@@ -753,9 +771,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
         let default_path = tmp.path().join("default");
-        svc.update_description("default", Some("Backend APIs")).unwrap();
+        svc.update_description("default", Some("Backend APIs"))
+            .unwrap();
         let content = std::fs::read_to_string(default_path.join("workspace.yml")).unwrap();
-        assert!(content.contains("Backend APIs"), "workspace.yml should contain the description");
+        assert!(
+            content.contains("Backend APIs"),
+            "workspace.yml should contain the description"
+        );
     }
 
     #[test]
@@ -766,7 +788,10 @@ mod tests {
         svc.update_description("default", Some("Initial")).unwrap();
         svc.update_description("default", None).unwrap();
         let content = std::fs::read_to_string(default_path.join("workspace.yml")).unwrap();
-        assert!(!content.contains("description"), "workspace.yml should not contain description when cleared");
+        assert!(
+            !content.contains("description"),
+            "workspace.yml should not contain description when cleared"
+        );
     }
 
     #[test]
@@ -784,7 +809,9 @@ mod tests {
     fn get_workspace_config_returns_config() {
         let tmp = TempDir::new().unwrap();
         let svc = make_service(&tmp);
-        let ws = svc.create("Configurable", tmp.path().join("cfg-ws")).unwrap();
+        let ws = svc
+            .create("Configurable", tmp.path().join("cfg-ws"))
+            .unwrap();
         let config = svc.get_workspace_config(&ws.id).unwrap();
         assert_eq!(config.name, "Configurable");
     }
@@ -795,7 +822,9 @@ mod tests {
 
         let tmp = TempDir::new().expect("tempdir");
         let svc = make_service(&tmp);
-        let ws = svc.create("Guarded", tmp.path().join("guarded-ws")).expect("create should succeed");
+        let ws = svc
+            .create("Guarded", tmp.path().join("guarded-ws"))
+            .expect("create should succeed");
 
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -804,7 +833,9 @@ mod tests {
         svc.update_request_guard_policy(&ws.id, policy.clone())
             .expect("update should succeed");
 
-        let loaded = svc.get_workspace_config(&ws.id).expect("load should succeed");
+        let loaded = svc
+            .get_workspace_config(&ws.id)
+            .expect("load should succeed");
         assert_eq!(loaded.request_guard_policy, policy);
     }
 
@@ -870,7 +901,11 @@ mod tests {
         let svc = make_service(&tmp);
         let ext = tmp.path().join("ext-col");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(ext.join("opencollection.yml"), "name: External API\nitems: []\n").unwrap();
+        std::fs::write(
+            ext.join("opencollection.yml"),
+            "name: External API\nitems: []\n",
+        )
+        .unwrap();
         svc.link_external_collection("default", ext).unwrap();
         let cfg = svc.get_workspace_config("default").unwrap();
         assert_eq!(cfg.collections.len(), 1);

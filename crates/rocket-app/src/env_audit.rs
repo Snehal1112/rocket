@@ -18,7 +18,9 @@ pub fn publish_env_write_events(
     before: &Environment,
     after: &Environment,
 ) {
-    events.publish(DomainEvent::EnvironmentSaved { name: env_name.to_string() });
+    events.publish(DomainEvent::EnvironmentSaved {
+        name: env_name.to_string(),
+    });
 
     for var in &after.variables {
         if !var.secret || var.value.is_empty() {
@@ -69,8 +71,12 @@ mod tests {
 
     #[test]
     fn publishes_environment_saved_unconditionally() {
-        let events = RecordingPublisher { events: Mutex::new(vec![]) };
-        let audit = CapturingAuditPublisher { captured: Mutex::new(vec![]) };
+        let events = RecordingPublisher {
+            events: Mutex::new(vec![]),
+        };
+        let audit = CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        };
         let before = Environment::new("prod");
         let after = Environment::new("prod");
 
@@ -84,8 +90,12 @@ mod tests {
 
     #[test]
     fn publishes_secret_variable_written_for_new_secret() {
-        let events = RecordingPublisher { events: Mutex::new(vec![]) };
-        let audit = CapturingAuditPublisher { captured: Mutex::new(vec![]) };
+        let events = RecordingPublisher {
+            events: Mutex::new(vec![]),
+        };
+        let audit = CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        };
         let before = Environment::new("prod");
         let mut after = Environment::new("prod");
         after.set_variable(Variable::secret("API_KEY", "sk-12345"));
@@ -102,8 +112,12 @@ mod tests {
 
     #[test]
     fn does_not_publish_secret_variable_written_for_non_secret() {
-        let events = RecordingPublisher { events: Mutex::new(vec![]) };
-        let audit = CapturingAuditPublisher { captured: Mutex::new(vec![]) };
+        let events = RecordingPublisher {
+            events: Mutex::new(vec![]),
+        };
+        let audit = CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        };
         let before = Environment::new("prod");
         let mut after = Environment::new("prod");
         after.set_variable(Variable::new("HOST", "api.example.com"));
@@ -116,8 +130,12 @@ mod tests {
 
     #[test]
     fn does_not_publish_secret_variable_written_when_value_unchanged() {
-        let events = RecordingPublisher { events: Mutex::new(vec![]) };
-        let audit = CapturingAuditPublisher { captured: Mutex::new(vec![]) };
+        let events = RecordingPublisher {
+            events: Mutex::new(vec![]),
+        };
+        let audit = CapturingAuditPublisher {
+            captured: Mutex::new(vec![]),
+        };
         let mut before = Environment::new("prod");
         before.set_variable(Variable::secret("API_KEY", "sk-12345"));
         let after = before.clone();

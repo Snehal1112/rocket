@@ -185,9 +185,8 @@ impl OAuth2Service {
     pub(crate) fn build_token_request_parts(
         config: &ResolvedOAuth2Config,
     ) -> (Vec<(String, String)>, Vec<(String, String)>) {
-        let mut form: Vec<(String, String)> = vec![
-            ("grant_type".into(), config.grant_type.clone()),
-        ];
+        let mut form: Vec<(String, String)> =
+            vec![("grant_type".into(), config.grant_type.clone())];
         let mut headers: Vec<(String, String)> = vec![];
 
         // Scope (applied before client auth to keep ordering predictable).
@@ -197,7 +196,10 @@ impl OAuth2Service {
 
         // Client authentication: header = HTTP Basic, body = form fields.
         if config.client_authentication == "header" {
-            headers.push(Self::basic_auth_header(&config.client_id, &config.client_secret));
+            headers.push(Self::basic_auth_header(
+                &config.client_id,
+                &config.client_secret,
+            ));
         } else {
             form.push(("client_id".into(), config.client_id.clone()));
             form.push(("client_secret".into(), config.client_secret.clone()));
@@ -267,10 +269,7 @@ impl OAuth2Service {
     }
 
     /// Refreshes an OAuth2 token.
-    pub async fn refresh_token(
-        &self,
-        req: &OAuth2RefreshRequest,
-    ) -> DomainResult<OAuthToken> {
+    pub async fn refresh_token(&self, req: &OAuth2RefreshRequest) -> DomainResult<OAuthToken> {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
@@ -383,17 +382,17 @@ impl OAuth2Service {
 
         let mut extra_headers: Vec<(String, String)> = vec![];
         if config.client_authentication == "header" {
-            extra_headers.push(Self::basic_auth_header(&config.client_id, &config.client_secret));
+            extra_headers.push(Self::basic_auth_header(
+                &config.client_id,
+                &config.client_secret,
+            ));
         }
 
         Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
     }
 
     /// Resolves all {{variables}} in the get-token request fields.
-    pub fn resolve_get_token_request(
-        &self,
-        req: &OAuth2GetTokenRequest,
-    ) -> ResolvedOAuth2Config {
+    pub fn resolve_get_token_request(&self, req: &OAuth2GetTokenRequest) -> ResolvedOAuth2Config {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
@@ -518,12 +517,7 @@ mod tests {
         fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
             Err(DomainError::NotFound("stub".into()))
         }
-        fn save_request(
-            &self,
-            _: &str,
-            path: &str,
-            _: &CollectionRequest,
-        ) -> DomainResult<String> {
+        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
             Ok(path.to_string())
         }
         fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
@@ -557,11 +551,7 @@ mod tests {
         ) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
-        fn get_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
+        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
         fn save_folder_variables(
@@ -572,11 +562,7 @@ mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
-        fn get_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
+        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
         fn save_request_variables(
@@ -591,10 +577,7 @@ mod tests {
 
     #[allow(dead_code)]
     fn make_service() -> OAuth2Service {
-        OAuth2Service::new(
-            Box::new(StubEnvRepo::empty()),
-            Box::new(StubCollectionRepo),
-        )
+        OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(StubCollectionRepo))
     }
 
     fn make_service_with_env(vars: &[(&str, &str)]) -> OAuth2Service {
@@ -645,7 +628,10 @@ mod tests {
         assert_eq!(resolved.token_url, "https://auth.example.com/token");
         assert_eq!(resolved.client_id, "client-123");
         assert_eq!(resolved.client_secret, "secret-456");
-        assert_eq!(resolved.token_params[0].value, "https://auth.example.com/api");
+        assert_eq!(
+            resolved.token_params[0].value,
+            "https://auth.example.com/api"
+        );
     }
 
     fn cc_config() -> ResolvedOAuth2Config {
@@ -719,9 +705,7 @@ mod tests {
         assert!(form
             .iter()
             .any(|(k, v)| k == "username" && v == "user@example.com"));
-        assert!(form
-            .iter()
-            .any(|(k, v)| k == "password" && v == "p@ssw0rd"));
+        assert!(form.iter().any(|(k, v)| k == "password" && v == "p@ssw0rd"));
     }
 
     #[test]
@@ -757,12 +741,24 @@ mod tests {
             "http://localhost:9876/callback",
             Some("verifier_abc"),
         );
-        assert!(form.iter().any(|(k, v)| k == "grant_type" && v == "authorization_code"));
-        assert!(form.iter().any(|(k, v)| k == "code" && v == "AUTH_CODE_123"));
-        assert!(form.iter().any(|(k, v)| k == "redirect_uri" && v == "http://localhost:9876/callback"));
-        assert!(form.iter().any(|(k, v)| k == "code_verifier" && v == "verifier_abc"));
-        assert!(form.iter().any(|(k, v)| k == "client_id" && v == "my-client"));
-        assert!(form.iter().any(|(k, v)| k == "resource" && v == "https://api.example.com"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "grant_type" && v == "authorization_code"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "code" && v == "AUTH_CODE_123"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "redirect_uri" && v == "http://localhost:9876/callback"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "code_verifier" && v == "verifier_abc"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "client_id" && v == "my-client"));
+        assert!(form
+            .iter()
+            .any(|(k, v)| k == "resource" && v == "https://api.example.com"));
     }
 
     #[test]
@@ -787,12 +783,8 @@ mod tests {
             refresh_params: vec![],
             force_reauth: false,
         };
-        let form = OAuth2Service::build_code_exchange_form(
-            &config,
-            "CODE",
-            "http://localhost/cb",
-            None,
-        );
+        let form =
+            OAuth2Service::build_code_exchange_form(&config, "CODE", "http://localhost/cb", None);
         // No PKCE verifier when None passed.
         assert!(!form.iter().any(|(k, _)| k == "code_verifier"));
         // Header auth: client_id/secret NOT in form.

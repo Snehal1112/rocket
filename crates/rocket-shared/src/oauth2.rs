@@ -6,7 +6,7 @@ pub struct OAuth2ClientCredentials {
     pub client_id: String,
     pub client_secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement: Option<String>,  // "basic_auth_header" | "body"
+    pub placement: Option<String>, // "basic_auth_header" | "body"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct OAuth2ResourceOwner {
 pub struct OAuth2PKCE {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub method: Option<String>,  // "S256" | "plain"
+    pub method: Option<String>, // "S256" | "plain"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +37,7 @@ pub struct OAuth2TokenConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,  // "accessToken" | "idToken"
+    pub source: Option<String>, // "accessToken" | "idToken"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<OAuth2TokenPlacement>,
 }
@@ -48,12 +48,14 @@ pub struct OAuth2AdditionalParameter {
     pub name: String,
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement: Option<String>,  // "header" | "query" | "body"
+    pub placement: Option<String>, // "header" | "query" | "body"
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,14 +89,26 @@ pub enum OAuth2Flow {
     ClientCredentials {
         #[serde(rename = "accessTokenUrl")]
         access_token_url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "refreshTokenUrl")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "refreshTokenUrl"
+        )]
         refresh_token_url: Option<String>,
         credentials: OAuth2ClientCredentials,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "additionalParameters")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "additionalParameters"
+        )]
         additional_parameters: Option<OAuth2AdditionalParameters>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "tokenConfig")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "tokenConfig"
+        )]
         token_config: Option<OAuth2TokenConfig>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
@@ -103,16 +117,32 @@ pub enum OAuth2Flow {
     ResourceOwnerPassword {
         #[serde(rename = "accessTokenUrl")]
         access_token_url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "refreshTokenUrl")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "refreshTokenUrl"
+        )]
         refresh_token_url: Option<String>,
         credentials: OAuth2ClientCredentials,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "resourceOwner")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "resourceOwner"
+        )]
         resource_owner: Option<OAuth2ResourceOwner>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "additionalParameters")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "additionalParameters"
+        )]
         additional_parameters: Option<OAuth2AdditionalParameters>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "tokenConfig")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "tokenConfig"
+        )]
         token_config: Option<OAuth2TokenConfig>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
@@ -123,9 +153,17 @@ pub enum OAuth2Flow {
         authorization_url: String,
         #[serde(rename = "accessTokenUrl")]
         access_token_url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "refreshTokenUrl")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "refreshTokenUrl"
+        )]
         refresh_token_url: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "callbackUrl")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "callbackUrl"
+        )]
         callback_url: Option<String>,
         credentials: OAuth2ClientCredentials,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -134,9 +172,17 @@ pub enum OAuth2Flow {
         state: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pkce: Option<OAuth2PKCE>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "additionalParameters")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "additionalParameters"
+        )]
         additional_parameters: Option<OAuth2AdditionalParameters>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "tokenConfig")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "tokenConfig"
+        )]
         token_config: Option<OAuth2TokenConfig>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
@@ -145,7 +191,11 @@ pub enum OAuth2Flow {
     Implicit {
         #[serde(rename = "authorizationUrl")]
         authorization_url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "callbackUrl")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "callbackUrl"
+        )]
         callback_url: Option<String>,
         #[serde(rename = "clientId")]
         client_id: String,
@@ -153,9 +203,17 @@ pub enum OAuth2Flow {
         scope: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         state: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "additionalParameters")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "additionalParameters"
+        )]
         additional_parameters: Option<OAuth2AdditionalParameters>,
-        #[serde(default, skip_serializing_if = "Option::is_none", rename = "tokenConfig")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "tokenConfig"
+        )]
         token_config: Option<OAuth2TokenConfig>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
@@ -169,7 +227,8 @@ mod tests {
     #[test]
     fn client_credentials_serde() {
         let creds = OAuth2ClientCredentials {
-            client_id: "id".into(), client_secret: "secret".into(),
+            client_id: "id".into(),
+            client_secret: "secret".into(),
             placement: Some("basic_auth_header".into()),
         };
         let json = serde_json::to_string(&creds).unwrap();
@@ -179,7 +238,10 @@ mod tests {
 
     #[test]
     fn pkce_config() {
-        let pkce = OAuth2PKCE { enabled: true, method: Some("S256".into()) };
+        let pkce = OAuth2PKCE {
+            enabled: true,
+            method: Some("S256".into()),
+        };
         let json = serde_json::to_string(&pkce).unwrap();
         let back: OAuth2PKCE = serde_json::from_str(&json).unwrap();
         assert_eq!(pkce, back);
@@ -187,7 +249,9 @@ mod tests {
 
     #[test]
     fn token_placement_header() {
-        let p = OAuth2TokenPlacement::Header { header: "Authorization".into() };
+        let p = OAuth2TokenPlacement::Header {
+            header: "Authorization".into(),
+        };
         let json = serde_json::to_string(&p).unwrap();
         let back: OAuth2TokenPlacement = serde_json::from_str(&json).unwrap();
         assert_eq!(p, back);
@@ -195,7 +259,9 @@ mod tests {
 
     #[test]
     fn token_placement_query() {
-        let p = OAuth2TokenPlacement::Query { query: "access_token".into() };
+        let p = OAuth2TokenPlacement::Query {
+            query: "access_token".into(),
+        };
         let json = serde_json::to_string(&p).unwrap();
         let back: OAuth2TokenPlacement = serde_json::from_str(&json).unwrap();
         assert_eq!(p, back);
@@ -206,7 +272,9 @@ mod tests {
         let tc = OAuth2TokenConfig {
             id: Some("my-token".into()),
             source: None,
-            placement: Some(OAuth2TokenPlacement::Header { header: "Authorization".into() }),
+            placement: Some(OAuth2TokenPlacement::Header {
+                header: "Authorization".into(),
+            }),
         };
         let json = serde_json::to_string(&tc).unwrap();
         let back: OAuth2TokenConfig = serde_json::from_str(&json).unwrap();
@@ -216,7 +284,8 @@ mod tests {
     #[test]
     fn additional_parameter() {
         let ap = OAuth2AdditionalParameter {
-            name: "audience".into(), value: "https://api.example.com".into(),
+            name: "audience".into(),
+            value: "https://api.example.com".into(),
             placement: Some("body".into()),
             enabled: true,
         };
@@ -225,7 +294,12 @@ mod tests {
 
     #[test]
     fn settings() {
-        let s = OAuth2Settings { auto_fetch_token: Some(true), auto_refresh_token: Some(false), verify_ssl: None, use_system_browser: None };
+        let s = OAuth2Settings {
+            auto_fetch_token: Some(true),
+            auto_refresh_token: Some(false),
+            verify_ssl: None,
+            use_system_browser: None,
+        };
         let json = serde_json::to_string(&s).unwrap();
         let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
@@ -240,7 +314,10 @@ mod tests {
             use_system_browser: Some(true),
         };
         let json = serde_json::to_string(&s).unwrap();
-        assert!(json.contains("useSystemBrowser"), "must serialize as useSystemBrowser, got: {json}");
+        assert!(
+            json.contains("useSystemBrowser"),
+            "must serialize as useSystemBrowser, got: {json}"
+        );
         let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.use_system_browser, Some(true));
     }
@@ -254,7 +331,10 @@ mod tests {
             use_system_browser: None,
         };
         let json = serde_json::to_string(&s).unwrap();
-        assert!(json.contains("verifySsl"), "field must serialize as verifySsl, got: {json}");
+        assert!(
+            json.contains("verifySsl"),
+            "field must serialize as verifySsl, got: {json}"
+        );
         let back: OAuth2Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.verify_ssl, Some(false));
     }
@@ -268,7 +348,10 @@ mod tests {
             use_system_browser: None,
         };
         let json = serde_json::to_string(&s).unwrap();
-        assert!(!json.contains("verifySsl"), "None must be skipped, got: {json}");
+        assert!(
+            !json.contains("verifySsl"),
+            "None must be skipped, got: {json}"
+        );
     }
 
     #[test]
@@ -276,7 +359,11 @@ mod tests {
         let flow = OAuth2Flow::ClientCredentials {
             access_token_url: "https://auth.example.com/token".into(),
             refresh_token_url: None,
-            credentials: OAuth2ClientCredentials { client_id: "id".into(), client_secret: "s".into(), placement: None },
+            credentials: OAuth2ClientCredentials {
+                client_id: "id".into(),
+                client_secret: "s".into(),
+                placement: None,
+            },
             scope: Some("read".into()),
             additional_parameters: None,
             token_config: None,
@@ -295,10 +382,17 @@ mod tests {
             access_token_url: "https://auth.example.com/token".into(),
             refresh_token_url: None,
             callback_url: Some("http://localhost:3000/callback".into()),
-            credentials: OAuth2ClientCredentials { client_id: "id".into(), client_secret: "s".into(), placement: None },
+            credentials: OAuth2ClientCredentials {
+                client_id: "id".into(),
+                client_secret: "s".into(),
+                placement: None,
+            },
             scope: Some("openid".into()),
             state: Some("random-state".into()),
-            pkce: Some(OAuth2PKCE { enabled: true, method: Some("S256".into()) }),
+            pkce: Some(OAuth2PKCE {
+                enabled: true,
+                method: Some("S256".into()),
+            }),
             additional_parameters: None,
             token_config: None,
             settings: None,
@@ -314,8 +408,15 @@ mod tests {
         let flow = OAuth2Flow::ResourceOwnerPassword {
             access_token_url: "https://auth.example.com/token".into(),
             refresh_token_url: None,
-            credentials: OAuth2ClientCredentials { client_id: "id".into(), client_secret: "s".into(), placement: None },
-            resource_owner: Some(OAuth2ResourceOwner { username: "user".into(), password: "pass".into() }),
+            credentials: OAuth2ClientCredentials {
+                client_id: "id".into(),
+                client_secret: "s".into(),
+                placement: None,
+            },
+            resource_owner: Some(OAuth2ResourceOwner {
+                username: "user".into(),
+                password: "pass".into(),
+            }),
             scope: None,
             additional_parameters: None,
             token_config: None,

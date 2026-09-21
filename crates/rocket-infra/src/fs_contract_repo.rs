@@ -1,20 +1,19 @@
 use chrono::Local;
+use rocket_collection::contract::types::ContractStatus;
 use rocket_collection::contract::{
     changelog::ContractChangelog,
     repository::{ContractError, ContractRepository, ContractResult},
     snapshot::ContractSnapshot,
+    transition_status,
     types::Contract,
-    StatusEvent, transition_status,
+    StatusEvent,
 };
-use rocket_collection::contract::types::ContractStatus;
 use std::path::Path;
 use ulid::Ulid;
 
 use crate::atomic_write;
 use crate::contract_records::{
-    changelog::ContractChangelogRecord,
-    snapshot::ContractSnapshotRecord,
-    types::ContractRecord,
+    changelog::ContractChangelogRecord, snapshot::ContractSnapshotRecord, types::ContractRecord,
 };
 
 pub struct FsContractRepo;
@@ -41,7 +40,9 @@ impl FsContractRepo {
     }
 
     pub fn attachments_dir(collection_root: &Path, id: Ulid) -> std::path::PathBuf {
-        Self::contracts_dir(collection_root).join("attachments").join(id.to_string())
+        Self::contracts_dir(collection_root)
+            .join("attachments")
+            .join(id.to_string())
     }
 
     fn ensure_dir(collection_root: &Path) -> ContractResult<()> {
@@ -111,8 +112,7 @@ impl ContractRepository for FsContractRepo {
                                     None
                                 };
                                 if let Some(ev) = event {
-                                    if let Ok(new_status) =
-                                        transition_status(&contract.status, &ev)
+                                    if let Ok(new_status) = transition_status(&contract.status, &ev)
                                     {
                                         contract.status = new_status;
                                         contract.updated_at = Some(chrono::Utc::now());
@@ -153,7 +153,11 @@ impl ContractRepository for FsContractRepo {
         Ok(())
     }
 
-    fn save_snapshot(&self, collection_root: &Path, snapshot: &ContractSnapshot) -> ContractResult<()> {
+    fn save_snapshot(
+        &self,
+        collection_root: &Path,
+        snapshot: &ContractSnapshot,
+    ) -> ContractResult<()> {
         Self::ensure_dir(collection_root)?;
         let path = Self::snapshot_path(collection_root, snapshot.contract_id);
         let record: ContractSnapshotRecord = snapshot.into();
@@ -162,7 +166,11 @@ impl ContractRepository for FsContractRepo {
         Ok(())
     }
 
-    fn load_snapshot(&self, collection_root: &Path, contract_id: Ulid) -> ContractResult<ContractSnapshot> {
+    fn load_snapshot(
+        &self,
+        collection_root: &Path,
+        contract_id: Ulid,
+    ) -> ContractResult<ContractSnapshot> {
         let path = Self::snapshot_path(collection_root, contract_id);
         if !path.exists() {
             return Ok(ContractSnapshot::new(contract_id));
@@ -172,7 +180,11 @@ impl ContractRepository for FsContractRepo {
         Ok(record.into())
     }
 
-    fn append_changelog(&self, collection_root: &Path, incoming: &ContractChangelog) -> ContractResult<()> {
+    fn append_changelog(
+        &self,
+        collection_root: &Path,
+        incoming: &ContractChangelog,
+    ) -> ContractResult<()> {
         Self::ensure_dir(collection_root)?;
         let path = Self::changelog_path(collection_root, incoming.contract_id);
         let mut existing: ContractChangelog = if path.exists() {
@@ -189,7 +201,11 @@ impl ContractRepository for FsContractRepo {
         Ok(())
     }
 
-    fn load_changelog(&self, collection_root: &Path, contract_id: Ulid) -> ContractResult<ContractChangelog> {
+    fn load_changelog(
+        &self,
+        collection_root: &Path,
+        contract_id: Ulid,
+    ) -> ContractResult<ContractChangelog> {
         let path = Self::changelog_path(collection_root, contract_id);
         if !path.exists() {
             return Ok(ContractChangelog::new(contract_id));

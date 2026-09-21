@@ -1,8 +1,8 @@
 //! IPC DTOs for `Contract` and its sub-types.
 
 use rocket_collection::contract::types::{
-    BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty,
-    ContractPolicy, ContractScope, ContractStatus, PartyKind,
+    BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy,
+    ContractScope, ContractStatus, PartyKind,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -211,8 +211,12 @@ impl From<&ContractScope> for ContractScopeDto {
     fn from(s: &ContractScope) -> Self {
         match s {
             ContractScope::Collection => Self::Collection,
-            ContractScope::Folder { rel_path } => Self::Folder { rel_path: rel_path.clone() },
-            ContractScope::Request { rel_path } => Self::Request { rel_path: rel_path.clone() },
+            ContractScope::Folder { rel_path } => Self::Folder {
+                rel_path: rel_path.clone(),
+            },
+            ContractScope::Request { rel_path } => Self::Request {
+                rel_path: rel_path.clone(),
+            },
         }
     }
 }
@@ -350,9 +354,14 @@ mod tests {
 
     #[test]
     fn scope_dto_json_keeps_rel_path_snake_case() {
-        let d = ContractScopeDto::Folder { rel_path: PathBuf::from("a/b.yml") };
+        let d = ContractScopeDto::Folder {
+            rel_path: PathBuf::from("a/b.yml"),
+        };
         let json = serde_json::to_string(&d).unwrap();
-        assert!(json.contains("\"rel_path\":"), "rel_path must stay snake_case in JSON: {json}");
+        assert!(
+            json.contains("\"rel_path\":"),
+            "rel_path must stay snake_case in JSON: {json}"
+        );
     }
 
     #[test]

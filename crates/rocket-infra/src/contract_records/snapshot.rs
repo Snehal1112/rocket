@@ -53,12 +53,18 @@ pub struct ContractSnapshotRecord {
 
 impl From<&KeyValueEntry> for KeyValueEntryRecord {
     fn from(k: &KeyValueEntry) -> Self {
-        Self { key: k.key.clone(), value: k.value.clone() }
+        Self {
+            key: k.key.clone(),
+            value: k.value.clone(),
+        }
     }
 }
 impl From<KeyValueEntryRecord> for KeyValueEntry {
     fn from(r: KeyValueEntryRecord) -> Self {
-        Self { key: r.key, value: r.value }
+        Self {
+            key: r.key,
+            value: r.value,
+        }
     }
 }
 
@@ -152,7 +158,10 @@ entries:
             request_path: PathBuf::from("a.yml"),
             method: "GET".into(),
             url_pattern: "/x".into(),
-            headers: vec![KeyValueEntryRecord { key: "K".into(), value: "V".into() }],
+            headers: vec![KeyValueEntryRecord {
+                key: "K".into(),
+                value: "V".into(),
+            }],
             query_params: vec![],
             body_content: None,
             form_fields: vec![],

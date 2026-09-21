@@ -560,17 +560,31 @@ mod tests {
         {
             let repo = git2::Repository::open(&path).expect("open repo");
             let mut index = repo.index().expect("index");
-            index.add_path(Path::new("only_main.bru")).expect("add only_main");
+            index
+                .add_path(Path::new("only_main.bru"))
+                .expect("add only_main");
             index.write().expect("write index");
             let tree_id = index.write_tree().expect("write tree");
             let tree = repo.find_tree(tree_id).expect("find tree");
-            let head = repo.head().expect("head").peel_to_commit().expect("head commit");
-            repo.commit(Some("refs/heads/main"), &sig, &sig, "add only_main", &tree, &[&head])
-                .expect("commit only_main");
+            let head = repo
+                .head()
+                .expect("head")
+                .peel_to_commit()
+                .expect("head commit");
+            repo.commit(
+                Some("refs/heads/main"),
+                &sig,
+                &sig,
+                "add only_main",
+                &tree,
+                &[&head],
+            )
+            .expect("commit only_main");
         }
 
         let svc = Git2Service::new();
-        svc.create_branch(&path, "feature").expect("create feature branch");
+        svc.create_branch(&path, "feature")
+            .expect("create feature branch");
 
         // On feature: modify the shared file, remove only_main.bru, add only_feature.bru.
         fs::write(dir.path().join("test.bru"), "meta { name: Feature }").expect("modify test.bru");
@@ -580,14 +594,29 @@ mod tests {
             let repo = git2::Repository::open(&path).expect("open repo");
             let mut index = repo.index().expect("index");
             index.add_path(Path::new("test.bru")).expect("add test.bru");
-            index.remove_path(Path::new("only_main.bru")).expect("remove only_main from index");
-            index.add_path(Path::new("only_feature.bru")).expect("add only_feature");
+            index
+                .remove_path(Path::new("only_main.bru"))
+                .expect("remove only_main from index");
+            index
+                .add_path(Path::new("only_feature.bru"))
+                .expect("add only_feature");
             index.write().expect("write index");
             let tree_id = index.write_tree().expect("write tree");
             let tree = repo.find_tree(tree_id).expect("find tree");
-            let head = repo.head().expect("head").peel_to_commit().expect("head commit");
-            repo.commit(Some("refs/heads/feature"), &sig, &sig, "feature changes", &tree, &[&head])
-                .expect("commit feature changes");
+            let head = repo
+                .head()
+                .expect("head")
+                .peel_to_commit()
+                .expect("head commit");
+            repo.commit(
+                Some("refs/heads/feature"),
+                &sig,
+                &sig,
+                "feature changes",
+                &tree,
+                &[&head],
+            )
+            .expect("commit feature changes");
         }
 
         // Switch back to main — this is the operation under test.
@@ -702,7 +731,10 @@ mod tests {
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].path, "test.bru");
         assert_eq!(diffs[0].old_content.as_deref(), Some("meta { name: Test }"));
-        assert_eq!(diffs[0].new_content.as_deref(), Some("changed for stash diff"));
+        assert_eq!(
+            diffs[0].new_content.as_deref(),
+            Some("changed for stash diff")
+        );
     }
 
     #[test]
@@ -967,7 +999,8 @@ mod tests {
 
         // A local commit on main that no remote carries.
         fs::write(dir.path().join("local-only.txt"), "local work\n").expect("write local file");
-        svc.stage(&path, &["local-only.txt"]).expect("stage local file");
+        svc.stage(&path, &["local-only.txt"])
+            .expect("stage local file");
         svc.commit(&path, "local only").expect("commit local work");
         let original_main = branch_oid(&path, "main");
 
@@ -1033,8 +1066,10 @@ mod tests {
         // Move HEAD off main so main exists but is not the current branch.
         svc.create_branch(&path, "scratch").expect("create scratch");
         fs::write(dir.path().join("scratch.txt"), "scratch work\n").expect("write scratch file");
-        svc.stage(&path, &["scratch.txt"]).expect("stage scratch file");
-        svc.commit(&path, "scratch work").expect("commit on scratch");
+        svc.stage(&path, &["scratch.txt"])
+            .expect("stage scratch file");
+        svc.commit(&path, "scratch work")
+            .expect("commit on scratch");
 
         let original_main = branch_oid(&path, "main");
         let original_scratch = branch_oid(&path, "scratch");

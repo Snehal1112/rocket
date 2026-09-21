@@ -42,9 +42,9 @@ impl ComplianceProfile {
             // No frameworks selected = still record everything (audit is always on).
             return true;
         }
-        crate::control::CONTROL_CATALOG.iter().any(|e| {
-            self.active_frameworks.contains(&e.framework) && e.kinds.contains(&event_kind)
-        })
+        crate::control::CONTROL_CATALOG
+            .iter()
+            .any(|e| self.active_frameworks.contains(&e.framework) && e.kinds.contains(&event_kind))
     }
 }
 

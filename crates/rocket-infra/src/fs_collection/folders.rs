@@ -5,7 +5,9 @@ use rocket_collection::{Collection, CollectionSummary};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::migration::{detect_format, is_migration_interrupted, migrate_collection, CollectionFormat};
+use crate::migration::{
+    detect_format, is_migration_interrupted, migrate_collection, CollectionFormat,
+};
 use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
 use rocket_collection::generate_uid;
 
@@ -78,7 +80,11 @@ pub(super) fn get(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collectio
     }
     let root = build_folder_tree(&path)?;
     let settings = super::settings::get_settings(repo, name).unwrap_or_default();
-    Ok(Collection { name: name.to_string(), root, settings })
+    Ok(Collection {
+        name: name.to_string(),
+        root,
+        settings,
+    })
 }
 
 pub(super) fn get_summaries(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collection> {
@@ -99,7 +105,11 @@ pub(super) fn get_summaries(repo: &FsCollectionRepo, name: &str) -> DomainResult
     }
     let root = build_folder_tree_summaries(&path)?;
     let settings = super::settings::get_settings(repo, name).unwrap_or_default();
-    Ok(Collection { name: name.to_string(), root, settings })
+    Ok(Collection {
+        name: name.to_string(),
+        root,
+        settings,
+    })
 }
 
 #[tracing::instrument(name = "collection_create", skip(repo), fields(collection_name = %name))]
@@ -128,8 +138,9 @@ pub(super) fn create(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collec
         bundled: None,
         extensions: None,
     };
-    let yaml = serde_yaml::to_string(&oc)
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}")))?;
+    let yaml = serde_yaml::to_string(&oc).map_err(|e| {
+        DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
+    })?;
     atomic_write(&path.join("opencollection.yml"), yaml.as_bytes())?;
 
     Ok(Collection::new(name))
@@ -157,13 +168,20 @@ pub(super) fn rename(repo: &FsCollectionRepo, old_name: &str, new_name: &str) ->
         return Err(DomainError::NotFound(format!("Collection '{}'", old_name)));
     }
     if new_path.exists() {
-        return Err(DomainError::AlreadyExists(format!("Collection '{}'", new_name)));
+        return Err(DomainError::AlreadyExists(format!(
+            "Collection '{}'",
+            new_name
+        )));
     }
     fs::rename(&old_path, &new_path)?;
     Ok(())
 }
 
-pub(super) fn create_folder(repo: &FsCollectionRepo, collection: &str, path: &str) -> DomainResult<()> {
+pub(super) fn create_folder(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<()> {
     Collection::validate_name(collection)?;
     let collection_dir = repo.collection_path(collection);
     let dir_path = repo.validate_path(&collection_dir, Path::new(path))?;
@@ -190,7 +208,11 @@ pub(super) fn create_folder(repo: &FsCollectionRepo, collection: &str, path: &st
     Ok(())
 }
 
-pub(super) fn delete_folder(repo: &FsCollectionRepo, collection: &str, path: &str) -> DomainResult<()> {
+pub(super) fn delete_folder(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<()> {
     Collection::validate_name(collection)?;
     let collection_dir = repo.collection_path(collection);
     let dir_path = repo.validate_path(&collection_dir, Path::new(path))?;
@@ -220,13 +242,18 @@ pub(super) fn move_item(
     let mutex1 = repo.collection_mutex(first);
     let _guard1 = mutex1.lock().unwrap_or_else(|e| e.into_inner());
     let mutex2 = (src_collection != dst_collection).then(|| repo.collection_mutex(second));
-    let _guard2 = mutex2.as_ref().map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
+    let _guard2 = mutex2
+        .as_ref()
+        .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
     let src_collection_dir = repo.collection_path(src_collection);
     let dst_collection_dir = repo.collection_path(dst_collection);
     let src = repo.validate_path(&src_collection_dir, Path::new(src_path))?;
     let dst = repo.validate_path(&dst_collection_dir, Path::new(dst_path))?;
     if !src.exists() {
-        return Err(DomainError::NotFound(format!("{}/{}", src_collection, src_path)));
+        return Err(DomainError::NotFound(format!(
+            "{}/{}",
+            src_collection, src_path
+        )));
     }
     if dst.starts_with(&src) {
         return Err(DomainError::InvalidInput("Cannot move into itself".into()));
@@ -250,8 +277,9 @@ pub(super) fn move_item(
             let content = fs::read_to_string(&folder_yml)?;
             if let Ok(mut info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
                 info.name = new_name;
-                let yaml = serde_yaml::to_string(&info)
-                    .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
+                let yaml = serde_yaml::to_string(&info).map_err(|e| {
+                    DomainError::Internal(format!("Failed to serialize folder.yml: {e}"))
+                })?;
                 atomic_write(&folder_yml, yaml.as_bytes())?;
             }
         }
@@ -260,7 +288,12 @@ pub(super) fn move_item(
     Ok(())
 }
 
-pub(super) fn reorder_items(repo: &FsCollectionRepo, collection: &str, folder_path: &str, ordered_names: &[String]) -> DomainResult<()> {
+pub(super) fn reorder_items(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    folder_path: &str,
+    ordered_names: &[String],
+) -> DomainResult<()> {
     Collection::validate_name(collection)?;
     let mutex = repo.collection_mutex(collection);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -271,7 +304,10 @@ pub(super) fn reorder_items(repo: &FsCollectionRepo, collection: &str, folder_pa
         repo.validate_path(&collection_dir, Path::new(folder_path))?
     };
     if !dir.is_dir() {
-        return Err(DomainError::NotFound(format!("{}/{}", collection, folder_path)));
+        return Err(DomainError::NotFound(format!(
+            "{}/{}",
+            collection, folder_path
+        )));
     }
     let yaml = serde_yaml::to_string(ordered_names)
         .map_err(|e| DomainError::Internal(format!("Failed to serialize order: {e}")))?;
