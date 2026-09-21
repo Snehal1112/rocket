@@ -78,7 +78,7 @@ describe('RunnerPane', () => {
     ]);
     vi.mocked(getCollection).mockResolvedValue({
       name: 'demo',
-      settings: { headers: [], variables: [] },
+      settings: { headers: [], variables: [], sandboxMode: 'safe' },
       root: {
         uid: 'root',
         name: 'demo',

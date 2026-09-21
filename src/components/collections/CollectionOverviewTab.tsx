@@ -255,9 +255,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       headers: toPersistedHeaders(headers),
       docs: docs || undefined,
       variables,
+      sandboxMode: collection?.settings.sandboxMode ?? 'safe',
     });
     setIsDirty(false);
-  }, [collectionName, auth, headers, docs, variables]);
+  }, [collectionName, auth, headers, docs, variables, collection]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
     saveSettings,

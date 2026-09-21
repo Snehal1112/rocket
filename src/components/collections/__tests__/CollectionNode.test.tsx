@@ -31,7 +31,7 @@ const summary: CollectionSummary = {
 const emptyCollection: tauriApi.Collection = {
   name: 'my-collection',
   root: { uid: 'root', name: 'my-collection', items: [] },
-  settings: { headers: [], variables: [] },
+  settings: { headers: [], variables: [], sandboxMode: 'safe' },
 };
 
 function renderNode() {

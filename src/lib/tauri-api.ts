@@ -56,11 +56,14 @@ export interface CollectionVariable {
   secret: boolean;
 }
 
+export type SandboxMode = 'safe' | 'developer';
+
 export interface CollectionSettings {
   docs?: string;
   auth?: Auth;
   headers: Header[];
   variables: CollectionVariable[];
+  sandboxMode: SandboxMode;
 }
 
 export interface CollectionSummary {
