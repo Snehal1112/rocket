@@ -1,5 +1,5 @@
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -36,6 +36,7 @@ export function GitCredentialsDialog() {
   const [token, setToken] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [availableKeyPaths, setAvailableKeyPaths] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   // On open: load persisted credentials first; fall back to SSH key auto-detection.
   useEffect(() => {
@@ -119,17 +120,23 @@ export function GitCredentialsDialog() {
         break;
     }
 
-    // Persist repository-scoped credentials when a repository is active. Clone flows
-    // have no repository yet, but still activate the credentials for the pending operation.
-    if (repositoryId) {
-      try {
-        await saveGitCredentials(repositoryId, creds);
-      } catch (e) {
-        setSaveError(`Could not save credentials to keychain: ${String(e)}`);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Persist repository-scoped credentials when a repository is active. Clone flows
+      // have no repository yet, but still activate the credentials for the pending operation.
+      if (repositoryId) {
+        try {
+          await saveGitCredentials(repositoryId, creds);
+        } catch (e) {
+          setSaveError(`Could not save credentials to keychain: ${String(e)}`);
+        }
       }
-    }
 
-    setCredentials(creds);
+      setCredentials(creds);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -288,8 +295,15 @@ export function GitCredentialsDialog() {
             </div>
           )}
 
-          <Button onClick={handleConnect} className='w-full' size='sm'>
-            Connect
+          <Button
+            onClick={handleConnect}
+            className='w-full'
+            size='sm'
+            disabled={saving}
+            aria-busy={saving}
+          >
+            {saving && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
+            {saving ? 'Connecting…' : 'Connect'}
           </Button>
         </div>
       </DialogContent>
