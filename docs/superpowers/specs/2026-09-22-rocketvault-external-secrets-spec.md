@@ -87,9 +87,13 @@ and `~/data/rocket/rocketvault/api/secrets.go`:
   Response `200`: `{"access_token": "...", "expires_in": <seconds>}`. `401` means
   bad credentials (terminal, do not retry).
 - **List secrets (vault-scoped):** `GET {base_url}/api/v1/vaults/{vault_name}/secrets`
-  with `Authorization: Bearer <token>`. Returns a paginated list of
-  `{id (uuid), name, ...}` objects (`model.Secret` — includes `value`, but this
-  spec never persists that field from a list response, see §4.3).
+  with `Authorization: Bearer <token>`. Returns the `model.ListSecretsResponse`
+  envelope, `{"secrets": [...], "total": <count>}` — not a bare array — where
+  each entry is a `{id (uuid), name, ...}` object (`model.Secret` — includes
+  `value`, but this spec never persists that field from a list response, see
+  §4.3). The endpoint is server-side paginated (`per_page` default 60, max
+  200); this integration requests `per_page=200` as a pragmatic mitigation and
+  does not implement cursor-based pagination beyond that in v1.
 - **Get secret value (vault-scoped):** `GET
   {base_url}/api/v1/vaults/{vault_name}/secrets/{secret_id}` with the same
   Bearer token. Response `200`: `{"value": "..."}`. `404` → secret gone
