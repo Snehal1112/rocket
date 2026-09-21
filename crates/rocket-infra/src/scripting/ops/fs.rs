@@ -69,6 +69,31 @@ pub fn op_fs_exists(#[string] path: String) -> bool {
     exists_impl(&path)
 }
 
+fn mkdir_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
+    let result = if recursive { fs::create_dir_all(path) } else { fs::create_dir(path) };
+    result.map_err(|e| io_err(e, path))
+}
+
+#[op2(fast)]
+pub fn op_fs_mkdir(#[string] path: String, recursive: bool) -> Result<(), ScriptOpError> {
+    mkdir_impl(&path, recursive)
+}
+
+fn remove_impl(path: &str, recursive: bool) -> Result<(), ScriptOpError> {
+    let meta = fs::metadata(path).map_err(|e| io_err(e, path))?;
+    let result = if meta.is_dir() {
+        if recursive { fs::remove_dir_all(path) } else { fs::remove_dir(path) }
+    } else {
+        fs::remove_file(path)
+    };
+    result.map_err(|e| io_err(e, path))
+}
+
+#[op2(fast)]
+pub fn op_fs_remove(#[string] path: String, recursive: bool) -> Result<(), ScriptOpError> {
+    remove_impl(&path, recursive)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +162,49 @@ mod tests {
         fs::write(&present, "x").expect("write");
         assert!(exists_impl(&present.to_string_lossy()));
         assert!(!exists_impl(&dir.path().join("nope.txt").to_string_lossy()));
+    }
+
+    #[test]
+    fn mkdir_non_recursive_fails_when_parent_missing() {
+        let dir = TempDir::new().expect("tempdir");
+        let nested = dir.path().join("a").join("b");
+        assert!(mkdir_impl(&nested.to_string_lossy(), false).is_err());
+    }
+
+    #[test]
+    fn mkdir_recursive_creates_missing_parents() {
+        let dir = TempDir::new().expect("tempdir");
+        let nested = dir.path().join("a").join("b");
+        mkdir_impl(&nested.to_string_lossy(), true).expect("mkdir recursive");
+        assert!(nested.exists());
+    }
+
+    #[test]
+    fn remove_deletes_a_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let file = dir.path().join("gone.txt");
+        fs::write(&file, "x").expect("write");
+        remove_impl(&file.to_string_lossy(), false).expect("remove");
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn remove_non_recursive_fails_on_non_empty_directory() {
+        let dir = TempDir::new().expect("tempdir");
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).expect("mkdir");
+        fs::write(sub.join("inner.txt"), "x").expect("write inner");
+        assert!(remove_impl(&sub.to_string_lossy(), false).is_err());
+        assert!(sub.exists(), "non-empty dir must survive a non-recursive remove attempt");
+    }
+
+    #[test]
+    fn remove_recursive_deletes_non_empty_directory() {
+        let dir = TempDir::new().expect("tempdir");
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).expect("mkdir");
+        fs::write(sub.join("inner.txt"), "x").expect("write inner");
+        remove_impl(&sub.to_string_lossy(), true).expect("remove recursive");
+        assert!(!sub.exists());
     }
 }
