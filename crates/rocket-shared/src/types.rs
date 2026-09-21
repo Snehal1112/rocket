@@ -194,7 +194,7 @@ pub enum Auth {
         value: String,
         placement: String, // "header" | "query"
     },
-    OAuth2(crate::oauth2::OAuth2Flow),
+    OAuth2(Box<crate::oauth2::OAuth2Flow>),
     #[serde(rename_all = "camelCase")]
     AwsSigV4 {
         access_key: String,
@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn auth_oauth2_serialization_roundtrip() {
         use crate::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
-        let auth = Auth::OAuth2(OAuth2Flow::ClientCredentials {
+        let auth = Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
             access_token_url: "https://auth.example.com/token".into(),
             refresh_token_url: None,
             credentials: OAuth2ClientCredentials {
@@ -355,7 +355,7 @@ mod tests {
             additional_parameters: None,
             token_config: None,
             settings: None,
-        });
+        }));
         let json = serde_json::to_string(&auth).unwrap();
         assert!(json.contains("\"authType\":\"o-auth2\""));
         assert!(json.contains("\"flow\":\"client_credentials\""));

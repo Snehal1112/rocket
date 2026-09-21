@@ -253,7 +253,7 @@ fn auth_oauth2_client_credentials_oc_to_domain() {
     match auth {
         Auth::OAuth2(flow) => {
             assert!(matches!(
-                flow,
+                *flow,
                 rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }
             ));
         }
@@ -868,7 +868,7 @@ http:
     match &req.auth {
         Auth::OAuth2(flow) => {
             assert!(matches!(
-                flow,
+                flow.as_ref(),
                 rocket_shared::oauth2::OAuth2Flow::ClientCredentials { .. }
             ));
         }
@@ -898,7 +898,7 @@ fn oauth2_auth_code_full_roundtrip() {
         OAuth2PKCE, OAuth2Settings, OAuth2TokenConfig, OAuth2TokenPlacement,
     };
 
-    let original = Auth::OAuth2(OAuth2Flow::AuthorizationCode {
+    let original = Auth::OAuth2(Box::new(OAuth2Flow::AuthorizationCode {
         authorization_url: "https://auth.example.com/authorize".into(),
         access_token_url: "https://auth.example.com/token".into(),
         refresh_token_url: Some("https://auth.example.com/refresh".into()),
@@ -942,7 +942,7 @@ fn oauth2_auth_code_full_roundtrip() {
             verify_ssl: Some(true),
             use_system_browser: None,
         }),
-    });
+    }));
 
     let oc: OcAuth = original.clone().into();
     let back: Auth = oc.into();

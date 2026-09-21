@@ -117,7 +117,7 @@ fn auth_detail(auth: &Auth) -> String {
         Auth::None | Auth::Inherit => String::new(),
         Auth::OAuth2(flow) => {
             use rocket_shared::oauth2::OAuth2Flow;
-            match flow {
+            match flow.as_ref() {
                 OAuth2Flow::ClientCredentials { credentials, .. }
                 | OAuth2Flow::ResourceOwnerPassword { credentials, .. }
                 | OAuth2Flow::AuthorizationCode { credentials, .. } => {
@@ -407,7 +407,8 @@ mod tests {
             token_config: None,
             settings: None,
         };
-        let req = Request::new("Get", HttpMethod::Get, "/secure").with_auth(Auth::OAuth2(flow));
+        let req =
+            Request::new("Get", HttpMethod::Get, "/secure").with_auth(Auth::OAuth2(Box::new(flow)));
         let snap = RequestSignatureSnapshot::from_request("secure.yml", &req);
         assert_eq!(snap.auth_detail, "my-client");
     }

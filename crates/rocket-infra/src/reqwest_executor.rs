@@ -374,7 +374,7 @@ async fn apply_auth(
             _ => {} // Unknown placement — skip.
         },
         Auth::OAuth2(flow) => {
-            match flow {
+            match flow.as_ref() {
                 rocket_shared::oauth2::OAuth2Flow::ClientCredentials {
                     access_token_url,
                     credentials,
