@@ -13,7 +13,11 @@ function ScrollArea({
       className={cn('relative overflow-hidden', className)}
       {...props}
     >
-      <ScrollAreaPrimitive.Viewport className='h-full w-full rounded-[inherit]'>
+      {/* Radix wraps children in an inner div with `display:table`, which
+          sizes to its widest content instead of the container — that
+          silently breaks any `truncate` inside a ScrollArea. Force it back
+          to block layout so descendants respect this element's width. */}
+      <ScrollAreaPrimitive.Viewport className='h-full w-full rounded-[inherit] [&>div]:!block'>
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />
