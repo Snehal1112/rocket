@@ -2,6 +2,7 @@ use deno_core::OpState;
 use crate::scripting::state::ScriptInputState;
 
 pub mod console;
+pub mod fs;
 pub mod req;
 pub mod res;
 pub mod rok;
