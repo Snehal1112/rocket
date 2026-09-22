@@ -24,6 +24,8 @@ pub struct Environment {
     pub dot_env_file_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub client_certificates: Vec<ClientCertificate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_secrets: Vec<crate::external_secret::ExternalSecretBinding>,
 }
 
 impl Environment {
@@ -36,6 +38,7 @@ impl Environment {
             extends: None,
             dot_env_file_path: None,
             client_certificates: Vec::new(),
+            external_secrets: Vec::new(),
         }
     }
 
@@ -127,6 +130,7 @@ mod tests {
             extends: None,
             dot_env_file_path: None,
             client_certificates: Vec::new(),
+            external_secrets: Vec::new(),
         };
         assert_eq!(env.color, Some("#FF5733".into()));
         assert!(env.description.is_some());
@@ -142,6 +146,7 @@ mod tests {
             extends: Some("production".into()),
             dot_env_file_path: Some(".env.staging".into()),
             client_certificates: Vec::new(),
+            external_secrets: Vec::new(),
         };
         assert_eq!(env.extends, Some("production".into()));
         assert_eq!(env.dot_env_file_path, Some(".env.staging".into()));
@@ -171,9 +176,38 @@ mod tests {
             extends: Some("base".into()),
             dot_env_file_path: Some(".env.dev".into()),
             client_certificates: Vec::new(),
+            external_secrets: Vec::new(),
         };
         let json = serde_json::to_string(&env).unwrap();
         let back: Environment = serde_json::from_str(&json).unwrap();
         assert_eq!(env, back);
+    }
+
+    #[test]
+    fn environment_external_secrets_defaults_to_empty_on_old_yaml() {
+        // Simulates loading a pre-existing environment file saved before this
+        // field existed — must not fail to deserialize.
+        let json = r#"{"name":"prod","variables":[]}"#;
+        let env: Environment =
+            serde_json::from_str(json).expect("deserialize old-format environment");
+        assert!(env.external_secrets.is_empty());
+    }
+
+    #[test]
+    fn environment_external_secrets_roundtrip() {
+        use crate::external_secret::{ExternalSecretBinding, ExternalSecretRef};
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "payments".to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: vec![ExternalSecretRef {
+                name: "stripe-key".to_string(),
+                secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
+            }],
+        });
+        let json = serde_json::to_string(&env).expect("serialize environment");
+        let back: Environment = serde_json::from_str(&json).expect("deserialize environment");
+        assert_eq!(env.external_secrets, back.external_secrets);
     }
 }
