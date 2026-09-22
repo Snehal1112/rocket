@@ -7,6 +7,14 @@ pub struct VariableContext {
     pub folder: HashMap<String, String>,
     pub env: HashMap<String, String>,
     pub collection: HashMap<String, String>,
+    /// Values fetched from RocketVault, keyed by "{alias}.{secretName}" per
+    /// the active environment's `external_secrets` bindings. Populated once
+    /// per resolve/run by `RequestExecutionService::resolve_external_secrets`
+    /// (Plan 06) — this crate has no I/O and never fetches these values
+    /// itself. Kept as its own field rather than folded into `env`, so
+    /// `rok.getEnvVar` never accidentally returns a vault-sourced value
+    /// through an unrelated code path.
+    pub external_secrets: HashMap<String, String>,
     pub global_env: HashMap<String, String>,
     pub process_env: HashMap<String, String>,
     /// Keys (from any scope) whose *value* must be redacted if it appears in
@@ -17,12 +25,13 @@ pub struct VariableContext {
 
 impl VariableContext {
     /// Merge all scopes except process_env.
-    /// Insertion order: global_env → collection → env → folder → request → runtime.
+    /// Insertion order: global_env → collection → external_secrets → env → folder → request → runtime.
     /// Later layers overwrite earlier on key collision.
     pub fn flatten(&self) -> HashMap<String, String> {
         let mut out = HashMap::new();
         out.extend(self.global_env.clone());
         out.extend(self.collection.clone());
+        out.extend(self.external_secrets.clone());
         out.extend(self.env.clone());
         out.extend(self.folder.clone());
         out.extend(self.request.clone());
@@ -38,6 +47,7 @@ impl VariableContext {
         }
         out.extend(self.global_env.clone());
         out.extend(self.collection.clone());
+        out.extend(self.external_secrets.clone());
         out.extend(self.env.clone());
         out.extend(self.folder.clone());
         out.extend(self.request.clone());
@@ -145,18 +155,56 @@ mod tests {
 
     #[test]
     fn full_hierarchy_runtime_wins() {
-        // All 8 scopes present — runtime must win.
+        // All 9 scopes present — runtime must win.
         let ctx = VariableContext {
             runtime: m(&[("k", "runtime")]),
             request: m(&[("k", "request")]),
             folder: m(&[("k", "folder")]),
             env: m(&[("k", "env")]),
             collection: m(&[("k", "collection")]),
+            external_secrets: m(&[("k", "vault")]),
             global_env: m(&[("k", "global")]),
             process_env: m(&[("k", "process")]),
             secret_values: std::collections::HashSet::new(),
         };
-        assert_eq!(ctx.flatten().get("k").unwrap(), "runtime");
+        assert_eq!(ctx.flatten().get("k").expect("k present"), "runtime");
+    }
+
+    #[test]
+    fn env_beats_external_secrets() {
+        let ctx = VariableContext {
+            env: m(&[("k", "env")]),
+            external_secrets: m(&[("k", "vault")]),
+            ..Default::default()
+        };
+        assert_eq!(ctx.flatten().get("k").expect("k present"), "env");
+    }
+
+    #[test]
+    fn external_secrets_beats_collection() {
+        let ctx = VariableContext {
+            external_secrets: m(&[("k", "vault")]),
+            collection: m(&[("k", "col")]),
+            ..Default::default()
+        };
+        assert_eq!(ctx.flatten().get("k").expect("k present"), "vault");
+    }
+
+    #[test]
+    fn external_secrets_value_passes_through_flatten_unchanged() {
+        // A value present only in external_secrets, with no key collision
+        // anywhere else, shows up in flatten()'s output unchanged — plain
+        // pass-through, not filtered.
+        let ctx = VariableContext {
+            external_secrets: m(&[("payments.stripeKey", "sk-live-abcdef123")]),
+            ..Default::default()
+        };
+        let flat = ctx.flatten();
+        assert_eq!(
+            flat.get("payments.stripeKey")
+                .expect("payments.stripeKey present"),
+            "sk-live-abcdef123"
+        );
     }
 
     #[test]
