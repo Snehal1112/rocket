@@ -1373,12 +1373,20 @@ impl RequestExecutionService {
         )
     )]
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
+        // Fetches must succeed before any variable resolution or dispatch runs —
+        // a configured external secret that fails to resolve live is a hard
+        // stop, not a silent empty-string substitution (spec §2/§4.6). The `?`
+        // here is the entire mechanism: an Err from resolve_external_secrets
+        // propagates straight out of execute() before begin_phases (and
+        // therefore before send_request) ever runs.
+        let external_secrets = self
+            .resolve_external_secrets(input.environment_name.as_deref())
+            .await?;
+
         // Every phase runs unconditionally — this is the single-send path. The
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
-        // TODO(Plan 06 Task 3): replace the empty map with the real resolved
-        // external secrets map produced by `resolve_external_secrets`.
-        let mut state = self.begin_phases(&input, &std::collections::HashMap::new())?;
+        let mut state = self.begin_phases(&input, &external_secrets)?;
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         let response = self.send_request(&state).await?;
@@ -2128,6 +2136,136 @@ mod tests {
         assert_eq!(
             result.get("payments.webhookSecret"),
             Some(&"whsec-abc".to_string())
+        );
+    }
+
+    /// Counts calls instead of just recording the last one, so the failure-path
+    /// test below can assert the executor was never reached at all.
+    struct CallCountingExecutor {
+        calls: Mutex<usize>,
+        response: HttpResponse,
+    }
+
+    impl CallCountingExecutor {
+        fn new(status: u16) -> Self {
+            Self {
+                calls: Mutex::new(0),
+                response: HttpResponse {
+                    status,
+                    status_text: "OK".into(),
+                    headers: vec![],
+                    body: "{}".into(),
+                    duration_ms: 1,
+                    ttfb_ms: 1,
+                    size_bytes: 2,
+                },
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            *self.calls.lock().expect("lock CallCountingExecutor")
+        }
+    }
+
+    #[async_trait]
+    impl HttpExecutor for CallCountingExecutor {
+        async fn execute(&self, _req: &HttpRequest) -> DomainResult<HttpResponse> {
+            *self.calls.lock().expect("lock CallCountingExecutor") += 1;
+            Ok(self.response.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_resolves_external_secret_before_dispatch() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let executor = Arc::new(MockExecutor::new(200));
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let out = svc
+            .execute(sample_input(
+                "https://api.example.com/{{payments.apiKey}}",
+                Some("prod"),
+            ))
+            .await
+            .expect("execute");
+
+        assert_eq!(out.response.status, 200);
+        let url = exec_arc
+            .last_url
+            .lock()
+            .expect("lock last_url")
+            .clone()
+            .expect("executor was called");
+        assert_eq!(url, "https://api.example.com/sk-live-test-value");
+    }
+
+    #[tokio::test]
+    async fn execute_fails_before_dispatch_when_external_secret_fetch_errors() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Error("vault unreachable".to_string()),
+        )]));
+
+        let executor = Arc::new(CallCountingExecutor::new(200));
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let result = svc
+            .execute(sample_input(
+                "https://api.example.com/{{payments.apiKey}}",
+                Some("prod"),
+            ))
+            .await;
+
+        assert!(
+            result.is_err(),
+            "execute() must fail when external-secret resolution fails"
+        );
+        assert_eq!(
+            exec_arc.call_count(),
+            0,
+            "HttpExecutor::execute must never run when resolve_external_secrets errors — \
+             this is the 'never a silent empty-string substitution' / hard-stop-before-dispatch \
+             requirement from spec §2/§4.6"
         );
     }
 
