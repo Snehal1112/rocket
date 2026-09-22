@@ -27,7 +27,9 @@ impl LoadTestService {
             ));
         }
 
-        let resolved = execution_service.resolve_request(&input)?;
+        // Load testing is out of scope for external-secrets resolution.
+        let resolved =
+            execution_service.resolve_request(&input, &std::collections::HashMap::new())?;
         let result = run_load_test_v2(executor, &resolved, &config, app).await;
         Ok(result)
     }

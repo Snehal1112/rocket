@@ -336,6 +336,7 @@ impl RequestExecutionService {
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
     ) -> VariableContext {
         // Precedence (lowest → highest): collection < env < folder < request.
         let mut ctx = VariableContext::default();
@@ -386,6 +387,13 @@ impl RequestExecutionService {
             }
         }
 
+        ctx.external_secrets = external_secrets.clone();
+        for value in external_secrets.values() {
+            if value.len() >= MIN_REDACTION_LEN {
+                ctx.secret_values.insert(value.clone());
+            }
+        }
+
         ctx
     }
 
@@ -398,20 +406,26 @@ impl RequestExecutionService {
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
     ) -> std::collections::HashMap<String, String> {
-        self.build_variable_scopes(collection, environment_name, request_path)
+        self.build_variable_scopes(collection, environment_name, request_path, external_secrets)
             .flatten()
     }
 
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
     /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
     /// `run_load_test` so resolution logic is never duplicated.
-    pub(crate) fn resolve_request(&self, input: &ExecuteRequestInput) -> DomainResult<HttpRequest> {
+    pub(crate) fn resolve_request(
+        &self,
+        input: &ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<HttpRequest> {
         // Build variable map: collection < env < folder < request.
         let vars = self.build_variable_context(
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
+            external_secrets,
         );
 
         // Merge collection auth and headers with request-level values.
@@ -903,8 +917,12 @@ impl RequestExecutionService {
     /// Resolves the request, emits the sensitive-auth audit event, and builds
     /// the scope-separated variable context. Every phase method below assumes
     /// this ran first.
-    pub(crate) fn begin_phases(&self, input: &ExecuteRequestInput) -> DomainResult<PhaseState> {
-        let http_request = self.resolve_request(input)?;
+    pub(crate) fn begin_phases(
+        &self,
+        input: &ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<PhaseState> {
+        let http_request = self.resolve_request(input, external_secrets)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -928,6 +946,7 @@ impl RequestExecutionService {
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
+            external_secrets,
         );
         if let Some(name) = input.global_env_name.as_deref() {
             if let Ok(global_env) = self.env_repo.get(name) {
@@ -1357,7 +1376,9 @@ impl RequestExecutionService {
         // Every phase runs unconditionally — this is the single-send path. The
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
-        let mut state = self.begin_phases(&input)?;
+        // TODO(Plan 06 Task 3): replace the empty map with the real resolved
+        // external secrets map produced by `resolve_external_secrets`.
+        let mut state = self.begin_phases(&input, &std::collections::HashMap::new())?;
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         let response = self.send_request(&state).await?;
@@ -1373,7 +1394,8 @@ impl RequestExecutionService {
         input: ExecuteRequestInput,
         config: LoadTestConfig,
     ) -> DomainResult<LoadTestResult> {
-        let resolved = self.resolve_request(&input)?;
+        // Load testing is out of scope for external-secrets resolution.
+        let resolved = self.resolve_request(&input, &std::collections::HashMap::new())?;
         let executor = Arc::clone(&self.executor);
         Ok(http_run_load_test(executor, &resolved, &config).await)
     }
@@ -2175,8 +2197,35 @@ mod tests {
         );
 
         let input = sample_input("{{oidc-baseurl}}/api/v1/users", Some("dev"));
-        let resolved = svc.resolve_request(&input).unwrap();
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
         assert_eq!(resolved.url, "https://auth.local/api/v1/users");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_folds_in_external_secrets() {
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut external_secrets = std::collections::HashMap::new();
+        external_secrets.insert("payments.apiKey".to_string(), "sk-live-key".to_string());
+
+        let input = sample_input("https://api.example.com/{{payments.apiKey}}", None);
+        let resolved = svc
+            .resolve_request(&input, &external_secrets)
+            .expect("resolve_request");
+
+        assert_eq!(resolved.url, "https://api.example.com/sk-live-key");
     }
 
     #[tokio::test]
@@ -5049,7 +5098,9 @@ mod tests {
 
         let mut input = sample_input("https://example.com", None);
         input.pre_request_script = Some("// pre".into());
-        let mut state = svc.begin_phases(&input).expect("begin");
+        let mut state = svc
+            .begin_phases(&input, &std::collections::HashMap::new())
+            .expect("begin");
         svc.run_before_request_phase(&input, rocket_scripting::ExecutionMode::Runner, &mut state)
             .await
             .expect("run_before_request_phase");
@@ -5069,7 +5120,9 @@ mod tests {
             Box::new(ErrorJsonqEngine),
         );
         let input = sample_input("https://example.com", None);
-        let mut state = svc.begin_phases(&input).expect("begin");
+        let mut state = svc
+            .begin_phases(&input, &std::collections::HashMap::new())
+            .expect("begin");
 
         let mut carried = std::collections::HashMap::new();
         carried.insert("TOKEN".to_string(), "from-step-1".to_string());
