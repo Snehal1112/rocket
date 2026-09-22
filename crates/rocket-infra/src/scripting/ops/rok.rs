@@ -30,6 +30,19 @@ pub fn op_rok_get_env_var(state: &OpState, #[string] key: String) -> String {
         .unwrap_or_default()
 }
 
+/// rok.getSecretVar('alias.secretName') — reads a fetched External Secret value.
+#[op2]
+#[string]
+pub fn op_rok_get_secret_var(state: &OpState, #[string] key: String) -> String {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .external_secrets
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// rok.hasEnvVar(key) — true if key exists in the active environment.
 #[op2(fast)]
 pub fn op_rok_has_env_var(state: &OpState, #[string] key: String) -> bool {

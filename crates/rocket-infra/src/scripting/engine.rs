@@ -156,6 +156,7 @@ extension!(
         rok::op_rok_get_var,
         rok::op_rok_set_var,
         rok::op_rok_get_env_var,
+        rok::op_rok_get_secret_var,
         rok::op_rok_set_env_var,
         rok::op_rok_has_env_var,
         rok::op_rok_delete_env_var,
@@ -389,6 +390,19 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         let val = result.runtime_vars.get("url").expect("url present");
         assert_eq!(val, "https://api.example.com");
+    }
+
+    #[tokio::test]
+    async fn rok_get_secret_var_reads_from_context() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.external_secrets
+            .insert("payments.stripeKey".into(), "sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("rok.setVar('key', rok.getSecretVar('payments.stripeKey'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let val = result.runtime_vars.get("key").expect("key present");
+        assert_eq!(val, "sk-live-abcdef123");
     }
 
     #[tokio::test]

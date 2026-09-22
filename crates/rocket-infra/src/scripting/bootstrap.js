@@ -33,6 +33,7 @@
     hasEnvVar:         (key)        => __ops.op_rok_has_env_var(key),
     deleteEnvVar:      (key)        => __ops.op_rok_delete_env_var(key),
     getEnvName:        ()           => __ops.op_rok_get_env_name(),
+    getSecretVar:      (key)        => __ops.op_rok_get_secret_var(key),
     getCollectionVar:  (key)        => __ops.op_rok_get_collection_var(key),
     setCollectionVar:  (key, value) => __ops.op_rok_set_collection_var(key, JSON.stringify(value)),
     getGlobalEnvVar:   (key)        => __ops.op_rok_get_global_env_var(key),
