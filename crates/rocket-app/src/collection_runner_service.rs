@@ -219,6 +219,20 @@ impl CollectionRunnerService {
     ) -> DomainResult<RunSummary> {
         let collection = self.collection_repo.get(&input.collection)?;
         let items = flatten_run_set(&collection, input.folder_path.as_deref())?;
+
+        // Fetch every External Secret value exactly once, up front, and reuse
+        // this same map for every step below. RocketVault value resolution is
+        // a real network round-trip per secret name; the active environment's
+        // external_secrets bindings do not change mid-run, so re-fetching per
+        // step would multiply RocketVault round-trips by the step count
+        // (spec acceptance criterion 7). A failure here fails the whole run
+        // before any step executes and before RunnerStarted is even
+        // published — no step, and no "this run started" signal, for a run
+        // whose secrets could not be resolved.
+        let external_secrets = exec
+            .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
+            .await?;
+
         let run_id = Ulid::new().to_string();
         if let Ok(mut set) = self.in_flight.lock() {
             set.insert(run_id.clone());
@@ -250,7 +264,14 @@ impl CollectionRunnerService {
 
             let item = &items[cursor];
             let outcome = self
-                .run_step(exec, &input, item, steps.len(), &mut carried_runtime)
+                .run_step(
+                    exec,
+                    &input,
+                    item,
+                    steps.len(),
+                    &mut carried_runtime,
+                    &external_secrets,
+                )
                 .await;
             let mut result = outcome.result;
 
@@ -350,6 +371,7 @@ impl CollectionRunnerService {
         item: &RunItem,
         index: usize,
         carried_runtime: &mut HashMap<String, String>,
+        external_secrets: &HashMap<String, String>,
     ) -> StepOutcome {
         let step_input: ExecuteRequestInput = build_step_input(
             item,
@@ -359,7 +381,7 @@ impl CollectionRunnerService {
             input.request_guard_policy.clone(),
         );
 
-        let mut state = match exec.begin_phases(&step_input) {
+        let mut state = match exec.begin_phases(&step_input, external_secrets) {
             Ok(state) => state,
             Err(e) => {
                 return StepOutcome {
