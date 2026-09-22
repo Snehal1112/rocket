@@ -5,7 +5,8 @@ use rocket_audit::{
 };
 use rocket_collection::{settings::SandboxMode as CollectionSandboxMode, CollectionRepository};
 use rocket_environment::{
-    resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
+    resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory,
+    SecretManagerRepository, SecretStore, VariableContext, VaultSecretFetcher,
 };
 use rocket_history::{HistoryEntry, HistoryRepository};
 use rocket_http::{
@@ -164,6 +165,23 @@ pub struct RequestExecutionService {
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
     script_engine: Option<Box<dyn ScriptEngine>>,
+    /// App-level RocketVault connection registry — `resolve_external_secrets`
+    /// looks up the `SecretManagerConnection` named by each binding's
+    /// `connection_id`. No I/O in this crate; concrete impl lives in
+    /// `rocket-infra` (Plan 04's `FsSecretManagerRepo`).
+    secret_manager_repo: Box<dyn SecretManagerRepository>,
+    /// Client-secret storage for vault connections — a distinct
+    /// `SecretStore` instance from the one `FsEnvironmentRepo` uses for
+    /// local `secret: true` variables (that one is scoped to
+    /// `com.rocketapi.env-secrets`; this one to
+    /// `com.rocketapi.vault-connection`, via Plan 04's
+    /// `KeyringSecretStore::new_vault_connections()`).
+    vault_connection_secret_store: Arc<dyn SecretStore>,
+    /// Fetches live secret values from a configured RocketVault connection.
+    /// One shared instance serves every connection, exactly like
+    /// `executor: Arc<dyn HttpExecutor>` serves every request regardless of
+    /// target host.
+    vault_fetcher: Arc<dyn VaultSecretFetcher>,
 }
 
 /// Secrets shorter than this are not added to `VariableContext.secret_values`
@@ -182,6 +200,9 @@ impl RequestExecutionService {
         collection_repo: Box<dyn CollectionRepository>,
         cookie_repo: Box<dyn CookieRepository>,
         events: Box<dyn EventPublisher>,
+        secret_manager_repo: Box<dyn SecretManagerRepository>,
+        vault_connection_secret_store: Arc<dyn SecretStore>,
+        vault_fetcher: Arc<dyn VaultSecretFetcher>,
     ) -> Self {
         Self {
             env_repo,
@@ -193,6 +214,9 @@ impl RequestExecutionService {
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
             script_engine: None,
+            secret_manager_repo,
+            vault_connection_secret_store,
+            vault_fetcher,
         }
     }
 
@@ -204,6 +228,9 @@ impl RequestExecutionService {
         cookie_repo: Box<dyn CookieRepository>,
         events: Box<dyn EventPublisher>,
         audit: Arc<dyn SecurityAuditPublisher>,
+        secret_manager_repo: Box<dyn SecretManagerRepository>,
+        vault_connection_secret_store: Arc<dyn SecretStore>,
+        vault_fetcher: Arc<dyn VaultSecretFetcher>,
     ) -> Self {
         Self {
             env_repo,
@@ -215,6 +242,9 @@ impl RequestExecutionService {
             events,
             audit,
             script_engine: None,
+            secret_manager_repo,
+            vault_connection_secret_store,
+            vault_fetcher,
         }
     }
 
@@ -248,6 +278,51 @@ impl RequestExecutionService {
     pub fn with_script_engine(mut self, engine: Box<dyn ScriptEngine>) -> Self {
         self.script_engine = Some(engine);
         self
+    }
+
+    /// Fetches real values for every `ExternalSecretRef` in the named
+    /// environment's `external_secrets` bindings. Returns a flat map keyed
+    /// `"{alias}.{secretName}" -> value`.
+    ///
+    /// `None` (no active environment) short-circuits to an empty map with zero
+    /// network activity — nothing to resolve. A binding whose ref resolves to
+    /// `Ok(None)` (deleted on the RocketVault side since the last "Fetch
+    /// Secrets") is silently omitted from the result, not an error. Any other
+    /// `Err` aborts the whole call immediately: a *configured, previously
+    /// successfully fetched* external secret name failing to resolve means the
+    /// network/vault is unreachable right now, not that the secret was never
+    /// set — partially populating the map and continuing would risk a request
+    /// going out with some vault-sourced values silently missing (spec §4.6).
+    pub async fn resolve_external_secrets(
+        &self,
+        environment_name: Option<&str>,
+    ) -> DomainResult<std::collections::HashMap<String, String>> {
+        let mut result = std::collections::HashMap::new();
+
+        let Some(name) = environment_name else {
+            return Ok(result);
+        };
+
+        let env = self.env_repo.get(name)?;
+        for binding in &env.external_secrets {
+            for secret_ref in &binding.secret_names {
+                let value = crate::vault_secret_resolution::resolve_vault_secret_value(
+                    self.secret_manager_repo.as_ref(),
+                    self.vault_connection_secret_store.as_ref(),
+                    self.vault_fetcher.as_ref(),
+                    &binding.connection_id,
+                    &binding.vault_name,
+                    &secret_ref.secret_id,
+                )
+                .await?;
+
+                if let Some(value) = value {
+                    result.insert(format!("{}.{}", binding.alias, secret_ref.name), value);
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// Builds a scope-separated `VariableContext` from all backend-accessible
@@ -1486,6 +1561,31 @@ mod tests {
         }
     }
 
+    /// No connections configured — every lookup misses. Used by every test in
+    /// this file that doesn't exercise RocketVault resolution itself.
+    struct EmptySecretManagerRepo;
+
+    impl rocket_environment::SecretManagerRepository for EmptySecretManagerRepo {
+        fn list(&self) -> DomainResult<Vec<rocket_environment::SecretManagerConnection>> {
+            Ok(vec![])
+        }
+        fn get(
+            &self,
+            _id: &str,
+        ) -> DomainResult<Option<rocket_environment::SecretManagerConnection>> {
+            Ok(None)
+        }
+        fn save(
+            &self,
+            _connection: &rocket_environment::SecretManagerConnection,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
     // Mock environment repo with one pre-loaded environment.
     struct MockEnvRepo {
         env: Option<Environment>,
@@ -1716,6 +1816,299 @@ mod tests {
         }
     }
 
+    fn test_connection(id: &str) -> rocket_environment::SecretManagerConnection {
+        rocket_environment::SecretManagerConnection {
+            id: id.to_string(),
+            label: "Test".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+        }
+    }
+
+    /// Configurable connection registry for `resolve_external_secrets` tests.
+    struct FakeSecretManagerRepo {
+        connections: Vec<rocket_environment::SecretManagerConnection>,
+    }
+
+    impl FakeSecretManagerRepo {
+        fn with_connection(conn: rocket_environment::SecretManagerConnection) -> Self {
+            Self {
+                connections: vec![conn],
+            }
+        }
+    }
+
+    impl rocket_environment::SecretManagerRepository for FakeSecretManagerRepo {
+        fn list(&self) -> DomainResult<Vec<rocket_environment::SecretManagerConnection>> {
+            Ok(self.connections.clone())
+        }
+        fn get(
+            &self,
+            id: &str,
+        ) -> DomainResult<Option<rocket_environment::SecretManagerConnection>> {
+            Ok(self.connections.iter().find(|c| c.id == id).cloned())
+        }
+        fn save(
+            &self,
+            connection: &rocket_environment::SecretManagerConnection,
+        ) -> DomainResult<()> {
+            let _ = connection;
+            Ok(())
+        }
+        fn delete(&self, _id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    /// Always hands back a fixed client secret — the actual value never matters
+    /// to these tests, only that the lookup succeeds.
+    struct FakeSecretStore;
+
+    impl rocket_environment::SecretStore for FakeSecretStore {
+        fn get(&self, _scope_id: &str, _key: &str) -> DomainResult<Option<String>> {
+            Ok(Some("test-client-secret".to_string()))
+        }
+        fn set(&self, _scope_id: &str, _key: &str, _value: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _scope_id: &str, _key: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    /// Per-secret-id scripted outcome for `FakeVaultFetcher::get_secret_value`.
+    #[derive(Clone)]
+    enum FakeSecretOutcome {
+        Value(String),
+        Missing,       // get_secret_value -> Ok(None): deleted on the RocketVault side.
+        Error(String), // get_secret_value -> Err(DomainError::Internal(..)).
+    }
+
+    /// Records every secret_id it was asked to resolve, in call order, so tests
+    /// can assert both the returned value and how many/which calls were made.
+    struct FakeVaultFetcher {
+        responses: std::collections::HashMap<String, FakeSecretOutcome>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl FakeVaultFetcher {
+        fn new(responses: Vec<(&str, FakeSecretOutcome)>) -> Self {
+            Self {
+                responses: responses
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl rocket_environment::VaultSecretFetcher for FakeVaultFetcher {
+        async fn list_secrets(
+            &self,
+            _connection: &rocket_environment::SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<Vec<rocket_environment::ExternalSecretRef>> {
+            Ok(vec![])
+        }
+
+        async fn get_secret_value(
+            &self,
+            _connection: &rocket_environment::SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+            secret_id: &str,
+        ) -> DomainResult<Option<String>> {
+            self.calls
+                .lock()
+                .expect("lock FakeVaultFetcher calls")
+                .push(secret_id.to_string());
+            match self.responses.get(secret_id) {
+                Some(FakeSecretOutcome::Value(v)) => Ok(Some(v.clone())),
+                Some(FakeSecretOutcome::Missing) | None => Ok(None),
+                Some(FakeSecretOutcome::Error(msg)) => Err(DomainError::Internal(msg.clone())),
+            }
+        }
+
+        async fn test_connection(
+            &self,
+            _connection: &rocket_environment::SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    fn binding_with_refs(
+        alias: &str,
+        refs: Vec<(&str, &str)>, // (name, secret_id)
+    ) -> rocket_environment::ExternalSecretBinding {
+        rocket_environment::ExternalSecretBinding {
+            alias: alias.to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: refs
+                .into_iter()
+                .map(|(name, secret_id)| rocket_environment::ExternalSecretRef {
+                    name: name.to_string(),
+                    secret_id: secret_id.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    fn svc_with_vault(
+        env: Option<Environment>,
+        fetcher: Arc<FakeVaultFetcher>,
+    ) -> RequestExecutionService {
+        let env_repo: Box<dyn rocket_environment::EnvironmentRepository> = match env {
+            Some(e) => Box::new(MockEnvRepo::with_env(e)),
+            None => Box::new(MockEnvRepo::empty()),
+        };
+        RequestExecutionService::new(
+            env_repo,
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        )
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_returns_empty_map_when_no_environment_given() {
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![]));
+        let svc = svc_with_vault(None, Arc::clone(&fetcher));
+
+        let result = svc
+            .resolve_external_secrets(None)
+            .await
+            .expect("resolve_external_secrets");
+
+        assert!(result.is_empty());
+        assert!(
+            fetcher.calls.lock().expect("lock calls").is_empty(),
+            "no environment name means no lookups at all, not even a miss"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_returns_empty_map_for_environment_with_no_bindings() {
+        let env = Environment::new("prod");
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![]));
+        let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
+
+        let result = svc
+            .resolve_external_secrets(Some("prod"))
+            .await
+            .expect("resolve_external_secrets");
+
+        assert!(result.is_empty());
+        assert!(fetcher.calls.lock().expect("lock calls").is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_resolves_all_secret_names_in_one_binding() {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(binding_with_refs(
+            "payments",
+            vec![("apiKey", "sec-1"), ("webhookSecret", "sec-2")],
+        ));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![
+            ("sec-1", FakeSecretOutcome::Value("sk-live-key".to_string())),
+            ("sec-2", FakeSecretOutcome::Value("whsec-abc".to_string())),
+        ]));
+        let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
+
+        let result = svc
+            .resolve_external_secrets(Some("prod"))
+            .await
+            .expect("resolve_external_secrets");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result.get("payments.apiKey"),
+            Some(&"sk-live-key".to_string())
+        );
+        assert_eq!(
+            result.get("payments.webhookSecret"),
+            Some(&"whsec-abc".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_hard_fails_on_a_fetcher_error() {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(binding_with_refs(
+            "payments",
+            vec![("apiKey", "sec-1"), ("webhookSecret", "sec-2")],
+        ));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![
+            ("sec-1", FakeSecretOutcome::Value("sk-live-key".to_string())),
+            (
+                "sec-2",
+                FakeSecretOutcome::Error("vault unreachable".to_string()),
+            ),
+        ]));
+        let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
+
+        let err = svc
+            .resolve_external_secrets(Some("prod"))
+            .await
+            .expect_err("a fetcher error on one ref must fail the whole call");
+
+        assert!(matches!(err, DomainError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_skips_a_deleted_secret_silently() {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(binding_with_refs(
+            "payments",
+            vec![
+                ("apiKey", "sec-1"),
+                ("deletedOnVaultSide", "sec-2"),
+                ("webhookSecret", "sec-3"),
+            ],
+        ));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![
+            ("sec-1", FakeSecretOutcome::Value("sk-live-key".to_string())),
+            ("sec-2", FakeSecretOutcome::Missing),
+            ("sec-3", FakeSecretOutcome::Value("whsec-abc".to_string())),
+        ]));
+        let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
+
+        let result = svc
+            .resolve_external_secrets(Some("prod"))
+            .await
+            .expect("resolve_external_secrets");
+
+        assert_eq!(
+            result.len(),
+            2,
+            "the deleted secret must be silently omitted, not errored"
+        );
+        assert!(!result.contains_key("payments.deletedOnVaultSide"));
+        assert_eq!(
+            result.get("payments.apiKey"),
+            Some(&"sk-live-key".to_string())
+        );
+        assert_eq!(
+            result.get("payments.webhookSecret"),
+            Some(&"whsec-abc".to_string())
+        );
+    }
+
     #[tokio::test]
     async fn service_run_load_test_resolves_variables_before_firing() {
         let mut env = Environment::new("staging");
@@ -1739,6 +2132,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("{{oidc-baseurl}}/api/data", Some("staging"));
@@ -1773,6 +2169,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let input = sample_input("{{oidc-baseurl}}/api/v1/users", Some("dev"));
@@ -1792,6 +2191,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let out = svc
@@ -1837,6 +2239,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         svc.execute(sample_input("https://example.com", None))
@@ -1869,6 +2274,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(SharedPublisher(publisher)),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         svc.execute(sample_input("https://example.com/items", None))
@@ -1998,6 +2406,9 @@ mod tests {
             Box::new(repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://{{HOST}}/api", None);
@@ -2032,6 +2443,9 @@ mod tests {
             Box::new(repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://api.example.com/{{TOKEN}}", None);
@@ -2074,6 +2488,9 @@ mod tests {
             Box::new(repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://api.example.com/{{V}}", Some("prod"));
@@ -2144,6 +2561,9 @@ mod tests {
             Box::new(StubCollectionRepo::with_settings(settings)),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://api.example.com", None);
@@ -2191,6 +2611,9 @@ mod tests {
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://api.example.com/users", None);
@@ -2227,6 +2650,9 @@ mod tests {
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         // Auth::None by default in sample_input.
@@ -2592,6 +3018,9 @@ mod tests {
             collection_repo,
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(engine)
     }
@@ -2741,6 +3170,9 @@ mod tests {
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             audit_publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
@@ -2849,6 +3281,9 @@ mod tests {
             Box::new(NullCookieRepo),
             Box::new(SharedPub(Arc::clone(&event_publisher))),
             audit_publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
@@ -2911,6 +3346,9 @@ mod tests {
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             audit_publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
@@ -3010,6 +3448,9 @@ mod tests {
             Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
             Box::new(NullCookieRepo),
             Box::new(SharedPub(Arc::clone(&event_publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
@@ -3091,6 +3532,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3131,6 +3575,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3164,6 +3611,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3197,6 +3647,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3233,6 +3686,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3263,6 +3719,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("http://localhost:8080/", None);
@@ -3299,6 +3758,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3339,6 +3801,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3381,6 +3846,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -3409,6 +3877,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy::default();
         let result = svc.check_request_guard(
@@ -3429,6 +3900,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3457,6 +3931,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3477,6 +3954,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3500,6 +3980,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3520,6 +4003,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3544,6 +4030,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3568,6 +4057,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3599,6 +4091,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3621,6 +4116,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
@@ -3677,6 +4175,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let mut input = sample_input("https://example.com", None);
@@ -3714,6 +4215,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
@@ -4066,6 +4570,9 @@ mod tests {
             Box::new(collection_repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedCapturingEngine(engine)));
 
@@ -4143,6 +4650,9 @@ mod tests {
             Box::new(collection_repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedCapturingEngineSecrets(engine)));
 
@@ -4205,6 +4715,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedCapturingEngineShort(engine)));
 
@@ -4254,6 +4767,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedCapturingEngineExact(engine)));
 
@@ -4302,6 +4818,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedCapturingEngineGlobal(engine)));
 
@@ -4367,6 +4886,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(FailingEngine));
 

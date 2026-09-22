@@ -81,6 +81,31 @@ mod tests {
         }
     }
 
+    /// No connections configured — every lookup misses. Used by every test in
+    /// this file that doesn't exercise RocketVault resolution itself.
+    struct EmptySecretManagerRepo;
+
+    impl rocket_environment::SecretManagerRepository for EmptySecretManagerRepo {
+        fn list(&self) -> DomainResult<Vec<rocket_environment::SecretManagerConnection>> {
+            Ok(vec![])
+        }
+        fn get(
+            &self,
+            _id: &str,
+        ) -> DomainResult<Option<rocket_environment::SecretManagerConnection>> {
+            Ok(None)
+        }
+        fn save(
+            &self,
+            _connection: &rocket_environment::SecretManagerConnection,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
     // Environment repo holding a single pre-loaded environment.
     struct MockEnvRepo {
         env: Option<Environment>,
@@ -281,6 +306,9 @@ mod tests {
             Box::new(StubCollectionRepo::empty()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         );
 
         let input = ExecuteRequestInput {

@@ -506,9 +506,9 @@ fn error_step(index: usize, item: &RunItem, message: String) -> RunStepResult {
 mod tests {
     use super::*;
     use crate::test_doubles::{
-        InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo,
-        ProgrammableEngine, RecordingExecutor, RecordingPublisher, SharedCollectionRepo,
-        SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher,
+        EmptySecretManagerRepo, InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo,
+        NullEnvRepo, ProgrammableEngine, RecordingExecutor, RecordingPublisher,
+        SharedCollectionRepo, SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher,
     };
     use rocket_collection::{Collection, Request};
     use rocket_scripting::ScriptResult;
@@ -570,6 +570,9 @@ mod tests {
             Box::new(SharedCollectionRepo(Arc::clone(&repo))),
             Box::new(NullCookieRepo),
             Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
 
@@ -1154,6 +1157,9 @@ mod tests {
             Box::new(SharedCollectionRepo(Arc::clone(&repo))),
             Box::new(NullCookieRepo),
             Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
 
@@ -1244,6 +1250,9 @@ mod tests {
             Box::new(SharedCollectionRepo(Arc::clone(&repo))),
             Box::new(NullCookieRepo),
             Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
 

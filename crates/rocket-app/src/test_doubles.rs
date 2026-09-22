@@ -12,7 +12,9 @@ use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
     Request as CollectionRequest,
 };
-use rocket_environment::{Environment, EnvironmentRepository};
+use rocket_environment::{
+    Environment, EnvironmentRepository, SecretManagerConnection, SecretManagerRepository,
+};
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
@@ -283,6 +285,26 @@ impl HistoryRepository for SharedHistoryRepo {
     }
     fn search(&self, f: &HistoryFilter) -> DomainResult<Vec<HistoryEntry>> {
         self.0.search(f)
+    }
+}
+
+/// No connections configured — every lookup misses. Used by every
+/// `CollectionRunnerService` test that doesn't exercise RocketVault
+/// resolution itself.
+pub struct EmptySecretManagerRepo;
+
+impl SecretManagerRepository for EmptySecretManagerRepo {
+    fn list(&self) -> DomainResult<Vec<SecretManagerConnection>> {
+        Ok(vec![])
+    }
+    fn get(&self, _id: &str) -> DomainResult<Option<SecretManagerConnection>> {
+        Ok(None)
+    }
+    fn save(&self, _connection: &SecretManagerConnection) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _id: &str) -> DomainResult<()> {
+        Ok(())
     }
 }
 
