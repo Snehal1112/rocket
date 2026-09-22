@@ -89,11 +89,18 @@ and `~/data/rocket/rocketvault/api/secrets.go`:
 - **List secrets (vault-scoped):** `GET {base_url}/api/v1/vaults/{vault_name}/secrets`
   with `Authorization: Bearer <token>`. Returns the `model.ListSecretsResponse`
   envelope, `{"secrets": [...], "total": <count>}` — not a bare array — where
-  each entry is a `{id (uuid), name, ...}` object (`model.Secret` — includes
-  `value`, but this spec never persists that field from a list response, see
-  §4.3). The endpoint is server-side paginated (`per_page` default 60, max
-  200); this integration requests `per_page=200` as a pragmatic mitigation and
-  does not implement cursor-based pagination beyond that in v1.
+  each entry is a `{id (uuid), name, tags, version, created_at, enabled}`
+  object (`model.SecretResponse`, confirmed at
+  `~/data/rocket/rocketvault/api/secrets.go:189-200`, built explicitly
+  "without values for security" — the server never sends a `value` field in a
+  list response at all, unlike the single-secret get endpoint below). The
+  parsing side still decodes defensively (only `id`/`name`, ignoring every
+  other field via serde's default unknown-field skip) so this holds even if
+  that ever changes, but the value-in-list-response premise itself is not
+  something to design around. The endpoint is server-side paginated
+  (`per_page` default 60, max 200); this integration requests `per_page=200`
+  as a pragmatic mitigation and does not implement cursor-based pagination
+  beyond that in v1.
 - **Get secret value (vault-scoped):** `GET
   {base_url}/api/v1/vaults/{vault_name}/secrets/{secret_id}` with the same
   Bearer token. Response `200`: `{"value": "..."}`. `404` → secret gone
@@ -112,6 +119,20 @@ and `~/data/rocket/rocketvault/api/secrets.go`:
   local dev servers.
 
 ### 4.2 New infra client: `RocketVaultClient` (in `rocket-infra`)
+
+> **Superseded by the implementation plans.** The plan series
+> (`docs/superpowers/plans/rocketvault-external-secrets/`) replaces the
+> single-connection `RocketVaultClient`/`RocketVaultConnectionConfig` shape
+> below with a `VaultSecretFetcher` trait (`rocket-environment`, Plan 02) plus
+> one stateless `ReqwestVaultSecretFetcher` implementation (`rocket-infra`,
+> Plan 03) that takes the connection/secret as call parameters instead of
+> being constructed bound to one connection. This keeps `rocket-app` free of
+> any RocketVault-specific concrete type — it only ever holds `Arc<dyn
+> VaultSecretFetcher>` — matching the DDD boundary rule
+> (`.claude/rules/rust-ddd-boundaries.md`) more precisely than this section's
+> original design. Every `RocketVaultClient` reference below is superseded;
+> the plan index's "Locked interface contract" is authoritative for the
+> actual shape.
 
 New module `crates/rocket-infra/src/rocketvault/client.rs`, built on `reqwest`
 (already a workspace dependency) — same crate/pattern `ReqwestExecutor` uses for
@@ -267,8 +288,16 @@ impl RequestExecutionService {
     /// environment's external_secrets bindings. Returns a flat map keyed
     /// "{alias}.{secretName}" -> value, merged into the variable maps
     /// consumed by build_variable_context/build_variable_scopes.
+    ///
+    /// Reads the named environment through regular_env_repo(collection), not
+    /// self.env_repo directly — the environment a real request uses is
+    /// collection-scoped in the normal case, served by a different repo than
+    /// the app-level ("global") one self.env_repo points at. A missing
+    /// environment soft-fails to an empty map, matching
+    /// build_variable_scopes's own convention for this lookup.
     pub async fn resolve_external_secrets(
         &self,
+        collection: Option<&str>,
         environment_name: Option<&str>,
     ) -> DomainResult<HashMap<String, String>>;
 }
