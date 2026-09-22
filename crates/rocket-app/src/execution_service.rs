@@ -294,12 +294,18 @@ impl RequestExecutionService {
     /// `None` (no active environment) short-circuits to an empty map with zero
     /// network activity — nothing to resolve. A binding whose ref resolves to
     /// `Ok(None)` (deleted on the RocketVault side since the last "Fetch
-    /// Secrets") is silently omitted from the result, not an error. Any other
-    /// `Err` aborts the whole call immediately: a *configured, previously
-    /// successfully fetched* external secret name failing to resolve means the
-    /// network/vault is unreachable right now, not that the secret was never
-    /// set — partially populating the map and continuing would risk a request
-    /// going out with some vault-sourced values silently missing (spec §4.6).
+    /// Secrets") is silently omitted from the result, not an error. A
+    /// `DomainError::NotFound` — the binding's `connection_id` no longer
+    /// refers to an existing Secret Manager connection, e.g. it was deleted
+    /// from Settings after the binding was saved — likewise soft-fails: that
+    /// one binding's secrets are skipped, not the whole call, since deleting
+    /// a connection is a supported action with no cross-check against
+    /// existing environment bindings. Any other `Err` aborts the whole call
+    /// immediately: a *configured, previously successfully fetched* external
+    /// secret name failing to resolve means the network/vault is unreachable
+    /// right now, not that the secret was never set — partially populating
+    /// the map and continuing would risk a request going out with some
+    /// vault-sourced values silently missing (spec §4.6).
     pub async fn resolve_external_secrets(
         &self,
         collection: Option<&str>,
@@ -316,7 +322,7 @@ impl RequestExecutionService {
         };
         for binding in &env.external_secrets {
             for secret_ref in &binding.secret_names {
-                let value = crate::vault_secret_resolution::resolve_vault_secret_value(
+                let value = match crate::vault_secret_resolution::resolve_vault_secret_value(
                     self.secret_manager_repo.as_ref(),
                     self.vault_connection_secret_store.as_ref(),
                     self.vault_fetcher.as_ref(),
@@ -324,7 +330,18 @@ impl RequestExecutionService {
                     &binding.vault_name,
                     &secret_ref.secret_id,
                 )
-                .await?;
+                .await
+                {
+                    Ok(value) => value,
+                    // The connection this binding pointed at was deleted from
+                    // Settings after the binding was saved — soft-fail this
+                    // one binding's secrets rather than aborting every
+                    // request that happens to use this environment,
+                    // mirroring how a deleted-from-the-vault secret (fetcher
+                    // Ok(None)) is already handled just below.
+                    Err(rocket_shared::error::DomainError::NotFound(_)) => continue,
+                    Err(err) => return Err(err),
+                };
 
                 if let Some(value) = value {
                     result.insert(format!("{}.{}", binding.alias, secret_ref.name), value);
@@ -2382,6 +2399,98 @@ mod tests {
             "HttpExecutor::execute must never run when resolve_external_secrets errors — \
              this is the 'never a silent empty-string substitution' / hard-stop-before-dispatch \
              requirement from spec §2/§4.6"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_skips_a_binding_whose_connection_was_deleted() {
+        // "conn-1" is the connection_id `binding_with_refs` bakes into every
+        // binding it builds, but this test's registry is EmptySecretManagerRepo
+        // — no connections at all — modeling a connection that was deleted from
+        // Settings after the binding was saved (a fully supported action with
+        // no cross-check against existing environment bindings).
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let result = svc
+            .resolve_external_secrets(None, Some("prod"))
+            .await
+            .expect(
+                "a binding whose connection was deleted must soft-fail that binding, \
+                 not abort the whole call",
+            );
+        assert!(
+            result.is_empty(),
+            "the binding pointing at a deleted connection must contribute no secrets, got: {result:?}"
+        );
+        assert!(
+            !result.contains_key("payments.apiKey"),
+            "the deleted-connection binding's secret must be absent, not present"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_succeeds_and_still_dispatches_when_a_binding_connection_was_deleted() {
+        // Same missing-connection setup as above, but exercised through the
+        // full execute() path with a request that doesn't even reference the
+        // affected binding's secret — pinning that a deleted connection on an
+        // unrelated binding must not abort dispatch of requests that never
+        // touch it.
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let executor = Arc::new(CallCountingExecutor::new(200));
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let out = svc
+            .execute(sample_input("https://api.example.com/status", Some("prod")))
+            .await
+            .expect(
+                "execute must succeed even though one binding's connection was deleted from Settings",
+            );
+
+        assert_eq!(out.response.status, 200);
+        assert_eq!(
+            exec_arc.call_count(),
+            1,
+            "HttpExecutor::execute must still run — a deleted-connection binding must not \
+             abort dispatch of a request that never references its secrets"
         );
     }
 
