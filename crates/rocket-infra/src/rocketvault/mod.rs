@@ -45,18 +45,22 @@ pub struct ReqwestVaultSecretFetcher {
 
 impl ReqwestVaultSecretFetcher {
     pub fn new() -> Self {
+        // Client::builder().build() only fails if the TLS backend itself
+        // cannot initialize — the same failure mode the panicking
+        // reqwest::Client::new() hits internally. Both clients below are
+        // built via the non-panicking builder path and fall back to
+        // reqwest::Client::new() only as a last resort, keeping this
+        // constructor's locked `-> Self` signature infallible without ever
+        // panicking on our own code path.
+        let http = reqwest::Client::builder()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         let http_insecure = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
-            // Client::builder().build() only fails if the TLS backend itself
-            // cannot initialize — the same failure mode reqwest::Client::new()
-            // (used for `http` below) panics on internally. Falling back to
-            // the verifying client here keeps this constructor's locked
-            // `-> Self` signature infallible without ever panicking on our
-            // own code path.
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            http: reqwest::Client::new(),
+            http,
             http_insecure,
             tokens: DashMap::new(),
         }
