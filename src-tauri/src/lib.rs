@@ -26,12 +26,13 @@ use tauri::Manager;
 
 /// OS-keychain backend for environment secret values.
 ///
-/// `KeyringSecretStore` is a stateless unit struct, so each call site can build
-/// its own handle; this helper keeps the concrete type in one place. Every
-/// `FsEnvironmentRepo` that serves user-facing environments must be built with
-/// it — `FsEnvironmentRepo::new` silently drops secret values.
+/// `KeyringSecretStore::new_env_secrets()` builds a handle scoped to the
+/// environment-secrets keychain namespace; this helper keeps the concrete
+/// type and that namespace choice in one place. Every `FsEnvironmentRepo`
+/// that serves user-facing environments must be built with it —
+/// `FsEnvironmentRepo::new` silently drops secret values.
 pub(crate) fn env_secret_store() -> Arc<dyn SecretStore> {
-    Arc::new(KeyringSecretStore)
+    Arc::new(KeyringSecretStore::new_env_secrets())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

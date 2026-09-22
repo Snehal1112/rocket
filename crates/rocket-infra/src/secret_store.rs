@@ -4,17 +4,41 @@
 use rocket_environment::secret_store::SecretStore;
 use rocket_shared::error::{DomainError, DomainResult};
 
-/// Keychain service namespace for environment secrets. Deliberately distinct
-/// from the git-credential service name ("rocket-api").
-const KEYRING_SERVICE: &str = "com.rocketapi.env-secrets";
-
 /// Stores secret values in the OS-native secret store: macOS Keychain,
-/// Windows Credential Manager, or the Linux Secret Service.
-pub struct KeyringSecretStore;
+/// Windows Credential Manager, or the Linux Secret Service. Configurable by
+/// keychain service label so one implementation serves multiple secret
+/// namespaces (environment variable secrets, RocketVault connection client
+/// secrets) without their entries colliding.
+pub struct KeyringSecretStore {
+    service: &'static str,
+}
+
+impl KeyringSecretStore {
+    /// Backs environment variable secret values. Uses the exact service
+    /// string this type used before it was generalized to take a
+    /// configurable label, so existing keychain entries keep resolving
+    /// unchanged.
+    pub fn new_env_secrets() -> Self {
+        Self {
+            service: "com.rocketapi.env-secrets",
+        }
+    }
+
+    /// Backs RocketVault connection client secrets (Plan 05's
+    /// `SecretManagerService`, scope_id = "vault-connection", key =
+    /// connection id). A distinct keychain service label from
+    /// `new_env_secrets()` so the two features can never share or clobber
+    /// each other's entries.
+    pub fn new_vault_connections() -> Self {
+        Self {
+            service: "com.rocketapi.vault-connection",
+        }
+    }
+}
 
 impl SecretStore for KeyringSecretStore {
     fn get(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &account(scope_id, key))
+        let entry = keyring::Entry::new(self.service, &account(scope_id, key))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -29,7 +53,7 @@ impl SecretStore for KeyringSecretStore {
     }
 
     fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &account(scope_id, key))
+        let entry = keyring::Entry::new(self.service, &account(scope_id, key))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         entry
             .set_password(value)
@@ -37,7 +61,7 @@ impl SecretStore for KeyringSecretStore {
     }
 
     fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, &account(scope_id, key))
+        let entry = keyring::Entry::new(self.service, &account(scope_id, key))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -68,8 +92,24 @@ mod tests {
     fn service_name_is_distinct_from_git_credentials() {
         // Git credentials use "rocket-api" (src-tauri/src/commands/git.rs:185).
         // Sharing a service name would let one feature clobber the other's entries.
-        assert_ne!(KEYRING_SERVICE, "rocket-api");
-        assert_eq!(KEYRING_SERVICE, "com.rocketapi.env-secrets");
+        let store = KeyringSecretStore::new_env_secrets();
+        assert_ne!(store.service, "rocket-api");
+        assert_eq!(store.service, "com.rocketapi.env-secrets");
+    }
+
+    #[test]
+    fn distinct_keychain_namespaces_for_env_and_vault_connections() {
+        let env_store = KeyringSecretStore::new_env_secrets();
+        let vault_store = KeyringSecretStore::new_vault_connections();
+        // Two genuinely distinct keychain service labels — sharing one would let
+        // an environment-secret entry collide with a vault-connection entry (or
+        // vice versa) if the same scope_id/key pair were ever reused across
+        // features. No real OS keychain is touched here; this only inspects the
+        // struct's own field, the same way `service_name_is_distinct_from_git_credentials`
+        // below checks a string constant without touching a keychain.
+        assert_ne!(env_store.service, vault_store.service);
+        assert_eq!(env_store.service, "com.rocketapi.env-secrets");
+        assert_eq!(vault_store.service, "com.rocketapi.vault-connection");
     }
 
     // Real-keychain coverage, ignored by default: CI has no Secret Service or
@@ -79,7 +119,7 @@ mod tests {
     #[test]
     #[ignore = "requires a real OS keychain"]
     fn keyring_set_get_delete_roundtrip() {
-        let store = KeyringSecretStore;
+        let store = KeyringSecretStore::new_env_secrets();
         let scope = "rocket-infra-test-scope";
         store.set(scope, "TEST_KEY", "sk-live-123").expect("set");
         assert_eq!(
@@ -96,7 +136,7 @@ mod tests {
     #[test]
     #[ignore = "requires a real OS keychain"]
     fn keyring_delete_of_missing_entry_is_ok() {
-        assert!(KeyringSecretStore
+        assert!(KeyringSecretStore::new_env_secrets()
             .delete("rocket-infra-test-scope", "NO_SUCH_KEY")
             .is_ok());
     }
