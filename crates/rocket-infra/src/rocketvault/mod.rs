@@ -15,10 +15,36 @@ const MIN_TOKEN_TTL: Duration = Duration::from_secs(30);
 /// Mirrors the reference client's `tokenExpiryCutoff`.
 const EARLY_REFRESH_CUTOFF: Duration = Duration::from_secs(60);
 
+/// Ceiling clamp applied to the server-supplied `expires_in` before it is
+/// turned into a `Duration`. `expires_in` is untrusted input deserialized
+/// straight from RocketVault's token response with no upper bound — without
+/// this clamp, a malicious or buggy server could send a value large enough
+/// that `Instant::now() + ttl` overflows and panics. A server claiming a
+/// token lives longer than this is itself untrustworthy, so the value is
+/// clamped rather than merely bounds-checked.
+const MAX_TOKEN_TTL_SECS: u64 = 86_400; // 24 hours
+
+/// Request timeout applied to both `reqwest::Client`s built in `new()`.
+/// Matches `rocket_http::RequestOptions`'s own 30s default
+/// (`default_timeout()` in `crates/rocket-http/src/request.rs`), so
+/// RocketVault calls fail closed with the same ceiling the rest of the app
+/// uses for outgoing HTTP requests, rather than hanging indefinitely.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// One cached OAuth2 access token for a single `SecretManagerConnection`,
 /// keyed by `connection.id` in `ReqwestVaultSecretFetcher::tokens`.
+///
+/// `base_url` and `client_id` are stored alongside the token so
+/// `ensure_token` can detect a stale entry: if a connection's `base_url` or
+/// `client_id` changes while its `id` stays the same (the user edits the
+/// connection), a cache hit keyed only on `id` would keep returning a token
+/// minted under the old `base_url`/`client_id` until its TTL expires —
+/// potentially sending a token to the wrong server, or one issued under a
+/// now-rotated `client_id`.
 struct TokenCache {
     token: String,
+    base_url: String,
+    client_id: String,
     expires_at: Instant,
 }
 
@@ -52,10 +78,20 @@ impl ReqwestVaultSecretFetcher {
         // reqwest::Client::new() only as a last resort, keeping this
         // constructor's locked `-> Self` signature infallible without ever
         // panicking on our own code path.
+        //
+        // Both clients disable redirects and set a request timeout, matching
+        // the style of this crate's own `reqwest_executor::build_client_impl`.
+        // RocketVault's API never redirects, so following one is never
+        // correct here — and a followed redirect could carry the request's
+        // `client_secret` form body to an unintended host.
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         let http_insecure = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(REQUEST_TIMEOUT)
             .danger_accept_invalid_certs(true)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
@@ -90,17 +126,21 @@ impl ReqwestVaultSecretFetcher {
         validate_base_url(connection)?;
 
         if let Some(cached) = self.tokens.get(&connection.id) {
-            if Instant::now() < token_expiry_cutoff(cached.expires_at) {
+            let still_matches_connection =
+                cached.base_url == connection.base_url && cached.client_id == connection.client_id;
+            if still_matches_connection && Instant::now() < token_expiry_cutoff(cached.expires_at) {
                 return Ok(cached.token.clone());
             }
         }
 
         let (token, expires_in) = self.fetch_token(connection, client_secret).await?;
-        let ttl = Duration::from_secs(expires_in).max(MIN_TOKEN_TTL);
+        let ttl = compute_token_ttl(expires_in);
         self.tokens.insert(
             connection.id.clone(),
             TokenCache {
                 token: token.clone(),
+                base_url: connection.base_url.clone(),
+                client_id: connection.client_id.clone(),
                 expires_at: Instant::now() + ttl,
             },
         );
@@ -167,6 +207,12 @@ impl ReqwestVaultSecretFetcher {
     }
 }
 
+impl Default for ReqwestVaultSecretFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Mirrors the reference Go client's `tokenExpiryCutoff`: refresh 60s before
 /// actual expiry, except when the token's remaining life is already at or
 /// under that window, in which case the raw expiry is used — otherwise a
@@ -178,6 +224,16 @@ fn token_expiry_cutoff(expires_at: Instant) -> Instant {
     } else {
         expires_at - EARLY_REFRESH_CUTOFF
     }
+}
+
+/// Turns a server-reported `expires_in` (seconds) into the `Duration` cached
+/// alongside the token. Clamps to `MAX_TOKEN_TTL_SECS` first — before the
+/// `Duration` is ever constructed — so `Instant::now() + ttl` in
+/// `ensure_token` can never overflow, then floors to `MIN_TOKEN_TTL` so a
+/// server reporting `expires_in: 0` (or another degenerate small value)
+/// doesn't force a refetch on every call.
+fn compute_token_ttl(expires_in: u64) -> Duration {
+    Duration::from_secs(expires_in.min(MAX_TOKEN_TTL_SECS)).max(MIN_TOKEN_TTL)
 }
 
 /// Enforces the `https://` requirement for non-loopback hosts, mirroring the
@@ -192,7 +248,17 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
         ))
     })?;
     let host = parsed.host_str().unwrap_or_default();
-    let is_loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
+    // `url::Url::host()` (unlike `host_str()`, which brackets IPv6 hosts as
+    // "[::1]" and would never match a bare "::1" comparison) returns a
+    // `url::Host` we can match structurally, so `Host::Ipv6(ip).is_loopback()`
+    // correctly recognizes "::1" and every other loopback form (e.g. also
+    // `Host::Ipv4(ip).is_loopback()` covers 127.0.0.2, not just 127.0.0.1).
+    let is_loopback = match parsed.host() {
+        Some(url::Host::Domain(d)) => d == "localhost",
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
     if parsed.scheme() != "https" && !is_loopback && !connection.allow_insecure_http {
         return Err(DomainError::InvalidInput(format!(
             "RocketVault connection {} must use https:// for non-loopback host {host} \
@@ -258,7 +324,9 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| DomainError::Http(format!("RocketVault list_secrets request failed: {e}")))?;
+            .map_err(|e| {
+                DomainError::Http(format!("RocketVault list_secrets request failed: {e}"))
+            })?;
 
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             self.tokens.remove(&connection.id);
@@ -308,7 +376,9 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| DomainError::Http(format!("RocketVault get_secret_value request failed: {e}")))?;
+            .map_err(|e| {
+                DomainError::Http(format!("RocketVault get_secret_value request failed: {e}"))
+            })?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
@@ -328,6 +398,12 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
 
         #[derive(Deserialize)]
         struct RawSecretValue {
+            // RocketVault's server omits the `value` key entirely (via an
+            // `omitempty` tag) when a secret's stored value is the empty
+            // string, rather than sending `"value": ""`. Without
+            // `#[serde(default)]` that legitimately-empty case fails to
+            // decode as an error instead of yielding `Ok(Some(String::new()))`.
+            #[serde(default)]
             value: String,
         }
         let parsed: RawSecretValue = resp.json().await.map_err(|e| {
@@ -343,7 +419,8 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
         vault_name: &str,
     ) -> DomainResult<()> {
         self.ensure_token(connection, client_secret).await?;
-        self.list_secrets(connection, client_secret, vault_name).await?;
+        self.list_secrets(connection, client_secret, vault_name)
+            .await?;
         Ok(())
     }
 }
@@ -516,7 +593,9 @@ mod tests {
             .mount(&mock_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001"))
+            .and(path(
+                "/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "value": "sk-live-abc123"
             })))
@@ -526,7 +605,12 @@ mod tests {
         let fetcher = ReqwestVaultSecretFetcher::new();
         let conn = test_connection(mock_server.uri());
         let value = fetcher
-            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .get_secret_value(
+                &conn,
+                "shh",
+                "prod-vault",
+                "b6f1c2e0-1234-4a5b-9abc-000000000001",
+            )
             .await
             .expect("get_secret_value");
         assert_eq!(value, Some("sk-live-abc123".to_string()));
@@ -544,7 +628,9 @@ mod tests {
             .mount(&mock_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/api/v1/vaults/prod-vault/secrets/00000000-0000-0000-0000-000000000000"))
+            .and(path(
+                "/api/v1/vaults/prod-vault/secrets/00000000-0000-0000-0000-000000000000",
+            ))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
             .await;
@@ -552,7 +638,12 @@ mod tests {
         let fetcher = ReqwestVaultSecretFetcher::new();
         let conn = test_connection(mock_server.uri());
         let value = fetcher
-            .get_secret_value(&conn, "shh", "prod-vault", "00000000-0000-0000-0000-000000000000")
+            .get_secret_value(
+                &conn,
+                "shh",
+                "prod-vault",
+                "00000000-0000-0000-0000-000000000000",
+            )
             .await
             .expect("get_secret_value on missing id");
         assert_eq!(value, None);
@@ -571,7 +662,9 @@ mod tests {
             .mount(&mock_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001"))
+            .and(path(
+                "/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001",
+            ))
             .respond_with(ResponseTemplate::new(401))
             .mount(&mock_server)
             .await;
@@ -580,7 +673,12 @@ mod tests {
         let conn = test_connection(mock_server.uri());
 
         let err = fetcher
-            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .get_secret_value(
+                &conn,
+                "shh",
+                "prod-vault",
+                "b6f1c2e0-1234-4a5b-9abc-000000000001",
+            )
             .await
             .expect_err("401 must error");
         assert!(matches!(err, rocket_shared::error::DomainError::Http(_)));
@@ -590,7 +688,12 @@ mod tests {
         // cleared — the token mock's .expect(2) above fails the test on drop
         // if only one token request ever fires.
         let _ = fetcher
-            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .get_secret_value(
+                &conn,
+                "shh",
+                "prod-vault",
+                "b6f1c2e0-1234-4a5b-9abc-000000000001",
+            )
             .await;
     }
 
@@ -635,5 +738,68 @@ mod tests {
         let conn = test_connection(mock_server.uri());
         let result = fetcher.test_connection(&conn, "wrong", "prod-vault").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_base_url_https_is_always_ok() {
+        let mut conn = test_connection("https://example.com".to_string());
+        conn.allow_insecure_http = false;
+        assert!(validate_base_url(&conn).is_ok());
+        conn.allow_insecure_http = true;
+        assert!(validate_base_url(&conn).is_ok());
+    }
+
+    #[test]
+    fn validate_base_url_http_non_loopback_rejected_unless_allowed() {
+        let mut conn = test_connection("http://example.com".to_string());
+        conn.allow_insecure_http = false;
+        let err = validate_base_url(&conn)
+            .expect_err("plain http to a non-loopback host must be rejected");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+
+        conn.allow_insecure_http = true;
+        assert!(validate_base_url(&conn).is_ok());
+    }
+
+    #[test]
+    fn validate_base_url_loopback_always_allowed_over_http() {
+        let mut conn = test_connection("http://localhost:8200".to_string());
+        conn.allow_insecure_http = false;
+        assert!(validate_base_url(&conn).is_ok());
+
+        conn.base_url = "http://127.0.0.1:8200".to_string();
+        assert!(validate_base_url(&conn).is_ok());
+
+        // IPv6 loopback ("::1") is also always allowed — regression test for
+        // the bracketed-host mismatch between `Url::host_str()` (returns
+        // "[::1]") and a bare "::1" comparison.
+        conn.base_url = "http://[::1]:8200".to_string();
+        assert!(validate_base_url(&conn).is_ok());
+    }
+
+    #[test]
+    fn compute_token_ttl_floors_zero_expires_in_to_min_ttl() {
+        assert_eq!(compute_token_ttl(0), MIN_TOKEN_TTL);
+    }
+
+    #[test]
+    fn compute_token_ttl_clamps_huge_expires_in_to_max_ttl() {
+        // A malicious/buggy server reporting an absurd expires_in (e.g. near
+        // u64::MAX) must not be able to overflow `Instant::now() + ttl` in
+        // `ensure_token` — the clamp caps the resulting Duration well below
+        // any value that could cause that.
+        assert_eq!(
+            compute_token_ttl(u64::MAX),
+            Duration::from_secs(MAX_TOKEN_TTL_SECS)
+        );
+        assert_eq!(
+            compute_token_ttl(MAX_TOKEN_TTL_SECS + 1),
+            Duration::from_secs(MAX_TOKEN_TTL_SECS)
+        );
+    }
+
+    #[test]
+    fn compute_token_ttl_passes_through_normal_values() {
+        assert_eq!(compute_token_ttl(300), Duration::from_secs(300));
     }
 }
