@@ -41,11 +41,40 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// minted under the old `base_url`/`client_id` until its TTL expires —
 /// potentially sending a token to the wrong server, or one issued under a
 /// now-rotated `client_id`.
+///
+/// `secret_fingerprint` exists for the same reason, covering `client_secret`:
+/// without it, editing a connection's secret (fixing a typo, rotating a
+/// leaked credential) while `base_url`/`client_id` stay the same would keep
+/// returning a token minted under the OLD secret until the cache entry's TTL
+/// expires (up to `MAX_TOKEN_TTL_SECS`) — a false-positive "Test Connection"
+/// success, and a silent failure only much later when the stale token itself
+/// finally expires. The raw `client_secret` is deliberately never stored
+/// here — only a one-way SHA-256 fingerprint of it — so it never lives in
+/// memory longer than the single `fetch_token` call that mints the token.
 struct TokenCache {
     token: String,
     base_url: String,
     client_id: String,
+    secret_fingerprint: String,
     expires_at: Instant,
+}
+
+/// Computes a one-way fingerprint of a `client_secret` for staleness
+/// detection in `TokenCache`. The raw secret must never be stored in the
+/// cache — it would then persist in memory for as long as the cached token
+/// does (up to `MAX_TOKEN_TTL_SECS`), well past the single `fetch_token` call
+/// that actually needs it. A fingerprint lets `ensure_token` notice the
+/// secret passed into a later call differs from the one that minted the
+/// cached token, without ever holding onto the secret itself.
+fn secret_fingerprint(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    Sha256::digest(secret.as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut acc, b| {
+            let _ = write!(acc, "{b:02x}");
+            acc
+        })
 }
 
 /// Talks to a RocketVault server's REST API (token issuance, secret listing,
@@ -126,8 +155,9 @@ impl ReqwestVaultSecretFetcher {
         validate_base_url(connection)?;
 
         if let Some(cached) = self.tokens.get(&connection.id) {
-            let still_matches_connection =
-                cached.base_url == connection.base_url && cached.client_id == connection.client_id;
+            let still_matches_connection = cached.base_url == connection.base_url
+                && cached.client_id == connection.client_id
+                && cached.secret_fingerprint == secret_fingerprint(client_secret);
             if still_matches_connection && Instant::now() < token_expiry_cutoff(cached.expires_at) {
                 return Ok(cached.token.clone());
             }
@@ -141,6 +171,7 @@ impl ReqwestVaultSecretFetcher {
                 token: token.clone(),
                 base_url: connection.base_url.clone(),
                 client_id: connection.client_id.clone(),
+                secret_fingerprint: secret_fingerprint(client_secret),
                 expires_at: Instant::now() + ttl,
             },
         );
@@ -429,7 +460,7 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
 mod tests {
     use super::*;
     use rocket_environment::SecretManagerConnection;
-    use wiremock::matchers::{header_exists, method, path, query_param};
+    use wiremock::matchers::{body_string_contains, header_exists, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_connection(base_url: String) -> SecretManagerConnection {
@@ -474,6 +505,58 @@ mod tests {
             .await
             .expect("second token fetch reuses cache");
         assert_eq!(token_again, "tok-1");
+    }
+
+    #[tokio::test]
+    async fn ensure_token_refetches_when_client_secret_changes_even_within_ttl() {
+        // Inverse of the test above: the SAME connection id, base_url, and
+        // client_id, but a DIFFERENT client_secret on the second call, must
+        // NOT reuse the cached token — it must re-authenticate and pick up
+        // the token minted for the new secret. This is the regression test
+        // for the bug where `still_matches_connection` compared only
+        // `base_url`/`client_id` and never noticed `client_secret` changed,
+        // so a cache hit returned success even though the fresh secret was
+        // never actually validated against the server.
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .and(body_string_contains("client_secret=secret-a"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-for-secret-a",
+                "expires_in": 300
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .and(body_string_contains("client_secret=secret-b"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-for-secret-b",
+                "expires_in": 300
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+
+        let token_a = fetcher
+            .ensure_token(&conn, "secret-a")
+            .await
+            .expect("first token fetch with secret-a");
+        assert_eq!(token_a, "tok-for-secret-a");
+
+        // Still within the TTL window (300s), but the secret changed — this
+        // must issue a fresh HTTP call rather than reuse the cached token.
+        // Each mock's .expect(1) above fails the test on drop unless exactly
+        // one request matching its own client_secret is observed.
+        let token_b = fetcher
+            .ensure_token(&conn, "secret-b")
+            .await
+            .expect("second token fetch with secret-b must re-authenticate");
+        assert_eq!(token_b, "tok-for-secret-b");
     }
 
     #[tokio::test]
