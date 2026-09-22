@@ -203,11 +203,120 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
     Ok(())
 }
 
+use rocket_environment::{ExternalSecretRef, VaultSecretFetcher};
+
+/// Deserialization target for one entry inside a RocketVault list-secrets
+/// response's `secrets` array. Deliberately has no `value` field —
+/// RocketVault's per-entry response includes one, but this struct must
+/// never be able to read it, so a list response can never leak a value into
+/// memory even though the server includes one (spec §4.1/§4.4). Every other
+/// field (`tags`, `created_at`, `enabled`, `version`, ...) is silently
+/// ignored by serde's default "unknown fields are skipped" deserialization
+/// behavior — no `deny_unknown_fields`.
+#[derive(Deserialize)]
+struct RawSecretSummary {
+    id: String,
+    name: String,
+}
+
+/// Deserialization target for RocketVault's list-secrets envelope,
+/// `{"secrets": [...], "total": N}` — confirmed from
+/// `model.ListSecretsResponse` (ground truth cited in Global Constraints).
+/// `total` is intentionally not declared as a field: it isn't needed here,
+/// and omitting it is safe because serde ignores unknown JSON fields by
+/// default (the same behavior `RawSecretSummary` relies on above).
+#[derive(Deserialize)]
+struct RawSecretListResponse {
+    secrets: Vec<RawSecretSummary>,
+}
+
+#[async_trait::async_trait]
+impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
+    async fn list_secrets(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        vault_name: &str,
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        let token = self.ensure_token(connection, client_secret).await?;
+        let client = self.client_for(connection);
+        // RocketVault paginates this endpoint (default per_page=60, max 200 —
+        // spec §4.1). Requesting the max page size is a pragmatic mitigation
+        // for v1: it covers any vault with up to 200 secrets in one call
+        // without implementing cursor-based pagination. A vault with more
+        // than 200 secrets will still silently show only the first 200 in
+        // "Fetch Secrets" — a documented v1 limitation, not a bug to fix
+        // here.
+        let url = format!(
+            "{}/api/v1/vaults/{}/secrets?per_page=200",
+            connection.base_url.trim_end_matches('/'),
+            vault_name
+        );
+
+        let resp = client
+            .get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| DomainError::Http(format!("RocketVault list_secrets request failed: {e}")))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.tokens.remove(&connection.id);
+            return Err(DomainError::Http(
+                "RocketVault rejected the token while listing secrets (401)".to_string(),
+            ));
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            return Err(DomainError::Http(format!(
+                "RocketVault list_secrets returned unexpected status {status}"
+            )));
+        }
+
+        let raw: RawSecretListResponse = resp.json().await.map_err(|e| {
+            DomainError::Http(format!("failed to decode RocketVault secret list: {e}"))
+        })?;
+
+        Ok(raw
+            .secrets
+            .into_iter()
+            .map(|s| ExternalSecretRef {
+                name: s.name,
+                secret_id: s.id,
+            })
+            .collect())
+    }
+
+    // get_secret_value / test_connection: implemented in Task 3. This
+    // scaffolding exists only so the trait compiles with all three methods
+    // present after this task — it is replaced with a real body in Task 3
+    // below, and by the end of Task 3 no `unimplemented!` remains anywhere
+    // in this file.
+    async fn get_secret_value(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+        _secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        unimplemented!("implemented in Task 3")
+    }
+
+    async fn test_connection(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<()> {
+        unimplemented!("implemented in Task 3")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rocket_environment::SecretManagerConnection;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header_exists, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_connection(base_url: String) -> SecretManagerConnection {
@@ -268,6 +377,91 @@ mod tests {
 
         let err = fetcher
             .ensure_token(&conn, "wrong-secret")
+            .await
+            .expect_err("401 must error");
+        assert!(matches!(err, rocket_shared::error::DomainError::Http(_)));
+        assert!(fetcher.tokens.get(&conn.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn list_secrets_maps_id_and_name_ignoring_other_fields() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .mount(&mock_server)
+            .await;
+        // RocketVault's real response is the model.ListSecretsResponse envelope
+        // ({"secrets": [...], "total": N}), not a bare array — see the Global
+        // Constraints "List" bullet for the ground-truth source. The
+        // query_param assertion below is the pagination-mitigation check: it
+        // fails the test if the implementation ever drops the ?per_page=200
+        // query string, which would otherwise silently truncate any vault with
+        // more than RocketVault's default 60-per-page limit.
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets"))
+            .and(query_param("per_page", "200"))
+            .and(header_exists("Authorization"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "secrets": [
+                    {
+                        "id": "b6f1c2e0-1234-4a5b-9abc-000000000001",
+                        "name": "stripe-key",
+                        "value": "sk-live-should-never-be-read",
+                        "tags": ["payments"],
+                        "created_at": "2026-01-01T00:00:00Z"
+                    },
+                    {
+                        "id": "c7a2d3f1-5678-4b6c-9def-000000000002",
+                        "name": "sendgrid-key",
+                        "value": "sg-should-never-be-read",
+                        "tags": []
+                    }
+                ],
+                "total": 2
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+
+        let refs = fetcher
+            .list_secrets(&conn, "shh", "prod-vault")
+            .await
+            .expect("list_secrets");
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].name, "stripe-key");
+        assert_eq!(refs[0].secret_id, "b6f1c2e0-1234-4a5b-9abc-000000000001");
+        assert_eq!(refs[1].name, "sendgrid-key");
+        assert_eq!(refs[1].secret_id, "c7a2d3f1-5678-4b6c-9def-000000000002");
+    }
+
+    #[tokio::test]
+    async fn list_secrets_401_is_an_error_and_clears_cached_token() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+
+        let err = fetcher
+            .list_secrets(&conn, "shh", "prod-vault")
             .await
             .expect_err("401 must error");
         assert!(matches!(err, rocket_shared::error::DomainError::Http(_)));
