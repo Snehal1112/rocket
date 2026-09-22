@@ -117,7 +117,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const handleAddEnv = useCallback(
     async (name: string) => {
-      await saveMutation.mutateAsync({ name, variables: [] });
+      await saveMutation.mutateAsync({ name, variables: [], externalSecrets: [] });
       setSelectedName(name);
       setActiveEnvId(name);
     },

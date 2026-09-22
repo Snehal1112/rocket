@@ -168,9 +168,31 @@ export interface Variable {
   secret: boolean;
 }
 
+export interface ExternalSecretRef {
+  name: string;
+  secretId: string;
+}
+
+export interface ExternalSecretBinding {
+  alias: string;
+  connectionId: string;
+  vaultName: string;
+  secretNames: ExternalSecretRef[];
+}
+
+export interface SecretManagerConnection {
+  id: string;
+  label: string;
+  baseUrl: string;
+  clientId: string;
+  verifySsl: boolean;
+  allowInsecureHttp: boolean;
+}
+
 export interface Environment {
   name: string;
   variables: Variable[];
+  externalSecrets: ExternalSecretBinding[];
 }
 
 export interface Template {
@@ -1625,3 +1647,28 @@ export const exportAuditEvidence = (start: string, end: string) =>
 
 export const saveAuditEvidenceFile = (path: string, content: string) =>
   invoke<void>('save_audit_evidence_file', { input: { path, content } });
+
+// ============================================================
+// Secret Manager connections (RocketVault external secrets)
+// ============================================================
+
+export const listSecretManagerConnections = () =>
+  invoke<SecretManagerConnection[]>('list_secret_manager_connections');
+
+export const saveSecretManagerConnection = (
+  connection: SecretManagerConnection,
+  clientSecret?: string,
+) =>
+  invoke<void>('save_secret_manager_connection', {
+    connection,
+    clientSecret,
+  });
+
+export const deleteSecretManagerConnection = (id: string) =>
+  invoke<void>('delete_secret_manager_connection', { id });
+
+export const testSecretManagerConnection = (id: string, vaultName: string) =>
+  invoke<void>('test_secret_manager_connection', { id, vaultName });
+
+export const fetchExternalSecretNames = (id: string, vaultName: string) =>
+  invoke<ExternalSecretRef[]>('fetch_external_secret_names', { id, vaultName });

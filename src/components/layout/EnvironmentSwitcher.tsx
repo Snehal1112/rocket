@@ -50,7 +50,7 @@ export function EnvironmentSwitcher() {
     }
     createGlobalInFlight.current = true;
     try {
-      await saveGlobalMutation.mutateAsync({ name, variables: [] });
+      await saveGlobalMutation.mutateAsync({ name, variables: [], externalSecrets: [] });
     } catch (err) {
       console.error('[EnvironmentSwitcher] create global env failed:', err);
     } finally {
@@ -71,7 +71,7 @@ export function EnvironmentSwitcher() {
     createCollectionInFlight.current = true;
     try {
       if (!activeCollection) throw new Error('No active collection');
-      await saveEnvMutation.mutateAsync({ name, variables: [] });
+      await saveEnvMutation.mutateAsync({ name, variables: [], externalSecrets: [] });
       setActiveEnvId(name);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -86,7 +86,7 @@ export function WorkspaceEnvironmentsTab() {
   const handleAddEnv = useCallback(
     async (name: string) => {
       try {
-        await saveMutation.mutateAsync({ name, variables: [] });
+        await saveMutation.mutateAsync({ name, variables: [], externalSecrets: [] });
         setSelectedName(name);
       } catch (err) {
         console.error('[WorkspaceEnvironmentsTab] failed to create environment', err);
