@@ -1,6 +1,55 @@
 use crate::oc::*;
 use rocket_environment::environment::Environment;
+use rocket_environment::external_secret::{ExternalSecretBinding, ExternalSecretRef};
 use rocket_environment::variable::Variable;
+
+impl From<OcExternalSecretRef> for ExternalSecretRef {
+    fn from(oc: OcExternalSecretRef) -> Self {
+        ExternalSecretRef {
+            name: oc.name,
+            secret_id: oc.secret_id,
+        }
+    }
+}
+
+impl From<ExternalSecretRef> for OcExternalSecretRef {
+    fn from(r: ExternalSecretRef) -> Self {
+        OcExternalSecretRef {
+            name: r.name,
+            secret_id: r.secret_id,
+        }
+    }
+}
+
+impl From<OcExternalSecretBinding> for ExternalSecretBinding {
+    fn from(oc: OcExternalSecretBinding) -> Self {
+        ExternalSecretBinding {
+            alias: oc.alias,
+            connection_id: oc.connection_id,
+            vault_name: oc.vault_name,
+            secret_names: oc
+                .secret_names
+                .into_iter()
+                .map(ExternalSecretRef::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<ExternalSecretBinding> for OcExternalSecretBinding {
+    fn from(b: ExternalSecretBinding) -> Self {
+        OcExternalSecretBinding {
+            alias: b.alias,
+            connection_id: b.connection_id,
+            vault_name: b.vault_name,
+            secret_names: b
+                .secret_names
+                .into_iter()
+                .map(OcExternalSecretRef::from)
+                .collect(),
+        }
+    }
+}
 
 impl From<OcEnvironment> for Environment {
     fn from(oc: OcEnvironment) -> Self {
@@ -14,12 +63,16 @@ impl From<OcEnvironment> for Environment {
                     OcEnvVariableEntry::Plain(v) => Variable::from(v),
                 })
                 .collect(),
+            external_secrets: oc
+                .external_secrets
+                .into_iter()
+                .map(ExternalSecretBinding::from)
+                .collect(),
             color: oc.color,
             description: oc.description,
             extends: oc.extends,
             dot_env_file_path: oc.dot_env_file_path,
             client_certificates: oc.client_certificates,
-            external_secrets: Vec::new(),
         }
     }
 }
@@ -49,6 +102,11 @@ impl From<Environment> for OcEnvironment {
                         OcEnvVariableEntry::Plain(OcVariable::from(v))
                     }
                 })
+                .collect(),
+            external_secrets: env
+                .external_secrets
+                .into_iter()
+                .map(OcExternalSecretBinding::from)
                 .collect(),
             client_certificates: env.client_certificates,
             extends: env.extends,

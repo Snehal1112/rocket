@@ -779,6 +779,49 @@ dotEnvFilePath: .env.prod
     }
 
     #[test]
+    fn oc_environment_external_secrets_absent_is_backward_compatible() {
+        // Every environment .yml file written before this feature existed has
+        // no `externalSecrets` key at all. It must keep loading unchanged.
+        let yaml = "name: production\nvariables: []\n";
+        let env: OcEnvironment = serde_yaml::from_str(yaml).expect("parse old-format environment");
+        assert!(env.external_secrets.is_empty());
+    }
+
+    #[test]
+    fn oc_external_secret_binding_yaml_is_camel_case() {
+        let yaml = r#"
+name: production
+externalSecrets:
+  - alias: payments
+    connectionId: conn-1
+    vaultName: prod-vault
+    secretNames:
+      - name: stripe-key
+        secretId: b6f1c2e0-1234-4a5b-9abc-000000000001
+"#;
+        let env: OcEnvironment = serde_yaml::from_str(yaml).expect("parse environment with external secrets");
+        assert_eq!(env.external_secrets.len(), 1);
+        let binding = &env.external_secrets[0];
+        assert_eq!(binding.alias, "payments");
+        assert_eq!(binding.connection_id, "conn-1");
+        assert_eq!(binding.vault_name, "prod-vault");
+        assert_eq!(binding.secret_names.len(), 1);
+        assert_eq!(binding.secret_names[0].name, "stripe-key");
+        assert_eq!(
+            binding.secret_names[0].secret_id,
+            "b6f1c2e0-1234-4a5b-9abc-000000000001"
+        );
+
+        // Round-trip and confirm the serialized form is camelCase, not snake_case.
+        let out = serde_yaml::to_string(&env).expect("serialize environment");
+        assert!(out.contains("connectionId:"), "expected camelCase, got:\n{out}");
+        assert!(out.contains("vaultName:"), "expected camelCase, got:\n{out}");
+        assert!(out.contains("secretNames:"), "expected camelCase, got:\n{out}");
+        assert!(out.contains("secretId:"), "expected camelCase, got:\n{out}");
+        assert!(!out.contains("connection_id:"), "must not emit snake_case:\n{out}");
+    }
+
+    #[test]
     fn env_variable_entry_prefers_secret_variant() {
         let yaml = "secret: true\nname: API_KEY\ntype: string\n";
         let entry: OcEnvVariableEntry = serde_yaml::from_str(yaml).expect("parse secret entry");

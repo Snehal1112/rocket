@@ -442,6 +442,7 @@ fn environment_oc_to_domain() {
             description: None,
             disabled: None,
         })],
+        external_secrets: Vec::new(),
         client_certificates: Vec::new(),
         extends: Some("base".into()),
         dot_env_file_path: Some(".env.prod".into()),
@@ -529,6 +530,7 @@ fn environment_oc_secret_entry_converts_back_with_secret_flag_set() {
             disabled: None,
             secret_type: Some("string".into()),
         })],
+        external_secrets: Vec::new(),
         client_certificates: Vec::new(),
         extends: None,
         dot_env_file_path: None,
@@ -1344,6 +1346,38 @@ fn environment_client_certificates_survive_oc_roundtrip() {
         back.client_certificates[0],
         ClientCertificate::Pem { ref domain, .. } if domain == "api.example.com"
     ));
+}
+
+#[test]
+fn environment_external_secrets_survive_oc_roundtrip() {
+    use rocket_environment::external_secret::{ExternalSecretBinding, ExternalSecretRef};
+
+    let mut env = Environment::new("prod");
+    env.external_secrets.push(ExternalSecretBinding {
+        alias: "payments".to_string(),
+        connection_id: "conn-1".to_string(),
+        vault_name: "prod-vault".to_string(),
+        secret_names: vec![ExternalSecretRef {
+            name: "stripe-key".to_string(),
+            secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
+        }],
+    });
+
+    let oc: OcEnvironment = env.clone().into();
+    let back: Environment = oc.into();
+
+    assert_eq!(env.external_secrets, back.external_secrets);
+}
+
+#[test]
+fn oc_environment_without_external_secrets_key_still_deserializes() {
+    // Every environment .yml file saved before this feature existed has no
+    // externalSecrets key — loading it must not fail, and it must convert to
+    // an Environment with an empty external_secrets list, not error out.
+    let yaml = "name: production\nvariables: []\n";
+    let oc: OcEnvironment = serde_yaml::from_str(yaml).expect("parse old-format environment");
+    let env: Environment = oc.into();
+    assert!(env.external_secrets.is_empty());
 }
 
 #[test]
