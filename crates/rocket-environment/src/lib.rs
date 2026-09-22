@@ -4,6 +4,7 @@ pub mod environment;
 pub mod external_secret;
 pub mod repository;
 pub mod resolver;
+pub mod secret_manager;
 pub mod secret_store;
 pub mod variable;
 
@@ -12,5 +13,6 @@ pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
 pub use repository::{EnvironmentRepository, EnvironmentRepositoryFactory};
 pub use resolver::{resolve, resolve_with_env, ResolveResult};
+pub use secret_manager::{SecretManagerConnection, SecretManagerRepository};
 pub use secret_store::{NullSecretStore, SecretStore};
 pub use variable::Variable;
