@@ -28,8 +28,8 @@ full locked interface contract every plan in this series depends on).
 
 **This is Plan 10 of 10 — the final plan in the series.** It depends on Plan 08
 (Tauri commands: `list_secret_manager_connections`,
-`fetch_external_secret_names`/equivalent — see the "Plan 09 dependency note"
-below) and Plan 09 (frontend types + Secret Manager Connections UI).
+`fetch_external_secret_names` — see "Plan 09 names used by Task 2" below) and
+Plan 09 (frontend types + Secret Manager Connections UI).
 
 ---
 
@@ -177,40 +177,22 @@ mutation, satisfies "no separate save path" from Task 3's brief even though
 the button is rendered by two different components depending on which tab is
 active.
 
-## Plan 09 dependency note (read before Task 2)
+## Plan 09 names used by Task 2
 
-At the time this plan was written, `2026-09-22-rocketvault-secrets-plan-09-frontend-connections.md`
-did not yet exist in `docs/superpowers/plans/rocketvault-external-secrets/`
-(only `00`, `01`, `02`, `03`, `05`, `07` were present — `09` was presumably
-being authored in parallel). This plan cannot read Plan 09's actual function/
-hook names, so Task 2 below uses the exact type names from `00-plan-index.md`'s
-locked interface contract (`ExternalSecretBinding`, `ExternalSecretRef`,
-`SecretManagerConnection`) plus the following **assumed** function names,
-chosen to match this codebase's existing naming conventions
-(`listEnvironments`/`useEnvironments` in `src/lib/tauri-api.ts` /
-`src/lib/queries/environment-queries.ts`):
+Task 2 below imports these directly from Plan 09's actual output (verified
+against `2026-09-22-rocketvault-secrets-plan-09-frontend-connections.md` —
+confirmed by a second independent review pass that these names match
+exactly, so no reconciliation step is needed):
 
 - `listSecretManagerConnections(): Promise<SecretManagerConnection[]>` —
-  assumed to live in `src/lib/tauri-api.ts`, wrapping the
-  `list_secret_manager_connections` Tauri command from spec §4.3.
-- `useSecretManagerConnections()` — assumed React Query hook, likely in a new
-  `src/lib/queries/secret-manager-queries.ts`, following the exact
-  `useEnvironments` pattern (`useQuery({ queryKey: [...], queryFn:
-  listSecretManagerConnections })`).
+  `src/lib/tauri-api.ts`, wraps the `list_secret_manager_connections` Tauri
+  command.
+- `useSecretManagerConnections()` — React Query hook,
+  `src/lib/queries/secret-manager-queries.ts`, following the `useEnvironments`
+  pattern (`useQuery({ queryKey: [...], queryFn: listSecretManagerConnections })`).
 - `fetchExternalSecretNames(connectionId: string, vaultName: string):
-  Promise<ExternalSecretRef[]>` — assumed to live in `src/lib/tauri-api.ts`,
-  wrapping whatever Tauri command Plan 08 exposes for the "Fetch Secrets"
-  action (the plan index's §4.3 names `test_secret_manager_connection`
-  explicitly but does not name a names-fetch command — Plan 08's actual
-  command name is authoritative).
-
-**Before starting Task 2, the implementer MUST open the finalized
-`2026-09-22-rocketvault-secrets-plan-09-frontend-connections.md` (it should
-exist by the time Plan 08/09 are done, per the dependency order in
-`00-plan-index.md`) and reconcile these three names against whatever it
-actually landed with.** If they differ, use Plan 09's real names and update
-the import lines below accordingly — do not silently implement against
-possibly-stale assumed names without checking first.
+  Promise<ExternalSecretRef[]>` — `src/lib/tauri-api.ts`, wraps the
+  `fetch_external_secret_names` Tauri command.
 
 ---
 
@@ -471,8 +453,8 @@ this repo's commit convention) rather than a freeform `git commit -m`. Stage
 **Interfaces:**
 - Consumes: `ExternalSecretBinding`, `ExternalSecretRef`, `SecretManagerConnection`
   types (locked contract, `00-plan-index.md`); `listSecretManagerConnections`/
-  `useSecretManagerConnections`/`fetchExternalSecretNames` from Plan 09 (see the
-  "Plan 09 dependency note" above — verify names before implementing).
+  `useSecretManagerConnections`/`fetchExternalSecretNames` from Plan 09 (see
+  "Plan 09 names used by Task 2" above).
 - Produces: `ExternalSecretsTab` component, consumed by Task 1's
   `EnvironmentDialog.tsx` render and Task 3's wiring.
 
