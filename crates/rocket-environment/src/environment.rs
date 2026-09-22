@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn environment_external_secrets_defaults_to_empty_on_old_yaml() {
+    fn environment_external_secrets_defaults_to_empty_on_old_format() {
         // Simulates loading a pre-existing environment file saved before this
         // field existed — must not fail to deserialize.
         let json = r#"{"name":"prod","variables":[]}"#;

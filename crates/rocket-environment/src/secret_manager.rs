@@ -49,8 +49,14 @@ mod tests {
         };
         let json = serde_json::to_string(&c).expect("serialize SecretManagerConnection");
         // Deliberately NOT camelCase — plain field names, see Global Constraints.
-        assert!(json.contains("\"base_url\""), "expected snake_case field, got: {json}");
-        assert!(json.contains("\"client_id\""), "expected snake_case field, got: {json}");
+        assert!(
+            json.contains("\"base_url\""),
+            "expected snake_case field, got: {json}"
+        );
+        assert!(
+            json.contains("\"client_id\""),
+            "expected snake_case field, got: {json}"
+        );
         let back: SecretManagerConnection =
             serde_json::from_str(&json).expect("deserialize SecretManagerConnection");
         assert_eq!(c, back);
@@ -59,7 +65,8 @@ mod tests {
     #[test]
     fn connection_verify_ssl_defaults_true_when_absent() {
         let json = r#"{"id":"c1","label":"L","base_url":"https://x","client_id":"cid"}"#;
-        let c: SecretManagerConnection = serde_json::from_str(json).expect("deserialize minimal connection");
+        let c: SecretManagerConnection =
+            serde_json::from_str(json).expect("deserialize minimal connection");
         assert!(c.verify_ssl, "verify_ssl should default to true for safety");
         assert!(!c.allow_insecure_http);
     }
@@ -105,5 +112,10 @@ mod tests {
         assert_eq!(repo.list().expect("list connections").len(), 1);
         repo.delete("conn-1").expect("delete connection");
         assert_eq!(repo.get("conn-1").expect("get after delete"), None);
+    }
+
+    #[test]
+    fn trait_is_object_safe() {
+        fn _assert(_: Box<dyn SecretManagerRepository>) {}
     }
 }

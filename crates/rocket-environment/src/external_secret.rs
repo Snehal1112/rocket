@@ -34,8 +34,12 @@ mod tests {
             secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
         };
         let json = serde_json::to_string(&r).expect("serialize ExternalSecretRef");
-        assert!(json.contains("\"secretId\""), "expected camelCase field, got: {json}");
-        let back: ExternalSecretRef = serde_json::from_str(&json).expect("deserialize ExternalSecretRef");
+        assert!(
+            json.contains("\"secretId\""),
+            "expected camelCase field, got: {json}"
+        );
+        let back: ExternalSecretRef =
+            serde_json::from_str(&json).expect("deserialize ExternalSecretRef");
         assert_eq!(r, back);
     }
 
@@ -51,16 +55,24 @@ mod tests {
             }],
         };
         let json = serde_json::to_string(&b).expect("serialize ExternalSecretBinding");
-        assert!(json.contains("\"connectionId\""), "expected camelCase field, got: {json}");
-        assert!(json.contains("\"vaultName\""), "expected camelCase field, got: {json}");
-        let back: ExternalSecretBinding = serde_json::from_str(&json).expect("deserialize ExternalSecretBinding");
+        assert!(
+            json.contains("\"connectionId\""),
+            "expected camelCase field, got: {json}"
+        );
+        assert!(
+            json.contains("\"vaultName\""),
+            "expected camelCase field, got: {json}"
+        );
+        let back: ExternalSecretBinding =
+            serde_json::from_str(&json).expect("deserialize ExternalSecretBinding");
         assert_eq!(b, back);
     }
 
     #[test]
     fn external_secret_binding_defaults_secret_names_to_empty() {
         let json = r#"{"alias":"payments","connectionId":"conn-1","vaultName":"prod-vault"}"#;
-        let b: ExternalSecretBinding = serde_json::from_str(json).expect("deserialize without secretNames");
+        let b: ExternalSecretBinding =
+            serde_json::from_str(json).expect("deserialize without secretNames");
         assert!(b.secret_names.is_empty());
     }
 }
