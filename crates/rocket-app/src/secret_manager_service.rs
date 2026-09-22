@@ -63,7 +63,7 @@ impl SecretManagerService {
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         self.repo.delete(id)?;
         if let Err(err) = self.secret_store.delete(VAULT_CONNECTION_SCOPE, id) {
-            eprintln!("warning: failed to delete keychain entry for vault connection {id}: {err}");
+            tracing::warn!(error = %err, id = %id, "failed to delete keychain entry for vault connection");
         }
         Ok(())
     }
