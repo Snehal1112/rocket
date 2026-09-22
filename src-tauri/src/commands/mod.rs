@@ -12,6 +12,7 @@ pub mod import;
 pub mod load_test;
 pub mod oauth2;
 pub mod runner;
+pub mod secret_managers;
 pub mod templates;
 pub mod ui_state;
 pub mod workspaces;

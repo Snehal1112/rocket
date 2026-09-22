@@ -460,6 +460,11 @@ pub fn run() {
             commands::contract::export_contract_openapi,
             commands::contract::archive_contract,
             commands::contract::unarchive_contract,
+            commands::secret_managers::list_secret_manager_connections,
+            commands::secret_managers::save_secret_manager_connection,
+            commands::secret_managers::delete_secret_manager_connection,
+            commands::secret_managers::test_secret_manager_connection,
+            commands::secret_managers::fetch_external_secret_names,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
