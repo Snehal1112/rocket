@@ -5,6 +5,7 @@
 //! phase-split refactor changed no behaviour.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -13,7 +14,8 @@ use rocket_collection::{
     Request as CollectionRequest,
 };
 use rocket_environment::{
-    Environment, EnvironmentRepository, SecretManagerConnection, SecretManagerRepository,
+    Environment, EnvironmentRepository, ExternalSecretRef, SecretManagerConnection,
+    SecretManagerRepository, SecretStore, VaultSecretFetcher,
 };
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
@@ -505,6 +507,124 @@ pub struct SharedPublisher(pub Arc<RecordingPublisher>);
 impl EventPublisher for SharedPublisher {
     fn publish(&self, event: DomainEvent) {
         self.0.publish(event);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// External Secrets: environment, vault fetcher, secret manager repo, store
+// ---------------------------------------------------------------------------
+
+/// Environment repo that always returns one fixed `Environment`, regardless
+/// of the name asked for. Enough for a test that only needs one environment
+/// with a known `external_secrets` binding — mirrors `NullEnvRepo` above but
+/// answers instead of always erroring.
+pub struct StaticEnvRepo(pub Environment);
+
+impl EnvironmentRepository for StaticEnvRepo {
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        Ok(vec![self.0.clone()])
+    }
+    fn get(&self, _name: &str) -> DomainResult<Environment> {
+        Ok(self.0.clone())
+    }
+    fn save(&self, _: &Environment) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// Secret Manager connection repo that always answers one fixed connection.
+pub struct FakeSecretManagerRepo(pub SecretManagerConnection);
+
+impl SecretManagerRepository for FakeSecretManagerRepo {
+    fn list(&self) -> DomainResult<Vec<SecretManagerConnection>> {
+        Ok(vec![self.0.clone()])
+    }
+    fn get(&self, id: &str) -> DomainResult<Option<SecretManagerConnection>> {
+        Ok(if id == self.0.id {
+            Some(self.0.clone())
+        } else {
+            None
+        })
+    }
+    fn save(&self, _: &SecretManagerConnection) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// Secret store that always answers one fixed client secret, regardless of
+/// scope/key. Enough for a test that only needs the vault-connection client
+/// secret lookup to succeed.
+pub struct FakeSecretStore(pub String);
+
+impl SecretStore for FakeSecretStore {
+    fn get(&self, _scope_id: &str, _key: &str) -> DomainResult<Option<String>> {
+        Ok(Some(self.0.clone()))
+    }
+    fn set(&self, _scope_id: &str, _key: &str, _value: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _scope_id: &str, _key: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// Vault fetcher that answers one canned value per secret id and counts how
+/// many times `get_secret_value` was called. That count is the assertion
+/// this plan's test makes to enforce spec acceptance criterion 7 (one
+/// resolution pass per run, not one per request).
+pub struct FakeVaultSecretFetcher {
+    values: HashMap<String, String>, // secret_id -> value
+    get_secret_value_calls: AtomicUsize,
+}
+
+impl FakeVaultSecretFetcher {
+    pub fn new(values: HashMap<String, String>) -> Arc<Self> {
+        Arc::new(Self {
+            values,
+            get_secret_value_calls: AtomicUsize::new(0),
+        })
+    }
+
+    pub fn call_count(&self) -> usize {
+        self.get_secret_value_calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl VaultSecretFetcher for FakeVaultSecretFetcher {
+    async fn list_secrets(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_secret_value(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+        secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        self.get_secret_value_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.values.get(secret_id).cloned())
+    }
+
+    async fn test_connection(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<()> {
+        Ok(())
     }
 }
 

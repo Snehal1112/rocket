@@ -528,9 +528,10 @@ fn error_step(index: usize, item: &RunItem, message: String) -> RunStepResult {
 mod tests {
     use super::*;
     use crate::test_doubles::{
-        EmptySecretManagerRepo, InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo,
-        NullEnvRepo, ProgrammableEngine, RecordingExecutor, RecordingPublisher,
-        SharedCollectionRepo, SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher,
+        EmptySecretManagerRepo, FakeSecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher,
+        InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo,
+        ProgrammableEngine, RecordingExecutor, RecordingPublisher, SharedCollectionRepo,
+        SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher, StaticEnvRepo,
     };
     use rocket_collection::{Collection, Request};
     use rocket_scripting::ScriptResult;
@@ -554,6 +555,134 @@ mod tests {
         collection.root.add_request(req("Second", "second.yml"));
         collection.root.add_request(req("Third", "third.yml"));
         collection
+    }
+
+    use rocket_environment::{
+        Environment, ExternalSecretBinding, ExternalSecretRef, SecretManagerConnection,
+    };
+
+    /// Same 3-request shape as `three_step_collection`, but each request's
+    /// URL references `{{payments.apiKey}}` — an External Secret — in its
+    /// query string, so a resolved run must substitute the real value into
+    /// every one of the 3 requests actually sent.
+    fn req_with_secret_ref(name: &str, file: &str) -> Request {
+        let mut r = Request::new(
+            name,
+            HttpMethod::Get,
+            format!("https://api.test/{file}?key=") + "{{payments.apiKey}}",
+        );
+        r.file_name = Some(file.to_string());
+        r
+    }
+
+    fn three_step_collection_with_secret_refs() -> Collection {
+        let mut collection = Collection::new("my-api");
+        collection
+            .root
+            .add_request(req_with_secret_ref("First", "first.yml"));
+        collection
+            .root
+            .add_request(req_with_secret_ref("Second", "second.yml"));
+        collection
+            .root
+            .add_request(req_with_secret_ref("Third", "third.yml"));
+        collection
+    }
+
+    fn environment_with_one_external_secret_binding() -> Environment {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "payments".to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: vec![ExternalSecretRef {
+                name: "apiKey".to_string(),
+                secret_id: "sec-1".to_string(),
+            }],
+        });
+        env
+    }
+
+    fn fake_connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "conn-1".to_string(),
+            label: "Prod RocketVault".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_external_secrets_exactly_once_per_run_not_once_per_step() {
+        // Spec acceptance criterion 7: a Collection Runner run over N
+        // requests that reference an External Secret must issue exactly one
+        // resolution pass, not N -- RocketVault's get_secret_value is a real
+        // network round-trip per secret name.
+        let collection = three_step_collection_with_secret_refs();
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+
+        let mut values = HashMap::new();
+        values.insert("sec-1".to_string(), "sk-test-secret-value".to_string());
+        let fetcher = FakeVaultSecretFetcher::new(values);
+
+        // Plan 06 (now written — see 2026-09-22-rocketvault-secrets-plan-06-execution-service.md)
+        // finalized `secret_manager_repo`/`vault_connection_secret_store`/
+        // `vault_fetcher` as three trailing POSITIONAL arguments appended to
+        // `RequestExecutionService::new`/`new_with_audit` — not builder
+        // methods. `with_script_engine` is unaffected (Plan 06 left it as
+        // the pre-existing opt-in builder it already was).
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(environment_with_one_external_secret_binding())),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(fake_connection())),
+            Arc::new(FakeSecretStore("client-secret-xyz".to_string())),
+            Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        );
+
+        let mut input = sample_run_input();
+        input.environment_name = Some("prod".to_string());
+
+        let summary = runner.run(&exec, input).await.expect("run");
+
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "expected exactly one get_secret_value call for the whole 3-step run, got {}",
+            fetcher.call_count()
+        );
+
+        assert_eq!(summary.steps.len(), 3, "all 3 steps must still run");
+        assert!(
+            summary
+                .steps
+                .iter()
+                .all(|s| s.status == RunStepStatus::Completed),
+            "every step must complete, got {:?}",
+            summary.steps
+        );
+
+        let sent = executor.sent_urls();
+        assert_eq!(sent.len(), 3);
+        for (i, url) in sent.iter().enumerate() {
+            assert!(
+                url.ends_with("?key=sk-test-secret-value"),
+                "step {i} url {url} did not resolve {{{{payments.apiKey}}}} to the fetched value"
+            );
+        }
     }
 
     fn sample_run_input() -> RunCollectionInput {
