@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
 import {
   useDeleteEnvironment,
@@ -19,11 +20,12 @@ import {
   useProcessEnvVars,
   useSaveEnvironment,
 } from '@/lib/queries/environment-queries';
-import type { Environment, Variable } from '@/lib/tauri-api';
+import type { Environment, ExternalSecretBinding, Variable } from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { EnvironmentSidebar } from './EnvironmentSidebar';
+import { ExternalSecretsTab } from './ExternalSecretsTab';
 import { VariableTable } from './VariableTable';
 
 interface EnvironmentDialogProps {
@@ -55,20 +57,36 @@ function dedupeVariables(variables: Variable[]): Variable[] {
   return result;
 }
 
+// `externalSecrets` is absent on the wire for any environment with no
+// bindings (the backend skips serializing an empty vec), so `Environment`
+// declares it optional. Narrow it to always-present once, here, so every
+// downstream reader in this file (and `ExternalSecretsTab`'s required
+// `bindings` prop) can rely on a real array both at runtime and in the type
+// system.
+type NormalizedEnvironment = Environment & { externalSecrets: ExternalSecretBinding[] };
+
+function normalizeEnv(env: Environment): NormalizedEnvironment {
+  return { ...env, externalSecrets: env.externalSecrets ?? [] };
+}
+
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const setActiveEnvId = useEnvStore((s) => s.setActiveEnvId);
 
-  const { data: environments = EMPTY_ENVS } = useEnvironments(activeCollection);
+  const { data: rawEnvironments = EMPTY_ENVS } = useEnvironments(activeCollection);
+  const environments = useMemo(() => rawEnvironments.map(normalizeEnv), [rawEnvironments]);
   const saveMutation = useSaveEnvironment(activeCollection);
   const deleteMutation = useDeleteEnvironment(activeCollection);
 
   const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
   const [isDirty, setIsDirty] = useState(false);
+  const [activeDialogTab, setActiveDialogTab] = useState<'variables' | 'external-secrets'>(
+    'variables',
+  );
 
   // Local in-flight edit state — avoids writing to the store mid-edit.
-  const [localEnvs, setLocalEnvs] = useState<Environment[]>(environments);
+  const [localEnvs, setLocalEnvs] = useState<NormalizedEnvironment[]>(environments);
 
   // Sync local env list when query refreshes, but only when not mid-edit to
   // avoid overwriting in-flight changes (and avoid the infinite-loop that a
@@ -76,6 +94,17 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   useEffect(() => {
     if (!isDirty) setLocalEnvs(environments);
   }, [environments, isDirty]);
+
+  // `selectedName`'s initializer reads `environments[0]?.name`, but the
+  // environments query is still loading on first mount (no cached data yet),
+  // so that initial read is always empty. Once the list arrives, select the
+  // first environment if nothing is selected yet, so opening the dialog
+  // doesn't strand the user on the empty state when environments exist.
+  useEffect(() => {
+    if (selectedName === null && environments.length > 0) {
+      setSelectedName(environments[0].name);
+    }
+  }, [selectedName, environments]);
 
   // The dialog stays mounted between opens (only `open` toggles visibility),
   // so a stale `isDirty`/`localEnvs` from an abandoned edit could otherwise
@@ -113,6 +142,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger
   useEffect(() => {
     setIsDirty(false);
+    setActiveDialogTab('variables');
   }, [selectedName]);
 
   const handleAddEnv = useCallback(
@@ -195,6 +225,18 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     [selectedEnv],
   );
 
+  // Stubs — Task 3 replaces these with real setLocalEnvs/setIsDirty
+  // implementations mirroring updateVariable/addVariable/removeVariable.
+  const updateExternalSecret = useCallback(() => {
+    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
+  }, []);
+  const addExternalSecret = useCallback(() => {
+    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
+  }, []);
+  const removeExternalSecret = useCallback(() => {
+    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
+  }, []);
+
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars();
@@ -241,16 +283,43 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
           {/* Right panel: variable editor. */}
           <div className='flex-1 flex flex-col min-w-0'>
             {selectedEnv ? (
-              <VariableTable
-                variables={selectedEnv.variables}
-                onChange={updateVariable}
-                onAdd={addVariable}
-                onRemove={removeVariable}
-                onSave={() => void triggerSave()}
-                isDirty={isDirty}
-                saveState={saveState}
-                variableContext={variableContext}
-              />
+              <Tabs
+                value={activeDialogTab}
+                onValueChange={(v) => setActiveDialogTab(v as 'variables' | 'external-secrets')}
+                className='flex-1 flex flex-col min-h-0'
+              >
+                <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
+                  <TabsTrigger value='variables' className='text-xs'>
+                    Variables
+                  </TabsTrigger>
+                  <TabsTrigger value='external-secrets' className='text-xs'>
+                    External Secrets
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value='variables' className='flex-1 flex flex-col min-h-0 m-0'>
+                  <VariableTable
+                    variables={selectedEnv.variables}
+                    onChange={updateVariable}
+                    onAdd={addVariable}
+                    onRemove={removeVariable}
+                    onSave={() => void triggerSave()}
+                    isDirty={isDirty}
+                    saveState={saveState}
+                    variableContext={variableContext}
+                  />
+                </TabsContent>
+                <TabsContent value='external-secrets' className='flex-1 flex flex-col min-h-0 m-0'>
+                  <ExternalSecretsTab
+                    bindings={selectedEnv.externalSecrets}
+                    onChange={updateExternalSecret}
+                    onAdd={addExternalSecret}
+                    onRemove={removeExternalSecret}
+                    onSave={() => void triggerSave()}
+                    isDirty={isDirty}
+                    saveState={saveState}
+                  />
+                </TabsContent>
+              </Tabs>
             ) : (
               <div className='flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 bg-gradient-to-b from-background to-card/60'>
                 <RocketIdle className='w-24 h-24 opacity-70' />
