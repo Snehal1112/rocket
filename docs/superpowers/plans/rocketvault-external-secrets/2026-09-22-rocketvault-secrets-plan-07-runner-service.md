@@ -354,9 +354,13 @@ git commit -m "perf(runner): resolve external secrets once per run, not per step
   once-per-run wiring.
 - Produces: `FakeVaultSecretFetcher`, `FakeSecretManagerRepo`,
   `FakeSecretStore`, `StaticEnvRepo` in `test_doubles.rs` — reusable by any
-  later `rocket-app` test that needs a runnable External-Secrets fixture
-  (e.g. Plan 08's Tauri command tests, if they choose to reuse this module
-  instead of building their own).
+  later test *within the `rocket-app` crate* that needs a runnable
+  External-Secrets fixture. **Correction (post-Plan-07 whole-branch
+  review):** `test_doubles` is declared `pub(crate) mod test_doubles;` in
+  `crates/rocket-app/src/lib.rs:22`, so these fixtures are NOT visible
+  outside this crate — Plan 08's `src-tauri` command tests cannot import
+  them and must build their own equivalents (or Plan 08 could promote this
+  module's visibility if broader reuse is wanted later).
 
 This task does not follow the write-test-then-implement order the rest of
 this series uses, because there is nothing left to implement — Task 1 already
