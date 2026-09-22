@@ -261,10 +261,23 @@ impl RequestExecutionService {
 
     pub async fn resolve_external_secrets(
         &self,
+        collection: Option<&str>,
         environment_name: Option<&str>,
     ) -> DomainResult<std::collections::HashMap<String, String>>; // "{alias}.{secretName}" -> value
 }
 ```
+**Correction (post-Plan-06 whole-branch review):** this contract originally
+omitted the `collection` parameter, which caused `resolve_external_secrets`
+to read the environment through the app-level (`self.env_repo`, "global")
+repository instead of `regular_env_repo(collection)` — the collection-scoped
+repository every real request's `environment_name` is actually served from
+(see spec §4.6's method doc comment, which was always correct on this
+point). The corrected signature above is what actually shipped; any plan
+consuming this method must pass `input.collection.as_deref()` (or the
+equivalent) as the first argument. A missing environment soft-fails to an
+empty map (matching `build_variable_scopes`'s own convention for this
+lookup) rather than propagating `NotFound`.
+
 `build_variable_context`/`build_variable_scopes`/`resolve_request`/`begin_phases`
 (`crates/rocket-app/src/execution_service.rs:259,321,334,831`) each gain an
 added `external_secrets: &HashMap<String, String>` parameter, merged into the

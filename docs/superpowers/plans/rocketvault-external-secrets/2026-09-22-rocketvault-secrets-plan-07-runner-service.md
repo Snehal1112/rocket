@@ -57,14 +57,24 @@ signature this plan calls into).
   impl RequestExecutionService {
       pub async fn resolve_external_secrets(
           &self,
+          collection: Option<&str>,
           environment_name: Option<&str>,
       ) -> DomainResult<std::collections::HashMap<String, String>>;
   }
   ```
   and `begin_phases` gaining an added `external_secrets: &HashMap<String, String>`
-  parameter. If Plan 06 has since been implemented with a different exact
-  shape, reconcile this plan's Task 1 diff against that signature before
-  running it — the call sites below assume the signatures exactly as quoted.
+  parameter. **Correction (post-Plan-06 whole-branch review):** Plan 06 as
+  originally written and initially implemented omitted the `collection`
+  parameter, which routed the lookup through the wrong (app-level, not
+  collection-scoped) environment repository — fixed before Plan 07 started,
+  in Plan 06's own final-review fix round. The signature above is the
+  corrected, actually-shipped one. This plan's Task 1 call site (below) must
+  pass `Some(&input.collection)` as the first argument — `RunCollectionInput.collection`
+  is a plain `String`, not `Option<String>`, so it is always present for a
+  runner call, unlike `execute()`'s `input.collection: Option<String>`. If
+  Plan 06 has since been implemented with a still-different exact shape,
+  reconcile this plan's Task 1 diff against that signature before running it
+  — the call sites below assume the signatures exactly as quoted.
 - **No stored `RequestExecutionService` field on `CollectionRunnerService`.**
   Confirmed by reading the struct definition
   (`crates/rocket-app/src/collection_runner_service.rs:177-188`): it holds
@@ -189,7 +199,7 @@ New code:
         // published — no step, and no "this run started" signal, for a run
         // whose secrets could not be resolved.
         let external_secrets = exec
-            .resolve_external_secrets(input.environment_name.as_deref())
+            .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
             .await?;
 
         let run_id = Ulid::new().to_string();
