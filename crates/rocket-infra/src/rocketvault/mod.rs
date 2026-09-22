@@ -287,28 +287,64 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             .collect())
     }
 
-    // get_secret_value / test_connection: implemented in Task 3. This
-    // scaffolding exists only so the trait compiles with all three methods
-    // present after this task — it is replaced with a real body in Task 3
-    // below, and by the end of Task 3 no `unimplemented!` remains anywhere
-    // in this file.
     async fn get_secret_value(
         &self,
-        _connection: &SecretManagerConnection,
-        _client_secret: &str,
-        _vault_name: &str,
-        _secret_id: &str,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        vault_name: &str,
+        secret_id: &str,
     ) -> DomainResult<Option<String>> {
-        unimplemented!("implemented in Task 3")
+        let token = self.ensure_token(connection, client_secret).await?;
+        let client = self.client_for(connection);
+        let url = format!(
+            "{}/api/v1/vaults/{}/secrets/{}",
+            connection.base_url.trim_end_matches('/'),
+            vault_name,
+            secret_id
+        );
+
+        let resp = client
+            .get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| DomainError::Http(format!("RocketVault get_secret_value request failed: {e}")))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.tokens.remove(&connection.id);
+            return Err(DomainError::Http(
+                "RocketVault rejected the token while fetching a secret value (401)".to_string(),
+            ));
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            return Err(DomainError::Http(format!(
+                "RocketVault get_secret_value returned unexpected status {status}"
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct RawSecretValue {
+            value: String,
+        }
+        let parsed: RawSecretValue = resp.json().await.map_err(|e| {
+            DomainError::Http(format!("failed to decode RocketVault secret value: {e}"))
+        })?;
+        Ok(Some(parsed.value))
     }
 
     async fn test_connection(
         &self,
-        _connection: &SecretManagerConnection,
-        _client_secret: &str,
-        _vault_name: &str,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        vault_name: &str,
     ) -> DomainResult<()> {
-        unimplemented!("implemented in Task 3")
+        self.ensure_token(connection, client_secret).await?;
+        self.list_secrets(connection, client_secret, vault_name).await?;
+        Ok(())
     }
 }
 
@@ -466,5 +502,138 @@ mod tests {
             .expect_err("401 must error");
         assert!(matches!(err, rocket_shared::error::DomainError::Http(_)));
         assert!(fetcher.tokens.get(&conn.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn get_secret_value_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": "sk-live-abc123"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+        let value = fetcher
+            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .await
+            .expect("get_secret_value");
+        assert_eq!(value, Some("sk-live-abc123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_secret_value_404_is_none_not_error() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets/00000000-0000-0000-0000-000000000000"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+        let value = fetcher
+            .get_secret_value(&conn, "shh", "prod-vault", "00000000-0000-0000-0000-000000000000")
+            .await
+            .expect("get_secret_value on missing id");
+        assert_eq!(value, None);
+    }
+
+    #[tokio::test]
+    async fn get_secret_value_401_clears_cached_token_and_forces_refetch() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .expect(2) // one for the initial fetch, one forced by the 401 below
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets/b6f1c2e0-1234-4a5b-9abc-000000000001"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+
+        let err = fetcher
+            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .await
+            .expect_err("401 must error");
+        assert!(matches!(err, rocket_shared::error::DomainError::Http(_)));
+        assert!(fetcher.tokens.get(&conn.id).is_none());
+
+        // A second call must re-authenticate because the cache entry was
+        // cleared — the token mock's .expect(2) above fails the test on drop
+        // if only one token request ever fires.
+        let _ = fetcher
+            .get_secret_value(&conn, "shh", "prod-vault", "b6f1c2e0-1234-4a5b-9abc-000000000001")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok-1",
+                "expires_in": 300
+            })))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/vaults/prod-vault/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "secrets": [],
+                "total": 0
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+        fetcher
+            .test_connection(&conn, "shh", "prod-vault")
+            .await
+            .expect("test_connection should succeed against a healthy mocked vault");
+    }
+
+    #[tokio::test]
+    async fn test_connection_fails_on_bad_credentials() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth2/token"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let conn = test_connection(mock_server.uri());
+        let result = fetcher.test_connection(&conn, "wrong", "prod-vault").await;
+        assert!(result.is_err());
     }
 }
