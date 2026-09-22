@@ -20,6 +20,7 @@ pub mod security_audit_service;
 pub mod template_service;
 #[cfg(test)]
 pub(crate) mod test_doubles;
+pub mod vault_secret_resolution;
 pub mod workspace_service;
 
 pub use collection_runner_service::{
@@ -40,4 +41,5 @@ pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};
 pub use secret_manager_service::SecretManagerService;
 pub use security_audit_service::SecurityAuditService;
 pub use template_service::TemplateService;
+pub use vault_secret_resolution::resolve_vault_secret_value;
 pub use workspace_service::WorkspaceService;
