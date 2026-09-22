@@ -284,6 +284,13 @@ impl RequestExecutionService {
     /// environment's `external_secrets` bindings. Returns a flat map keyed
     /// `"{alias}.{secretName}" -> value`.
     ///
+    /// Reads the named environment through `regular_env_repo(collection)`, not
+    /// `self.env_repo` directly — the environment a real request uses is
+    /// collection-scoped in the normal case, served by a different repo than
+    /// the app-level ("global") one `self.env_repo` points at. A missing
+    /// environment soft-fails to an empty map, matching
+    /// `build_variable_scopes`'s own convention for this lookup.
+    ///
     /// `None` (no active environment) short-circuits to an empty map with zero
     /// network activity — nothing to resolve. A binding whose ref resolves to
     /// `Ok(None)` (deleted on the RocketVault side since the last "Fetch
@@ -295,6 +302,7 @@ impl RequestExecutionService {
     /// going out with some vault-sourced values silently missing (spec §4.6).
     pub async fn resolve_external_secrets(
         &self,
+        collection: Option<&str>,
         environment_name: Option<&str>,
     ) -> DomainResult<std::collections::HashMap<String, String>> {
         let mut result = std::collections::HashMap::new();
@@ -303,7 +311,9 @@ impl RequestExecutionService {
             return Ok(result);
         };
 
-        let env = self.env_repo.get(name)?;
+        let Ok(env) = self.regular_env_repo(collection).get(name) else {
+            return Ok(result);
+        };
         for binding in &env.external_secrets {
             for secret_ref in &binding.secret_names {
                 let value = crate::vault_secret_resolution::resolve_vault_secret_value(
@@ -1385,7 +1395,10 @@ impl RequestExecutionService {
         // propagates straight out of execute() before begin_phases (and
         // therefore before send_request) ever runs.
         let external_secrets = self
-            .resolve_external_secrets(input.environment_name.as_deref())
+            .resolve_external_secrets(
+                input.collection.as_deref(),
+                input.environment_name.as_deref(),
+            )
             .await?;
 
         // Every phase runs unconditionally — this is the single-send path. The
@@ -1671,6 +1684,22 @@ mod tests {
         }
         fn delete(&self, _: &str) -> DomainResult<()> {
             Ok(())
+        }
+    }
+
+    /// Returns the same pre-loaded `MockEnvRepo` for any collection name — used
+    /// to prove `resolve_external_secrets` routes through
+    /// `regular_env_repo(collection)` and not `self.env_repo` directly.
+    struct SingleCollectionEnvRepoFactory {
+        env: Environment,
+    }
+
+    impl rocket_environment::EnvironmentRepositoryFactory for SingleCollectionEnvRepoFactory {
+        fn for_collection(
+            &self,
+            _collection: &str,
+        ) -> Box<dyn rocket_environment::EnvironmentRepository> {
+            Box::new(MockEnvRepo::with_env(self.env.clone()))
         }
     }
 
@@ -2054,7 +2083,7 @@ mod tests {
         let svc = svc_with_vault(None, Arc::clone(&fetcher));
 
         let result = svc
-            .resolve_external_secrets(None)
+            .resolve_external_secrets(None, None)
             .await
             .expect("resolve_external_secrets");
 
@@ -2072,7 +2101,7 @@ mod tests {
         let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
 
         let result = svc
-            .resolve_external_secrets(Some("prod"))
+            .resolve_external_secrets(None, Some("prod"))
             .await
             .expect("resolve_external_secrets");
 
@@ -2094,7 +2123,7 @@ mod tests {
         let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
 
         let result = svc
-            .resolve_external_secrets(Some("prod"))
+            .resolve_external_secrets(None, Some("prod"))
             .await
             .expect("resolve_external_secrets");
 
@@ -2126,7 +2155,7 @@ mod tests {
         let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
 
         let err = svc
-            .resolve_external_secrets(Some("prod"))
+            .resolve_external_secrets(None, Some("prod"))
             .await
             .expect_err("a fetcher error on one ref must fail the whole call");
 
@@ -2152,7 +2181,7 @@ mod tests {
         let svc = svc_with_vault(Some(env), Arc::clone(&fetcher));
 
         let result = svc
-            .resolve_external_secrets(Some("prod"))
+            .resolve_external_secrets(None, Some("prod"))
             .await
             .expect("resolve_external_secrets");
 
@@ -2243,6 +2272,60 @@ mod tests {
             ))
             .await
             .expect("execute");
+
+        assert_eq!(out.response.status, 200);
+        let url = exec_arc
+            .last_url
+            .lock()
+            .expect("lock last_url")
+            .clone()
+            .expect("executor was called");
+        assert_eq!(url, "https://api.example.com/sk-live-test-value");
+    }
+
+    #[tokio::test]
+    async fn execute_resolves_external_secrets_through_the_collection_scoped_env_repo_not_the_global_one(
+    ) {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let executor = Arc::new(MockExecutor::new(200));
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            // Top-level/global env_repo is deliberately EMPTY — if the code under
+            // test regresses to reading self.env_repo directly instead of
+            // regular_env_repo(collection), this environment lookup will miss and
+            // the test will fail (either as an Err, if the soft-fail regresses
+            // too, or as an unresolved `{{payments.apiKey}}` literal reaching the
+            // dispatched URL).
+            Box::new(MockEnvRepo::empty()),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        )
+        .with_collection_env_repo_factory(Box::new(SingleCollectionEnvRepoFactory { env }));
+
+        let mut input = sample_input("https://api.example.com/{{payments.apiKey}}", Some("prod"));
+        input.collection = Some("my-collection".to_string());
+
+        let out = svc
+            .execute(input)
+            .await
+            .expect("execute must succeed by routing through the collection-scoped env repo");
 
         assert_eq!(out.response.status, 200);
         let url = exec_arc
