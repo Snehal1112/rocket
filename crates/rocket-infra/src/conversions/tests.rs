@@ -464,6 +464,7 @@ fn environment_roundtrip() {
         extends: None,
         dot_env_file_path: None,
         client_certificates: Vec::new(),
+        external_secrets: Vec::new(),
     };
     let oc: OcEnvironment = original.clone().into();
     let back: Environment = oc.into();

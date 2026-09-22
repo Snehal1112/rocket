@@ -19,6 +19,7 @@ impl From<OcEnvironment> for Environment {
             extends: oc.extends,
             dot_env_file_path: oc.dot_env_file_path,
             client_certificates: oc.client_certificates,
+            external_secrets: Vec::new(),
         }
     }
 }
