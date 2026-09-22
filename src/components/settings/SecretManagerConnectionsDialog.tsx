@@ -1,5 +1,5 @@
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -33,19 +33,39 @@ export function SecretManagerConnectionsDialog({
   open,
   onOpenChange,
 }: SecretManagerConnectionsDialogProps) {
-  const { data: connections = [] } = useSecretManagerConnections();
+  const {
+    data: connections = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useSecretManagerConnections();
   const saveMutation = useSaveSecretManagerConnection();
   const deleteMutation = useDeleteSecretManagerConnection();
   const testMutation = useTestSecretManagerConnection();
 
-  const [editing, setEditing] = useState<typeof emptyForm | null>(null);
+  const [editing, setEditing] = useState<(typeof emptyForm & { isNew: boolean }) | null>(null);
   const [testVaultName, setTestVaultName] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const startAdd = () => setEditing({ ...emptyForm, id: crypto.randomUUID() });
-  const startEdit = (c: SecretManagerConnection) => setEditing({ ...c, clientSecret: '' });
+  useEffect(() => {
+    if (!open) {
+      setEditing(null);
+      setTestVaultName('');
+      setDeletingId(null);
+    }
+  }, [open]);
+
+  const startAdd = () => setEditing({ ...emptyForm, id: crypto.randomUUID(), isNew: true });
+  const startEdit = (c: SecretManagerConnection) =>
+    setEditing({ ...c, clientSecret: '', isNew: false });
 
   const handleSave = async () => {
     if (!editing) return;
+    if (editing.isNew && !editing.clientSecret.trim()) {
+      toast.error('A client secret is required when adding a new connection.');
+      return;
+    }
     const connection: SecretManagerConnection = {
       id: editing.id,
       label: editing.label,
@@ -70,6 +90,8 @@ export function SecretManagerConnectionsDialog({
       await deleteMutation.mutateAsync(id);
     } catch (e) {
       toast.error(`Could not delete connection: ${String(e)}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -132,9 +154,13 @@ export function SecretManagerConnectionsDialog({
             <div>
               <Label htmlFor='sm-client-secret' className='text-sm'>
                 Client Secret{' '}
-                <span className='text-muted-foreground'>
-                  (leave blank to keep the existing secret)
-                </span>
+                {editing.isNew ? (
+                  <span>(required)</span>
+                ) : (
+                  <span className='text-muted-foreground'>
+                    (leave blank to keep the existing secret)
+                  </span>
+                )}
               </Label>
               <Input
                 id='sm-client-secret'
@@ -158,7 +184,9 @@ export function SecretManagerConnectionsDialog({
             <div className='flex items-center justify-between'>
               <Label htmlFor='sm-allow-insecure' className='text-sm'>
                 Allow insecure HTTP{' '}
-                <span className='text-muted-foreground'>(loopback only recommended)</span>
+                <span className='text-muted-foreground'>
+                  (permits non-loopback hosts over plain HTTP — loopback is always allowed)
+                </span>
               </Label>
               <Switch
                 id='sm-allow-insecure'
@@ -185,53 +213,104 @@ export function SecretManagerConnectionsDialog({
           </div>
         ) : (
           <div className='space-y-3'>
-            {connections.length === 0 && (
-              <p className='text-sm text-muted-foreground'>No connections configured.</p>
-            )}
-            {connections.map((c) => (
-              <div key={c.id} className='flex items-center justify-between gap-2 text-sm'>
-                <div>
-                  <div className='font-medium'>{c.label}</div>
-                  <div className='text-xs text-muted-foreground'>{c.baseUrl}</div>
-                </div>
-                <div className='flex items-center gap-1'>
-                  <Input
-                    value={testVaultName}
-                    onChange={(e) => setTestVaultName(e.target.value)}
-                    placeholder='vault name'
-                    className='h-7 w-28 text-xs'
-                  />
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    onClick={() => void handleTest(c.id)}
-                    disabled={testMutation.isPending}
-                  >
-                    Test
-                  </Button>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    aria-label='Edit connection'
-                    onClick={() => startEdit(c)}
-                  >
-                    <Pencil className='h-3.5 w-3.5' aria-hidden='true' />
-                  </Button>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    aria-label='Delete connection'
-                    onClick={() => void handleDelete(c.id)}
-                  >
-                    <Trash2 className='h-3.5 w-3.5' aria-hidden='true' />
-                  </Button>
-                </div>
+            {isLoading ? (
+              <div className='flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground'>
+                <Loader2 className='h-4 w-4 animate-spin' />
+                Loading connections…
               </div>
-            ))}
-            <Button size='sm' onClick={startAdd}>
-              <Plus className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
-              Add Connection
-            </Button>
+            ) : isError ? (
+              <div className='flex flex-col items-center justify-center gap-2 py-4 px-4 text-center'>
+                <p className='text-sm text-destructive'>Failed to load connections.</p>
+                <p className='text-xs text-muted-foreground wrap-break-word max-w-sm'>
+                  {String(error)}
+                </p>
+                <Button variant='outline' size='sm' onClick={() => void refetch()}>
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <>
+                {connections.length === 0 && (
+                  <p className='text-sm text-muted-foreground'>No connections configured.</p>
+                )}
+                {connections.map((c) => {
+                  if (c.id === deletingId) {
+                    return (
+                      <div
+                        key={c.id}
+                        className='flex items-center gap-2 px-2 py-1.5 rounded-md bg-destructive/10 text-sm'
+                      >
+                        <span className='flex-1'>
+                          Remove <span className='font-semibold'>{c.label}</span>?
+                        </span>
+                        <Button
+                          size='sm'
+                          variant='destructive'
+                          className='h-7 text-xs'
+                          disabled={deleteMutation.isPending}
+                          onClick={() => void handleDelete(c.id)}
+                        >
+                          Remove
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          className='h-7 text-xs'
+                          onClick={() => setDeletingId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={c.id} className='flex items-center justify-between gap-2 text-sm'>
+                      <div>
+                        <div className='font-medium'>{c.label}</div>
+                        <div className='text-xs text-muted-foreground'>{c.baseUrl}</div>
+                      </div>
+                      <div className='flex items-center gap-1'>
+                        <Input
+                          value={testVaultName}
+                          onChange={(e) => setTestVaultName(e.target.value)}
+                          placeholder='vault name'
+                          className='h-7 w-28 text-xs'
+                        />
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => void handleTest(c.id)}
+                          disabled={testMutation.isPending}
+                        >
+                          Test
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          aria-label='Edit connection'
+                          onClick={() => startEdit(c)}
+                        >
+                          <Pencil className='h-3.5 w-3.5' aria-hidden='true' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          aria-label='Delete connection'
+                          onClick={() => setDeletingId(c.id)}
+                        >
+                          <Trash2 className='h-3.5 w-3.5' aria-hidden='true' />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Button size='sm' onClick={startAdd}>
+                  <Plus className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
+                  Add Connection
+                </Button>
+              </>
+            )}
           </div>
         )}
       </DialogContent>

@@ -192,7 +192,7 @@ export interface SecretManagerConnection {
 export interface Environment {
   name: string;
   variables: Variable[];
-  externalSecrets: ExternalSecretBinding[];
+  externalSecrets?: ExternalSecretBinding[];
 }
 
 export interface Template {
