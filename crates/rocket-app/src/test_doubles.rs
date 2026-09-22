@@ -14,8 +14,8 @@ use rocket_collection::{
     Request as CollectionRequest,
 };
 use rocket_environment::{
-    Environment, EnvironmentRepository, ExternalSecretRef, SecretManagerConnection,
-    SecretManagerRepository, SecretStore, VaultSecretFetcher,
+    Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
+    SecretManagerConnection, SecretManagerRepository, SecretStore, VaultSecretFetcher,
 };
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
@@ -532,6 +532,19 @@ impl EnvironmentRepository for StaticEnvRepo {
     }
     fn delete(&self, _: &str) -> DomainResult<()> {
         Ok(())
+    }
+}
+
+/// Returns the same pre-loaded `Environment` for any collection name asked —
+/// used to prove a caller routes an environment lookup through
+/// `regular_env_repo(collection)` rather than the global `env_repo`. Pair
+/// with an empty/erroring global `env_repo` (e.g. `NullEnvRepo`) so a test
+/// using this factory fails if the caller's collection-routing regresses.
+pub struct StaticCollectionEnvRepoFactory(pub Environment);
+
+impl EnvironmentRepositoryFactory for StaticCollectionEnvRepoFactory {
+    fn for_collection(&self, _collection: &str) -> Box<dyn EnvironmentRepository> {
+        Box::new(StaticEnvRepo(self.0.clone()))
     }
 }
 

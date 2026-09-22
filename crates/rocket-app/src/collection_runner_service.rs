@@ -531,7 +531,8 @@ mod tests {
         EmptySecretManagerRepo, FakeSecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher,
         InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo,
         ProgrammableEngine, RecordingExecutor, RecordingPublisher, SharedCollectionRepo,
-        SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher, StaticEnvRepo,
+        SharedEngine, SharedExecutor, SharedHistoryRepo, SharedPublisher,
+        StaticCollectionEnvRepoFactory, StaticEnvRepo,
     };
     use rocket_collection::{Collection, Request};
     use rocket_scripting::ScriptResult;
@@ -681,6 +682,79 @@ mod tests {
             assert!(
                 url.ends_with("?key=sk-test-secret-value"),
                 "step {i} url {url} did not resolve {{{{payments.apiKey}}}} to the fetched value"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_external_secrets_through_the_collection_scoped_env_repo_not_the_global_one() {
+        // Regression guard for the exact bug class Plan 06's final review found
+        // at the single-send (execute()) level -- see
+        // execution_service.rs::execute_resolves_external_secrets_through_the_collection_scoped_env_repo_not_the_global_one
+        // for the analogous single-send guard. Proves CollectionRunnerService::run's
+        // `Some(&input.collection)` argument to resolve_external_secrets is
+        // load-bearing: the top-level env_repo here is deliberately empty
+        // (NullEnvRepo), so this run can only succeed by routing the environment
+        // lookup through the collection-scoped factory.
+        let collection = three_step_collection_with_secret_refs();
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+
+        let mut values = HashMap::new();
+        values.insert("sec-1".to_string(), "sk-test-secret-value".to_string());
+        let fetcher = FakeVaultSecretFetcher::new(values);
+
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(fake_connection())),
+            Arc::new(FakeSecretStore("client-secret-xyz".to_string())),
+            Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))))
+        .with_collection_env_repo_factory(Box::new(StaticCollectionEnvRepoFactory(
+            environment_with_one_external_secret_binding(),
+        )));
+
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        );
+
+        let mut input = sample_run_input();
+        input.environment_name = Some("prod".to_string());
+
+        let summary = runner
+            .run(&exec, input)
+            .await
+            .expect("run must succeed by routing through the collection-scoped env repo, not the empty global one");
+
+        assert_eq!(
+            fetcher.call_count(),
+            1,
+            "still exactly one resolution pass, even when routed through the collection-scoped repo"
+        );
+        assert_eq!(summary.steps.len(), 3, "all 3 steps must still run");
+        assert!(
+            summary
+                .steps
+                .iter()
+                .all(|s| s.status == RunStepStatus::Completed),
+            "every step must complete, got {:?}",
+            summary.steps
+        );
+
+        let sent = executor.sent_urls();
+        assert_eq!(sent.len(), 3);
+        for (i, url) in sent.iter().enumerate() {
+            assert!(
+                url.ends_with("?key=sk-test-secret-value"),
+                "step {i} url {url} did not resolve via the collection-scoped repo"
             );
         }
     }
