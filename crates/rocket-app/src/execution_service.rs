@@ -1336,9 +1336,14 @@ impl RequestExecutionService {
         }
 
         // Persist history (non-fatal — a save failure won't cancel the response).
+        // Redact secret values from the URL before it reaches rocket-history —
+        // the dispatched request and the RequestExecuted event below still
+        // carry the real, unredacted URL; only the persisted copy is redacted.
+        let redacted_url =
+            redact_secrets_in_url(&state.http_request.url, &state.var_ctx.secret_values);
         let mut entry = HistoryEntry::new(
             input.method.to_string(),
-            &state.http_request.url,
+            &redacted_url,
             response.status,
             response.duration_ms,
             response.size_bytes,
@@ -1545,6 +1550,26 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
     merged
 }
 
+/// Strips every known secret value out of a URL before it is persisted to
+/// `rocket-history` (spec §6/AC4). Covers both external-secret values and
+/// pre-existing local `secret: true` variable values, since both flow into
+/// `VariableContext.secret_values`. Redact at the point output is produced,
+/// not at the point secrets are read — this must never touch the URL used
+/// for actual dispatch or the `RequestExecuted` event.
+fn redact_secrets_in_url(url: &str, secret_values: &std::collections::HashSet<String>) -> String {
+    if secret_values.is_empty() {
+        return url.to_string();
+    }
+    let mut out = url.to_string();
+    for value in secret_values {
+        if value.len() < MIN_REDACTION_LEN {
+            continue; // same short-secret exemption already applied when populating secret_values
+        }
+        out = out.replace(value.as_str(), "••••••");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1649,16 +1674,24 @@ mod tests {
         }
     }
 
-    // In-memory history repo.
+    // In-memory history repo. `entries` is wrapped in an `Arc` so tests can
+    // pull out a handle to it (`saved_entries_handle`) before the repo is
+    // boxed and moved into `RequestExecutionService::new` as a trait object.
     struct MockHistoryRepo {
-        entries: Mutex<Vec<HistoryEntry>>,
+        entries: Arc<Mutex<Vec<HistoryEntry>>>,
     }
 
     impl MockHistoryRepo {
         fn new() -> Self {
             Self {
-                entries: Mutex::new(Vec::new()),
+                entries: Arc::new(Mutex::new(Vec::new())),
             }
+        }
+
+        /// Clones out the shared handle so a test can inspect saved entries
+        /// after this repo has been boxed and handed to the service.
+        fn saved_entries_handle(&self) -> Arc<Mutex<Vec<HistoryEntry>>> {
+            Arc::clone(&self.entries)
         }
     }
 
@@ -2266,6 +2299,55 @@ mod tests {
             "HttpExecutor::execute must never run when resolve_external_secrets errors — \
              this is the 'never a silent empty-string substitution' / hard-stop-before-dispatch \
              requirement from spec §2/§4.6"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_entry_redacts_external_secret_value_from_the_url() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let history_repo = Box::new(MockHistoryRepo::new());
+        let history_arc = history_repo.saved_entries_handle();
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            history_repo,
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        svc.execute(sample_input(
+            "https://api.example.com/{{payments.apiKey}}",
+            Some("prod"),
+        ))
+        .await
+        .expect("execute");
+
+        let saved = history_arc.lock().expect("lock saved entries");
+        assert_eq!(saved.len(), 1);
+        assert!(
+            !saved[0].url.contains("sk-live-test-value"),
+            "history entry must not contain the resolved secret value, got: {}",
+            saved[0].url
+        );
+        assert!(
+            saved[0].url.contains("••••••"),
+            "expected the redaction marker in place of the secret, got: {}",
+            saved[0].url
         );
     }
 
