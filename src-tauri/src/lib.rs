@@ -218,6 +218,23 @@ pub fn run() {
                 ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)),
             );
 
+            // RocketVault external secrets stack — shared Arcs used by both
+            // secret_manager_svc and exec_svc below.
+            let vault_connection_secret_store: Arc<
+                dyn rocket_environment::secret_store::SecretStore,
+            > = Arc::new(rocket_infra::KeyringSecretStore::new_vault_connections());
+            let vault_fetcher: Arc<
+                dyn rocket_environment::vault_secret_fetcher::VaultSecretFetcher,
+            > = Arc::new(rocket_infra::ReqwestVaultSecretFetcher::new());
+
+            let secret_manager_svc = rocket_app::SecretManagerService::new(
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -229,6 +246,11 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
             )
             .with_script_engine(Box::new(DenoScriptEngine::new()))
             .with_collection_env_repo_factory(Box::new(
@@ -283,6 +305,7 @@ pub fn run() {
             app.manage(template_svc);
             app.manage(cookie_svc);
             app.manage(exec_svc);
+            app.manage(secret_manager_svc);
             app.manage(runner_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
