@@ -20,7 +20,8 @@ pub struct FsSecretManagerRepo {
 impl FsSecretManagerRepo {
     /// `path` should point directly at the YAML file (e.g.
     /// `<app_data_dir>/secret_managers.yml`), not a containing directory —
-    /// matching `FsWorkspaceRepo::new`'s convention for `workspaces.yml`.
+    /// unlike `FsWorkspaceRepo::new`, which takes the app data directory and
+    /// joins the filename itself.
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
