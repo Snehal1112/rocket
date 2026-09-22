@@ -1,11 +1,7 @@
-@import "@fontsource-variable/plus-jakarta-sans";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
 @import "@fontsource/jetbrains-mono/600.css";
 @import "@fontsource/jetbrains-mono/700.css";
-@import "@fontsource/lora/400.css";
-@import "@fontsource/lora/400-italic.css";
-@import "@fontsource/lora/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @config "../tailwind.config.js";
