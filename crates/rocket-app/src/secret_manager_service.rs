@@ -1,15 +1,10 @@
+use crate::vault_secret_resolution::VAULT_CONNECTION_SCOPE;
+use rocket_environment::external_secret::ExternalSecretRef;
 use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
 use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
 use rocket_shared::error::{DomainError, DomainResult};
 use std::sync::Arc;
-
-/// scope_id under which every vault connection's client_secret is stored in
-/// the injected SecretStore. All connections share this one scope because
-/// `key` (the connection's `id`) already uniquely identifies each one within
-/// it — see this plan's Global Constraints for why that differs from
-/// environment-secret scoping.
-const VAULT_CONNECTION_SCOPE: &str = "vault-connection";
 
 pub struct SecretManagerService {
     repo: Box<dyn SecretManagerRepository>,
@@ -40,15 +35,31 @@ impl SecretManagerService {
     /// with a connection pointing at a secret that was never actually
     /// stored. `client_secret: None` is an edit that does not change the
     /// secret (e.g. relabeling a connection) — the keychain write is skipped
-    /// entirely and only the connection record is saved.
+    /// and only the connection record is saved, but only if a keychain entry
+    /// for this connection already exists; a brand-new connection with no
+    /// stored secret and no prior keychain entry is rejected rather than
+    /// silently persisted as a permanently broken record.
     pub fn save(
         &self,
         connection: SecretManagerConnection,
         client_secret: Option<String>,
     ) -> DomainResult<()> {
-        if let Some(secret) = client_secret {
-            self.secret_store
-                .set(VAULT_CONNECTION_SCOPE, &connection.id, &secret)?;
+        match client_secret {
+            Some(secret) => {
+                self.secret_store
+                    .set(VAULT_CONNECTION_SCOPE, &connection.id, &secret)?;
+            }
+            None => {
+                let has_existing_secret = self
+                    .secret_store
+                    .get(VAULT_CONNECTION_SCOPE, &connection.id)?
+                    .is_some();
+                if !has_existing_secret {
+                    return Err(DomainError::InvalidInput(
+                        "a new connection must be saved with a client_secret".to_string(),
+                    ));
+                }
+            }
         }
         self.repo.save(&connection)
     }
@@ -68,10 +79,7 @@ impl SecretManagerService {
         Ok(())
     }
 
-    async fn connection_and_secret(
-        &self,
-        id: &str,
-    ) -> DomainResult<(SecretManagerConnection, String)> {
+    fn connection_and_secret(&self, id: &str) -> DomainResult<(SecretManagerConnection, String)> {
         let connection = self
             .repo
             .get(id)?
@@ -80,13 +88,15 @@ impl SecretManagerService {
             .secret_store
             .get(VAULT_CONNECTION_SCOPE, id)?
             .ok_or_else(|| {
-                DomainError::Internal("connection has no stored client secret".to_string())
+                DomainError::Internal(format!(
+                    "no client secret available for connection {id} — it was never stored, or the OS keychain is locked/unavailable"
+                ))
             })?;
         Ok((connection, secret))
     }
 
     pub async fn test_connection(&self, id: &str, vault_name: &str) -> DomainResult<()> {
-        let (connection, secret) = self.connection_and_secret(id).await?;
+        let (connection, secret) = self.connection_and_secret(id)?;
         self.fetcher
             .test_connection(&connection, &secret, vault_name)
             .await
@@ -96,9 +106,11 @@ impl SecretManagerService {
         &self,
         id: &str,
         vault_name: &str,
-    ) -> DomainResult<Vec<rocket_environment::external_secret::ExternalSecretRef>> {
-        let (connection, secret) = self.connection_and_secret(id).await?;
-        self.fetcher.list_secrets(&connection, &secret, vault_name).await
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        let (connection, secret) = self.connection_and_secret(id)?;
+        self.fetcher
+            .list_secrets(&connection, &secret, vault_name)
+            .await
     }
 }
 
@@ -176,10 +188,10 @@ mod tests {
             {
                 return Err(DomainError::Internal("keychain write failed".to_string()));
             }
-            self.entries.lock().expect("lock FakeSecretStore").insert(
-                (scope_id.to_string(), key.to_string()),
-                value.to_string(),
-            );
+            self.entries
+                .lock()
+                .expect("lock FakeSecretStore")
+                .insert((scope_id.to_string(), key.to_string()), value.to_string());
             Ok(())
         }
         fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()> {
@@ -311,6 +323,29 @@ mod tests {
     }
 
     #[test]
+    fn save_without_secret_on_brand_new_connection_is_rejected() {
+        let repo = FakeRepo::new();
+        let store = Arc::new(FakeSecretStore::new());
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::clone(&store) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+        let conn = sample_connection("conn-1");
+
+        let result = service.save(conn, None);
+
+        assert!(
+            matches!(result, Err(DomainError::InvalidInput(_))),
+            "expected DomainError::InvalidInput for a new connection saved without a client_secret, got {result:?}"
+        );
+        assert!(
+            service.list().expect("list connections").is_empty(),
+            "a rejected save must not persist the connection record"
+        );
+    }
+
+    #[test]
     fn save_without_secret_leaves_existing_keychain_entry_untouched() {
         let repo = FakeRepo::new();
         let store = Arc::new(FakeSecretStore::new());
@@ -325,7 +360,9 @@ mod tests {
             .expect("initial save with secret");
 
         conn.label = "Renamed RocketVault".to_string();
-        service.save(conn.clone(), None).expect("edit without resecret");
+        service
+            .save(conn.clone(), None)
+            .expect("edit without resecret");
 
         let listed = service.list().expect("list connections");
         assert_eq!(listed, vec![conn]);
@@ -368,16 +405,16 @@ mod tests {
         let repo = FakeRepo::new();
         let store = FakeSecretStore::new();
         store.fail_next_set();
-        let service = SecretManagerService::new(
-            Box::new(repo),
-            Arc::new(store),
-            Arc::new(FakeFetcher),
-        );
+        let service =
+            SecretManagerService::new(Box::new(repo), Arc::new(store), Arc::new(FakeFetcher));
         let conn = sample_connection("conn-1");
 
         let result = service.save(conn, Some("shh-its-a-secret".to_string()));
 
-        assert!(result.is_err(), "expected keychain failure to surface as an error");
+        assert!(
+            result.is_err(),
+            "expected keychain failure to surface as an error"
+        );
         assert!(
             service.list().expect("list connections").is_empty(),
             "connection record must not be persisted when the keychain write fails"
@@ -471,7 +508,9 @@ mod tests {
             }),
         );
 
-        let result = service.fetch_secret_names("no-such-conn", "prod-vault").await;
+        let result = service
+            .fetch_secret_names("no-such-conn", "prod-vault")
+            .await;
 
         assert!(
             matches!(result, Err(DomainError::NotFound(_))),

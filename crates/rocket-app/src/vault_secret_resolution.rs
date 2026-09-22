@@ -3,11 +3,16 @@ use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
 use rocket_shared::error::{DomainError, DomainResult};
 
-const VAULT_CONNECTION_SCOPE: &str = "vault-connection";
+/// scope_id under which every vault connection's client_secret is stored in
+/// the injected SecretStore. All connections share this one scope because
+/// `key` (the connection's `id`) already uniquely identifies each one within
+/// it — see this plan's Global Constraints for why that differs from
+/// environment-secret scoping.
+pub(crate) const VAULT_CONNECTION_SCOPE: &str = "vault-connection";
 
 /// Resolves one `{{alias.secretName}}` binding to its live value by looking
 /// up the connection, its stored client_secret, then calling the fetcher.
-/// Shared between `SecretManagerService`-adjacent callers (this plan) and
+/// Will be shared between `SecretManagerService`-adjacent callers and
 /// `RequestExecutionService` (Plan 06) so both go through one code path
 /// rather than duplicating this three-step lookup.
 ///
@@ -30,7 +35,9 @@ pub async fn resolve_vault_secret_value(
     let client_secret = secret_store
         .get(VAULT_CONNECTION_SCOPE, connection_id)?
         .ok_or_else(|| {
-            DomainError::Internal("connection has no stored client secret".to_string())
+            DomainError::Internal(format!(
+                "no client secret available for connection {connection_id} — it was never stored, or the OS keychain is locked/unavailable"
+            ))
         })?;
     fetcher
         .get_secret_value(&connection, &client_secret, vault_name, secret_id)
@@ -83,10 +90,10 @@ mod tests {
                 .cloned())
         }
         fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()> {
-            self.0.lock().expect("lock FakeSecretStore").insert(
-                (scope_id.to_string(), key.to_string()),
-                value.to_string(),
-            );
+            self.0
+                .lock()
+                .expect("lock FakeSecretStore")
+                .insert((scope_id.to_string(), key.to_string()), value.to_string());
             Ok(())
         }
         fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()> {
@@ -226,7 +233,9 @@ mod tests {
         store
             .set("vault-connection", "conn-1", "shh-its-a-secret")
             .expect("seed keychain entry");
-        let fetcher = FakeFetcher { value_result: Ok(None) };
+        let fetcher = FakeFetcher {
+            value_result: Ok(None),
+        };
 
         let result = resolve_vault_secret_value(
             &repo,
