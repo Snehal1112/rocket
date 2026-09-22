@@ -225,17 +225,52 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     [selectedEnv],
   );
 
-  // Stubs — Task 3 replaces these with real setLocalEnvs/setIsDirty
-  // implementations mirroring updateVariable/addVariable/removeVariable.
-  const updateExternalSecret = useCallback(() => {
-    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
-  }, []);
+  const updateExternalSecret = useCallback(
+    (idx: number, patch: Partial<ExternalSecretBinding>) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          const externalSecrets = e.externalSecrets.slice();
+          externalSecrets[idx] = { ...externalSecrets[idx], ...patch };
+          return { ...e, externalSecrets };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
   const addExternalSecret = useCallback(() => {
-    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
-  }, []);
-  const removeExternalSecret = useCallback(() => {
-    // No-op stub. Task 3 wires this to setLocalEnvs/setIsDirty.
-  }, []);
+    if (!selectedEnv) return;
+    setLocalEnvs((prev) =>
+      prev.map((e) => {
+        if (e.name !== selectedEnv.name) return e;
+        return {
+          ...e,
+          externalSecrets: [
+            ...e.externalSecrets,
+            { alias: '', connectionId: '', vaultName: '', secretNames: [] },
+          ],
+        };
+      }),
+    );
+    setIsDirty(true);
+  }, [selectedEnv]);
+
+  const removeExternalSecret = useCallback(
+    (idx: number) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          return { ...e, externalSecrets: e.externalSecrets.filter((_, i) => i !== idx) };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
 
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);

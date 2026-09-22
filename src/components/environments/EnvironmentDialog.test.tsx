@@ -72,3 +72,30 @@ describe('EnvironmentDialog tab switcher', () => {
     expect(await screen.findByLabelText('Variable key 1')).toBeInTheDocument();
   });
 });
+
+describe('EnvironmentDialog external secrets save flow', () => {
+  beforeEach(() => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv]);
+    vi.mocked(tauriApi.saveEnvironment).mockResolvedValue(undefined);
+  });
+
+  it('saves a binding added via the External Secrets tab through the existing save mutation', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+
+    await screen.findByLabelText('Variable key 1');
+    await user.click(screen.getByRole('tab', { name: /external secrets/i }));
+    await user.click(await screen.findByRole('button', { name: /add binding/i }));
+
+    const aliasInput = await screen.findByLabelText('Alias for binding 1');
+    await user.type(aliasInput, 'payments');
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+    const [, savedEnv] = vi.mocked(tauriApi.saveEnvironment).mock.calls[0];
+    expect(savedEnv.externalSecrets).toContainEqual(
+      expect.objectContaining({ alias: 'payments', connectionId: '', vaultName: '' }),
+    );
+  });
+});
