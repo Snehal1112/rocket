@@ -40,6 +40,9 @@ impl EnvironmentService {
     }
 
     pub fn save(&self, env: &Environment) -> DomainResult<()> {
+        rocket_environment::external_secret::validate_external_secret_bindings(
+            &env.external_secrets,
+        )?;
         // Snapshot previous state so we can detect which secret values actually changed.
         let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;

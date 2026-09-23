@@ -1,3 +1,4 @@
+use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 /// One secret name captured from a RocketVault "Fetch Secrets" action, paired
@@ -21,6 +22,48 @@ pub struct ExternalSecretBinding {
     pub vault_name: String,
     #[serde(default)]
     pub secret_names: Vec<ExternalSecretRef>,
+}
+
+/// Checks that every binding can actually be referenced as
+/// `{{alias.secretName}}`. The alias must be non-empty, unique within the
+/// environment, and made of letters, digits, `_` or `-` only. A dot would make
+/// the `alias.secretName` key ambiguous. Each binding also needs a connection
+/// and a vault name, otherwise "Fetch Secrets" and send-time resolution have
+/// nothing to talk to.
+pub fn validate_external_secret_bindings(bindings: &[ExternalSecretBinding]) -> DomainResult<()> {
+    let mut seen = std::collections::HashSet::new();
+    for binding in bindings {
+        let alias = binding.alias.as_str();
+        if alias.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "external secret binding alias must not be empty".to_string(),
+            ));
+        }
+        if !alias
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(DomainError::InvalidInput(format!(
+                "external secret alias '{alias}' may only contain letters, digits, '_' or '-'"
+            )));
+        }
+        if !seen.insert(alias) {
+            return Err(DomainError::InvalidInput(format!(
+                "external secret alias '{alias}' is used by more than one binding"
+            )));
+        }
+        if binding.connection_id.trim().is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "external secret binding '{alias}' has no connection selected"
+            )));
+        }
+        if binding.vault_name.trim().is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "external secret binding '{alias}' has no vault name"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -74,5 +117,43 @@ mod tests {
         let b: ExternalSecretBinding =
             serde_json::from_str(json).expect("deserialize without secretNames");
         assert!(b.secret_names.is_empty());
+    }
+
+    fn binding(alias: &str) -> ExternalSecretBinding {
+        ExternalSecretBinding {
+            alias: alias.to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validate_bindings_accepts_valid_aliases() {
+        let bindings = vec![binding("payments"), binding("stripe_live-2")];
+        assert!(validate_external_secret_bindings(&bindings).is_ok());
+    }
+
+    #[test]
+    fn validate_bindings_rejects_empty_dotted_or_duplicate_alias() {
+        for bad in [
+            vec![binding("")],
+            vec![binding("pay.ments")],
+            vec![binding("pay ments")],
+            vec![binding("payments"), binding("payments")],
+        ] {
+            let err = validate_external_secret_bindings(&bad).expect_err("must reject");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
+        }
+    }
+
+    #[test]
+    fn validate_bindings_rejects_missing_connection_or_vault() {
+        let mut no_conn = binding("payments");
+        no_conn.connection_id = String::new();
+        let mut no_vault = binding("payments");
+        no_vault.vault_name = "  ".to_string();
+        assert!(validate_external_secret_bindings(&[no_conn]).is_err());
+        assert!(validate_external_secret_bindings(&[no_vault]).is_err());
     }
 }

@@ -44,6 +44,15 @@ impl SecretManagerService {
         connection: SecretManagerConnection,
         client_secret: Option<String>,
     ) -> DomainResult<()> {
+        validate_connection(&connection)?;
+        if client_secret
+            .as_deref()
+            .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(DomainError::InvalidInput(
+                "client_secret must not be empty".to_string(),
+            ));
+        }
         match client_secret {
             Some(secret) => {
                 self.secret_store
@@ -112,6 +121,36 @@ impl SecretManagerService {
             .list_secrets(&connection, &secret, vault_name)
             .await
     }
+}
+
+/// Rejects a connection record that could never work, before anything is
+/// written to the keychain or to `secret_managers.yml`. The https-only rule
+/// for non-loopback hosts is enforced by the fetcher on every call, so it is
+/// not repeated here.
+fn validate_connection(connection: &SecretManagerConnection) -> DomainResult<()> {
+    let required = [
+        ("id", &connection.id),
+        ("label", &connection.label),
+        ("base_url", &connection.base_url),
+        ("client_id", &connection.client_id),
+    ];
+    for (field, value) in required {
+        if value.trim().is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "secret manager connection {field} must not be empty"
+            )));
+        }
+    }
+    let parsed = url::Url::parse(&connection.base_url).map_err(|e| {
+        DomainError::InvalidInput(format!("invalid base_url '{}': {e}", connection.base_url))
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(DomainError::InvalidInput(format!(
+            "base_url '{}' must be an http:// or https:// URL",
+            connection.base_url
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -516,5 +555,45 @@ mod tests {
             matches!(result, Err(DomainError::NotFound(_))),
             "expected DomainError::NotFound for an unknown connection id, got {result:?}"
         );
+    }
+
+    #[test]
+    fn save_rejects_blank_fields_and_bad_base_url() {
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::new(FakeSecretStore::new()),
+            Arc::new(FakeFetcher),
+        );
+        let mut no_label = sample_connection("c1");
+        no_label.label = "  ".to_string();
+        let mut bad_url = sample_connection("c2");
+        bad_url.base_url = "vault.internal:8774".to_string();
+        let mut ftp_url = sample_connection("c3");
+        ftp_url.base_url = "ftp://vault.internal".to_string();
+        for conn in [no_label, bad_url, ftp_url] {
+            let err = service
+                .save(conn, Some("s3cret".to_string()))
+                .expect_err("must reject");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
+        }
+        assert!(service.list().expect("list connections").is_empty());
+    }
+
+    #[test]
+    fn save_rejects_blank_client_secret() {
+        let store = Arc::new(FakeSecretStore::new());
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            store.clone(),
+            Arc::new(FakeFetcher),
+        );
+        let err = service
+            .save(sample_connection("c1"), Some("   ".to_string()))
+            .expect_err("must reject");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(store
+            .get(VAULT_CONNECTION_SCOPE, "c1")
+            .expect("get")
+            .is_none());
     }
 }
