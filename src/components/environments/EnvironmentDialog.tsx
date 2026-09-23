@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
+import { validateExternalSecretBindings } from '@/lib/external-secrets';
 import {
   useDeleteEnvironment,
   useEnvironments,
@@ -137,6 +138,19 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     saveSettings,
     'Failed to save changes',
   );
+
+  // Both tabs share one save, so an unfinished binding blocks a Variables save too.
+  // Point the user at the External Secrets tab instead of failing with a generic toast.
+  const handleSave = useCallback(() => {
+    if (!selectedEnv) return;
+    const error = validateExternalSecretBindings(selectedEnv.externalSecrets);
+    if (error) {
+      toast.error(error);
+      setActiveDialogTab('external-secrets');
+      return;
+    }
+    void triggerSave();
+  }, [selectedEnv, triggerSave]);
 
   // Reset dirty flag when switching environments.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger
@@ -337,7 +351,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     onChange={updateVariable}
                     onAdd={addVariable}
                     onRemove={removeVariable}
-                    onSave={() => void triggerSave()}
+                    onSave={handleSave}
                     isDirty={isDirty}
                     saveState={saveState}
                     variableContext={variableContext}
@@ -349,7 +363,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     onChange={updateExternalSecret}
                     onAdd={addExternalSecret}
                     onRemove={removeExternalSecret}
-                    onSave={() => void triggerSave()}
+                    onSave={handleSave}
                     isDirty={isDirty}
                     saveState={saveState}
                   />
