@@ -189,10 +189,7 @@ impl ReqwestVaultSecretFetcher {
         client_secret: &str,
     ) -> DomainResult<(String, u64)> {
         let client = self.client_for(connection);
-        let url = format!(
-            "{}/api/v1/oauth2/token",
-            connection.base_url.trim_end_matches('/')
-        );
+        let url = vault_api_url(connection, &["api", "v1", "oauth2", "token"])?;
         let form = [
             ("grant_type", "client_credentials"),
             ("client_id", connection.client_id.as_str()),
@@ -200,7 +197,7 @@ impl ReqwestVaultSecretFetcher {
         ];
 
         let resp = client
-            .post(&url)
+            .post(url)
             .form(&form)
             .send()
             .await
@@ -265,6 +262,42 @@ fn token_expiry_cutoff(expires_at: Instant) -> Instant {
 /// doesn't force a refetch on every call.
 fn compute_token_ttl(expires_in: u64) -> Duration {
     Duration::from_secs(expires_in.min(MAX_TOKEN_TTL_SECS)).max(MIN_TOKEN_TTL)
+}
+
+/// Builds an API URL under `connection.base_url` from raw path segments.
+/// Each segment is percent-encoded, so a vault name or secret id holding
+/// `/`, `?` or `#` can never change which endpoint is called. Empty, `.` and
+/// `..` segments are rejected for the same reason.
+fn vault_api_url(
+    connection: &SecretManagerConnection,
+    segments: &[&str],
+) -> DomainResult<url::Url> {
+    if let Some(bad) = segments
+        .iter()
+        .find(|s| s.trim().is_empty() || **s == "." || **s == "..")
+    {
+        return Err(DomainError::InvalidInput(format!(
+            "invalid RocketVault path segment '{bad}'"
+        )));
+    }
+    let mut url = url::Url::parse(&connection.base_url).map_err(|e| {
+        DomainError::InvalidInput(format!(
+            "RocketVault connection {} has an invalid base_url: {e}",
+            connection.id
+        ))
+    })?;
+    url.set_query(None);
+    url.set_fragment(None);
+    url.path_segments_mut()
+        .map_err(|()| {
+            DomainError::InvalidInput(format!(
+                "RocketVault connection {} base_url cannot hold a path",
+                connection.id
+            ))
+        })?
+        .pop_if_empty()
+        .extend(segments);
+    Ok(url)
 }
 
 /// Enforces the `https://` requirement for non-loopback hosts, mirroring the
@@ -344,14 +377,11 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
         // than 200 secrets will still silently show only the first 200 in
         // "Fetch Secrets" — a documented v1 limitation, not a bug to fix
         // here.
-        let url = format!(
-            "{}/api/v1/vaults/{}/secrets?per_page=200",
-            connection.base_url.trim_end_matches('/'),
-            vault_name
-        );
+        let mut url = vault_api_url(connection, &["api", "v1", "vaults", vault_name, "secrets"])?;
+        url.query_pairs_mut().append_pair("per_page", "200");
 
         let resp = client
-            .get(&url)
+            .get(url)
             .bearer_auth(&token)
             .send()
             .await
@@ -395,15 +425,13 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
     ) -> DomainResult<Option<String>> {
         let token = self.ensure_token(connection, client_secret).await?;
         let client = self.client_for(connection);
-        let url = format!(
-            "{}/api/v1/vaults/{}/secrets/{}",
-            connection.base_url.trim_end_matches('/'),
-            vault_name,
-            secret_id
-        );
+        let url = vault_api_url(
+            connection,
+            &["api", "v1", "vaults", vault_name, "secrets", secret_id],
+        )?;
 
         let resp = client
-            .get(&url)
+            .get(url)
             .bearer_auth(&token)
             .send()
             .await
@@ -884,5 +912,25 @@ mod tests {
     #[test]
     fn compute_token_ttl_passes_through_normal_values() {
         assert_eq!(compute_token_ttl(300), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn vault_api_url_percent_encodes_segments() {
+        let conn = test_connection("https://vault.example.com/prefix/".to_string());
+        let url =
+            vault_api_url(&conn, &["api", "v1", "vaults", "a/b?c#d", "secrets"]).expect("url");
+        assert_eq!(
+            url.as_str(),
+            "https://vault.example.com/prefix/api/v1/vaults/a%2Fb%3Fc%23d/secrets"
+        );
+    }
+
+    #[test]
+    fn vault_api_url_rejects_dot_segments_and_empty_segments() {
+        let conn = test_connection("https://vault.example.com".to_string());
+        for bad in ["..", ".", "", "  "] {
+            let err = vault_api_url(&conn, &["api", "v1", "vaults", bad]).expect_err("reject");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
+        }
     }
 }
