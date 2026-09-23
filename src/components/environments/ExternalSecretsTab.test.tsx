@@ -159,4 +159,25 @@ describe('ExternalSecretsTab', () => {
     const badge = await screen.findByText('stripe-key');
     expect(badge.closest('[data-slot="badge"]') ?? badge).toBeInTheDocument();
   });
+
+  it('clears fetched secret names when the vault name changes', async () => {
+    const populated: ExternalSecretBinding = {
+      ...binding,
+      secretNames: [{ name: 'stripe-key', secretId: 'id-1' }],
+    };
+    const { onChange } = renderTab([populated]);
+    const user = userEvent.setup();
+
+    await screen.findByText('stripe-key');
+    await user.type(screen.getByLabelText('Vault name for binding 1'), 'x');
+
+    expect(onChange).toHaveBeenCalledWith(0, { vaultName: 'prod-vaultx', secretNames: [] });
+    expect(screen.queryByText('stripe-key')).not.toBeInTheDocument();
+  });
+
+  it('warns when the bound connection no longer exists', async () => {
+    renderTab([{ ...binding, connectionId: 'deleted-conn' }]);
+
+    expect(await screen.findByText(/selected connection no longer exists/i)).toBeInTheDocument();
+  });
 });

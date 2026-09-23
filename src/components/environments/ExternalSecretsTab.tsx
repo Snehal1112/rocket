@@ -46,7 +46,7 @@ export function ExternalSecretsTab({
   isDirty,
   saveState,
 }: ExternalSecretsTabProps) {
-  const { data: connections = [] } = useSecretManagerConnections();
+  const { data: connections = [], isSuccess: connectionsLoaded } = useSecretManagerConnections();
 
   return (
     <div className='flex-1 flex flex-col min-w-0'>
@@ -90,6 +90,7 @@ export function ExternalSecretsTab({
                 idx={idx}
                 binding={binding}
                 connections={connections}
+                connectionsLoaded={connectionsLoaded}
                 onChange={onChange}
                 onRemove={onRemove}
               />
@@ -136,11 +137,19 @@ interface BindingRowProps {
   idx: number;
   binding: ExternalSecretBinding;
   connections: SecretManagerConnection[];
+  connectionsLoaded: boolean;
   onChange: (idx: number, patch: Partial<ExternalSecretBinding>) => void;
   onRemove: (idx: number) => void;
 }
 
-function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRowProps) {
+function BindingRow({
+  idx,
+  binding,
+  connections,
+  connectionsLoaded,
+  onChange,
+  onRemove,
+}: BindingRowProps) {
   // Local display state, seeded from props and echoed to the parent via
   // onChange. This keeps keystrokes and freshly-fetched secret names visible
   // immediately, independent of unrelated re-renders (e.g. the connections
@@ -158,6 +167,22 @@ function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRo
   useEffect(() => setSecretNames(binding.secretNames), [binding.secretNames]);
 
   const canFetch = !!binding.connectionId && !!vaultName && !isFetching;
+  // The connection may have been deleted in Settings after this binding was saved.
+  const connectionMissing =
+    connectionsLoaded &&
+    !!binding.connectionId &&
+    !connections.some((c) => c.id === binding.connectionId);
+
+  // Fetched ids belong to one connection and vault. Keeping them after either
+  // changes would resolve old ids against the new vault at send time.
+  const retarget = (patch: Partial<ExternalSecretBinding>) => {
+    if (secretNames.length > 0) {
+      setSecretNames([]);
+      onChange(idx, { ...patch, secretNames: [] });
+    } else {
+      onChange(idx, patch);
+    }
+  };
 
   const fetchSecrets = async () => {
     if (!binding.connectionId || !vaultName) return;
@@ -169,7 +194,7 @@ function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRo
       onChange(idx, { secretNames: names });
     } catch (err) {
       console.error('[ExternalSecretsTab] fetch secrets failed:', err);
-      toast.error('Failed to fetch secrets');
+      toast.error(`Failed to fetch secrets: ${String(err)}`);
     } finally {
       setIsFetching(false);
     }
@@ -190,7 +215,9 @@ function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRo
         />
         <Select
           value={binding.connectionId}
-          onValueChange={(v) => onChange(idx, { connectionId: v })}
+          onValueChange={(v) => {
+            if (v !== binding.connectionId) retarget({ connectionId: v });
+          }}
         >
           <SelectTrigger
             className='h-7 min-w-0 text-xs'
@@ -211,7 +238,7 @@ function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRo
           value={vaultName}
           onChange={(e) => {
             setVaultName(e.target.value);
-            onChange(idx, { vaultName: e.target.value });
+            retarget({ vaultName: e.target.value });
           }}
           className='h-7 min-w-0 text-xs font-mono'
           aria-label={`Vault name for binding ${idx + 1}`}
@@ -247,6 +274,11 @@ function BindingRow({ idx, binding, connections, onChange, onRemove }: BindingRo
           </Tooltip>
         </TooltipProvider>
       </div>
+      {connectionMissing && (
+        <p className='pl-0.5 text-[11px] text-destructive'>
+          The selected connection no longer exists. Pick another connection and fetch again.
+        </p>
+      )}
       <div className='pl-0.5 flex flex-wrap gap-1'>
         {secretNames.length === 0 ? (
           <p className='text-[11px] text-muted-foreground/70'>No secrets fetched yet.</p>
