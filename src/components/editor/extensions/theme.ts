@@ -75,6 +75,10 @@ export const rocketTheme = EditorView.theme({
     background: 'hsl(var(--muted-foreground) / 0.12)',
     color: 'hsl(var(--muted-foreground))',
   },
+  '.cm-var-vault': {
+    background: 'rgb(244 63 94 / 0.12)',
+    color: 'rgb(225 29 72)',
+  },
   '.cm-var-global': {
     background: 'hsl(var(--primary) / 0.12)',
     color: 'hsl(var(--primary))',
@@ -218,6 +222,10 @@ export const rocketThemeDark = EditorView.theme(
     '.cm-var-collection': {
       background: 'hsl(var(--muted-foreground) / 0.12)',
       color: '#8c8c8c', // VSCode 2026 Dark: descriptionForeground
+    },
+    '.cm-var-vault': {
+      background: 'rgb(244 63 94 / 0.15)',
+      color: '#f14c71',
     },
     '.cm-var-global': {
       background: 'hsl(var(--primary) / 0.15)',

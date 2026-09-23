@@ -126,6 +126,11 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'rok.setEnvVar("key", value)',
           },
           {
+            label: 'rok.getSecretVar("alias.name")',
+            kind: 'expression',
+            code: 'rok.getSecretVar("alias.name")',
+          },
+          {
             label: 'rok.getCollectionVar("key")',
             kind: 'expression',
             code: 'rok.getCollectionVar("key")',
@@ -282,6 +287,11 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'rok.setEnvVar("key", value)',
           },
           {
+            label: 'rok.getSecretVar("alias.name")',
+            kind: 'expression',
+            code: 'rok.getSecretVar("alias.name")',
+          },
+          {
             label: 'rok.setCollectionVar("key", value)',
             kind: 'expression',
             code: 'rok.setCollectionVar("key", value)',
@@ -384,6 +394,11 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
           },
           { label: 'rok.getEnvVar("key")', kind: 'expression', code: 'rok.getEnvVar("key")' },
           {
+            label: 'rok.getSecretVar("alias.name")',
+            kind: 'expression',
+            code: 'rok.getSecretVar("alias.name")',
+          },
+          {
             label: 'rok.getCollectionVar("key")',
             kind: 'expression',
             code: 'rok.getCollectionVar("key")',
@@ -425,6 +440,8 @@ declare const rok: {
   deleteEnvVar(key: string): void;
   /** Returns the active environment name. */
   getEnvName(): string | undefined;
+  /** Read an External Secret fetched from RocketVault, keyed "alias.secretName". Returns "" when unknown. */
+  getSecretVar(key: string): string;
   /** Read a collection variable. */
   getCollectionVar(key: string): unknown;
   /** Write a collection variable (persisted to opencollection.yml). */

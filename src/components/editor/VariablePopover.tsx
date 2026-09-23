@@ -32,6 +32,7 @@ function navLinkLabel(source: VariableSource | 'pathParam'): string | null {
     case 'runtime':
       return 'Request Variables →';
     case 'environment':
+    case 'vault':
       return 'Collection Environments →';
     case 'global':
       return 'Global Environments →';

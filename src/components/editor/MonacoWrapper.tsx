@@ -28,6 +28,7 @@ interface MonacoWrapperProps {
 const SOURCE_CLASS: Record<string, string> = {
   environment: 'rocket-var-environment',
   collection: 'rocket-var-collection',
+  vault: 'rocket-var-vault',
   global: 'rocket-var-global',
   folder: 'rocket-var-folder',
   request: 'rocket-var-request',
@@ -45,6 +46,7 @@ function ensureDecorationStyles() {
   style.textContent = `
     .rocket-var-environment { background: hsl(var(--primary)/0.15); color: hsl(var(--primary)); border-radius: 2px; }
     .rocket-var-collection { background: rgb(59 130 246 / 0.15); color: rgb(59 130 246); border-radius: 2px; }
+    .rocket-var-vault { background: rgb(244 63 94 / 0.15); color: rgb(244 63 94); border-radius: 2px; }
     .rocket-var-global { background: rgb(20 184 166 / 0.15); color: rgb(20 184 166); border-radius: 2px; }
     .rocket-var-folder { background: rgb(245 158 11 / 0.15); color: rgb(245 158 11); border-radius: 2px; }
     .rocket-var-request { background: rgb(168 85 247 / 0.15); color: rgb(168 85 247); border-radius: 2px; }

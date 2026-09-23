@@ -1,4 +1,4 @@
-import type { CollectionVariable } from '@/lib/tauri-api';
+import type { CollectionVariable, ExternalSecretBinding } from '@/lib/tauri-api';
 import { generateDynamicVar, listDynamicVars } from './dynamic-vars';
 
 // Matches {{variable.name}} style placeholders.
@@ -10,6 +10,7 @@ export type VariableSource =
   | 'folder'
   | 'environment'
   | 'collection'
+  | 'vault'
   | 'global'
   | 'process'
   | 'dynamic';
@@ -39,7 +40,9 @@ export function buildResolver(
 
 // Builds a scope-aware variable map for the overlay UI.
 // Lower-priority scopes are written first; higher-priority scopes overwrite them.
-// Priority (lowest → highest): dynamic → process → global → collection → env → folder → request → runtime.
+// Priority (lowest → highest): dynamic → process → global → collection → vault → env → folder → request → runtime.
+// Vault entries come from the active environment's External Secrets bindings.
+// Their values are only fetched at send time, so they are always masked here.
 export function buildScopedContext(params: {
   runtimeVars?: Record<string, string>;
   requestVars?: CollectionVariable[];
@@ -47,6 +50,7 @@ export function buildScopedContext(params: {
   collectionVars?: CollectionVariable[];
   envVars?: Record<string, string>;
   envLabel?: string;
+  externalSecrets?: ExternalSecretBinding[];
   globalVars?: Record<string, string>;
   processEnvVars?: Record<string, string>;
 }): Map<string, VariableScopeEntry> {
@@ -62,6 +66,11 @@ export function buildScopedContext(params: {
   for (const v of (params.collectionVars ?? []).filter((v) => v.enabled)) {
     const val = v.value || v.initialValue || '';
     if (val) add(v.key, val, 'collection', 'Collection', v.secret);
+  }
+  for (const binding of params.externalSecrets ?? []) {
+    if (!binding.alias) continue;
+    for (const ref of binding.secretNames)
+      add(`${binding.alias}.${ref.name}`, '', 'vault', `Vault (${binding.alias})`, true);
   }
   for (const [k, v] of Object.entries(params.envVars ?? {}))
     add(k, v, 'environment', params.envLabel ?? 'Environment');
@@ -85,6 +94,7 @@ export function sourceBadgeClass(source: VariableSource): string {
     folder: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     environment: 'bg-primary/15 text-primary',
     collection: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
+    vault: 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
     global: 'bg-teal-500/15 text-teal-700 dark:text-teal-400',
     process: 'bg-muted text-muted-foreground',
     dynamic: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400',

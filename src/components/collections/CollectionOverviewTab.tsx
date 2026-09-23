@@ -130,10 +130,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
   const scopedContext = useMemo(() => {
     const envVars: Record<string, string> = {};
-    if (activeEnvId) {
-      const env = environments.find((e) => e.name === activeEnvId);
-      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
-    }
+    const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
+    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) envVars[v.key] = v.value;
     const globalVars: Record<string, string> = globalEnv
       ? Object.fromEntries(
           globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
@@ -142,6 +140,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     return buildScopedContext({
       envVars,
       envLabel: activeEnvId ?? undefined,
+      externalSecrets: activeEnv?.externalSecrets,
       globalVars,
       processEnvVars,
       collectionVars: variables,

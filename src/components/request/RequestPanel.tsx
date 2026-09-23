@@ -454,10 +454,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   // Build the scope-aware variable context for all editors in this panel.
   const scopedContext = useMemo(() => {
     const envVars: Record<string, string> = {};
-    if (activeEnvIdForScope) {
-      const env = environments.find((e) => e.name === activeEnvIdForScope);
-      if (env) for (const v of env.variables) if (v.enabled) envVars[v.key] = v.value;
-    }
+    const activeEnv = activeEnvIdForScope
+      ? environments.find((e) => e.name === activeEnvIdForScope)
+      : undefined;
+    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) envVars[v.key] = v.value;
     const globalVars: Record<string, string> = globalEnv
       ? Object.fromEntries(
           globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
@@ -466,6 +466,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return buildScopedContext({
       envVars,
       envLabel: activeEnvIdForScope ?? undefined,
+      externalSecrets: activeEnv?.externalSecrets,
       globalVars,
       processEnvVars,
       collectionVars: collectionVariables,
@@ -622,6 +623,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           setActiveSection('variables');
           break;
         case 'environment':
+        case 'vault':
           setEnvDialogOpen(true);
           break;
         case 'global': {

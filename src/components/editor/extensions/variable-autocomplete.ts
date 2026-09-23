@@ -19,6 +19,7 @@ const SCOPE_BOOST: Record<VariableSource, number> = {
   request: 5,
   folder: 4,
   environment: 3,
+  vault: 2,
   collection: 2,
   global: 1,
   process: 0,
@@ -41,6 +42,8 @@ function scopeBadge(source: VariableSource): string {
       return 'E';
     case 'collection':
       return 'C';
+    case 'vault':
+      return 'V';
     case 'global':
       return 'G';
     case 'process':
