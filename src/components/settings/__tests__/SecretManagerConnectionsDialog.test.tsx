@@ -91,4 +91,38 @@ describe('SecretManagerConnectionsDialog', () => {
       undefined,
     );
   });
+
+  it('adding a connection with a blank client ID does not call save', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /add connection/i }));
+    await user.type(screen.getByLabelText(/^label$/i), 'Prod Vault');
+    await user.type(screen.getByLabelText(/base url/i), 'https://vault.internal:8774');
+    await user.type(screen.getByLabelText(/client secret/i), 'super-secret-value');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(tauriApi.saveSecretManagerConnection).not.toHaveBeenCalled();
+  });
+
+  it('keeps a separate test vault name per connection row', async () => {
+    const conn = {
+      baseUrl: 'https://vault.internal:8774',
+      clientId: 'rocketapi',
+      verifySsl: true,
+      allowInsecureHttp: false,
+    };
+    vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([
+      { ...conn, id: 'conn-1', label: 'Prod' },
+      { ...conn, id: 'conn-2', label: 'Staging' },
+    ]);
+    vi.mocked(tauriApi.testSecretManagerConnection).mockResolvedValue(undefined);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/vault name to test staging/i), 'stage-vault');
+
+    expect(screen.getByLabelText(/vault name to test prod/i)).toHaveValue('');
+    const testButtons = screen.getAllByRole('button', { name: /^test$/i });
+    await user.click(testButtons[1]);
+    expect(tauriApi.testSecretManagerConnection).toHaveBeenCalledWith('conn-2', 'stage-vault');
+  });
 });

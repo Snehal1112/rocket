@@ -45,13 +45,14 @@ export function SecretManagerConnectionsDialog({
   const testMutation = useTestSecretManagerConnection();
 
   const [editing, setEditing] = useState<(typeof emptyForm & { isNew: boolean }) | null>(null);
-  const [testVaultName, setTestVaultName] = useState('');
+  // Keyed by connection id, so each row keeps its own vault name.
+  const [testVaultNames, setTestVaultNames] = useState<Record<string, string>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setEditing(null);
-      setTestVaultName('');
+      setTestVaultNames({});
       setDeletingId(null);
     }
   }, [open]);
@@ -62,22 +63,30 @@ export function SecretManagerConnectionsDialog({
 
   const handleSave = async () => {
     if (!editing) return;
+    if (!editing.label.trim() || !editing.baseUrl.trim() || !editing.clientId.trim()) {
+      toast.error('Label, base URL and client ID are required.');
+      return;
+    }
+    if (!/^https?:\/\/[^/\s]+/i.test(editing.baseUrl.trim())) {
+      toast.error('Base URL must start with http:// or https://.');
+      return;
+    }
     if (editing.isNew && !editing.clientSecret.trim()) {
       toast.error('A client secret is required when adding a new connection.');
       return;
     }
     const connection: SecretManagerConnection = {
       id: editing.id,
-      label: editing.label,
-      baseUrl: editing.baseUrl,
-      clientId: editing.clientId,
+      label: editing.label.trim(),
+      baseUrl: editing.baseUrl.trim(),
+      clientId: editing.clientId.trim(),
       verifySsl: editing.verifySsl,
       allowInsecureHttp: editing.allowInsecureHttp,
     };
     try {
       await saveMutation.mutateAsync({
         connection,
-        clientSecret: editing.clientSecret || undefined,
+        clientSecret: editing.clientSecret.trim() ? editing.clientSecret : undefined,
       });
       setEditing(null);
     } catch (e) {
@@ -96,12 +105,13 @@ export function SecretManagerConnectionsDialog({
   };
 
   const handleTest = async (id: string) => {
-    if (!testVaultName) {
+    const vaultName = (testVaultNames[id] ?? '').trim();
+    if (!vaultName) {
       toast.error('Enter a vault name to test against.');
       return;
     }
     try {
-      await testMutation.mutateAsync({ id, vaultName: testVaultName });
+      await testMutation.mutateAsync({ id, vaultName });
       toast.success('Connection succeeded.');
     } catch (e) {
       toast.error(`Connection failed: ${String(e)}`);
@@ -272,9 +282,12 @@ export function SecretManagerConnectionsDialog({
                       </div>
                       <div className='flex items-center gap-1'>
                         <Input
-                          value={testVaultName}
-                          onChange={(e) => setTestVaultName(e.target.value)}
+                          value={testVaultNames[c.id] ?? ''}
+                          onChange={(e) =>
+                            setTestVaultNames((prev) => ({ ...prev, [c.id]: e.target.value }))
+                          }
                           placeholder='vault name'
+                          aria-label={`Vault name to test ${c.label}`}
                           className='h-7 w-28 text-xs'
                         />
                         <Button
