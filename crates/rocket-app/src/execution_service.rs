@@ -193,6 +193,7 @@ pub struct RequestExecutionService {
 const MIN_REDACTION_LEN: usize = 6;
 
 impl RequestExecutionService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         env_repo: Box<dyn EnvironmentRepository>,
         executor: Arc<dyn HttpExecutor>,
@@ -220,6 +221,7 @@ impl RequestExecutionService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_audit(
         env_repo: Box<dyn EnvironmentRepository>,
         executor: Arc<dyn HttpExecutor>,
