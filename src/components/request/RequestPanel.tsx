@@ -1,4 +1,4 @@
-import { Braces, Loader2, Send, ShieldCheck, Tag, X, Zap } from 'lucide-react';
+import { Braces, Code2, Loader2, Send, ShieldCheck, Tag, X, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SingleLineEditor } from '@/components/editor';
@@ -33,7 +33,9 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
+import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
+import { resolveRequestFields } from '@/lib/execute-request';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
   useEnvironments,
@@ -401,6 +403,20 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     },
     [tab.id, updateRequest],
   );
+
+  const handleCopyAsCurl = useCallback(async () => {
+    if (request.auth.authType === 'aws-sig-v4') {
+      toast.warning("AWS SigV4 signing isn't included — this command won't be pre-signed.");
+    }
+    try {
+      const resolved = await resolveRequestFields(tab.id, request);
+      const command = generateCurlCommand(resolved, request.method);
+      await navigator.clipboard.writeText(command);
+      toast.success('Copied as cURL');
+    } catch {
+      toast.error('Failed to copy as cURL');
+    }
+  }, [tab.id, request]);
 
   const enabledParamCount = request.queryParams.filter((p) => p.enabled).length;
   const enabledHeaderCount = request.headers.filter((h) => h.enabled).length;
@@ -972,6 +988,17 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           aria-label='Load test'
         >
           <Zap className='h-3.5 w-3.5' aria-hidden='true' />
+        </Button>
+
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-7'
+          onClick={handleCopyAsCurl}
+          title='Copy as cURL'
+          aria-label='Copy as cURL'
+        >
+          <Code2 className='h-3.5 w-3.5' aria-hidden='true' />
         </Button>
 
         {!tab.source && (
