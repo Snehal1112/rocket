@@ -1039,6 +1039,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           <AssertionsTab
             assertions={request.assertions}
             onChange={(newAssertions) => updateRequest(tab.id, { assertions: newAssertions })}
+            variableContext={scopedContext}
+            onNavigateToSource={handleEditorNavigateToSource}
           />
         </div>
       ) : null}

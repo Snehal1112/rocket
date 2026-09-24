@@ -82,6 +82,26 @@ describe('resolveRequestFieldsForPath', () => {
     const resolved = await resolveRequestFieldsForPath(undefined, undefined, baseRequest());
     expect(resolved.url).toBe('{{baseUrl}}/ping'); // no collection vars available, left unresolved
   });
+
+  it('resolves {{var}} placeholders in assertion values', async () => {
+    const request = {
+      ...baseRequest(),
+      assertions: [{ expression: 'res.body.token', operator: 'eq', value: '{{baseUrl}}' }],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.assertions).toEqual([
+      { expression: 'res.body.token', operator: 'eq', value: 'https://collection.example' },
+    ]);
+  });
+
+  it('leaves assertion expression and undefined value untouched', async () => {
+    const request = {
+      ...baseRequest(),
+      assertions: [{ expression: 'res.status', operator: 'isDefined' }],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.assertions).toEqual([{ expression: 'res.status', operator: 'isDefined' }]);
+  });
 });
 
 describe('getEnvInvalidationKeys', () => {

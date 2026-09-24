@@ -51,7 +51,7 @@ export async function executeRunnerEntry(
       preRequestScript: request.preRequestScript ?? undefined,
       postResponseScript: request.postResponseScript ?? undefined,
       testsScript: request.tests ?? undefined,
-      assertions: request.assertions,
+      assertions: resolved.assertions,
       tags: request.tags,
       actions: request.actions,
       globalEnvName,

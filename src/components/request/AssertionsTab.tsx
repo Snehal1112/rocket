@@ -12,10 +12,13 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import type { AssertionEntry } from '@/lib/tauri-api';
+import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 
 interface AssertionsTabProps {
   assertions: AssertionEntry[];
   onChange: (assertions: AssertionEntry[]) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
 const UNARY_OPERATORS = new Set([
@@ -99,7 +102,12 @@ const OPERATOR_GROUPS = [
   },
 ];
 
-export function AssertionsTab({ assertions, onChange }: AssertionsTabProps) {
+export function AssertionsTab({
+  assertions,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: AssertionsTabProps) {
   function update(index: number, patch: Partial<AssertionEntry>) {
     const next = assertions.map((a, i) => (i === index ? { ...a, ...patch } : a));
     onChange(next);
@@ -159,6 +167,8 @@ export function AssertionsTab({ assertions, onChange }: AssertionsTabProps) {
                   onChange={(v) => update(i, { expression: v })}
                   placeholder='res.status'
                   className='h-7 text-xs'
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
                 />
               </div>
 
@@ -199,6 +209,8 @@ export function AssertionsTab({ assertions, onChange }: AssertionsTabProps) {
                     onChange={(v) => update(i, { value: v })}
                     placeholder='expected value'
                     className='h-7 text-xs'
+                    variableContext={variableContext}
+                    onNavigateToSource={onNavigateToSource}
                   />
                 )}
               </div>

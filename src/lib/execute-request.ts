@@ -3,6 +3,7 @@ import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import type { Environment } from '@/lib/tauri-api';
 import {
+  type AssertionEntry,
   type Auth,
   type Body,
   type CollectionVariable,
@@ -140,6 +141,7 @@ export interface ResolvedRequestFields {
   queryParams: { key: string; value: string; enabled: boolean }[];
   body: ReturnType<typeof toApiBody>;
   auth: Auth;
+  assertions: AssertionEntry[];
   collection: string | undefined;
   environmentName: string | undefined;
   requestPath: string | undefined;
@@ -234,12 +236,18 @@ export async function resolveRequestFieldsForPath(
     .filter((p) => p.enabled)
     .map((p) => ({ key: resolve(p.key), value: resolve(p.value), enabled: p.enabled }));
 
+  const resolvedAssertions: AssertionEntry[] = request.assertions.map((a) => ({
+    ...a,
+    value: a.value !== undefined ? resolve(a.value) : a.value,
+  }));
+
   return {
     url: resolvedUrl,
     headers: effectiveHeaders,
     queryParams: resolvedQueryParams,
     body: resolvedBody,
     auth: resolvedAuth,
+    assertions: resolvedAssertions,
     collection,
     environmentName: useEnvStore.getState().activeEnvId ?? undefined,
     requestPath,
@@ -523,6 +531,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     queryParams: resolvedQueryParams,
     body: resolvedBody,
     auth: resolvedAuth,
+    assertions: resolvedAssertions,
     collection,
     environmentName,
     requestPath,
@@ -551,7 +560,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       preRequestScript: effectiveRequest.preRequestScript ?? undefined,
       postResponseScript: effectiveRequest.postResponseScript ?? undefined,
       testsScript: effectiveRequest.testsScript ?? undefined,
-      assertions: effectiveRequest.assertions ?? [],
+      assertions: resolvedAssertions,
       actions: effectiveRequest.actions ?? [],
       globalEnvName,
       requestName,
