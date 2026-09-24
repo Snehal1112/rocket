@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.9.2](https://github.com/Snehal1112/rocket/compare/v0.9.1...v0.9.2) (2026-09-24)
+
+### Features
+
+* **app:** add RequestExecutionService::resolve_external_secrets ([7fc56d4](https://github.com/Snehal1112/rocket/commit/7fc56d4d36f71d3c16adf73d07753726737102a0))
+* **app:** add SecretManagerService CRUD ([5e11748](https://github.com/Snehal1112/rocket/commit/5e117480c024c5915718e91eb96ea3884148a832))
+* **app:** add SecretManagerService test_connection/fetch_secret_names ([2d0f220](https://github.com/Snehal1112/rocket/commit/2d0f220cb01a328d1bdf7af2fb598fb7c0fbd3a9))
+* **app:** add shared resolve_vault_secret_value helper ([78abd07](https://github.com/Snehal1112/rocket/commit/78abd077fa20af5a1de69cc3a561ffcb86f58d1b))
+* **app:** resolve external secrets before dispatch in execute() ([ae96130](https://github.com/Snehal1112/rocket/commit/ae96130d5e9abb5aff4ed8d4df1775ab51c7bc43))
+* **app:** thread external_secrets through variable resolution ([7993c70](https://github.com/Snehal1112/rocket/commit/7993c70b846c9bb71280cf388871cfd120e0844c))
+* **editor:** add vault as a variable source everywhere else ([8b91c3a](https://github.com/Snehal1112/rocket/commit/8b91c3a1702f9d149346684660e74b994378066c))
+* **environment:** add external secret domain types ([9c69efc](https://github.com/Snehal1112/rocket/commit/9c69efcbf1c6d27d78e3de6d65afd6c13610d954))
+* **environment:** add external_secrets field to Environment ([1641332](https://github.com/Snehal1112/rocket/commit/1641332f61f5691476326980b1cc5d9190d24048))
+* **environment:** add external_secrets scope to VariableContext ([2ee9b16](https://github.com/Snehal1112/rocket/commit/2ee9b167e2be5745c2b4aad65700ee20b912a7cc))
+* **environment:** add SecretManagerConnection + repository trait ([b3a1841](https://github.com/Snehal1112/rocket/commit/b3a1841d06e94240f11f0f6bd2b2e8e96218860c))
+* **environment:** add VaultSecretFetcher trait + NullVaultSecretFetcher ([63d668c](https://github.com/Snehal1112/rocket/commit/63d668cbfae97730d022baddcbb3de62dca49ac9))
+* **frontend:** add env dialog tab switcher ([efda093](https://github.com/Snehal1112/rocket/commit/efda093f54ce0df776ecb69dbea8d9dda7b4756b))
+* **frontend:** add external secrets tab ([f3ab623](https://github.com/Snehal1112/rocket/commit/f3ab6237edd559d96f402058d20c942e693ea909))
+* **frontend:** add secret connections dialog ([cc69932](https://github.com/Snehal1112/rocket/commit/cc69932a8f576acceb58c9ee1bccd687d5fcbfce))
+* **frontend:** add secret manager entry point ([8850271](https://github.com/Snehal1112/rocket/commit/885027102a1555997360ae73c2c73a3719f23cc1))
+* **frontend:** add secret manager types ([e75e3f6](https://github.com/Snehal1112/rocket/commit/e75e3f678d4034b6d34e64feb80b34075d265cba))
+* **frontend:** validate external secret bindings before save ([dcafa45](https://github.com/Snehal1112/rocket/commit/dcafa4595490697279c0b1b3213175c2c4e78b79))
+* **frontend:** wire external secrets save flow ([f0cfabe](https://github.com/Snehal1112/rocket/commit/f0cfabe437e9369bf5a628b53d601c376b89d0a7))
+* **infra:** add FsSecretManagerRepo for Secret Manager connection persistence ([70f7330](https://github.com/Snehal1112/rocket/commit/70f73300c868cabd22099b0b3865b28e5126b1ff))
+* **infra:** add OcExternalSecretBinding/Ref and wire conversions ([81527b1](https://github.com/Snehal1112/rocket/commit/81527b16d4a2dddf826c8049c9d1f6a7323a6f16))
+* **infra:** add ReqwestVaultSecretFetcher token fetch and cache ([50080c2](https://github.com/Snehal1112/rocket/commit/50080c2bd7e56217c4372a6699ad891a79a6518d))
+* **infra:** implement get_secret_value and test_connection ([82de708](https://github.com/Snehal1112/rocket/commit/82de708329efba1dc8677d7d5391498d0e7ea714))
+* **infra:** implement VaultSecretFetcher::list_secrets ([0e71441](https://github.com/Snehal1112/rocket/commit/0e7144160334b47c726eacb8c9f0c7e222025032))
+* **request:** add Copy as cURL button ([4a68433](https://github.com/Snehal1112/rocket/commit/4a68433e5cc464724c1b4968805ff65c0f43845a))
+* **scripting:** add rok.getSecretVar op ([d092f38](https://github.com/Snehal1112/rocket/commit/d092f3826da88539deedef68419091dae33bf006))
+* **tauri:** add secret manager connection commands ([e44e7ad](https://github.com/Snehal1112/rocket/commit/e44e7ad8e4e0de43bb47766c3f5e4146d5c3a37e))
+* **tauri:** wire RocketVault secret manager stack into startup ([6094d54](https://github.com/Snehal1112/rocket/commit/6094d541b4583257dbb1cbd894975b35f9fc0ade))
+
+### Bug Fixes
+
+* **app:** don't abort on deleted secret conn ([64d6173](https://github.com/Snehal1112/rocket/commit/64d6173515b70ceb190dcad053f70a3de69e7a6f))
+* **app:** harden SecretManagerService secret handling ([08afa43](https://github.com/Snehal1112/rocket/commit/08afa436675ca29e01f000f6fa78e6316813f0f3))
+* **app:** redact secret values from history URL before persisting ([d210d30](https://github.com/Snehal1112/rocket/commit/d210d30bf3a5aa20a79f4af3e6cdf97ff80ebdea))
+* **app:** scope external secrets to collection env ([37a5699](https://github.com/Snehal1112/rocket/commit/37a56992097ae5d5ab0f2202ccbed0ebab9e8583))
+* **app:** use tracing::warn for keychain delete failure in SecretManagerService ([1a0243d](https://github.com/Snehal1112/rocket/commit/1a0243d8d1ce9bf130af04773244a115275a0b92))
+* **app:** validate secret bindings and connections on save ([ce79375](https://github.com/Snehal1112/rocket/commit/ce79375ef9d42fa2c0e07a6624b9e9f38e28900e))
+* **assertions:** resolve {{var}} in values ([656f47f](https://github.com/Snehal1112/rocket/commit/656f47ff99a498e134caaa55d536444504d62c01))
+* **frontend:** harden secret manager connections dialog ([c3f69bc](https://github.com/Snehal1112/rocket/commit/c3f69bcc3891587e3d07f074b45023a47b8db043))
+* **frontend:** reset stale secret ids and flag deleted connections ([04a3755](https://github.com/Snehal1112/rocket/commit/04a3755022a0eecbdeb36ffe868fc3a2d098896b))
+* **infra:** avoid panicking Client::new() for verifying client ([9983453](https://github.com/Snehal1112/rocket/commit/9983453f8bdcef876f5773cc03ffb35c27a7e8c0))
+* **infra:** detect secret rotation in token cache ([27b4f01](https://github.com/Snehal1112/rocket/commit/27b4f018f3b8d827c6a70ce52f4217313a17dfb3))
+* **infra:** harden RocketVault secret fetcher ([278cd64](https://github.com/Snehal1112/rocket/commit/278cd6461b3062c8cfb3754ebcb57b3c4e51636e))
+* **infra:** percent-encode RocketVault API path segments ([4f18d8e](https://github.com/Snehal1112/rocket/commit/4f18d8e86e3dedb8ced5162c84b87908523af77a))
+* **settings:** scope test-vault field per connection row ([6758e1b](https://github.com/Snehal1112/rocket/commit/6758e1b56a2a9fe131b6b4a20f7147a180f290f7))
+
+### Performance Improvements
+
+* box large enum variants for request/auth types ([28d6327](https://github.com/Snehal1112/rocket/commit/28d6327477fa8a124d8742ae94e272a31e20b30b))
+* **runner:** resolve external secrets once per run, not per step ([92d6081](https://github.com/Snehal1112/rocket/commit/92d6081608ba179733954967fed414044006fb11))
+* **shared:** box OAuth2Flow to shrink Auth enum ([71d248f](https://github.com/Snehal1112/rocket/commit/71d248fd054322970dc3b9985588760ca4ed1275))
+
 ## [0.9.1](https://github.com/Snehal1112/rocket/compare/v0.8.0...v0.9.1) (2026-09-21)
 
 ### Features
