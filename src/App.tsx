@@ -1,7 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { useEffect, useState } from 'react';
-import { Toaster } from 'sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
@@ -10,6 +9,7 @@ import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { TitleBar } from '@/components/title-bar';
+import { Toaster } from '@/components/ui/sonner';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
@@ -233,7 +233,7 @@ function App() {
         onConsoleToggle={() => setConsoleOpen(!isConsoleOpen)}
       />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
-      <Toaster position='bottom-right' richColors closeButton />
+      <Toaster position='bottom-right' />
     </div>
   );
 }
