@@ -27,9 +27,11 @@ Claude review that runs automatically on every PR.
   selector discipline.
 - The check runs in parallel with `pr-check.yml` and can never block or delay
   a merge in this phase — it's advisory only.
-- One source of truth for "what good Rocket code looks like," usable by both
-  this CI job and human contributors, replacing the two currently-orphaned
-  `.github/agents/*.md` files.
+- One source of truth for "what good Rocket code looks like" — `CLAUDE.md`
+  and `.claude/rules/*.md`, already used by both this CI job and human/agent
+  contributors — rather than a second, hand-maintained copy of the rules.
+  The two currently-orphaned `.github/agents/*.md` files stay unreferenced
+  either way.
 
 ## Non-goals (this spec)
 
@@ -60,35 +62,54 @@ PR opened/updated on branch
 
 ### `.github/workflows/claude-review.yml`
 
-- Trigger: `pull_request: types: [opened, synchronize]`, `branches: [main]`.
-- Skip condition: `if: github.event.pull_request.draft == false`.
-- Uses `anthropics/claude-code-action`, pinned to a specific released version
-  tag (not `@main`), `mode: automation` so it runs without needing a
-  `@claude` trigger comment.
-- `permissions: { contents: read, pull-requests: write }`.
-- Checkout with `fetch-depth: 0` so the action has full diff context.
+- Trigger: `pull_request: types: [opened, synchronize, ready_for_review,
+  reopened]`, `branches: [main]`.
+- Belt-and-suspenders skip: `if: github.event.pull_request.draft == false`
+  (the `code-review` skill below also skips drafts on its own judgment, but
+  an explicit workflow-level guard avoids spending a runner minute finding
+  that out).
+- Uses `anthropics/claude-code-action@v1` (pinned major version, not
+  `@main`), authenticating with `claude_code_oauth_token` (see secret below).
+  No `mode` input — the action infers automation mode from the presence of a
+  `prompt` input (verified against `code.claude.com/docs/en/github-actions`,
+  current as of this spec).
+- `permissions: { contents: read, pull-requests: read, issues: read,
+  id-token: write }` — matches Anthropic's own published review-workflow
+  example. `id-token: write` is required for the action's default GitHub App
+  authentication; posting comments happens through the App's own installed
+  permissions via an MCP tool call, not the workflow's ambient
+  `GITHUB_TOKEN`, so `pull-requests: write` isn't needed here.
+- Checkout with `fetch-depth: 1` (shallow) — a PR review needs the diff, not
+  full history; matches the verified official example.
 
-### Consolidated review prompt
+### Review prompt: Anthropic's `code-review` plugin, not a hand-rolled one
 
-A single new prompt, inlined as a multi-line block scalar in the workflow's
-`prompt:` input (the action's input surface doesn't include a
-prompt-from-file option), that folds together the review criteria currently
-scattered across:
+`claude-code-action` runs Claude Code itself inside the runner, and Claude
+Code always loads the repository's `CLAUDE.md` as project context — the same
+mechanism that surfaces `CLAUDE.md`'s Hard Rules and the `.claude/rules/`
+pointer chain to a human working in this repo applies automatically to the
+action's run, once the workflow checks the repository out. So instead of
+hand-duplicating those rules into a new custom prompt (this spec's original
+plan), the workflow invokes Anthropic's own `code-review` plugin skill:
 
-- `CLAUDE.md` Hard Rules (shadcn/ui only, lucide-react only, SingleLineEditor
-  vs Monaco, Zustand destructuring, no `unwrap()`, no git-CLI shell-outs,
-  conventional commits, serde camelCase-on-IPC-DTOs-only).
-- `.claude/rules/rust-ddd-boundaries.md`, `tauri-ipc-boundaries.md`,
-  `frontend-component-guardrails.md`.
-- The checklists in `.github/agents/rocket-implementation-reviewer.agent.md`
-  and `code-reviewer.md`.
+```yaml
+plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+plugins: "code-review@claude-code-plugins"
+prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+```
 
-Those two `.github/agents/*.md` files carry frontmatter (`tools: [read,
-search]`, `model: inherit`) shaped for a different agent runtime and aren't
-directly consumable by `claude-code-action`'s `prompt` input, so their
-substance gets folded into the new prompt rather than referenced in place.
-This becomes the one place that defines "what good Rocket code looks like"
-for both this CI job and any human/agent reviewer.
+`--comment` posts findings as inline PR comments, or one summary comment
+when it finds none; without it, results only land in the workflow run log.
+The `claude_args` line is required even though the skill's own frontmatter
+names the same tool, because the action only starts the MCP server that
+posts inline comments when `--allowedTools` names it in `claude_args`.
+
+This keeps `CLAUDE.md` and `.claude/rules/*.md` as the single source of
+truth for "what good Rocket code looks like" — no second copy of the rules
+to keep in sync — and leaves the two orphaned `.github/agents/*.md` files
+unreferenced (deleting them is out of scope here; a separate cleanup if
+ever needed).
 
 ### `CLAUDE_CODE_OAUTH_TOKEN` secret
 
@@ -116,12 +137,15 @@ by this design, but worth knowing if a later sub-project wants it.
 
 ## Data Flow
 
-1. PR opened or pushed to.
+1. PR opened, pushed to, reopened, or marked ready for review.
 2. GitHub triggers `claude-review.yml` in parallel with `pr-check.yml`.
-3. Checkout (full history) → `claude-code-action` runs with the consolidated
-   prompt against the PR diff.
-4. Action posts a PR comment with findings, or updates its existing comment on
-   subsequent pushes (not one new comment per push).
+3. Shallow checkout → `claude-code-action` runs the `code-review` skill
+   against the PR diff, with `CLAUDE.md`/`.claude/rules/*.md` loaded
+   automatically as project context.
+4. Action posts inline PR comments (or one summary comment when clean) via
+   the GitHub App's own permissions, and skips draft/closed/already-reviewed
+   PRs on its own judgment in addition to this workflow's explicit draft
+   guard.
 
 ## Error Handling & Cost Control
 
@@ -135,14 +159,17 @@ by this design, but worth knowing if a later sub-project wants it.
 
 ## Security Considerations
 
-- Repo is a personal/single-owner repo (`Snehal1112/rocket`) today, so
-  fork-PR prompt-injection/cost-abuse risk is low, but the workflow should
-  still avoid `pull_request_target` (which would expose secrets to
-  fork-submitted code) — plain `pull_request` is correct here since it never
-  exposes secrets to untrusted fork code.
-- `permissions` block is scoped to the minimum needed
-  (`contents: read`, `pull-requests: write`) rather than defaulting to
-  broader repo-token permissions.
+- Trigger is plain `pull_request`, never `pull_request_target`: GitHub
+  itself withholds secrets from workflow runs triggered by fork pull
+  requests under `pull_request`, so a fork PR simply can't reach
+  `CLAUDE_CODE_OAUTH_TOKEN` or trigger a review run at all — confirmed
+  against Anthropic's own docs, not just an assumption. `Snehal1112/rocket`
+  is a personal repo with no external contributors today, but this holds
+  regardless.
+- `permissions` block is scoped to the minimum needed for the verified
+  official pattern (`contents: read`, `pull-requests: read`, `issues: read`,
+  `id-token: write`) rather than defaulting to broader repo-token
+  permissions.
 
 ## Verification
 
