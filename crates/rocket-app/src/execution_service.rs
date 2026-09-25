@@ -479,12 +479,34 @@ impl RequestExecutionService {
             })
             .collect();
 
+        // Resolve {{placeholders}} in the body: raw `content` for text-like modes,
+        // and each form-data entry's `value` for multipart. Keys and file paths
+        // are left untouched.
+        let resolved_body = input.body.clone().map(|mut body| {
+            if let Some(content) = &body.content {
+                body.content = Some(resolve(content, &vars).output);
+            }
+            if let Some(entries) = &body.form_data {
+                body.form_data = Some(
+                    entries
+                        .iter()
+                        .map(|entry| {
+                            let mut entry = entry.clone();
+                            entry.value = resolve(&entry.value, &vars).output;
+                            entry
+                        })
+                        .collect(),
+                );
+            }
+            body
+        });
+
         Ok(HttpRequest {
             method: input.method,
             url: resolved_url,
             headers: resolved_headers,
             query_params: input.query_params.clone(),
-            body: input.body.clone(),
+            body: resolved_body,
             auth: effective_auth,
             options: input.options.clone(),
         })
@@ -4328,6 +4350,179 @@ mod tests {
             "a string body should respect the script's explicit Content-Type instead of being forced to JSON"
         );
         assert_eq!(body.content.as_deref(), Some("<a/>"));
+    }
+
+    #[tokio::test]
+    async fn resolve_request_resolves_plain_variable_in_body_content() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let settings = CollectionSettings {
+            variables: vec![cv("PASSWORD", "hunter2")],
+            ..Default::default()
+        };
+        let repo = StubCollectionRepo::with_settings(settings);
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://example.com/login", None);
+        input.collection = Some("my-api".into());
+        input.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some(r#"{"password":"{{PASSWORD}}"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        svc.execute(input).await.expect("execute failed");
+
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
+        assert_eq!(body.content.as_deref(), Some(r#"{"password":"hunter2"}"#));
+    }
+
+    #[tokio::test]
+    async fn resolve_request_resolves_vault_secret_in_body_content() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(binding_with_refs(
+            "password",
+            vec![("rocket-admin", "sec-1")],
+        ));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("s3cr3t-pw".to_string()),
+        )]));
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let mut input = sample_input("https://example.com/login", Some("prod"));
+        input.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some(r#"{"password":"{{password.rocket-admin}}"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        svc.execute(input).await.expect("execute failed");
+
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
+        assert_eq!(body.content.as_deref(), Some(r#"{"password":"s3cr3t-pw"}"#));
+    }
+
+    #[tokio::test]
+    async fn resolve_request_resolves_formdata_value_but_not_key() {
+        use rocket_shared::types::{Body, BodyMode, FormDataEntry, FormDataType};
+
+        let settings = CollectionSettings {
+            variables: vec![cv("TOKEN", "tok-123")],
+            ..Default::default()
+        };
+        let repo = StubCollectionRepo::with_settings(settings);
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(repo),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://example.com/upload", None);
+        input.collection = Some("my-api".into());
+        input.body = Some(Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "{{TOKEN}}".into(),
+                value: "{{TOKEN}}".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        });
+        svc.execute(input).await.expect("execute failed");
+
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
+        let entries = body.form_data.expect("form_data should be present");
+        assert_eq!(entries[0].value, "tok-123", "value should be resolved");
+        assert_eq!(entries[0].key, "{{TOKEN}}", "key should NOT be resolved");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_handles_body_with_no_content_without_panicking() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let body_capturing = BodyCapturingExecutor::new();
+        let executor_arc = Arc::clone(&body_capturing);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor_arc,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.body = Some(Body {
+            mode: BodyMode::None,
+            content: None,
+            form_data: None,
+            file_path: None,
+        });
+        let result = svc.execute(input).await;
+        assert!(result.is_ok());
+
+        let body = body_capturing
+            .last_body()
+            .expect("executor should have received a body");
+        assert_eq!(body.content, None);
     }
 
     #[test]
