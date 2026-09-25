@@ -90,12 +90,29 @@ substance gets folded into the new prompt rather than referenced in place.
 This becomes the one place that defines "what good Rocket code looks like"
 for both this CI job and any human/agent reviewer.
 
-### `ANTHROPIC_API_KEY` secret
+### `CLAUDE_CODE_OAUTH_TOKEN` secret
 
-Required repo secret (Settings → Secrets and variables → Actions). **Manual
-setup step, not automated by this change** — provisioning API credentials is
-outside what should happen unattended. Documented as a prerequisite in the
-implementation plan.
+Authenticated via a Claude Pro/Max subscription, not a pay-per-token
+Anthropic API key: generate a token locally with `claude setup-token`
+(requires the Claude GitHub App to be installed on the repo at
+https://github.com/apps/claude first), then add it as a repo secret
+(Settings → Secrets and variables → Actions → `CLAUDE_CODE_OAUTH_TOKEN`).
+The workflow passes it as the action's `claude_code_oauth_token` input
+instead of `anthropic_api_key` — the two inputs are mutually exclusive, and
+if both were set the API key would silently take precedence, so
+`anthropic_api_key` must not be set at all.
+
+**Manual setup step, not automated by this change** — provisioning
+credentials is outside what should happen unattended. Documented as a
+prerequisite in the implementation plan.
+
+**Caveat to verify during implementation:** the OAuth token is a personal
+credential tied to your subscription (not a service account), and unlike an
+API key it has no rotation/revocation UI in the Anthropic console — if it
+expires or is revoked, `claude setup-token` needs to be re-run and the secret
+updated manually. Also, `claude-code-action`'s `classify_inline_comments`
+feature requires `anthropic_api_key` and is skipped under OAuth — not used
+by this design, but worth knowing if a later sub-project wants it.
 
 ## Data Flow
 
@@ -108,8 +125,9 @@ implementation plan.
 
 ## Error Handling & Cost Control
 
-- Missing/invalid `ANTHROPIC_API_KEY` → this job fails visibly in the Actions
-  tab; `pr-check.yml` is unaffected and merge is still possible.
+- Missing/invalid/expired `CLAUDE_CODE_OAUTH_TOKEN` → this job fails visibly
+  in the Actions tab; `pr-check.yml` is unaffected and merge is still
+  possible.
 - Draft PRs are skipped entirely (no review run, no cost).
 - Action pinned to a released version so behavior doesn't shift under us
   without an explicit version bump.
@@ -157,5 +175,9 @@ context; each remaining piece gets its own spec when picked up:
 
 ## Open Items
 
-- `ANTHROPIC_API_KEY` must be provisioned manually before this workflow can
-  run (see Components above).
+- The Claude GitHub App must be installed on the repo and
+  `CLAUDE_CODE_OAUTH_TOKEN` generated (`claude setup-token`) and added as a
+  repo secret manually before this workflow can run (see Components above).
+- Because the OAuth token rides on a personal Claude subscription, review
+  runs are attributed to and rate-limited against that individual's plan —
+  worth knowing if usage volume grows enough to matter.
