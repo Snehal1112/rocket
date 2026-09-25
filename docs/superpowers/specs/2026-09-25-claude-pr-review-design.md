@@ -183,8 +183,12 @@ CI infrastructure isn't unit-testable in the usual sense. Verification is:
 4. Confirm the PR remains mergeable regardless of the review outcome (i.e.
    the job is genuinely advisory, not silently blocking via branch protection
    defaults).
-5. Push a follow-up commit to the same PR and confirm the comment updates in
-   place rather than duplicating.
+5. Push a follow-up commit to the same PR and observe what happens — official
+   docs state the skill "skips... pull requests that already have a comment
+   from Claude," which reads as skip-on-repeat rather than update-in-place,
+   but this spec doesn't rely on either behavior being true. The only
+   required property is no duplicate-comment spam; record which behavior is
+   actually observed for future reference.
 
 ## Roadmap
 
