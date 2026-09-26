@@ -1,5 +1,5 @@
 import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { RocketBook } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
@@ -13,14 +13,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useSaveButton } from '@/hooks/use-save-button';
+import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
 import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
+import { getQueryClient } from '@/lib/query-client';
 import {
-  type CollectionSummary,
   createCollection,
   deleteCollection,
   linkExternalCollection,
-  listCollections,
   onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
@@ -40,34 +40,39 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const openTab = usePaneStore((s) => s.openTab);
   const { data: globalEnvironments = [] } = useGlobalEnvironments();
 
-  const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
+  const { data: summaries = [] } = useCollections();
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [docContent, setDocContent] = useState<string>(workspace?.description ?? '');
 
-  const refresh = useCallback(async () => {
-    const cols = await listCollections();
-    setSummaries(cols);
-  }, []);
+  // Debounce onCollectionChanged the same way CollectionsSidebar's own
+  // listDebounce does. Both components now read the same query key, so an
+  // un-debounced listener here would invalidate immediately on every
+  // filesystem-watcher event regardless of the sidebar's own 300ms timer —
+  // defeating the point of debouncing at all.
+  const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refetch collections when workspaceId changes or a collection-changed event fires.
   // Global environments are fetched automatically by useGlobalEnvironments().
   // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
   useEffect(() => {
-    refresh().catch(console.error);
-
     let cancelled = false;
     const unlistenPromise = onCollectionChanged(() => {
-      if (!cancelled) refresh().catch(console.error);
+      if (cancelled) return;
+      if (listDebounce.current) clearTimeout(listDebounce.current);
+      listDebounce.current = setTimeout(() => {
+        void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
+      }, 300);
     });
 
     return () => {
       cancelled = true;
+      if (listDebounce.current) clearTimeout(listDebounce.current);
       unlistenPromise.then((fn) => fn());
     };
-  }, [workspaceId, refresh]);
+  }, [workspaceId]);
 
   useEffect(() => {
     setDocContent(workspace?.description ?? '');
@@ -91,7 +96,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
       await createCollection(name);
       setNewName('');
       setIsCreating(false);
-      await refresh();
+      await getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     } catch (err) {
       console.error('[WorkspaceOverview] create failed:', err);
     }
@@ -100,7 +105,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   async function handleDeleteCollection(name: string) {
     try {
       await deleteCollection(name);
-      await refresh();
+      await getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     } catch (err) {
       console.error('[WorkspaceOverview] delete failed:', err);
     }
@@ -126,7 +131,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
       const path = await openFolderPicker();
       if (path) {
         await linkExternalCollection(workspaceId, path);
-        await refresh();
+        await getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
       }
     } catch (err) {
       console.error('[WorkspaceOverview] link external failed:', err);
@@ -336,7 +341,9 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
         workspaceId={workspaceId}
-        onImportComplete={() => void refresh()}
+        onImportComplete={() =>
+          void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all })
+        }
       />
 
       {/* ── RIGHT COLUMN — Documentation ── */}

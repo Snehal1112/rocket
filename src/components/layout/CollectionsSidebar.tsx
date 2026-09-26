@@ -20,19 +20,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tree } from '@/components/ui/tree';
+import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import {
   type CollectionItem,
-  type CollectionSummary,
   createCollection,
   createFolder,
   deleteCollection,
   deleteFolder,
   deleteRequest,
   getCollection,
-  listCollections,
   moveItem,
   onCollectionChanged,
   saveRequest,
@@ -46,7 +45,7 @@ import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
-  const [summaries, setSummaries] = useState<CollectionSummary[]>([]);
+  const { data: summaries = [] } = useCollections();
   const [searchQuery, setSearchQuery] = useState('');
   const filter = searchQuery.toLowerCase().trim();
   const [selectedId, setSelectedId] = useState<string>('');
@@ -71,15 +70,6 @@ export function CollectionsSidebar() {
   const [createError, setCreateError] = useState('');
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-
-  const fetchCollections = useCallback(async () => {
-    try {
-      const results = await listCollections();
-      setSummaries(results);
-    } catch (err) {
-      console.error('[CollectionsSidebar] list error', err);
-    }
-  }, []);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -116,12 +106,12 @@ export function CollectionsSidebar() {
         }
       };
       closeTabs(store.root);
-      void fetchCollections();
+      void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     } catch (err) {
       console.error('Delete failed:', err);
     }
     setDeleteTarget(null);
-  }, [deleteTarget, fetchCollections]);
+  }, [deleteTarget]);
 
   const INVALID_CHARS = /[/\\:*?"<>|]/;
 
@@ -246,19 +236,23 @@ export function CollectionsSidebar() {
   const envDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate debounce for git branch-switch events so that file-watcher
   // collection-changed events fired during checkout cannot reset it and
-  // cause fetchCollections to run before git has finished writing all files.
+  // cause the collections query to refetch before git has finished writing
+  // all files.
   const gitDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    void fetchCollections();
+    void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     let cancelled = false;
     const unlisteners: Array<() => void> = [];
 
     onCollectionChanged((event) => {
       // Branch-switch events are already handled by the git-changed listener.
-      // Skipping here prevents a duplicate fetchCollections call.
+      // Skipping here prevents a duplicate invalidate.
       if (event.type === 'branchSwitched' || event.type === 'branchMerged') return;
       if (listDebounce.current) clearTimeout(listDebounce.current);
-      listDebounce.current = setTimeout(() => void fetchCollections(), 300);
+      listDebounce.current = setTimeout(
+        () => void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all }),
+        300,
+      );
 
       // Reload environments if an environment file changed.
       if (event.path?.includes('/environments/') && event.collection) {
@@ -280,7 +274,7 @@ export function CollectionsSidebar() {
     // Reload when the user switches workspaces — the backend now reads from
     // the new workspace path, so we just need to trigger a fresh fetch.
     listen('workspace-switched', () => {
-      void fetchCollections();
+      void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     }).then((fn) => {
       if (cancelled) fn();
       else unlisteners.push(fn);
@@ -290,11 +284,14 @@ export function CollectionsSidebar() {
     // Uses its own debounce so concurrent file-watcher collection-changed
     // events during checkout do not keep pushing this fetch further out.
     // Also cancels listDebounce so file-watcher events that arrived during
-    // checkout do not trigger a second fetchCollections call.
+    // checkout do not trigger a second invalidate.
     listen('git-changed', () => {
       if (listDebounce.current) clearTimeout(listDebounce.current);
       if (gitDebounce.current) clearTimeout(gitDebounce.current);
-      gitDebounce.current = setTimeout(() => void fetchCollections(), 300);
+      gitDebounce.current = setTimeout(
+        () => void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all }),
+        300,
+      );
     }).then((fn) => {
       if (cancelled) fn();
       else unlisteners.push(fn);
@@ -325,7 +322,7 @@ export function CollectionsSidebar() {
         fn();
       });
     };
-  }, [fetchCollections]);
+  }, []);
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: existing div layout cannot change to nav without layout refactor
@@ -601,7 +598,9 @@ export function CollectionsSidebar() {
           open={importDialogOpen}
           onOpenChange={setImportDialogOpen}
           workspaceId={activeWorkspaceId}
-          onImportComplete={() => void fetchCollections()}
+          onImportComplete={() =>
+            void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all })
+          }
         />
       )}
 
