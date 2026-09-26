@@ -48,6 +48,11 @@ import { isActiveRequest } from './tree-utils';
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
 const EMPTY_IDS: string[] = [];
 
+// Module-level (not per-instance) counter shared by every RequestNode row, so a
+// slow fetch from an earlier click on one row can detect that a later click on
+// any row has superseded it, and skip stealing focus back when it resolves.
+let latestOpenToken = 0;
+
 interface RequestNodeProps {
   uid: string;
   name: string;
@@ -160,6 +165,9 @@ export function RequestNode({
   // Swallows fetch failures so a malformed/deleted file can't crash the sidebar —
   // mirrors the existing error handling in CollectionNode's refreshTree.
   async function openInPane(groupId?: string) {
+    // Claim the latest token before the await below, so a later click (on this row
+    // or any other) can supersede this call while its fetch is still in flight.
+    const token = ++latestOpenToken;
     // An already-open tab only needs focusing, so skip the IPC fetch entirely.
     // openTab recognises the existing tab by id and just activates it.
     const existing = findTabInTree(usePaneStore.getState().root, uid);
@@ -168,7 +176,11 @@ export function RequestNode({
       return;
     }
     try {
-      openTab(await createTab(), groupId);
+      const tab = await createTab();
+      // A newer click superseded this one while we were fetching. Drop the result
+      // silently instead of stealing focus back to a request the user already left.
+      if (token !== latestOpenToken) return;
+      openTab(tab, groupId);
     } catch (err) {
       reportOpenFailure(err);
     }
@@ -191,6 +203,13 @@ export function RequestNode({
   // malformed file) never leaves the user with an empty split pane — split only happens
   // once we know we have a tab to put in it.
   async function openInSplit(direction: 'horizontal' | 'vertical') {
+    // An already-open tab only needs focusing. Splitting first would leave the new
+    // pane empty, since openTab re-activates the tab in its existing pane regardless.
+    const existing = findTabInTree(usePaneStore.getState().root, uid);
+    if (existing) {
+      openTab(existing.tab);
+      return;
+    }
     try {
       const tab = await createTab();
       // Read panes fresh after the await, since they may have changed during the fetch.
