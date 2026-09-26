@@ -6,6 +6,21 @@ import * as tauriApi from '@/lib/tauri-api';
 import { createDeferred } from '@/test/deferred';
 import type { DiffState } from '@/types/pane-types';
 
+// vi.hoisted is required here (rather than plain top-level consts) because
+// DiffViewer is imported statically above and itself imports
+// monaco-js-worker-lifecycle; ES module imports execute before ordinary
+// top-level statements, so a plain `const acquireJsWorker = vi.fn()` would
+// still be in its temporal dead zone when the mock factory runs.
+// (Same pattern as MonacoWrapper.test.tsx.)
+const { acquireJsWorker, releaseJsWorker } = vi.hoisted(() => ({
+  acquireJsWorker: vi.fn(),
+  releaseJsWorker: vi.fn(),
+}));
+vi.mock('@/components/editor/monaco-js-worker-lifecycle', () => ({
+  acquireJsWorker,
+  releaseJsWorker,
+}));
+
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
   return { ...actual, gitDiff: vi.fn(), gitDiffStaged: vi.fn() };
@@ -118,5 +133,37 @@ describe('DiffViewer toggle resilience', () => {
     deferred.reject(new Error('diff unavailable'));
     expect(await screen.findByText(/diff unavailable/)).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Working' })).not.toBeDisabled();
+  });
+});
+
+describe('DiffViewer JS worker lifecycle', () => {
+  beforeEach(() => {
+    acquireJsWorker.mockClear();
+    releaseJsWorker.mockClear();
+  });
+
+  it('acquires the JS worker for a .js file and releases on unmount', () => {
+    const { unmount } = render(
+      <DiffViewer diffState={{ ...diffState, filePath: 'src/index.js' }} />,
+    );
+    expect(acquireJsWorker).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(releaseJsWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('acquires the JS worker for a .ts file and releases on unmount', () => {
+    const { unmount } = render(
+      <DiffViewer diffState={{ ...diffState, filePath: 'src/index.ts' }} />,
+    );
+    expect(acquireJsWorker).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(releaseJsWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not acquire the JS worker for a non-JS file', () => {
+    render(<DiffViewer diffState={{ ...diffState, filePath: 'package.json' }} />);
+    expect(acquireJsWorker).not.toHaveBeenCalled();
   });
 });

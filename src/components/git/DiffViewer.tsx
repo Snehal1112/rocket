@@ -2,6 +2,7 @@ import '@/components/editor/monaco-setup';
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { acquireJsWorker, releaseJsWorker } from '@/components/editor/monaco-js-worker-lifecycle';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
 import type { DiffState } from '@/types/pane-types';
@@ -102,6 +103,17 @@ export function DiffViewer({
   // Visual mode is only available for .yml collection files.
   const canShowVisual = diffState.filePath.endsWith('.yml');
   const language = getLanguage(diffState.filePath);
+
+  // Acquire/release the shared Monaco JS/TS worker ref count so it tears
+  // down once no JS/TS editor (this diff, MonacoWrapper, etc.) is visible.
+  // Keyed on `language` since `diffState` can change while this component
+  // stays mounted (e.g. staged/working toggle on a different file type).
+  useEffect(() => {
+    const isJsLike = language === 'javascript' || language === 'typescript';
+    if (!isJsLike) return;
+    acquireJsWorker();
+    return () => releaseJsWorker();
+  }, [language]);
 
   // A wholly added, deleted, or untracked file has nothing on one side of the
   // diff. Side-by-side rendering then wastes half the view on Monaco's empty-
