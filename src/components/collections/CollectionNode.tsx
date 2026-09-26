@@ -37,7 +37,12 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
-import { getCollection, onCollectionChanged, renameCollection, saveRequest } from '@/lib/tauri-api';
+import {
+  getCollectionSummaries,
+  onCollectionChanged,
+  renameCollection,
+  saveRequest,
+} from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
@@ -139,7 +144,7 @@ export function CollectionNode({
   }, [collectionRoot, loadContracts, newLoadContracts]);
 
   const refreshTree = useCallback(() => {
-    getCollection(summary.name)
+    getCollectionSummaries(summary.name)
       .then(setCollection)
       .catch((err) => console.error('[CollectionNode] fetch error', err));
   }, [summary.name]);

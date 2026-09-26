@@ -14,7 +14,7 @@ vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
   return {
     ...actual,
-    getCollection: vi.fn(),
+    getCollectionSummaries: vi.fn(),
     // biome-ignore lint/suspicious/noEmptyBlockStatements: unlisten stub.
     onCollectionChanged: vi.fn().mockResolvedValue(() => {}),
   };
@@ -53,7 +53,7 @@ function renderNode() {
 
 describe('CollectionNode git-changed refresh', () => {
   beforeEach(() => {
-    vi.mocked(tauriApi.getCollection).mockResolvedValue(emptyCollection);
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue(emptyCollection);
     // Force this node open via the pane store's "active collection" effect —
     // simpler and more reliable in a test than driving the tree's own
     // expand/collapse click handling.
@@ -64,9 +64,9 @@ describe('CollectionNode git-changed refresh', () => {
     renderNode();
 
     await waitFor(() => {
-      expect(tauriApi.getCollection).toHaveBeenCalledWith(summary.name);
+      expect(tauriApi.getCollectionSummaries).toHaveBeenCalledWith(summary.name);
     });
-    const callsBeforeGitChanged = vi.mocked(tauriApi.getCollection).mock.calls.length;
+    const callsBeforeGitChanged = vi.mocked(tauriApi.getCollectionSummaries).mock.calls.length;
 
     const { listen } = await import('@tauri-apps/api/event');
     const gitChangedHandler = vi
@@ -85,7 +85,7 @@ describe('CollectionNode git-changed refresh', () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(tauriApi.getCollection).mock.calls.length).toBeGreaterThan(
+      expect(vi.mocked(tauriApi.getCollectionSummaries).mock.calls.length).toBeGreaterThan(
         callsBeforeGitChanged,
       );
     });
@@ -127,7 +127,9 @@ describe('CollectionNode summary item rendering', () => {
   };
 
   beforeEach(() => {
-    vi.mocked(tauriApi.getCollection).mockResolvedValue(collectionWithSummaryAndOpaqueItems);
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue(
+      collectionWithSummaryAndOpaqueItems,
+    );
     usePaneStore.setState({ activeCollection: summary.name });
   });
 

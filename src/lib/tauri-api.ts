@@ -612,6 +612,9 @@ export const listCollections = () => invoke<CollectionSummary[]>('list_collectio
 
 export const getCollection = (name: string) => invoke<Collection>('get_collection', { name });
 
+export const getCollectionSummaries = (name: string) =>
+  invoke<Collection>('get_collection_summaries', { name });
+
 export const getRequest = (collection: string, path: string) =>
   invoke<Request>('get_request', { collection, path });
 
