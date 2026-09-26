@@ -19,6 +19,8 @@ mod variables;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod schema_shape_tests;
 
 pub struct FsCollectionRepo {
     pub(super) base_dir: PathBuf,
