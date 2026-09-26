@@ -9,6 +9,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
   ContextMenu,
@@ -33,7 +34,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
-import { collectLeafGroupIds, mapApiRequestToState } from '@/lib/pane-utils';
+import { collectLeafGroupIds, findTabInTree, mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { getRequest, renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -159,11 +160,25 @@ export function RequestNode({
   // Swallows fetch failures so a malformed/deleted file can't crash the sidebar —
   // mirrors the existing error handling in CollectionNode's refreshTree.
   async function openInPane(groupId?: string) {
+    // An already-open tab only needs focusing, so skip the IPC fetch entirely.
+    // openTab recognises the existing tab by id and just activates it.
+    const existing = findTabInTree(usePaneStore.getState().root, uid);
+    if (existing) {
+      openTab(existing.tab, groupId);
+      return;
+    }
     try {
       openTab(await createTab(), groupId);
     } catch (err) {
-      console.error('[RequestNode] Failed to load request:', err);
+      reportOpenFailure(err);
     }
+  }
+
+  // Logs a failed on-demand fetch and tells the user which request could not open.
+  // Tauri rejects with a plain string, so non-Error values are stringified as-is.
+  function reportOpenFailure(err: unknown) {
+    console.error('[RequestNode] Failed to load request:', err);
+    toast.error(`Could not open "${name}": ${err instanceof Error ? err.message : String(err)}`);
   }
 
   function handleClick() {
@@ -178,14 +193,16 @@ export function RequestNode({
   async function openInSplit(direction: 'horizontal' | 'vertical') {
     try {
       const tab = await createTab();
-      const allCurrentIds = collectLeafGroupIds(root);
-      splitGroup(activeGroupId, direction);
+      // Read panes fresh after the await, since they may have changed during the fetch.
+      const current = usePaneStore.getState();
+      const allCurrentIds = collectLeafGroupIds(current.root);
+      splitGroup(current.activeGroupId, direction);
       const newRoot = usePaneStore.getState().root;
       const newIds = collectLeafGroupIds(newRoot);
       const newGroupId = newIds.find((id) => !allCurrentIds.includes(id));
       if (newGroupId) openTab(tab, newGroupId);
     } catch (err) {
-      console.error('[RequestNode] Failed to load request:', err);
+      reportOpenFailure(err);
     }
   }
 
