@@ -1522,6 +1522,33 @@ fn get_summaries_skips_non_http_items_without_error() {
 }
 
 #[test]
+fn get_summaries_skips_http_file_missing_method_instead_of_misreading_it() {
+    // Mirrors build_folder_tree_skips_http_file_missing_method_instead_of_misreading_it
+    // for the lightweight summary loader. OcItem is untagged and OcFolder needs only
+    // `info`, so a broken HTTP file (missing the required `http.method` field) matches
+    // OcItem::Folder in the fallback probe. That must still be treated as genuine
+    // corruption in load_request_summary, not as a recognised non-HTTP item, so it does
+    // not surface as a phantom summary or folder in the sidebar tree.
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/broken.yml"),
+        "info:\n  name: Broken\n  type: http\nhttp:\n  url: https://example.com\n",
+    )
+    .expect("write broken.yml");
+    let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
+    repo.save_request("my-api", "good.yml", &req)
+        .expect("save request");
+
+    let col = repo.get_summaries("my-api").expect("get_summaries");
+    assert_eq!(col.root.items.len(), 1, "{:?}", col.root.items);
+    assert!(matches!(
+        &col.root.items[0],
+        rocket_collection::CollectionItem::Summary(s) if s.name == "Good"
+    ));
+}
+
+#[test]
 fn websocket_settings_preserved_in_opaque_item() {
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();

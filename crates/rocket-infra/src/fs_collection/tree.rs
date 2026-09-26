@@ -64,7 +64,11 @@ pub(super) fn build_folder_tree_summaries(current: &Path) -> DomainResult<Folder
     build_tree(
         current,
         &mut |path, entry_name| match load_request_summary(path, entry_name) {
-            Ok(summary) => Ok(Some(CollectionItem::Summary(summary))),
+            Ok(Some(summary)) => Ok(Some(CollectionItem::Summary(summary))),
+            Ok(None) => {
+                tracing::debug!(path = %path.display(), "skipping non-HTTP item in summary load");
+                Ok(None)
+            }
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file in summary load");
                 Ok(None)
@@ -200,9 +204,14 @@ where
 }
 
 /// Parse only the uid/name/method/url fields from a request file for sidebar display.
-/// Non-HTTP protocol files (e.g. a GraphQL .yml that passes is_request_file) will fail
-/// here and be skipped by the caller's warn path.
-fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<RequestSummary> {
+/// Non-HTTP protocol files (e.g. a GraphQL, gRPC, WebSocket, or ScriptFile .yml that
+/// passes `is_request_file`) are recognised via the untagged `OcItem` probe, just like
+/// `load_yaml_item`, and return `Ok(None)` so the caller can skip them silently (at
+/// debug level) instead of reporting them as corrupt. A file that matches only
+/// `OcItem::Folder` is a broken request, not a recognised non-HTTP item — a folder is a
+/// directory and never a single file — so, like `load_yaml_item`, it is reported as
+/// genuine corruption alongside anything that matches no `OcItem` variant at all.
+fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<RequestSummary>> {
     let content = fs::read_to_string(path)?;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -222,25 +231,36 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<RequestSu
             method: String,
             url: String,
         }
-        let min: MinReq = serde_yaml::from_str(&content)
-            .map_err(|e| DomainError::Internal(format!("Failed to parse request summary: {e}")))?;
-        Ok(RequestSummary {
-            uid: min.uid.unwrap_or_default(),
-            name: min.info.name,
-            method: min.http.method,
-            url: min.http.url,
-            file_name: Some(entry_name.to_string()),
-        })
+        let min_err = match serde_yaml::from_str::<MinReq>(&content) {
+            Ok(min) => {
+                return Ok(Some(RequestSummary {
+                    uid: min.uid.unwrap_or_default(),
+                    name: min.info.name,
+                    method: min.http.method,
+                    url: min.http.url,
+                    file_name: Some(entry_name.to_string()),
+                }))
+            }
+            Err(e) => e,
+        };
+        match serde_yaml::from_str::<OcItem>(&content) {
+            Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
+                format!("Failed to parse request summary: {min_err}"),
+            )),
+            Ok(
+                OcItem::GraphQL(_) | OcItem::Grpc(_) | OcItem::WebSocket(_) | OcItem::ScriptFile(_),
+            ) => Ok(None),
+        }
     } else {
         // Legacy JSON: full Request deserialization then extract fields.
         let req: rocket_collection::Request = serde_json::from_str(&content)
             .map_err(|e| DomainError::Internal(format!("Failed to parse legacy request: {e}")))?;
-        Ok(RequestSummary {
+        Ok(Some(RequestSummary {
             uid: req.uid,
             name: req.name,
             method: req.method.to_string(),
             url: req.url,
             file_name: Some(entry_name.to_string()),
-        })
+        }))
     }
 }
