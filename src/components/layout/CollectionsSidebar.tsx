@@ -51,6 +51,13 @@ export function CollectionsSidebar() {
   const [selectedId, setSelectedId] = useState<string>('');
 
   const [view, setView] = useState<'collections' | 'history'>('collections');
+  // Tracks whether the History tab has ever been activated, so HistoryPanel's
+  // initial fetch/render is deferred until the user actually opens it — once
+  // opened, it stays mounted for the rest of the session.
+  const [historyEverViewed, setHistoryEverViewed] = useState(false);
+  useEffect(() => {
+    if (view === 'history') setHistoryEverViewed(true);
+  }, [view]);
 
   const collectionsTabRef = useRef<HTMLButtonElement>(null);
   const historyTabRef = useRef<HTMLButtonElement>(null);
@@ -589,7 +596,7 @@ export function CollectionsSidebar() {
           aria-labelledby='tab-history'
           className={cn('flex-1 overflow-hidden', view !== 'history' && 'hidden')}
         >
-          <HistoryPanel />
+          {(view === 'history' || historyEverViewed) && <HistoryPanel />}
         </div>
       </div>
 
