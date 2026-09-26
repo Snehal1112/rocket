@@ -2,10 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const setCompilerOptions = vi.fn();
 const getCompilerOptions = vi.fn(() => ({ target: 99 }));
+const setTsCompilerOptions = vi.fn();
+const getTsCompilerOptions = vi.fn(() => ({ target: 42 }));
 
 vi.mock('monaco-editor', () => ({
   typescript: {
     javascriptDefaults: { setCompilerOptions, getCompilerOptions },
+    typescriptDefaults: {
+      setCompilerOptions: setTsCompilerOptions,
+      getCompilerOptions: getTsCompilerOptions,
+    },
   },
 }));
 
@@ -16,6 +22,7 @@ describe('monaco-js-worker-lifecycle', () => {
     // of depending on prior tests leaving it balanced back to 0.
     vi.resetModules();
     setCompilerOptions.mockClear();
+    setTsCompilerOptions.mockClear();
   });
 
   afterEach(() => {
@@ -40,6 +47,8 @@ describe('monaco-js-worker-lifecycle', () => {
 
     expect(setCompilerOptions).toHaveBeenCalledTimes(1);
     expect(setCompilerOptions).toHaveBeenCalledWith({ target: 99 });
+    expect(setTsCompilerOptions).toHaveBeenCalledTimes(1);
+    expect(setTsCompilerOptions).toHaveBeenCalledWith({ target: 42 });
   });
 
   it('is a no-op to release when the count is already at zero', async () => {

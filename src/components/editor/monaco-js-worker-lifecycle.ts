@@ -1,14 +1,20 @@
 import * as monacoNs from 'monaco-editor';
 
-// Monaco's TypeScript/JavaScript language-service worker (a full TS compiler
-// running in a Web Worker, ~50-60MB once loaded) has no idle-stop timer and
-// is shared process-wide across every JS/TS-language editor in the app
-// (ScriptsTab, ResponseBodyViewer, DiffViewer). It only tears down via a
-// private WorkerManager method with no public entry point — the only public
-// way to trigger that teardown is to re-apply the current compiler options,
-// which fires `onDidChange` and forces the worker to restart lazily on next
-// use. This module ref-counts every mounted JS/TS editor across the app so
-// the worker is released only once none of them are visible.
+// Monaco's TypeScript and JavaScript language services each run their own
+// worker (a full TS compiler running in a Web Worker, ~50-60MB once loaded
+// per worker) backed by a separate WorkerManager instance —
+// `monacoNs.typescript.javascriptDefaults` for JS and
+// `monacoNs.typescript.typescriptDefaults` for TS. Neither has an idle-stop
+// timer, and both are shared process-wide across every JS/TS-language editor
+// in the app (ScriptsTab, ResponseBodyViewer, DiffViewer). Each only tears
+// down via a private WorkerManager method with no public entry point — the
+// only public way to trigger that teardown is to re-apply the current
+// compiler options on its `*Defaults` object, which fires `onDidChange` and
+// forces that worker to restart lazily on next use. This module ref-counts
+// every mounted JS/TS editor across the app (regardless of which language it
+// is) so both workers are released together once none of them are visible.
+// Re-applying compiler options for a language whose worker was never created
+// is a safe, cheap no-op — Monaco's worker creation is lazy.
 let jsWorkerRefCount = 0;
 
 // Teardown must not run synchronously inside releaseJsWorker(). Re-applying
@@ -39,8 +45,11 @@ export function releaseJsWorker(): void {
     setTimeout(() => {
       teardownScheduled = false;
       if (jsWorkerRefCount === 0) {
-        const defaults = monacoNs.typescript.javascriptDefaults;
-        defaults.setCompilerOptions(defaults.getCompilerOptions());
+        const jsDefaults = monacoNs.typescript.javascriptDefaults;
+        jsDefaults.setCompilerOptions(jsDefaults.getCompilerOptions());
+
+        const tsDefaults = monacoNs.typescript.typescriptDefaults;
+        tsDefaults.setCompilerOptions(tsDefaults.getCompilerOptions());
       }
     }, 0);
   }
