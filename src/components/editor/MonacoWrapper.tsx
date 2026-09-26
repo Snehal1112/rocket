@@ -7,6 +7,7 @@ import { parseTextTokens } from '@/lib/text-variables';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { EditorSkeleton } from './EditorSkeleton';
 import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
+import { acquireJsWorker, releaseJsWorker } from './monaco-js-worker-lifecycle';
 import type { ScriptPhase } from './rok-types';
 import { ROK_TYPE_DEFS_FOR_PHASE } from './rok-types';
 import { useMonacoTheme } from './useMonacoTheme';
@@ -92,6 +93,18 @@ export function MonacoWrapper({
   useEffect(() => {
     ensureDecorationStyles();
   }, []);
+
+  // Acquire the shared Monaco TS/JS worker while a JS/TS editor is mounted
+  // and release it on unmount or language change. Must stay a passive effect
+  // (not useLayoutEffect): releaseJsWorker() defers its teardown so it runs
+  // after @monaco-editor/react's own model-disposal cleanup, which also runs
+  // in a passive effect.
+  useEffect(() => {
+    const isJsLike = resolvedLanguage === 'javascript' || resolvedLanguage === 'typescript';
+    if (!isJsLike) return;
+    acquireJsWorker();
+    return () => releaseJsWorker();
+  }, [resolvedLanguage]);
 
   // Phase changes need fresh type stubs because rok/req/res availability differs per phase.
   useEffect(() => {
