@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { isGitSshTrustFailure, parseGitNetworkError } from '../tauri-api';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 describe('parseGitNetworkError', () => {
   it('parses an SSH unknown-host failure', () => {
@@ -55,5 +58,46 @@ describe('parseGitNetworkError', () => {
       code: 'generic',
       message: 'Invalid TLS certificate',
     });
+  });
+});
+
+describe('listContracts in-flight dedup', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it('coalesces two concurrent calls for the same collectionRoot into one invoke', async () => {
+    vi.mocked(invoke).mockResolvedValue([{ id: 'c1' }]);
+    const { listContracts } = await import('../tauri-api');
+
+    const [a, b] = await Promise.all([
+      listContracts('/ws/collections/my-api'),
+      listContracts('/ws/collections/my-api'),
+    ]);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(a).toEqual(b);
+  });
+
+  it('issues a fresh invoke for a different collectionRoot', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    const { listContracts } = await import('../tauri-api');
+
+    await Promise.all([listContracts('/ws/collections/a'), listContracts('/ws/collections/b')]);
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the cached promise after a rejection, so the next call retries', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('boom'));
+    const { listContracts } = await import('../tauri-api');
+
+    await expect(listContracts('/ws/collections/my-api')).rejects.toThrow('boom');
+
+    vi.mocked(invoke).mockResolvedValueOnce([{ id: 'c1' }]);
+    const result = await listContracts('/ws/collections/my-api');
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([{ id: 'c1' }]);
   });
 });

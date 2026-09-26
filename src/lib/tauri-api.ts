@@ -1476,8 +1476,18 @@ export const attachContract = (collectionRoot: string, input: AttachContractInpu
 export const updateContract = (collectionRoot: string, input: UpdateContractInput) =>
   invoke<Contract>('update_contract', { collectionRoot, input });
 
-export const listContracts = (collectionRoot: string) =>
-  invoke<Contract[]>('list_contracts', { collectionRoot });
+const inFlightContractsRequests = new Map<string, Promise<Contract[]>>();
+
+export const listContracts = (collectionRoot: string): Promise<Contract[]> => {
+  const cached = inFlightContractsRequests.get(collectionRoot);
+  if (cached) return cached;
+
+  const request = invoke<Contract[]>('list_contracts', { collectionRoot }).finally(() => {
+    inFlightContractsRequests.delete(collectionRoot);
+  });
+  inFlightContractsRequests.set(collectionRoot, request);
+  return request;
+};
 
 export const getContract = (collectionRoot: string, contractId: string) =>
   invoke<Contract>('get_contract', { collectionRoot, contractId });
