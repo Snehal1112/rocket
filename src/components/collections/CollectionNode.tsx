@@ -318,7 +318,8 @@ export function CollectionNode({
     filter
       ? rawItems.filter(
           (item) =>
-            item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
+            (item.type !== 'request' && item.type !== 'summary') ||
+            item.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : rawItems,
   );
@@ -570,7 +571,7 @@ export function CollectionNode({
                 />
               );
             }
-            if (item.type === 'summary' || item.type === 'opaque') return null;
+            if (item.type === 'opaque') return null;
             return (
               <RequestNode
                 key={`request-${item.uid}`}

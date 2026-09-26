@@ -159,7 +159,8 @@ export function FolderNode({
     filter
       ? items.filter(
           (item) =>
-            item.type !== 'request' || item.name.toLowerCase().includes(filter.toLowerCase()),
+            (item.type !== 'request' && item.type !== 'summary') ||
+            item.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : items,
   );
@@ -342,7 +343,7 @@ export function FolderNode({
                 />
               );
             }
-            if (item.type === 'summary' || item.type === 'opaque') return null;
+            if (item.type === 'opaque') return null;
             const fileName = item.fileName ?? item.name;
             const requestPath = `${basePath}/${fileName}`;
             return (

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { CollectionSummary } from '@/lib/tauri-api';
@@ -89,5 +89,80 @@ describe('CollectionNode git-changed refresh', () => {
         callsBeforeGitChanged,
       );
     });
+  });
+});
+
+describe('CollectionNode summary item rendering', () => {
+  const collectionWithSummaryAndOpaqueItems: tauriApi.Collection = {
+    name: 'my-collection',
+    root: {
+      uid: 'root',
+      name: 'my-collection',
+      items: [
+        {
+          type: 'summary',
+          uid: 'req-1',
+          name: 'List Orders',
+          method: 'GET',
+          url: 'https://api.example.com/orders',
+          fileName: 'list-orders.yml',
+        },
+        {
+          type: 'summary',
+          uid: 'req-2',
+          name: 'Create Invoice',
+          method: 'GET',
+          url: 'https://api.example.com/invoices',
+          fileName: 'create-invoice.yml',
+        },
+        {
+          type: 'opaque',
+          protocol: 'graphql',
+          name: 'GraphQL Query',
+          raw: {},
+        },
+      ],
+    },
+    settings: { headers: [], variables: [], sandboxMode: 'safe' },
+  };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.getCollection).mockResolvedValue(collectionWithSummaryAndOpaqueItems);
+    usePaneStore.setState({ activeCollection: summary.name });
+  });
+
+  it('renders a summary item as a request row and skips the opaque item', async () => {
+    renderNode();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('GraphQL Query')).not.toBeInTheDocument();
+  });
+
+  it('filters out a non-matching summary item by name, like it does for request items', async () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <CollectionNode
+          summary={summary}
+          filter='orders'
+          summaries={[summary]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    // Positive control: prove rendering actually happened and settled before
+    // asserting on absence — otherwise the absence check below could pass
+    // trivially because nothing has rendered yet.
+    await waitFor(() => {
+      expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('request-item-GET-Create Invoice')).not.toBeInTheDocument();
   });
 });
