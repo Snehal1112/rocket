@@ -105,9 +105,66 @@ pub struct OcOAuth2ResourceOwner {
     pub password: String,
 }
 
-/// OAuth2 PKCE configuration. Reuses the domain type, which already has the spec
-/// shape (`disabled`, `method`) and also reads the legacy `enabled` field.
-pub type OcOAuth2PKCE = OAuth2PKCE;
+/// OAuth2 PKCE configuration as persisted on disk: spec shape (`disabled`, `method`),
+/// with the legacy `enabled` field still accepted on read. This is a dedicated type,
+/// not an alias to the domain `OAuth2PKCE`, so a future domain-only change to that
+/// type can't silently change the on-disk shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", from = "OcOAuth2PKCEWire")]
+pub struct OcOAuth2PKCE {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl OcOAuth2PKCE {
+    /// Returns true unless PKCE was explicitly disabled. Mirrors the domain
+    /// type's helper of the same name.
+    pub fn is_enabled(&self) -> bool {
+        !self.disabled.unwrap_or(false)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OcOAuth2PKCEWire {
+    #[serde(default)]
+    disabled: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    method: Option<String>,
+}
+
+impl From<OcOAuth2PKCEWire> for OcOAuth2PKCE {
+    fn from(w: OcOAuth2PKCEWire) -> Self {
+        // `disabled` wins when both are present, because it is the spec field.
+        let is_disabled = w.disabled.or(w.enabled.map(|on| !on)).unwrap_or(false);
+        OcOAuth2PKCE {
+            disabled: is_disabled.then_some(true),
+            method: w.method,
+        }
+    }
+}
+
+impl From<OAuth2PKCE> for OcOAuth2PKCE {
+    fn from(p: OAuth2PKCE) -> Self {
+        OcOAuth2PKCE {
+            disabled: p.disabled,
+            method: p.method,
+        }
+    }
+}
+
+impl From<OcOAuth2PKCE> for OAuth2PKCE {
+    fn from(p: OcOAuth2PKCE) -> Self {
+        OAuth2PKCE {
+            disabled: p.disabled,
+            method: p.method,
+        }
+    }
+}
 
 /// A value that can be a boolean or the string "inherit".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

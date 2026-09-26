@@ -16,7 +16,7 @@ This is the authoritative spec reference for RocketAPI infrastructure decisions.
 - **Backend**: Tauri v2 + Rust, DDD architecture, Cargo workspace
 - **Frontend**: React 18, TypeScript, Vite, Zustand, shadcn/ui, Lucide React, Monaco Editor, CodeMirror 6
 - **File format**: `.yml` only — **never `.json`** for any on-disk storage
-- **Spec compliance**: OpenCollection v1.0.0 (`https://schema.opencollection.com/json/draft-07/opencollection/v1.0.0`)
+- **Spec compliance**: OpenCollection v1.0.0 (`https://schema.opencollection.com/opencollection/v1.0.0.json`)
 
 The codebase has these Rust crates:
 `rocket-shared`, `rocket-collection`, `rocket-environment`, `rocket-http`,
@@ -44,7 +44,7 @@ config:
     protoFiles: [{ type: "file", path: string }]
     importPaths: [{ path: string, disabled?: bool }]
   proxy:
-    enabled: bool
+    disabled: bool
     inherit: bool
     config:
       protocol: string
@@ -169,6 +169,9 @@ runtime:
   variables: [Variable]
   scripts: Scripts
   auth: Auth
+settings:
+  timeout: number | "inherit"
+  keepAliveInterval: number | "inherit"
 docs: string
 ```
 
@@ -412,7 +415,7 @@ auth:
   credentials: { clientId, clientSecret, placement }
   scope, state
   pkce:
-    enabled: bool
+    disabled: bool
     method: "S256" | "plain"
   additionalParameters:
     authorizationRequest: [...]
@@ -613,6 +616,6 @@ clientCertificates   importPaths           protoFiles
 
 ## 12. Spec Source
 
-- Schema: `https://schema.opencollection.com/json/draft-07/opencollection/v1.0.0`
+- Schema: `https://schema.opencollection.com/opencollection/v1.0.0.json`
 - Spec: `https://spec.opencollection.com/`
 - OpenCollection is a Bruno-built, community-supported project. It defines **how to use** an API (workflows, scripts, environments), complementing OpenAPI which defines **what** the API is.

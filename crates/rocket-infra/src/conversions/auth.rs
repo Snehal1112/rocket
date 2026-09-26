@@ -1,7 +1,7 @@
 use crate::oc::*;
 use rocket_shared::oauth2::{
-    OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2ResourceOwner,
-    OAuth2Settings, OAuth2TokenConfig,
+    OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE,
+    OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
 };
 use rocket_shared::types::Auth;
 
@@ -112,7 +112,7 @@ impl From<OcAuthTyped> for Auth {
                         credentials: creds,
                         scope,
                         state,
-                        pkce,
+                        pkce: pkce.map(OAuth2PKCE::from),
                         additional_parameters,
                         token_config,
                         settings,
@@ -340,7 +340,7 @@ fn domain_oauth2_to_oc_fields(
             None,
             scope,
             state,
-            pkce,
+            pkce.map(OcOAuth2PKCE::from),
             additional_parameters,
             token_config,
             settings,
