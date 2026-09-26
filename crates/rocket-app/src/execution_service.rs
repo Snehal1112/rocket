@@ -1580,9 +1580,10 @@ fn body_mode_from_content_type(headers: &[Header]) -> rocket_shared::types::Body
 }
 
 /// Use the collection auth when the request carries no auth of its own.
+/// A request set to inherit also takes the collection auth, since inherit is not sent on the wire.
 fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
     match request_auth {
-        Auth::None => collection_auth.unwrap_or(Auth::None),
+        Auth::None | Auth::Inherit => collection_auth.unwrap_or(Auth::None),
         explicit => explicit,
     }
 }
@@ -2852,6 +2853,26 @@ mod tests {
     #[test]
     fn merge_auth_none_collection_returns_none() {
         let result = merge_auth(Auth::None, None);
+        assert_eq!(result, Auth::None);
+    }
+
+    #[test]
+    fn merge_auth_uses_collection_when_request_is_inherit() {
+        let collection_auth = Some(Auth::Bearer {
+            token: "col_tok".into(),
+        });
+        let result = merge_auth(Auth::Inherit, collection_auth);
+        assert_eq!(
+            result,
+            Auth::Bearer {
+                token: "col_tok".into()
+            }
+        );
+    }
+
+    #[test]
+    fn merge_auth_inherit_without_collection_auth_returns_none() {
+        let result = merge_auth(Auth::Inherit, None);
         assert_eq!(result, Auth::None);
     }
 
