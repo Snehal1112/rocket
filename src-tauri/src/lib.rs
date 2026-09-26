@@ -391,9 +391,18 @@ pub fn run() {
                 // are pure overhead.
                 #[cfg(target_os = "linux")]
                 win.with_webview(|webview| {
-                    use webkit2gtk::{CacheModel, WebContextExt, WebViewExt};
+                    use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt};
                     if let Some(ctx) = webview.inner().context() {
                         ctx.set_cache_model(CacheModel::DocumentViewer);
+                    }
+                    // Rocket has no camera or microphone features, draws its
+                    // charts as SVG, and never navigates between documents.
+                    // Media capture, WebGL and the back/forward page cache
+                    // are therefore unused overhead.
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_enable_media_stream(false);
+                        settings.set_enable_webgl(false);
+                        settings.set_enable_page_cache(false);
                     }
                 })
                 .ok();
