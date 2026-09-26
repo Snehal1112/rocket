@@ -1,6 +1,8 @@
 //! Auth and request-settings structs for the OpenCollection YAML format.
 
-use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2Settings, OAuth2TokenConfig};
+use rocket_shared::oauth2::{
+    OAuth2AdditionalParameters, OAuth2PKCE, OAuth2Settings, OAuth2TokenConfig,
+};
 use serde::{Deserialize, Serialize};
 
 /// OpenCollection Auth — discriminated by `type` field. String "inherit" for inheritance.
@@ -101,13 +103,9 @@ pub struct OcOAuth2ResourceOwner {
     pub password: String,
 }
 
-/// OAuth2 PKCE configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OcOAuth2PKCE {
-    pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub method: Option<String>,
-}
+/// OAuth2 PKCE configuration. Reuses the domain type, which already has the spec
+/// shape (`disabled`, `method`) and also reads the legacy `enabled` field.
+pub type OcOAuth2PKCE = OAuth2PKCE;
 
 /// A value that can be a boolean or the string "inherit".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

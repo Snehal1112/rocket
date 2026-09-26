@@ -917,7 +917,7 @@ fn oauth2_auth_code_full_roundtrip() {
         scope: Some("openid email".into()),
         state: Some("random-state".into()),
         pkce: Some(OAuth2PKCE {
-            enabled: true,
+            disabled: None,
             method: Some("S256".into()),
         }),
         additional_parameters: Some(OAuth2AdditionalParameters {

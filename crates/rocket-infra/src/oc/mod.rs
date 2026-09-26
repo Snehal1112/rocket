@@ -250,6 +250,51 @@ mod tests {
     }
 
     #[test]
+    fn oc_auth_oauth2_pkce_spec_and_legacy_fields() {
+        let cases = [
+            ("type: oauth2\nflow: authorization_code\npkce:\n  disabled: true\n  method: S256", false),
+            ("type: oauth2\nflow: authorization_code\npkce:\n  enabled: false", false),
+            ("type: oauth2\nflow: authorization_code\npkce:\n  enabled: true", true),
+            ("type: oauth2\nflow: authorization_code\npkce:\n  method: S256", true),
+        ];
+        for (yaml, expect_enabled) in cases {
+            let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
+            let OcAuth::Typed(typed) = auth else {
+                panic!("expected typed auth for {yaml}")
+            };
+            let OcAuthTyped::OAuth2 { pkce, .. } = *typed else {
+                panic!("expected OAuth2 for {yaml}")
+            };
+            assert_eq!(pkce.expect("pkce").is_enabled(), expect_enabled, "{yaml}");
+        }
+    }
+
+    #[test]
+    fn oc_auth_oauth2_pkce_writes_disabled_not_enabled() {
+        let auth = OcAuth::Typed(Box::new(OcAuthTyped::OAuth2 {
+            flow: "authorization_code".into(),
+            access_token_url: None,
+            refresh_token_url: None,
+            authorization_url: None,
+            callback_url: None,
+            credentials: None,
+            resource_owner: None,
+            scope: None,
+            state: None,
+            pkce: Some(OcOAuth2PKCE {
+                disabled: Some(true),
+                method: Some("S256".into()),
+            }),
+            additional_parameters: Box::new(None),
+            token_config: Box::new(None),
+            settings: None,
+        }));
+        let yaml = serde_yaml::to_string(&auth).unwrap();
+        assert!(yaml.contains("disabled: true"), "{yaml}");
+        assert!(!yaml.contains("enabled:"), "{yaml}");
+    }
+
+    #[test]
     fn inheritable_boolean_value() {
         let yaml = "true";
         let v: InheritableBoolean = serde_yaml::from_str(yaml).unwrap();

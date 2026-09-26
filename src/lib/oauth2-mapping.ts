@@ -15,7 +15,7 @@ interface ApiOAuth2ResourceOwner {
 }
 
 interface ApiOAuth2PKCE {
-  enabled: boolean;
+  disabled?: boolean | null;
   method?: string | null;
 }
 
@@ -91,7 +91,7 @@ export function oauth2StateToApiAuth(state: OAuth2State): ApiOAuth2Auth {
 
   const pkce: ApiOAuth2PKCE | null =
     state.grantType === 'authorization_code'
-      ? { enabled: state.usePkce, method: state.usePkce ? 'S256' : null }
+      ? { disabled: state.usePkce ? null : true, method: state.usePkce ? 'S256' : null }
       : null;
 
   const additionalParameters: ApiOAuth2AdditionalParameters | null = (() => {
@@ -214,7 +214,7 @@ export function apiAuthToOAuth2State(auth: ApiOAuth2Auth): OAuth2State {
       | 'body',
     scope: auth.scope ?? '',
     state: auth.state ?? '',
-    usePkce: auth.pkce?.enabled ?? true,
+    usePkce: !(auth.pkce?.disabled ?? false),
     useSystemBrowser: settings?.useSystemBrowser ?? false,
     tokenSource: (tc?.source === 'idToken' ? 'idToken' : 'accessToken') as
       | 'accessToken'

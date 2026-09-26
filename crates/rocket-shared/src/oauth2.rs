@@ -16,12 +16,46 @@ pub struct OAuth2ResourceOwner {
     pub password: String,
 }
 
+/// PKCE settings. The spec field is `disabled`, and an absent value means PKCE is on.
+/// Data written before 2026-09 used `enabled`, so deserialization accepts both
+/// and normalizes to `disabled`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "OAuth2PKCEWire")]
 pub struct OAuth2PKCE {
-    pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub method: Option<String>, // "S256" | "plain"
+}
+
+impl OAuth2PKCE {
+    /// Returns true unless PKCE was explicitly disabled.
+    pub fn is_enabled(&self) -> bool {
+        !self.disabled.unwrap_or(false)
+    }
+}
+
+/// Input shape that accepts both the spec field (`disabled`) and the legacy field (`enabled`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OAuth2PKCEWire {
+    #[serde(default)]
+    disabled: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    method: Option<String>,
+}
+
+impl From<OAuth2PKCEWire> for OAuth2PKCE {
+    fn from(w: OAuth2PKCEWire) -> Self {
+        // `disabled` wins when both are present, because it is the spec field.
+        let is_disabled = w.disabled.or(w.enabled.map(|on| !on)).unwrap_or(false);
+        OAuth2PKCE {
+            disabled: is_disabled.then_some(true),
+            method: w.method,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -239,12 +273,56 @@ mod tests {
     #[test]
     fn pkce_config() {
         let pkce = OAuth2PKCE {
-            enabled: true,
+            disabled: None,
             method: Some("S256".into()),
         };
         let json = serde_json::to_string(&pkce).unwrap();
+        assert!(!json.contains("enabled"), "legacy field must never be written: {json}");
         let back: OAuth2PKCE = serde_json::from_str(&json).unwrap();
         assert_eq!(pkce, back);
+        assert!(back.is_enabled());
+    }
+
+    #[test]
+    fn pkce_disabled_serializes_as_spec_field() {
+        let pkce = OAuth2PKCE {
+            disabled: Some(true),
+            method: None,
+        };
+        assert_eq!(serde_json::to_string(&pkce).unwrap(), r#"{"disabled":true}"#);
+        assert!(!pkce.is_enabled());
+    }
+
+    #[test]
+    fn pkce_reads_legacy_enabled_field() {
+        let on: OAuth2PKCE = serde_json::from_str(r#"{"enabled":true,"method":"S256"}"#).unwrap();
+        assert_eq!(
+            on,
+            OAuth2PKCE {
+                disabled: None,
+                method: Some("S256".into())
+            }
+        );
+        let off: OAuth2PKCE = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+        assert_eq!(
+            off,
+            OAuth2PKCE {
+                disabled: Some(true),
+                method: None
+            }
+        );
+    }
+
+    #[test]
+    fn pkce_disabled_wins_over_legacy_enabled() {
+        let p: OAuth2PKCE = serde_json::from_str(r#"{"disabled":false,"enabled":false}"#).unwrap();
+        assert!(p.is_enabled());
+    }
+
+    #[test]
+    fn pkce_normalises_disabled_false_to_absent() {
+        let p: OAuth2PKCE = serde_json::from_str(r#"{"disabled":false}"#).unwrap();
+        assert_eq!(p.disabled, None);
     }
 
     #[test]
@@ -390,7 +468,7 @@ mod tests {
             scope: Some("openid".into()),
             state: Some("random-state".into()),
             pkce: Some(OAuth2PKCE {
-                enabled: true,
+                disabled: None,
                 method: Some("S256".into()),
             }),
             additional_parameters: None,

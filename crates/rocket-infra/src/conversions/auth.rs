@@ -1,7 +1,7 @@
 use crate::oc::*;
 use rocket_shared::oauth2::{
-    OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE,
-    OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
+    OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2ResourceOwner,
+    OAuth2Settings, OAuth2TokenConfig,
 };
 use rocket_shared::types::Auth;
 
@@ -112,7 +112,7 @@ impl From<OcAuthTyped> for Auth {
                         credentials: creds,
                         scope,
                         state,
-                        pkce: pkce.map(oc_pkce_to_domain),
+                        pkce,
                         additional_parameters,
                         token_config,
                         settings,
@@ -146,13 +146,6 @@ fn oc_ro_to_domain(r: OcOAuth2ResourceOwner) -> OAuth2ResourceOwner {
     OAuth2ResourceOwner {
         username: r.username,
         password: r.password,
-    }
-}
-
-fn oc_pkce_to_domain(p: OcOAuth2PKCE) -> OAuth2PKCE {
-    OAuth2PKCE {
-        enabled: p.enabled,
-        method: p.method,
     }
 }
 
@@ -337,7 +330,7 @@ fn domain_oauth2_to_oc_fields(
             None,
             scope,
             state,
-            pkce.map(domain_pkce_to_oc),
+            pkce,
             additional_parameters,
             token_config,
             settings,
@@ -385,12 +378,5 @@ fn domain_ro_to_oc(r: OAuth2ResourceOwner) -> OcOAuth2ResourceOwner {
     OcOAuth2ResourceOwner {
         username: r.username,
         password: r.password,
-    }
-}
-
-fn domain_pkce_to_oc(p: OAuth2PKCE) -> OcOAuth2PKCE {
-    OcOAuth2PKCE {
-        enabled: p.enabled,
-        method: p.method,
     }
 }
