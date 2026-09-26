@@ -23,38 +23,50 @@
 
 - **File-based collections** stored as OpenCollection YAML on disk
 - **Multi-workspace** support with embedded and external collections
-- **Full git integration** with staging, commits, branches, push/pull, stash, and conflict resolution
-- **Environment variables** with `{{variable}}` template syntax and secret masking
+- **Import from Postman or Bruno** — collections, environments, and zipped exports, with optional new-workspace creation
+- **Full git integration** — staging, commits, branches, merges, push/pull/fetch (force-with-lease), stash, remote management, SSH key discovery, and real per-file conflict resolution, all via `libgit2` (no shell-outs)
+- **Collection Runner** — execute a whole collection or folder sequentially with live streamed progress and a results summary
+- **Scripting & testing** — pre-request/post-response/test scripts in Monaco with real TypeScript IntelliSense for the request/response API, a snippet sidebar, plus a visual no-code assertions builder for scriptless checks
+- **Environment variables** with `{{variable}}` template syntax, secret masking, and optional external secret-manager integration for pulling values from a vault
 - **Multi-tab editor** with split panes, auto-save, and keyboard-driven navigation
-- **Authentication** support for Basic, Bearer, API Key, OAuth 2.0, and AWS SigV4
-- **Load testing** with concurrent request execution and percentile latency stats
+- **Authentication** — Basic, Bearer, API Key, OAuth 2.0 (client credentials grant), and AWS SigV4
+- **Load testing** — phase-based (ramp-up/hold/ramp-down) or fixed-concurrency/RPS runs, a live dashboard with latency/throughput/error-rate/concurrency charts and percentile stats, and export to HTML/CSV/JSON/PDF
 - **Monaco editor** for JSON/XML/text bodies with syntax highlighting and theme sync
-- **Contract Lock** — attach SLA/API contracts to collections or folders, track changes, and preview PDFs natively
+- **Contract Lock** — attach SLA/API contracts to collections or folders, track drift with a changelog, preview PDFs natively, and export contracts as OpenAPI YAML
+- **Security & compliance audit trail** — tamper-evident, hash-chained event log with configurable compliance profiles and evidence export
 - **Light/dark theme** with system preference detection
 - **Cross-platform** native desktop app (Linux, macOS, Windows)
 - **No cloud, no account** — your data stays on your machine
 
-## Why Rocket is Fast
+## Benchmarked vs. Bruno and Postman
 
-Most API clients are Electron apps — they ship a full copy of Chromium and a Node.js runtime with every install. That baseline alone costs 300–500 MB of RAM before you open a single request.
+Most API clients are Electron apps — they ship a full copy of Chromium with every install. Rocket uses the OS WebView instead (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows), so there's no bundled browser engine to ship.
 
-Rocket is built differently:
+These aren't estimates — they're measured, head-to-head, on the same machine (Rocket 0.9.2 release build vs. locally installed Bruno 4.2.0 and Postman 11.71.7):
 
-| | Rocket | Postman / Insomnia |
-|---|---|---|
-| **Runtime** | Rust + OS WebView | Electron (Chromium + Node.js) |
-| **Idle memory** | No bundled Chromium | ~400–600 MB RSS |
-| **Install size** | ~16 MB | ~300–500 MB |
-| **Background sync** | None | Cloud sync, telemetry, updater |
-| **Startup** | Fast (native binary) | Slow (JS engine warmup) |
+| | Rocket | Bruno | Postman |
+|---|---|---|---|
+| **Runtime** | Rust + OS WebView | Electron | Electron |
+| **Install size** | **38.9 MB** (.deb) | 527 MB | 653 MB |
+| **Startup → window visible** | **6.38 s** | 7.86 s | **0.99 s** |
+| **Idle memory (PSS)** | ~332 MB (3 processes) | **169.6 MB** (6 processes) | 507.7 MB (8 processes) |
 
-**How:**
+**Methodology:** idle memory is PSS (proportional set size, via `/proc/<pid>/smaps_rollup`) summed across each app's full process tree, measured ~15s after its window became viewable with no requests sent — PSS avoids double-counting memory pages shared between an app's own forked processes, which a naive RSS sum would inflate. Startup is wall-clock time from process launch to the app's main window reaching `IsViewable` with real dimensions (verified via `xdotool`/`xwininfo`, filtering out transient placeholder windows some of these apps create first) — not a "process launched" proxy. Rocket's figure was measured in an isolated `systemd-run --user --scope` (`memory.high=max`, confirmed 0 bytes swapped), flat across 20s–180s of idle time; Bruno and Postman were measured back-to-back on the same machine without that isolation, so their numbers carry a smaller version of the caveat below.
 
-- **Tauri uses the OS WebView** — WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows. No bundled Chromium.
+**Takeaways:**
+
+- **Rocket still ships far smaller** (~14–17x) than either Electron competitor, and starts faster than Bruno.
+- **A previous "171 MB" figure for Rocket was a measurement artifact, not a real number.** All development on this machine runs inside a shared cgroup (`memory.high` capped at 2 GB) alongside the tooling doing the measuring, concurrent builds, and other processes. Under that pressure the kernel reclaims and swaps out pages, and PSS only counts resident memory — so a reading taken mid-pressure can come in dramatically lower than the app's real footprint. We proved this directly: the *same running Rocket instance*, with zero user activity, read 292 MB and then 159 MB twenty seconds later purely from swap, with no code change involved. Measured outside that cgroup, Rocket is flat at **~332 MB** from 20 seconds to 180 seconds of idle time, with zero bytes swapped — this is the real number. The original 171 MB figure was a single sample taken immediately after a release build, inside the same pressured cgroup; an empty, freshly-installed Rocket with no data at all already needs more memory than that once actually measured cleanly.
+- **The `WebKitCacheModel::DocumentViewer` and `WEBKIT_DISABLE_COMPOSITING_MODE=1` fixes are still real and still necessary** — with compositing left on, WebKitWebProcess's real footprint (measured the same clean way) balloons to **3.5 GB**, not something visible under cgroup pressure. Keep both.
+- **One small, real optimization did come out of this investigation:** the sidebar kept its History panel permanently mounted (rendering up to 200 entries, ~2,000 DOM nodes — 77% of the app's entire DOM) even when the user was looking at the Collections tab. It's now deferred until the History tab is actually opened.
+- **Startup times used real window-visibility detection** (via `xdotool`/`xwininfo`, filtering decoy placeholder windows) rather than whatever weaker proxy an earlier pass used — this moved Bruno's number up (2.05s → 7.86s) and Postman's down (4.09s → 0.99s) versus previously-published figures, which says more about the old methodology's inconsistency across apps than about either app changing.
+- **Postman required signing in** (via an external OAuth browser flow) during an earlier measurement pass, spawning a separate Brave browser process that was excluded from its footprint; the run reported here reached its idle state without triggering that flow. Bruno and Rocket both work fully offline with no account.
+
+**How Rocket stays small:**
+
+- **Tauri uses the OS WebView** — WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows — instead of bundling Chromium.
 - **Rust backend** — no garbage collector, no JVM, no Node runtime. Services are small structs wired via trait objects and dropped when not needed.
 - **No cloud, no polling** — there is no background process phoning home. Every I/O operation is triggered by user action, against local files only.
-
-> Rocket uses the OS WebView (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows) rather than bundling Chromium. Total memory depends on what WebKit processes the OS already has running.
 
 ## Quick Start
 
@@ -123,7 +135,7 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
 | `rocket-git` | Git operations via libgit2 |
 | `rocket-app` | Orchestration services |
 | `rocket-infra` | Filesystem implementations |
-| `rocket-import` | Bruno collection importer |
+| `rocket-import` | Bruno & Postman collection importer |
 | `src-tauri` | Tauri commands and app initialization |
 
 ### Frontend Stack
@@ -186,14 +198,20 @@ Contracts are stored as YAML files under `.rocket/contracts/` inside the collect
 ```
 src/                           # React frontend
   components/
+    audit/                     # Security/compliance audit log UI
     collections/               # Collection sidebar tree
-    editor/                    # Monaco wrapper and themes
-    contract/                  # Contract Lock UI
+    contract/                  # Contract status badge
+    contracts/                 # Contract Lock workflow (list, diff, changelog, export)
+    editor/                    # Monaco wrapper, themes, scripting IntelliSense
+    environments/              # Environment editor + external secret-manager binding
     git/                       # Git UI panel
+    history/                   # Request history panel
+    import/                    # Postman/Bruno import dialog
     layout/                    # App shell, sidebar, status bar
     panes/                     # Tab system and editor groups
-    request/                   # Request editor, params, auth, body
+    request/                   # Request editor, params, auth, body, scripts, runner, load testing
     response/                  # Response viewer
+    settings/                  # External secret-manager connections
     workspace/                 # Workspace overview, environments
   hooks/                       # Custom React hooks
   lib/                         # Utilities, Tauri API bridge
@@ -209,6 +227,7 @@ crates/                        # Rust backend
   rocket-git/
   rocket-app/
   rocket-infra/
+  rocket-import/                # Bruno & Postman importers
 src-tauri/                     # Tauri shell
   src/
     commands/                  # IPC command handlers
@@ -227,6 +246,8 @@ docs/
 | `Cmd/Ctrl+Tab` | Next tab |
 | `Cmd/Ctrl+Shift+Tab` | Previous tab |
 | `Cmd/Ctrl+1-9` | Jump to tab by index |
+| `Cmd/Ctrl+L` | Open Contracts tab |
+| `Cmd/Ctrl+Shift+G` | Open git panel |
 
 ## Documentation
 
