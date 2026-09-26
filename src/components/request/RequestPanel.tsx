@@ -1,7 +1,8 @@
 import { Braces, Code2, Loader2, Send, ShieldCheck, Tag, X, Zap } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SingleLineEditor } from '@/components/editor';
+import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 import { RocketLiftOff } from '@/components/illustrations';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
@@ -79,8 +80,11 @@ import { RequestVariablesPanel } from './RequestVariablesPanel';
 import { RocketTabBar } from './RocketTabBar';
 import { SaveRequestButton } from './SaveRequestButton';
 import { SaveToCollectionDialog } from './SaveToCollectionDialog';
-import { ScriptsTab } from './ScriptsTab';
 import { VarsTab } from './VarsTab';
+
+// Lazy-load the Scripts tab so its heavy dependency chain (snippet sidebar,
+// rok/chai type definitions) is only loaded once a user opens the tab.
+const ScriptsTab = lazy(() => import('./ScriptsTab').then((m) => ({ default: m.ScriptsTab })));
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
@@ -1051,14 +1055,16 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       ) : null}
       {activeSection === 'scripts' ? (
         <div className='flex-1 min-h-0 overflow-hidden'>
-          <ScriptsTab
-            preRequestScript={request.preRequestScript ?? ''}
-            postResponseScript={request.postResponseScript ?? ''}
-            testsScript={request.testsScript ?? ''}
-            onChangePreRequest={(v) => updateRequest(tab.id, { preRequestScript: v })}
-            onChangePostResponse={(v) => updateRequest(tab.id, { postResponseScript: v })}
-            onChangeTests={(v) => updateRequest(tab.id, { testsScript: v })}
-          />
+          <Suspense fallback={<EditorSkeleton />}>
+            <ScriptsTab
+              preRequestScript={request.preRequestScript ?? ''}
+              postResponseScript={request.postResponseScript ?? ''}
+              testsScript={request.testsScript ?? ''}
+              onChangePreRequest={(v) => updateRequest(tab.id, { preRequestScript: v })}
+              onChangePostResponse={(v) => updateRequest(tab.id, { postResponseScript: v })}
+              onChangeTests={(v) => updateRequest(tab.id, { testsScript: v })}
+            />
+          </Suspense>
         </div>
       ) : null}
       {activeSection === 'assertions' ? (
