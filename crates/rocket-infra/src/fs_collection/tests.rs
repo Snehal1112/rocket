@@ -87,6 +87,31 @@ fn delete_request() {
 }
 
 #[test]
+fn get_request_errors_on_body_malformed_but_summary_parseable_file() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/broken.yml"),
+        "info:\n  name: Broken\n  type: http\nhttp:\n  method: GET\n  url: https://example.com\n  body:\n    type: bogus\n    data: x\n",
+    )
+    .expect("write broken.yml");
+
+    // The lenient summary loader only reads uid/info.name/http.method/http.url,
+    // so this file still appears in get_summaries()...
+    let summaries = repo.get_summaries("my-api").expect("get_summaries");
+    assert_eq!(summaries.root.items.len(), 1);
+
+    // ...but the strict full loader used by get_request rejects the malformed
+    // body.type discriminant instead of panicking. The frontend's on-demand
+    // fetch (RequestNode.createTab) relies on this being a clean error.
+    let result = repo.get_request("my-api", "broken.yml");
+    assert!(
+        result.is_err(),
+        "expected malformed body to error, got {result:?}"
+    );
+}
+
+#[test]
 fn create_and_delete_folder() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();

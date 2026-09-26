@@ -50,6 +50,13 @@ impl CollectionService {
         self.repo.get_summaries(name)
     }
 
+    /// Get the full request at `path`, including body/headers/auth/scripts.
+    /// Used by the frontend to fetch full data on demand for a sidebar item
+    /// that was loaded via `get_summaries`.
+    pub fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+        self.repo.get_request(collection, path)
+    }
+
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         let collection = self.repo.create(name)?;
@@ -681,6 +688,34 @@ mod tests {
             )),
             "expected RequestSaved, got {:?}", *published
         );
+    }
+
+    #[test]
+    fn get_request_returns_the_saved_request() {
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        );
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        svc.save_request("my-api", "users.yml", &request)
+            .expect("save_request");
+
+        let loaded = svc.get_request("my-api", "users.yml").expect("get_request");
+        assert_eq!(loaded.name, "Get Users");
+        assert_eq!(loaded.url, "https://api.example.com/users");
+    }
+
+    #[test]
+    fn get_request_errors_for_missing_request() {
+        let svc = CollectionService::new(
+            Box::new(MockCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        );
+        assert!(svc.get_request("my-api", "ghost.yml").is_err());
     }
 
     #[test]

@@ -337,6 +337,7 @@ pub fn run() {
             commands::collections::list_collections,
             commands::collections::get_collection,
             commands::collections::get_collection_summaries,
+            commands::collections::get_request,
             commands::collections::create_collection,
             commands::collections::delete_collection,
             commands::collections::rename_collection,
