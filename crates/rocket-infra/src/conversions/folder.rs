@@ -4,6 +4,7 @@ use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable, SandboxMode};
 use rocket_shared::types::{Auth, Header};
 
+use super::auth::persisted_oc_auth;
 use super::request::{oc_http_request_to_request, request_to_oc_http_request};
 
 /// Converts one parsed OpenCollection item into a domain tree item.
@@ -207,9 +208,10 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
         })
         .collect();
 
+    let auth = col.settings.auth.and_then(persisted_oc_auth);
     let request = {
         let has_defaults = !col.settings.headers.is_empty()
-            || col.settings.auth.is_some()
+            || auth.is_some()
             || !col.settings.variables.is_empty();
         if has_defaults {
             Some(OcRequestDefaults {
@@ -225,7 +227,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
                     )
                 },
                 metadata: None,
-                auth: col.settings.auth.map(OcAuth::from),
+                auth,
                 variables: if col.settings.variables.is_empty() {
                     None
                 } else {

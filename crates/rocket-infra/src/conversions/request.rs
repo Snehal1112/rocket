@@ -6,6 +6,7 @@ use rocket_shared::action::{
 use rocket_shared::description::Documentation;
 use rocket_shared::types::{Auth, Body, Header, HttpMethod};
 
+use super::auth::persisted_oc_auth;
 use super::param::{merge_params, split_params};
 use super::request_settings::{domain_settings_to_oc, oc_settings_to_domain};
 
@@ -126,11 +127,7 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
             .collect(),
         params,
         body: req.body.clone().map(OcHttpRequestBody::from),
-        auth: if req.auth == Auth::None {
-            None
-        } else {
-            Some(OcAuth::from(req.auth.clone()))
-        },
+        auth: persisted_oc_auth(req.auth.clone()),
     };
 
     let mut scripts = Vec::new();

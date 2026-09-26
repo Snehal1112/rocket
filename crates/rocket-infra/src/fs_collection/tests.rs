@@ -1440,3 +1440,63 @@ fn websocket_settings_preserved_in_opaque_item() {
         ws[0].raw
     );
 }
+
+#[test]
+fn save_settings_omits_none_auth_instead_of_writing_type_none() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let settings = CollectionSettings {
+        auth: Some(rocket_shared::types::Auth::None),
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings).unwrap();
+
+    let content = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
+    assert!(!content.contains("type: none"), "{content}");
+    let raw: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+    assert!(raw.get("request").is_none(), "no empty request block: {content}");
+    assert_eq!(repo.get_settings("my-api").unwrap().auth, None);
+}
+
+#[test]
+fn save_settings_writes_inherit_as_spec_string() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let settings = CollectionSettings {
+        auth: Some(rocket_shared::types::Auth::Inherit),
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings).unwrap();
+
+    let content = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
+    assert!(content.contains("auth: inherit"), "{content}");
+    assert_eq!(
+        repo.get_settings("my-api").unwrap().auth,
+        Some(rocket_shared::types::Auth::Inherit)
+    );
+}
+
+#[test]
+fn legacy_type_none_collection_auth_still_loads() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/opencollection.yml"),
+        "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\nrequest:\n  auth:\n    type: none\n",
+    )
+    .unwrap();
+    assert_eq!(
+        repo.get_settings("my-api").unwrap().auth,
+        Some(rocket_shared::types::Auth::None)
+    );
+}
+
+#[test]
+fn save_request_omits_none_auth() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let req = rocket_collection::Request::new("Ping", HttpMethod::Get, "https://example.com");
+    repo.save_request("my-api", "ping.yml", &req).unwrap();
+    let content = fs::read_to_string(dir.path().join("my-api/ping.yml")).unwrap();
+    assert!(!content.contains("auth"), "{content}");
+}

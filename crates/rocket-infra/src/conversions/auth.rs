@@ -241,6 +241,16 @@ impl From<Auth> for OcAuth {
     }
 }
 
+/// Converts a domain auth into the value written to disk. The spec's `Auth`
+/// has no "none" member, so `Auth::None` is written by leaving the field out.
+/// `OcAuthTyped::None` is still read, for files written before this rule.
+pub fn persisted_oc_auth(auth: Auth) -> Option<OcAuth> {
+    match auth {
+        Auth::None => None,
+        other => Some(OcAuth::from(other)),
+    }
+}
+
 /// Extract all OC OAuth2 fields from a domain OAuth2Flow variant.
 #[allow(clippy::type_complexity)]
 fn domain_oauth2_to_oc_fields(

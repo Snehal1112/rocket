@@ -3,9 +3,12 @@ import { fromPersistedAuth, toPersistedAuth } from '../persisted-auth';
 import type { Auth } from '../tauri-api';
 
 describe('toPersistedAuth', () => {
-  it('maps none and inherit to authType none', () => {
+  it('maps none to authType none (the backend omits it on disk)', () => {
     expect(toPersistedAuth({ authType: 'none' })).toEqual({ authType: 'none' });
-    expect(toPersistedAuth({ authType: 'inherit' })).toEqual({ authType: 'none' });
+  });
+
+  it('keeps inherit as authType inherit instead of collapsing it to none', () => {
+    expect(toPersistedAuth({ authType: 'inherit' })).toEqual({ authType: 'inherit' });
   });
 
   it('maps basic auth', () => {
@@ -212,11 +215,23 @@ describe('fromPersistedAuth', () => {
     const persisted = { authType: 'wsse' } as unknown as Auth;
     expect(fromPersistedAuth(persisted, 'inherit')).toEqual({ authType: 'inherit' });
   });
+
+  it('reads an explicit inherit as inherit even where the fallback is none', () => {
+    expect(fromPersistedAuth({ authType: 'inherit' } as Auth, 'none')).toEqual({
+      authType: 'inherit',
+    });
+  });
+
+  it('keeps mapping none to the caller fallback, so older requests saved without auth still inherit', () => {
+    expect(fromPersistedAuth({ authType: 'none' }, 'inherit')).toEqual({ authType: 'inherit' });
+    expect(fromPersistedAuth({ authType: 'none' }, 'none')).toEqual({ authType: 'none' });
+  });
 });
 
 describe('round-trip: toPersistedAuth(fromPersistedAuth(x)) is stable', () => {
   const cases: Auth[] = [
     { authType: 'none' },
+    { authType: 'inherit' } as Auth,
     { authType: 'basic', username: 'u', password: 'p' },
     { authType: 'bearer', token: 't' },
     { authType: 'api-key', key: 'k', value: 'v', placement: 'header' },

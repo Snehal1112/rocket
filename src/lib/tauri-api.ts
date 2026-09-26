@@ -36,6 +36,7 @@ export interface Body {
 
 export type Auth =
   | { authType: 'none' }
+  | { authType: 'inherit' }
   | { authType: 'basic'; username: string; password: string }
   | { authType: 'bearer'; token: string }
   | { authType: 'api-key'; key: string; value: string; placement: 'header' | 'query' }

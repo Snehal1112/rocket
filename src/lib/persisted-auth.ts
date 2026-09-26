@@ -30,6 +30,8 @@ export function fromPersistedAuth(
   const a = auth as Record<string, unknown>;
   const authType = a.authType as string;
 
+  if (authType === 'inherit') return { authType: 'inherit' };
+
   // Backend only ever emits 'o-auth2' (kebab-case tag), but tolerate a bare
   // 'oauth2' defensively in case of hand-edited YAML or a future importer.
   if (authType === 'o-auth2' || authType === 'oauth2') {
@@ -85,8 +87,9 @@ export function fromPersistedAuth(
 export function toPersistedAuth(auth: AuthState): Auth {
   switch (auth.authType) {
     case 'none':
-    case 'inherit':
       return { authType: 'none' };
+    case 'inherit':
+      return { authType: 'inherit' };
     case 'basic':
       return {
         authType: 'basic',

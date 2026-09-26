@@ -5,7 +5,8 @@ use rocket_collection::{Collection, CollectionSettings, CollectionVariable};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::oc::{OcAuth, OcCollection, OcHttpRequestHeader, OcInfo, OcRequestDefaults, OcVariable};
+use crate::conversions::persisted_oc_auth;
+use crate::oc::{OcCollection, OcHttpRequestHeader, OcInfo, OcRequestDefaults, OcVariable};
 use rocket_collection::generate_uid;
 
 use super::FsCollectionRepo;
@@ -136,9 +137,10 @@ pub(super) fn save_settings(
         }
     };
 
-    // Build OcRequestDefaults from settings.
+    // Build OcRequestDefaults from settings. "No auth" is written by omission.
+    let auth = settings.auth.clone().and_then(persisted_oc_auth);
     let has_defaults =
-        !settings.headers.is_empty() || settings.auth.is_some() || !settings.variables.is_empty();
+        !settings.headers.is_empty() || auth.is_some() || !settings.variables.is_empty();
 
     oc.request = if has_defaults {
         Some(OcRequestDefaults {
@@ -155,7 +157,7 @@ pub(super) fn save_settings(
                 )
             },
             metadata: None,
-            auth: settings.auth.clone().map(OcAuth::from),
+            auth,
             variables: if settings.variables.is_empty() {
                 None
             } else {
