@@ -112,6 +112,30 @@ fn get_request_errors_on_body_malformed_but_summary_parseable_file() {
 }
 
 #[test]
+fn get_request_on_uid_less_file_does_not_rewrite_it() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let file_path = dir.path().join("my-api/no-uid.yml");
+    let original =
+        "info:\n  name: No Uid\n  type: http\nhttp:\n  method: GET\n  url: https://example.com\n";
+    fs::write(&file_path, original).expect("write no-uid.yml");
+
+    // Callers still get a non-empty in-memory uid.
+    let req = repo
+        .get_request("my-api", "no-uid.yml")
+        .expect("get_request");
+    assert!(!req.uid.is_empty(), "expected an in-memory uid");
+
+    // A pure read must not silently rewrite the file on disk.
+    let after = fs::read(&file_path).expect("re-read no-uid.yml");
+    assert_eq!(
+        after,
+        original.as_bytes(),
+        "get_request must not modify the file on disk"
+    );
+}
+
+#[test]
 fn create_and_delete_folder() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();

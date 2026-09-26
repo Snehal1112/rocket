@@ -40,13 +40,10 @@ pub(super) fn get_request(
             req.file_name = file_path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string());
+            // Give a uid-less file an in-memory uid only. This is a pure read, so the
+            // file is not rewritten; the uid is persisted by the next save_request.
             if req.uid.is_empty() {
                 req.uid = generate_uid();
-                // Self-heal: write the generated UID back so the file is valid next time.
-                let oc_with_uid = crate::conversions::request_to_oc_http_request(&req);
-                if let Ok(yaml) = serde_yaml::to_string(&oc_with_uid) {
-                    let _ = crate::atomic_write(&file_path, yaml.as_bytes());
-                }
             }
             return Ok(req);
         }
