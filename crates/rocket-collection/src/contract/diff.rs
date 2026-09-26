@@ -14,6 +14,17 @@ struct DiffContext<'a> {
     author: Option<&'a str>,
 }
 
+/// Returns true when the auth type carries no request-level auth.
+/// Older snapshots recorded "inherit" as "none", so both must be treated alike.
+fn is_no_auth_type(auth_type: &str) -> bool {
+    matches!(auth_type, "none" | "inherit" | "")
+}
+
+/// Compares two snapshot auth types, treating all no-auth spellings as equal.
+fn auth_types_equivalent(old: &str, new: &str) -> bool {
+    old == new || (is_no_auth_type(old) && is_no_auth_type(new))
+}
+
 /// Pure function — no I/O, no side effects.
 /// Returns one `ChangelogEntry` per detected change, each tagged with `is_breaking`
 /// according to the supplied `BreakingChangePolicy`.
@@ -62,8 +73,9 @@ pub fn diff_signature(
         });
     }
 
-    // Auth type change — always breaking
-    if old.auth_type != new.auth_type {
+    // Auth type change — always breaking.
+    // "none" and "inherit" both mean no request-level auth, so they compare equal.
+    if !auth_types_equivalent(&old.auth_type, &new.auth_type) {
         entries.push(ChangelogEntry {
             timestamp: now,
             request_path: path.clone(),
@@ -739,6 +751,37 @@ mod tests {
     fn no_changes_v2_returns_empty() {
         let snap = base_snap_v2();
         assert!(diff_signature(&snap, &snap, &lenient(), None).is_empty());
+    }
+
+    fn no_auth_snap(auth_type: &str) -> RequestSignatureSnapshot {
+        let mut snap = base_snap_v2();
+        snap.auth_type = auth_type.into();
+        snap.auth_detail = String::new();
+        snap
+    }
+
+    #[test]
+    fn auth_type_none_to_inherit_is_not_a_change() {
+        let old = no_auth_snap("none");
+        let new = no_auth_snap("inherit");
+        assert!(diff_signature(&old, &new, &lenient(), None).is_empty());
+    }
+
+    #[test]
+    fn auth_type_inherit_to_none_is_not_a_change() {
+        let old = no_auth_snap("inherit");
+        let new = no_auth_snap("none");
+        assert!(diff_signature(&old, &new, &lenient(), None).is_empty());
+    }
+
+    #[test]
+    fn auth_type_inherit_to_bearer_is_still_a_change() {
+        let old = no_auth_snap("inherit");
+        let new = no_auth_snap("bearer");
+        let changes = diff_signature(&old, &new, &lenient(), None);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "auth_type");
+        assert!(changes[0].is_breaking);
     }
 
     #[test]
