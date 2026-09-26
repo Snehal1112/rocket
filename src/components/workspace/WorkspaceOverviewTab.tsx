@@ -1,5 +1,5 @@
 import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { RocketBook } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
@@ -21,7 +21,6 @@ import {
   createCollection,
   deleteCollection,
   linkExternalCollection,
-  onCollectionChanged,
   openFolderPicker,
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -40,39 +39,17 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const openTab = usePaneStore((s) => s.openTab);
   const { data: globalEnvironments = [] } = useGlobalEnvironments();
 
+  // useCollections() reads the same shared query cache CollectionsSidebar
+  // reads and invalidates. Freshness on collection-changed / git-changed
+  // events is CollectionsSidebar's responsibility (it's always mounted in
+  // the app shell); this component does not need its own listener because
+  // invalidating the shared key anywhere refetches it for every consumer.
   const { data: summaries = [] } = useCollections();
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [docContent, setDocContent] = useState<string>(workspace?.description ?? '');
-
-  // Debounce onCollectionChanged the same way CollectionsSidebar's own
-  // listDebounce does. Both components now read the same query key, so an
-  // un-debounced listener here would invalidate immediately on every
-  // filesystem-watcher event regardless of the sidebar's own 300ms timer —
-  // defeating the point of debouncing at all.
-  const listDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Refetch collections when workspaceId changes or a collection-changed event fires.
-  // Global environments are fetched automatically by useGlobalEnvironments().
-  // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId triggers backend context change
-  useEffect(() => {
-    let cancelled = false;
-    const unlistenPromise = onCollectionChanged(() => {
-      if (cancelled) return;
-      if (listDebounce.current) clearTimeout(listDebounce.current);
-      listDebounce.current = setTimeout(() => {
-        void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
-      }, 300);
-    });
-
-    return () => {
-      cancelled = true;
-      if (listDebounce.current) clearTimeout(listDebounce.current);
-      unlistenPromise.then((fn) => fn());
-    };
-  }, [workspaceId]);
 
   useEffect(() => {
     setDocContent(workspace?.description ?? '');
