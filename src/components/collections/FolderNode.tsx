@@ -155,14 +155,18 @@ export function FolderNode({
     }
   };
 
+  // Opaque items (GraphQL/gRPC/WebSocket) never render — see the `item.type === 'opaque'`
+  // guard in the render loop below — so they must never keep an otherwise-empty folder
+  // visible under an active filter.
+  const filterableItems = items.filter((item) => item.type !== 'opaque');
   const filteredItems = sortItemsFoldersFirst(
     filter
-      ? items.filter(
+      ? filterableItems.filter(
           (item) =>
             (item.type !== 'request' && item.type !== 'summary') ||
             item.name.toLowerCase().includes(filter.toLowerCase()),
         )
-      : items,
+      : filterableItems,
   );
 
   if (filter && filteredItems.length === 0) return null;

@@ -93,6 +93,9 @@ describe('CollectionNode git-changed refresh', () => {
 });
 
 describe('CollectionNode summary item rendering', () => {
+  // The real get_collection_summaries backend excludes type: 'opaque' items (non-HTTP
+  // protocols like GraphQL are skipped entirely). This fixture exercises the frontend's
+  // defensive render guard as a forward-looking safety net, not current end-to-end behavior.
   const collectionWithSummaryAndOpaqueItems: tauriApi.Collection = {
     name: 'my-collection',
     root: {
@@ -166,5 +169,77 @@ describe('CollectionNode summary item rendering', () => {
       expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('request-item-GET-Create Invoice')).not.toBeInTheDocument();
+  });
+});
+
+describe('CollectionNode filter hides folders that only contain opaque items', () => {
+  // A folder containing only an opaque item (no folders, no other requests) must be
+  // treated as empty by the filter — opaque items never render (see the
+  // `item.type === 'opaque'` guard in both CollectionNode's and FolderNode's render
+  // loops), so keeping them in `filteredItems` would incorrectly keep an otherwise-empty
+  // folder visible under a non-matching filter.
+  const collectionWithFolderContainingOnlyOpaqueItem: tauriApi.Collection = {
+    name: 'my-collection',
+    root: {
+      uid: 'root',
+      name: 'my-collection',
+      items: [
+        {
+          type: 'folder',
+          uid: 'folder-1',
+          name: 'GraphQL Stuff',
+          items: [
+            {
+              type: 'opaque',
+              protocol: 'graphql',
+              name: 'GraphQL Query',
+              raw: {},
+            },
+          ],
+        },
+        {
+          type: 'summary',
+          uid: 'req-1',
+          name: 'List Orders',
+          method: 'GET',
+          url: 'https://api.example.com/orders',
+          fileName: 'list-orders.yml',
+        },
+      ],
+    },
+    settings: { headers: [], variables: [], sandboxMode: 'safe' },
+  };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue(
+      collectionWithFolderContainingOnlyOpaqueItem,
+    );
+    usePaneStore.setState({ activeCollection: summary.name });
+  });
+
+  it('hides a folder whose only content is a non-matching opaque item under an active filter', async () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <CollectionNode
+          summary={summary}
+          filter='orders'
+          summaries={[summary]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    // Positive control: prove rendering actually happened and settled before
+    // asserting on absence — otherwise the absence check below could pass
+    // trivially because nothing has rendered yet.
+    await waitFor(() => {
+      expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('GraphQL Stuff')).not.toBeInTheDocument();
   });
 });

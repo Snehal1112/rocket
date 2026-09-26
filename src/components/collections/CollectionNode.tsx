@@ -319,14 +319,18 @@ export function CollectionNode({
   };
 
   const rawItems = collection?.root.items ?? [];
+  // Opaque items (GraphQL/gRPC/WebSocket) never render — see the `item.type === 'opaque'`
+  // guard in the render loop below — so they must never keep an otherwise-empty
+  // container visible under an active filter.
+  const filterableItems = rawItems.filter((item) => item.type !== 'opaque');
   const filteredItems = sortItemsFoldersFirst(
     filter
-      ? rawItems.filter(
+      ? filterableItems.filter(
           (item) =>
             (item.type !== 'request' && item.type !== 'summary') ||
             item.name.toLowerCase().includes(filter.toLowerCase()),
         )
-      : rawItems,
+      : filterableItems,
   );
 
   return (
