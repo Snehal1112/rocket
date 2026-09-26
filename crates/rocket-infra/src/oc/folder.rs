@@ -24,9 +24,6 @@ pub struct OcFolderInfo {
     pub seq: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
-    /// Folder-level request defaults (variables, auth, headers).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request: Option<OcRequestDefaults>,
 }
 
 impl Default for OcFolderInfo {
@@ -38,7 +35,6 @@ impl Default for OcFolderInfo {
             folder_type: Some("folder".into()),
             seq: None,
             tags: Vec::new(),
-            request: None,
         }
     }
 }

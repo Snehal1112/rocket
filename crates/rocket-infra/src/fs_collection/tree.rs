@@ -5,8 +5,9 @@ use rocket_collection::{CollectionItem, Folder, RequestSummary};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::conversions::oc_http_request_to_request;
-use crate::oc::{OcFolderInfo, OcHttpRequest};
+use crate::oc::OcHttpRequest;
 
+use super::folder_file::parse_folder_yml;
 use super::paths::{is_request_file, read_uid_from_yaml};
 
 pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
@@ -69,13 +70,13 @@ where
     let folder_yml = current.join("folder.yml");
     if folder_yml.exists() {
         if let Ok(content) = fs::read_to_string(&folder_yml) {
-            if let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
-                if let Some(ref uid) = info.uid {
+            if let Ok(oc_folder) = parse_folder_yml(&content) {
+                if let Some(ref uid) = oc_folder.info.uid {
                     if !uid.is_empty() {
                         folder.uid = uid.clone();
                     }
                 }
-                folder.name = info.name;
+                folder.name = oc_folder.info.name;
             }
         }
         if folder.uid.is_empty() {

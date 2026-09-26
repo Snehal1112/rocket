@@ -5,8 +5,9 @@ use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::oc::{OcCollection, OcFolderInfo};
+use crate::oc::OcCollection;
 
+use super::folder_file::{parse_folder_yml, write_folder_yml};
 use super::FsCollectionRepo;
 
 /// Read UID from YAML metadata (opencollection.yml or folder.yml).
@@ -39,18 +40,16 @@ pub(super) fn read_uid_from_yaml(dir: &Path) -> String {
     let folder_path = dir.join("folder.yml");
     if folder_path.exists() {
         if let Ok(content) = fs::read_to_string(&folder_path) {
-            if let Ok(mut info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
-                if let Some(ref uid) = info.uid {
+            if let Ok(mut oc_folder) = parse_folder_yml(&content) {
+                if let Some(ref uid) = oc_folder.info.uid {
                     if !uid.is_empty() {
                         return uid.clone();
                     }
                 }
                 let uid = read_legacy_uid(dir);
-                info.uid = Some(uid.clone());
-                if let Ok(yaml) = serde_yaml::to_string(&info) {
-                    if atomic_write(&folder_path, yaml.as_bytes()).is_ok() {
-                        cleanup_legacy_uid(dir);
-                    }
+                oc_folder.info.uid = Some(uid.clone());
+                if write_folder_yml(&folder_path, &oc_folder).is_ok() {
+                    cleanup_legacy_uid(dir);
                 }
                 return uid;
             }

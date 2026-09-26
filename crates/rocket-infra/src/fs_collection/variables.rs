@@ -4,8 +4,11 @@ use rocket_collection::{Collection, CollectionVariable};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::oc::{OcFolderInfo, OcHttpRequest, OcHttpRequestRuntime, OcRequestDefaults, OcVariable};
+use crate::oc::{
+    OcFolder, OcFolderInfo, OcHttpRequest, OcHttpRequestRuntime, OcRequestDefaults, OcVariable,
+};
 
+use super::folder_file::{parse_folder_yml, read_folder_yml, write_folder_yml};
 use super::paths::resolve_request_path;
 use super::FsCollectionRepo;
 
@@ -48,10 +51,10 @@ pub(super) fn get_folder_chain_variables(
         let Ok(content) = fs::read_to_string(&folder_yml) else {
             continue;
         };
-        let Ok(info) = serde_yaml::from_str::<OcFolderInfo>(&content) else {
+        let Ok(oc_folder) = parse_folder_yml(&content) else {
             continue;
         };
-        let Some(req) = info.request else {
+        let Some(req) = oc_folder.request else {
             continue;
         };
         let Some(vars) = req.variables else {
@@ -80,16 +83,19 @@ pub(super) fn save_folder_variables(
         repo.validate_path(&collection_dir, std::path::Path::new(folder_path))?
     };
     let folder_yml_path = folder_dir.join("folder.yml");
-    let mut info: OcFolderInfo = if folder_yml_path.exists() {
-        let content = fs::read_to_string(&folder_yml_path)?;
-        serde_yaml::from_str::<OcFolderInfo>(&content)
-            .map_err(|e| DomainError::Internal(format!("Failed to parse folder.yml: {e}")))?
+    let mut oc_folder = if folder_yml_path.exists() {
+        read_folder_yml(&folder_yml_path)?
     } else {
-        OcFolderInfo::default()
+        OcFolder {
+            info: OcFolderInfo::default(),
+            items: None,
+            request: None,
+            docs: None,
+        }
     };
     let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
-    let req_defaults = info.request.take().unwrap_or_default();
-    info.request = Some(OcRequestDefaults {
+    let req_defaults = oc_folder.request.take().unwrap_or_default();
+    oc_folder.request = Some(OcRequestDefaults {
         variables: if oc_vars.is_empty() {
             None
         } else {
@@ -97,9 +103,7 @@ pub(super) fn save_folder_variables(
         },
         ..req_defaults
     });
-    let yaml = serde_yaml::to_string(&info)
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-    atomic_write(&folder_yml_path, yaml.as_bytes())?;
+    write_folder_yml(&folder_yml_path, &oc_folder)?;
     Ok(())
 }
 
@@ -119,10 +123,8 @@ pub(super) fn get_folder_variables(
     if !folder_yml.exists() {
         return Ok(vec![]);
     }
-    let content = fs::read_to_string(&folder_yml)?;
-    let info: OcFolderInfo = serde_yaml::from_str(&content)
-        .map_err(|e| DomainError::Internal(format!("Failed to parse folder.yml: {e}")))?;
-    let vars = info
+    let oc_folder = read_folder_yml(&folder_yml)?;
+    let vars = oc_folder
         .request
         .and_then(|r| r.variables)
         .unwrap_or_default()

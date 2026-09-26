@@ -9,6 +9,7 @@ use rocket_collection::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
+pub(crate) mod folder_file;
 mod folders;
 mod paths;
 mod requests;

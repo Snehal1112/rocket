@@ -50,7 +50,7 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **Path validation.** Every file path accepted by `FsCollectionRepo` is validated with `validate_path()`, which canonicalizes the nearest existing ancestor and checks that the resolved path stays inside the collection base directory. Path traversal attempts return `DomainError::InvalidInput`.
 
-**On-disk format.** Collections are directories. Each directory contains `opencollection.yml` (metadata + settings), `folder.yml` (subfolder metadata), request files as `.yml`, and `_order.yml` (explicit item ordering). Legacy `.json` request files and the old `.uid` sidecar are auto-migrated on first access.
+**On-disk format.** Collections are directories. Each directory contains `opencollection.yml` (metadata + settings), `folder.yml` (spec `Folder` shape: `info`/`request`/`docs`, read and written only through `fs_collection/folder_file.rs`, which also reads the legacy bare-`FolderInfo` shape), request files as `.yml`, and `_order.yml` (explicit item ordering). Legacy `.json` request files and the old `.uid` sidecar are auto-migrated on first access.
 
 **UID storage.** UIDs are stored inside `opencollection.yml` and `folder.yml`. The legacy `.uid` file is read as a fallback during migration and then deleted.
 

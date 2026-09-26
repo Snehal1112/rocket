@@ -8,9 +8,10 @@ use crate::atomic_write;
 use crate::migration::{
     detect_format, is_migration_interrupted, migrate_collection, CollectionFormat,
 };
-use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
+use crate::oc::{OcCollection, OcInfo};
 use rocket_collection::generate_uid;
 
+use super::folder_file::{new_folder, parse_folder_yml, write_folder_yml};
 use super::paths::{count_request_files, read_uid_from_yaml, reject_symlink};
 use super::tree::{build_folder_tree, build_folder_tree_summaries};
 use super::FsCollectionRepo;
@@ -192,18 +193,10 @@ pub(super) fn create_folder(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
-    let info = OcFolderInfo {
-        name: folder_name,
-        uid: Some(generate_uid()),
-        description: None,
-        folder_type: Some("folder".into()),
-        seq: None,
-        tags: Vec::new(),
-        request: None,
-    };
-    let yaml = serde_yaml::to_string(&info)
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize folder.yml: {e}")))?;
-    atomic_write(&dir_path.join("folder.yml"), yaml.as_bytes())?;
+    write_folder_yml(
+        &dir_path.join("folder.yml"),
+        &new_folder(folder_name, generate_uid()),
+    )?;
 
     Ok(())
 }
@@ -275,12 +268,9 @@ pub(super) fn move_item(
         let folder_yml = dst.join("folder.yml");
         if folder_yml.exists() {
             let content = fs::read_to_string(&folder_yml)?;
-            if let Ok(mut info) = serde_yaml::from_str::<OcFolderInfo>(&content) {
-                info.name = new_name;
-                let yaml = serde_yaml::to_string(&info).map_err(|e| {
-                    DomainError::Internal(format!("Failed to serialize folder.yml: {e}"))
-                })?;
-                atomic_write(&folder_yml, yaml.as_bytes())?;
+            if let Ok(mut oc_folder) = parse_folder_yml(&content) {
+                oc_folder.info.name = new_name;
+                write_folder_yml(&folder_yml, &oc_folder)?;
             }
         }
     }

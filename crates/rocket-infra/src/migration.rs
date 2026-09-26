@@ -7,7 +7,8 @@ use rocket_collection::generate_uid;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::conversions::request_to_oc_http_request;
-use crate::oc::{OcCollection, OcFolderInfo, OcInfo};
+use crate::fs_collection::folder_file::{new_folder, write_folder_yml};
+use crate::oc::{OcCollection, OcInfo};
 use crate::{atomic_write, atomic_write_bulk};
 
 /// Detected format of a collection directory.
@@ -225,19 +226,7 @@ fn migrate_directory(dir: &Path) -> DomainResult<()> {
             let folder_yml = path.join("folder.yml");
             if !folder_yml.exists() {
                 let uid = read_legacy_uid_value(&path);
-                let info = OcFolderInfo {
-                    name: name.clone(),
-                    uid: Some(uid),
-                    description: None,
-                    folder_type: Some("folder".into()),
-                    seq: None,
-                    tags: Vec::new(),
-                    request: None,
-                };
-                let yaml = serde_yaml::to_string(&info).map_err(|e| {
-                    DomainError::Internal(format!("Failed to serialize folder.yml: {e}"))
-                })?;
-                atomic_write(&folder_yml, yaml.as_bytes())?;
+                write_folder_yml(&folder_yml, &new_folder(name.clone(), uid))?;
             }
             // Clean up legacy .uid in subfolder.
             let uid_path = path.join(".uid");
@@ -445,6 +434,9 @@ mod tests {
         // folder.yml contains the legacy UID.
         let content = fs::read_to_string(auth.join("folder.yml")).unwrap();
         assert!(content.contains("folder-uid"));
+        let raw: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(raw["info"]["uid"].as_str(), Some("folder-uid"), "{content}");
+        assert_eq!(raw["info"]["name"].as_str(), Some("auth"), "{content}");
     }
 
     #[test]

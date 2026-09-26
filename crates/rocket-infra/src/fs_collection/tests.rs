@@ -514,8 +514,6 @@ fn legacy_uid_migrated_into_opencollection_yml() {
 
 #[test]
 fn legacy_uid_migrated_into_folder_yml() {
-    use crate::oc::OcFolderInfo;
-
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "auth").unwrap();
@@ -526,10 +524,9 @@ fn legacy_uid_migrated_into_folder_yml() {
     fs::write(folder_dir.join(".uid"), legacy_uid).unwrap();
 
     let content = fs::read_to_string(folder_dir.join("folder.yml")).unwrap();
-    let mut info: OcFolderInfo = serde_yaml::from_str(&content).unwrap();
-    info.uid = None;
-    let yaml = serde_yaml::to_string(&info).unwrap();
-    fs::write(folder_dir.join("folder.yml"), yaml).unwrap();
+    let mut folder = crate::fs_collection::folder_file::parse_folder_yml(&content).unwrap();
+    folder.info.uid = None;
+    fs::write(folder_dir.join("folder.yml"), serde_yaml::to_string(&folder).unwrap()).unwrap();
 
     // Load the collection — build_folder_tree should trigger migration.
     let col = repo.get("my-api").unwrap();
@@ -1223,4 +1220,102 @@ fn script_roundtrip_matches_bruno_oc_spec() {
         loaded2.tests.as_deref(),
         Some("expect(res.status).to.equal(200);")
     );
+}
+
+fn read_yaml_value(path: &std::path::Path) -> serde_yaml::Value {
+    serde_yaml::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn create_folder_writes_spec_folder_shape() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+
+    let raw = read_yaml_value(&dir.path().join("my-api/auth/folder.yml"));
+    assert_eq!(raw["info"]["name"].as_str(), Some("auth"), "{raw:?}");
+    assert_eq!(raw["info"]["type"].as_str(), Some("folder"), "{raw:?}");
+    assert!(raw.get("name").is_none(), "folder.yml must not be a bare FolderInfo: {raw:?}");
+    assert!(raw.get("items").is_none(), "items must never be written: {raw:?}");
+}
+
+#[test]
+fn folder_uid_is_stable_across_reloads() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+
+    let first = repo.get("my-api").unwrap().root.find_folder("auth").unwrap().uid.clone();
+    let second = repo.get("my-api").unwrap().root.find_folder("auth").unwrap().uid.clone();
+    assert!(!first.is_empty());
+    assert_eq!(first, second, "folder uid must not regenerate on every load");
+}
+
+#[test]
+fn legacy_bare_folder_yml_still_loads_and_is_upgraded_on_write() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let folder_dir = dir.path().join("my-api/auth");
+    fs::create_dir_all(&folder_dir).unwrap();
+    fs::write(
+        folder_dir.join("folder.yml"),
+        "name: Auth Flows\nuid: legacy-folder-uid\ntype: folder\nrequest:\n  variables:\n  - name: token\n    value: abc\n",
+    )
+    .unwrap();
+
+    // Legacy file loads with its uid and display name.
+    let col = repo.get("my-api").unwrap();
+    let folder = col
+        .root
+        .items
+        .iter()
+        .find_map(|i| match i {
+            rocket_collection::CollectionItem::Folder(f) => Some(f),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(folder.uid, "legacy-folder-uid");
+    assert_eq!(folder.name, "Auth Flows");
+
+    // Legacy folder variables still feed the chain.
+    let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://example.com");
+    repo.save_request("my-api", "auth/login.yml", &req).unwrap();
+    let chain = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].key, "token");
+
+    // The next write upgrades the file to the spec shape and keeps the uid.
+    repo.save_folder_variables(
+        "my-api",
+        "auth",
+        vec![CollectionVariable {
+            key: "token".into(),
+            value: "xyz".into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        }],
+    )
+    .unwrap();
+    let raw = read_yaml_value(&folder_dir.join("folder.yml"));
+    assert_eq!(raw["info"]["uid"].as_str(), Some("legacy-folder-uid"), "{raw:?}");
+    assert_eq!(raw["info"]["name"].as_str(), Some("Auth Flows"), "{raw:?}");
+    assert!(raw["info"].get("request").is_none(), "request defaults must leave info: {raw:?}");
+    assert_eq!(raw["request"]["variables"][0]["name"].as_str(), Some("token"), "{raw:?}");
+    assert_eq!(repo.get_folder_variables("my-api", "auth").unwrap()[0].value, "xyz");
+}
+
+#[test]
+fn rename_folder_keeps_spec_shape_and_uid() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "old-name").unwrap();
+    let before = read_yaml_value(&dir.path().join("my-api/old-name/folder.yml"));
+    let uid = before["info"]["uid"].as_str().unwrap().to_string();
+
+    repo.move_item("my-api", "old-name", "my-api", "new-name").unwrap();
+
+    let after = read_yaml_value(&dir.path().join("my-api/new-name/folder.yml"));
+    assert_eq!(after["info"]["name"].as_str(), Some("new-name"), "{after:?}");
+    assert_eq!(after["info"]["uid"].as_str(), Some(uid.as_str()), "{after:?}");
 }
