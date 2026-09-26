@@ -75,16 +75,11 @@ export function HistoryPanel() {
     }
   }, []);
 
-  // Load recent history on mount.
-  useEffect(() => {
-    void fetchEntries('', 'All', 'All');
-  }, [fetchEntries]);
-
-  // Re-fetch when method or status filter changes immediately.
+  // Load on mount, and re-fetch immediately when method or status changes.
+  // (urlQuery is excluded — debounced separately in handleUrlChange below.)
   // biome-ignore lint/correctness/useExhaustiveDependencies: urlQuery excluded intentionally, debounced in handleUrlChange
   useEffect(() => {
     void fetchEntries(urlQuery, method, statusLabel);
-    // urlQuery intentionally excluded — debounced separately below.
   }, [fetchEntries, method, statusLabel]);
 
   // Debounced URL search with 300 ms delay.
