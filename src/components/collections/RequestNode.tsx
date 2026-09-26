@@ -35,7 +35,7 @@ import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
 import { collectLeafGroupIds, mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { renameRequest } from '@/lib/tauri-api';
+import { getRequest, renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -54,7 +54,7 @@ interface RequestNodeProps {
   collectionName: string;
   collectionRoot: string;
   path: string;
-  itemData: Extract<CollectionItem, { type: 'request' }>;
+  itemData: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }>;
   summaries: CollectionSummary[];
   onMove: (
     srcCollection: string,
@@ -139,9 +139,11 @@ export function RequestNode({
     }
   };
 
-  // Builds a RequestTab without opening it.
-  function createTab(): RequestTab {
-    const request: RequestState = mapApiRequestToState(itemData, true);
+  // Builds a RequestTab, fetching full request data on demand if only a
+  // lightweight summary (uid/name/method/fileName) was loaded from the sidebar.
+  async function createTab(): Promise<RequestTab> {
+    const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
+    const request: RequestState = mapApiRequestToState(full, true);
     return {
       id: uid,
       title: name,
@@ -153,19 +155,38 @@ export function RequestNode({
     };
   }
 
+  // Builds the tab and opens it in the given pane (or the active pane when omitted).
+  // Swallows fetch failures so a malformed/deleted file can't crash the sidebar —
+  // mirrors the existing error handling in CollectionNode's refreshTree.
+  async function openInPane(groupId?: string) {
+    try {
+      openTab(await createTab(), groupId);
+    } catch (err) {
+      console.error('[RequestNode] Failed to load request:', err);
+    }
+  }
+
   function handleClick() {
     if (isRenaming) return;
-    openTab(createTab());
+    void openInPane();
   }
 
   // Opens the tab in a new pane created by splitting in the given direction.
-  function openInSplit(direction: 'horizontal' | 'vertical') {
-    const allCurrentIds = collectLeafGroupIds(root);
-    splitGroup(activeGroupId, direction);
-    const newRoot = usePaneStore.getState().root;
-    const newIds = collectLeafGroupIds(newRoot);
-    const newGroupId = newIds.find((id) => !allCurrentIds.includes(id));
-    if (newGroupId) openTab(createTab(), newGroupId);
+  // Fetches the tab data before splitting so a rejected on-demand fetch (deleted or
+  // malformed file) never leaves the user with an empty split pane — split only happens
+  // once we know we have a tab to put in it.
+  async function openInSplit(direction: 'horizontal' | 'vertical') {
+    try {
+      const tab = await createTab();
+      const allCurrentIds = collectLeafGroupIds(root);
+      splitGroup(activeGroupId, direction);
+      const newRoot = usePaneStore.getState().root;
+      const newIds = collectLeafGroupIds(newRoot);
+      const newGroupId = newIds.find((id) => !allCurrentIds.includes(id));
+      if (newGroupId) openTab(tab, newGroupId);
+    } catch (err) {
+      console.error('[RequestNode] Failed to load request:', err);
+    }
   }
 
   const allLeafIds = collectLeafGroupIds(root);
@@ -276,7 +297,7 @@ export function RequestNode({
               <DropdownMenuSeparator />
               {/* Pane-targeting actions. */}
               {otherGroupIds.length === 1 && (
-                <DropdownMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
+                <DropdownMenuItem onClick={() => void openInPane(otherGroupIds[0])}>
                   <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other
                   pane
                 </DropdownMenuItem>
@@ -289,17 +310,17 @@ export function RequestNode({
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className='w-48'>
                     {otherGroupIds.map((gid) => (
-                      <DropdownMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
+                      <DropdownMenuItem key={gid} onClick={() => void openInPane(gid)}>
                         Pane {allLeafIds.indexOf(gid) + 1}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               )}
-              <DropdownMenuItem onClick={() => openInSplit('horizontal')}>
+              <DropdownMenuItem onClick={() => void openInSplit('horizontal')}>
                 <PanelRight aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open to right
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openInSplit('vertical')}>
+              <DropdownMenuItem onClick={() => void openInSplit('vertical')}>
                 <PanelBottom aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open below
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -349,7 +370,7 @@ export function RequestNode({
         <ContextMenuSeparator />
         {/* Pane-targeting actions. */}
         {otherGroupIds.length === 1 && (
-          <ContextMenuItem onClick={() => openTab(createTab(), otherGroupIds[0])}>
+          <ContextMenuItem onClick={() => void openInPane(otherGroupIds[0])}>
             <LayoutPanelLeft aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open in other pane
           </ContextMenuItem>
         )}
@@ -360,17 +381,17 @@ export function RequestNode({
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className='w-48'>
               {otherGroupIds.map((gid) => (
-                <ContextMenuItem key={gid} onClick={() => openTab(createTab(), gid)}>
+                <ContextMenuItem key={gid} onClick={() => void openInPane(gid)}>
                   Pane {allLeafIds.indexOf(gid) + 1}
                 </ContextMenuItem>
               ))}
             </ContextMenuSubContent>
           </ContextMenuSub>
         )}
-        <ContextMenuItem onClick={() => openInSplit('horizontal')}>
+        <ContextMenuItem onClick={() => void openInSplit('horizontal')}>
           <PanelRight aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open to right
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => openInSplit('vertical')}>
+        <ContextMenuItem onClick={() => void openInSplit('vertical')}>
           <PanelBottom aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Open below
         </ContextMenuItem>
         <ContextMenuSeparator />
