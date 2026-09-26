@@ -570,7 +570,7 @@ export function CollectionNode({
                 />
               );
             }
-            if (item.type === 'summary') return null;
+            if (item.type === 'summary' || item.type === 'opaque') return null;
             return (
               <RequestNode
                 key={`request-${item.uid}`}

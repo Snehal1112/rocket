@@ -1319,3 +1319,102 @@ fn rename_folder_keeps_spec_shape_and_uid() {
     assert_eq!(after["info"]["name"].as_str(), Some("new-name"), "{after:?}");
     assert_eq!(after["info"]["uid"].as_str(), Some(uid.as_str()), "{after:?}");
 }
+
+const GRAPHQL_ITEM_YML: &str = "info:\n  name: List Users\n  type: graphql\ngraphql:\n  url: https://api.example.com/graphql\n  body:\n    query: '{ users { id } }'\n";
+const GRPC_ITEM_YML: &str = "info:\n  name: Get User\n  type: grpc\ngrpc:\n  url: grpc://api.example.com\n  method: users.UserService/GetUser\n  methodType: unary\n";
+const WEBSOCKET_ITEM_YML: &str = "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\n";
+
+fn opaque_items(
+    folder: &rocket_collection::Folder,
+) -> Vec<&rocket_collection::folder::OpaqueProtocolItem> {
+    folder
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            rocket_collection::CollectionItem::OpaqueItem(o) => Some(o),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn build_folder_tree_loads_non_http_items_as_opaque() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "realtime").unwrap();
+    let col_dir = dir.path().join("my-api");
+    fs::write(col_dir.join("list-users.yml"), GRAPHQL_ITEM_YML).unwrap();
+    fs::write(col_dir.join("get-user.yml"), GRPC_ITEM_YML).unwrap();
+    fs::write(col_dir.join("realtime/chat.yml"), WEBSOCKET_ITEM_YML).unwrap();
+
+    let col = repo.get("my-api").unwrap();
+    let mut root: Vec<(&str, &str)> = opaque_items(&col.root)
+        .iter()
+        .map(|o| (o.protocol.as_str(), o.name.as_str()))
+        .collect();
+    root.sort();
+    assert_eq!(root, vec![("graphql", "List Users"), ("grpc", "Get User")]);
+
+    let realtime = col.root.find_folder("realtime").unwrap();
+    let ws = opaque_items(realtime);
+    assert_eq!(ws.len(), 1);
+    assert_eq!(ws[0].protocol, "websocket");
+    assert_eq!(ws[0].name, "Chat");
+    assert_eq!(
+        ws[0].raw["websocket"]["url"].as_str(),
+        Some("wss://chat.example.com/ws")
+    );
+}
+
+#[test]
+fn build_folder_tree_skips_script_files_without_dropping_siblings() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/setup.yml"),
+        "type: script\nscript: ./scripts/setup.js\n",
+    )
+    .unwrap();
+    let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
+    repo.save_request("my-api", "good.yml", &req).unwrap();
+
+    let col = repo.get("my-api").unwrap();
+    assert_eq!(col.root.items.len(), 1, "{:?}", col.root.items);
+    assert!(matches!(
+        &col.root.items[0],
+        rocket_collection::CollectionItem::Request(r) if r.name == "Good"
+    ));
+}
+
+#[test]
+fn build_folder_tree_skips_http_file_missing_method_instead_of_misreading_it() {
+    // OcItem is untagged and OcFolder needs only `info`, so a broken HTTP file
+    // would match OcItem::Folder. It must be skipped as corrupt, never turned
+    // into a phantom folder.
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/broken.yml"),
+        "info:\n  name: Broken\n  type: http\nhttp:\n  url: https://example.com\n",
+    )
+    .unwrap();
+
+    let col = repo.get("my-api").unwrap();
+    assert!(col.root.items.is_empty(), "{:?}", col.root.items);
+}
+
+#[test]
+fn get_summaries_skips_non_http_items_without_error() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/list-users.yml"), GRAPHQL_ITEM_YML).unwrap();
+    let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
+    repo.save_request("my-api", "good.yml", &req).unwrap();
+
+    let col = repo.get_summaries("my-api").unwrap();
+    assert_eq!(col.root.items.len(), 1);
+    assert!(matches!(
+        &col.root.items[0],
+        rocket_collection::CollectionItem::Summary(s) if s.name == "Good"
+    ));
+}

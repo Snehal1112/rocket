@@ -150,10 +150,18 @@ export interface RequestSummary {
   fileName?: string;
 }
 
+/** Non-HTTP item (GraphQL, gRPC, WebSocket) kept as raw YAML. Not shown or editable in the UI yet. */
+export interface OpaqueProtocolItem {
+  protocol: 'graphql' | 'grpc' | 'websocket';
+  name: string;
+  raw: unknown;
+}
+
 export type CollectionItem =
   | ({ type: 'request' } & Request)
   | ({ type: 'folder' } & Folder)
-  | ({ type: 'summary' } & RequestSummary);
+  | ({ type: 'summary' } & RequestSummary)
+  | ({ type: 'opaque' } & OpaqueProtocolItem);
 
 export interface Collection {
   name: string;

@@ -4,8 +4,8 @@ use std::path::Path;
 use rocket_collection::{CollectionItem, Folder, RequestSummary};
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::conversions::oc_http_request_to_request;
-use crate::oc::OcHttpRequest;
+use crate::conversions::{oc_http_request_to_request, oc_item_to_collection_item};
+use crate::oc::{OcHttpRequest, OcItem};
 
 use super::folder_file::parse_folder_yml;
 use super::paths::{is_request_file, read_uid_from_yaml};
@@ -14,24 +14,48 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
     build_tree(current, &mut |path, entry_name| {
         let content = fs::read_to_string(path)?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let request_result = match ext {
-            "yml" | "yaml" => serde_yaml::from_str::<OcHttpRequest>(&content)
-                .map(oc_http_request_to_request)
-                .map_err(|e| DomainError::Internal(e.to_string())),
+        let loaded = match ext {
+            "yml" | "yaml" => load_yaml_item(&content),
             _ => serde_json::from_str::<rocket_collection::Request>(&content)
-                .map_err(|e| DomainError::Internal(e.to_string())),
+                .map(|r| Some(CollectionItem::Request(Box::new(r))))
+                .map_err(|e| e.to_string()),
         };
-        match request_result {
-            Ok(mut request) => {
+        match loaded {
+            Ok(Some(CollectionItem::Request(mut request))) => {
                 request.file_name = Some(entry_name.to_string());
-                Ok(Some(CollectionItem::Request(Box::new(request))))
+                Ok(Some(CollectionItem::Request(request)))
             }
+            Ok(other) => Ok(other),
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file");
                 Ok(None)
             }
         }
     })
+}
+
+/// Parses one `.yml` item file. HTTP is tried first so a broken HTTP file keeps
+/// its precise parse error. Other protocols are recognised through the untagged
+/// `OcItem` enum. A file that matches only `OcItem::Folder` is a broken request,
+/// since a folder is a directory and never a single file, so it is reported with
+/// the HTTP parse error.
+fn load_yaml_item(content: &str) -> Result<Option<CollectionItem>, String> {
+    let http_err = match serde_yaml::from_str::<OcHttpRequest>(content) {
+        Ok(req) => {
+            return Ok(Some(CollectionItem::Request(Box::new(
+                oc_http_request_to_request(req),
+            ))))
+        }
+        Err(e) => e,
+    };
+    match serde_yaml::from_str::<OcItem>(content) {
+        Ok(OcItem::Folder(_)) | Err(_) => Err(http_err.to_string()),
+        Ok(OcItem::ScriptFile(_)) => {
+            tracing::debug!("skipping script file; scripts are not collection tree items");
+            Ok(None)
+        }
+        Ok(item) => Ok(oc_item_to_collection_item(item)),
+    }
 }
 
 /// Build the folder tree loading only the minimal fields needed for the sidebar.

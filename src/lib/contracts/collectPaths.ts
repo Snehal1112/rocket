@@ -17,7 +17,7 @@ export function collectPaths(
       const path = prefix ? `${prefix}/${seg}` : seg;
       folders.push(path);
       collectPaths(item.items, path, folders, requests);
-    } else {
+    } else if (item.type !== 'opaque') {
       const seg = item.fileName ?? item.name;
       const path = prefix ? `${prefix}/${seg}` : seg;
       requests.push(path);

@@ -342,7 +342,7 @@ export function FolderNode({
                 />
               );
             }
-            if (item.type === 'summary') return null;
+            if (item.type === 'summary' || item.type === 'opaque') return null;
             const fileName = item.fileName ?? item.name;
             const requestPath = `${basePath}/${fileName}`;
             return (
