@@ -1,23 +1,43 @@
 import { lazy, Suspense, useState } from 'react';
-import { AuditLogTab } from '@/components/audit/AuditLogTab';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
-import { ContractDiffPane } from '@/components/contracts/ContractDiffPane';
-import { ContractsTab } from '@/components/contracts/ContractsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 
-// Lazy-load Monaco-heavy git components so they don't load until a git tab opens.
+// Lazy-load tabs that aren't shown on a default/cold launch, so their code
+// (and anything heavy they pull in, e.g. GitPanel's diff libs or RunnerPane's
+// recharts) isn't parsed and resident until the user actually opens one.
 const ConflictResolver = lazy(() =>
   import('@/components/git/ConflictResolver').then((m) => ({ default: m.ConflictResolver })),
 );
 const DiffViewer = lazy(() =>
   import('@/components/git/DiffViewer').then((m) => ({ default: m.DiffViewer })),
 );
+const GitPanel = lazy(() =>
+  import('@/components/git/GitPanel').then((m) => ({ default: m.GitPanel })),
+);
+const ContractsTab = lazy(() =>
+  import('@/components/contracts/ContractsTab').then((m) => ({ default: m.ContractsTab })),
+);
+const ContractDiffPane = lazy(() =>
+  import('@/components/contracts/ContractDiffPane').then((m) => ({ default: m.ContractDiffPane })),
+);
+const AuditLogTab = lazy(() =>
+  import('@/components/audit/AuditLogTab').then((m) => ({ default: m.AuditLogTab })),
+);
+const RunnerPane = lazy(() =>
+  import('@/components/request/runner/RunnerPane').then((m) => ({ default: m.RunnerPane })),
+);
+const WorkspaceEnvironmentsTab = lazy(() =>
+  import('@/components/workspace/WorkspaceEnvironmentsTab').then((m) => ({
+    default: m.WorkspaceEnvironmentsTab,
+  })),
+);
+const WorkspaceGitTab = lazy(() =>
+  import('@/components/workspace/WorkspaceGitTab').then((m) => ({ default: m.WorkspaceGitTab })),
+);
 
 import { MousePointer2 } from 'lucide-react';
-import { GitPanel } from '@/components/git/GitPanel';
 import { RocketLaunch } from '@/components/illustrations';
 import { RequestPanel } from '@/components/request/RequestPanel';
-import { RunnerPane } from '@/components/request/runner/RunnerPane';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,8 +48,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { WorkspaceEnvironmentsTab } from '@/components/workspace/WorkspaceEnvironmentsTab';
-import { WorkspaceGitTab } from '@/components/workspace/WorkspaceGitTab';
 import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
@@ -192,33 +210,47 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           ) : isRequestTab(activeTab) ? (
             <RequestPanel tab={activeTab} groupId={node.groupId} />
           ) : isGitTab(activeTab) ? (
-            <GitPanel
-              key={activeTab.repositoryId}
-              repositoryId={activeTab.repositoryId}
-              repositoryLabel={activeTab.repositoryLabel}
-            />
+            <Suspense fallback={<EditorSkeleton />}>
+              <GitPanel
+                key={activeTab.repositoryId}
+                repositoryId={activeTab.repositoryId}
+                repositoryLabel={activeTab.repositoryLabel}
+              />
+            </Suspense>
           ) : isContractTab(activeTab) ? (
-            <ContractsTab
-              collectionId={activeTab.collectionRoot}
-              collectionName={activeTab.collectionName}
-            />
+            <Suspense fallback={<EditorSkeleton />}>
+              <ContractsTab
+                collectionId={activeTab.collectionRoot}
+                collectionName={activeTab.collectionName}
+              />
+            </Suspense>
           ) : isContractDiffTab(activeTab) ? (
-            <ContractDiffPane
-              collectionId={activeTab.collectionId}
-              contractId={activeTab.contractId}
-            />
+            <Suspense fallback={<EditorSkeleton />}>
+              <ContractDiffPane
+                collectionId={activeTab.collectionId}
+                contractId={activeTab.contractId}
+              />
+            </Suspense>
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
             ) : activeTab.activeSection === 'environments' ? (
-              <WorkspaceEnvironmentsTab />
+              <Suspense fallback={<EditorSkeleton />}>
+                <WorkspaceEnvironmentsTab />
+              </Suspense>
             ) : activeTab.activeSection === 'git' ? (
-              <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
+              <Suspense fallback={<EditorSkeleton />}>
+                <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
+              </Suspense>
             ) : activeTab.activeSection === 'audit' ? (
-              <AuditLogTab />
+              <Suspense fallback={<EditorSkeleton />}>
+                <AuditLogTab />
+              </Suspense>
             ) : null
           ) : isRunnerTab(activeTab) ? (
-            <RunnerPane tab={activeTab} groupId={node.groupId} />
+            <Suspense fallback={<EditorSkeleton />}>
+              <RunnerPane tab={activeTab} groupId={node.groupId} />
+            </Suspense>
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )
