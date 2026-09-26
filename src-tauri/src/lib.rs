@@ -35,6 +35,39 @@ pub(crate) fn env_secret_store() -> Arc<dyn SecretStore> {
     Arc::new(KeyringSecretStore::new_env_secrets())
 }
 
+/// Memory-pressure settings for WebKit's network process.
+///
+/// WebKitGTK only lets these reach the network process from here. The web
+/// process takes them from a construct-only `WebContext` property, which wry
+/// creates internally and does not expose. The network process disables its
+/// periodic memory check by default and only turns it on when custom
+/// settings are set, so this enables proactive trimming there.
+///
+/// WebKit's defaults are a 3072 MB limit, thresholds of 0.33 and 0.5, no
+/// kill threshold, and a 30 s poll. Rocket's network process idles around
+/// 15 MB and only carries its own app assets and IPC traffic, so a 128 MB
+/// limit starts releasing non-critical memory at 32 MB and critical memory
+/// at about 51 MB. That leaves idle usage well below the first threshold,
+/// so WebKit does not keep trimming in a loop. The kill threshold stays at
+/// 0, which disables killing, because a restarted process is worse than
+/// the memory it would save.
+#[cfg(target_os = "linux")]
+fn network_memory_pressure_settings() -> webkit2gtk::MemoryPressureSettings {
+    use webkit2gtk::glib::translate::from_glib_full;
+    // SAFETY: `MemoryPressureSettings::new()` asserts that GTK is initialized,
+    // but the C constructor only allocates a plain settings struct. It
+    // returns a new owned box, which `from_glib_full` takes ownership of.
+    let mut settings: webkit2gtk::MemoryPressureSettings =
+        unsafe { from_glib_full(webkit2gtk::ffi::webkit_memory_pressure_settings_new()) };
+    settings.set_memory_limit(128);
+    // Conservative must stay below strict, so set it first.
+    settings.set_conservative_threshold(0.25);
+    settings.set_strict_threshold(0.4);
+    settings.set_kill_threshold(0.0);
+    settings.set_poll_interval(30.0);
+    settings
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Work around a WebKitGTK GPU-compositing bug that renders the Scripts tab
@@ -42,6 +75,22 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     unsafe {
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+
+    // Must run before any WebsiteDataManager (and so any webview) exists.
+    #[cfg(target_os = "linux")]
+    {
+        use webkit2gtk::glib::translate::ToGlibPtrMut;
+        let mut settings = network_memory_pressure_settings();
+        // SAFETY: The safe binding asserts that GTK is initialized, which
+        // tao only does later. The C function just copies the settings into
+        // process-global state and needs no GTK, and we are on the main
+        // thread before any WebsiteDataManager exists.
+        unsafe {
+            webkit2gtk::ffi::webkit_website_data_manager_set_memory_pressure_settings(
+                settings.to_glib_none_mut().0,
+            );
+        }
     }
 
     // Bound libgit2's network operations before anything else runs. These
@@ -512,4 +561,21 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::network_memory_pressure_settings;
+
+    // WebKit's setters silently ignore out-of-range or misordered values, so
+    // read every field back to prove each one was accepted.
+    #[test]
+    fn network_memory_pressure_settings_are_accepted_by_webkit() {
+        let mut settings = network_memory_pressure_settings();
+        assert_eq!(settings.memory_limit(), 128);
+        assert_eq!(settings.conservative_threshold(), 0.25);
+        assert_eq!(settings.strict_threshold(), 0.4);
+        assert_eq!(settings.kill_threshold(), 0.0);
+        assert_eq!(settings.poll_interval(), 30.0);
+    }
 }
