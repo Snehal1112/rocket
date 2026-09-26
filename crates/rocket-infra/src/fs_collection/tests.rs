@@ -1561,3 +1561,78 @@ fn save_request_omits_none_auth() {
     let content = fs::read_to_string(dir.path().join("my-api/ping.yml")).unwrap();
     assert!(!content.contains("auth"), "{content}");
 }
+
+fn find_root_folder(col: &rocket_collection::Collection) -> &rocket_collection::Folder {
+    col.root
+        .items
+        .iter()
+        .find_map(|i| match i {
+            rocket_collection::CollectionItem::Folder(f) => Some(f),
+            _ => None,
+        })
+        .expect("root folder")
+}
+
+#[test]
+fn spec_folder_yml_with_object_docs_loads_and_keeps_its_identity() {
+    // The spec's Folder.docs is `Documentation`: a string, null, or {content, type}.
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create");
+    let folder_dir = dir.path().join("my-api/auth");
+    fs::create_dir_all(&folder_dir).expect("mkdir");
+    fs::write(
+        folder_dir.join("folder.yml"),
+        "info:\n  name: Auth Flows\n  uid: spec-folder-uid\n  type: folder\nrequest:\n  variables:\n  - name: token\n    value: abc\ndocs:\n  content: '# Auth'\n  type: text/markdown\n",
+    )
+    .expect("write");
+
+    let first = repo.get("my-api").expect("get");
+    let folder = find_root_folder(&first);
+    assert_eq!(folder.uid, "spec-folder-uid");
+    assert_eq!(folder.name, "Auth Flows");
+    let second = repo.get("my-api").expect("get");
+    assert_eq!(find_root_folder(&second).uid, "spec-folder-uid");
+
+    let vars = repo.get_folder_variables("my-api", "auth").expect("vars");
+    assert_eq!(vars.len(), 1);
+    assert_eq!(vars[0].key, "token");
+
+    // Saving folder variables keeps the object-form docs intact.
+    repo.save_folder_variables("my-api", "auth", Vec::new())
+        .expect("save vars");
+    let raw: serde_yaml::Value = serde_yaml::from_str(
+        &fs::read_to_string(folder_dir.join("folder.yml")).expect("read"),
+    )
+    .expect("yaml");
+    assert_eq!(raw["docs"]["content"].as_str(), Some("# Auth"), "{raw:?}");
+    assert_eq!(raw["docs"]["type"].as_str(), Some("text/markdown"), "{raw:?}");
+}
+
+#[test]
+fn save_folder_variables_without_folder_yml_names_folder_after_its_directory() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create");
+    // A folder that exists on disk without folder.yml, e.g. created outside Rocket.
+    fs::create_dir_all(dir.path().join("my-api/billing")).expect("mkdir");
+
+    repo.save_folder_variables(
+        "my-api",
+        "billing",
+        vec![CollectionVariable {
+            key: "region".into(),
+            value: "eu".into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        }],
+    )
+    .expect("save vars");
+
+    let raw: serde_yaml::Value = serde_yaml::from_str(
+        &fs::read_to_string(dir.path().join("my-api/billing/folder.yml")).expect("read"),
+    )
+    .expect("yaml");
+    assert_eq!(raw["info"]["name"].as_str(), Some("billing"), "{raw:?}");
+    let col = repo.get("my-api").expect("get");
+    assert_eq!(find_root_folder(&col).name, "billing");
+}

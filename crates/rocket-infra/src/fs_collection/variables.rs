@@ -86,8 +86,16 @@ pub(super) fn save_folder_variables(
     let mut oc_folder = if folder_yml_path.exists() {
         read_folder_yml(&folder_yml_path)?
     } else {
+        let name = folder_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
         OcFolder {
-            info: OcFolderInfo::default(),
+            info: OcFolderInfo {
+                name,
+                ..OcFolderInfo::default()
+            },
             items: None,
             request: None,
             docs: None,

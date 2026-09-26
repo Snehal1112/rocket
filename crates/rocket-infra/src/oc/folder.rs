@@ -48,7 +48,7 @@ pub struct OcFolder {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<OcRequestDefaults>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub docs: Option<String>,
+    pub docs: Option<OcDescription>,
 }
 
 /// Item — dispatches to any request type, folder, or script file.
