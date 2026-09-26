@@ -40,7 +40,14 @@ const KNOWN_DEFERRED: &[&str] = &[
 const COLLECTION_INFO: &[&str] = &["name", "summary", "version", "authors"];
 const ITEM_INFO: &[&str] = &["name", "description", "type", "seq", "tags"];
 const FOLDER: &[&str] = &["info", "items", "request", "docs"];
-const REQUEST_DEFAULTS: &[&str] = &["headers", "metadata", "auth", "variables", "scripts", "settings"];
+const REQUEST_DEFAULTS: &[&str] = &[
+    "headers",
+    "metadata",
+    "auth",
+    "variables",
+    "scripts",
+    "settings",
+];
 const HTTP_REQUEST: &[&str] = &["info", "http", "runtime", "settings", "examples", "docs"];
 const HTTP_DETAILS: &[&str] = &["method", "url", "headers", "params", "body", "auth"];
 const HTTP_RUNTIME: &[&str] = &["variables", "scripts", "assertions", "actions"];
@@ -49,7 +56,14 @@ const HEADER: &[&str] = &["name", "value", "description", "disabled"];
 const PARAM: &[&str] = &["name", "value", "description", "type", "disabled"];
 const BODY: &[&str] = &["type", "data"];
 const FORM_FIELD: &[&str] = &["name", "value", "description", "disabled"];
-const MULTIPART_PART: &[&str] = &["name", "type", "value", "description", "contentType", "disabled"];
+const MULTIPART_PART: &[&str] = &[
+    "name",
+    "type",
+    "value",
+    "description",
+    "contentType",
+    "disabled",
+];
 const FILE_VARIANT: &[&str] = &["filePath", "contentType", "selected"];
 const VARIABLE: &[&str] = &["name", "value", "description", "disabled"];
 const SCRIPT: &[&str] = &["type", "code"];
@@ -65,23 +79,63 @@ const AUTH_BEARER: &[&str] = &["type", "token"];
 const AUTH_APIKEY: &[&str] = &["type", "key", "value", "placement"];
 const AUTH_NTLM: &[&str] = &["type", "username", "password", "domain"];
 const AUTH_AWSV4: &[&str] = &[
-    "type", "accessKeyId", "secretAccessKey", "sessionToken", "service", "region", "profileName",
+    "type",
+    "accessKeyId",
+    "secretAccessKey",
+    "sessionToken",
+    "service",
+    "region",
+    "profileName",
 ];
 const OAUTH2_CLIENT_CREDENTIALS_FLOW: &[&str] = &[
-    "type", "flow", "accessTokenUrl", "refreshTokenUrl", "credentials", "scope",
-    "additionalParameters", "tokenConfig", "settings",
+    "type",
+    "flow",
+    "accessTokenUrl",
+    "refreshTokenUrl",
+    "credentials",
+    "scope",
+    "additionalParameters",
+    "tokenConfig",
+    "settings",
 ];
 const OAUTH2_PASSWORD_FLOW: &[&str] = &[
-    "type", "flow", "accessTokenUrl", "refreshTokenUrl", "credentials", "resourceOwner", "scope",
-    "additionalParameters", "tokenConfig", "settings",
+    "type",
+    "flow",
+    "accessTokenUrl",
+    "refreshTokenUrl",
+    "credentials",
+    "resourceOwner",
+    "scope",
+    "additionalParameters",
+    "tokenConfig",
+    "settings",
 ];
 const OAUTH2_AUTH_CODE_FLOW: &[&str] = &[
-    "type", "flow", "authorizationUrl", "accessTokenUrl", "refreshTokenUrl", "callbackUrl",
-    "credentials", "scope", "state", "pkce", "additionalParameters", "tokenConfig", "settings",
+    "type",
+    "flow",
+    "authorizationUrl",
+    "accessTokenUrl",
+    "refreshTokenUrl",
+    "callbackUrl",
+    "credentials",
+    "scope",
+    "state",
+    "pkce",
+    "additionalParameters",
+    "tokenConfig",
+    "settings",
 ];
 const OAUTH2_IMPLICIT_FLOW: &[&str] = &[
-    "type", "flow", "authorizationUrl", "callbackUrl", "credentials", "scope", "state",
-    "additionalParameters", "tokenConfig", "settings",
+    "type",
+    "flow",
+    "authorizationUrl",
+    "callbackUrl",
+    "credentials",
+    "scope",
+    "state",
+    "additionalParameters",
+    "tokenConfig",
+    "settings",
 ];
 const OAUTH2_CLIENT_CREDENTIALS: &[&str] = &["clientId", "clientSecret", "placement"];
 const OAUTH2_IMPLICIT_CREDENTIALS: &[&str] = &["clientId"];
@@ -91,8 +145,11 @@ const OAUTH2_SETTINGS: &[&str] = &["autoFetchToken", "autoRefreshToken"];
 const OAUTH2_TOKEN_CONFIG: &[&str] = &["id", "placement", "source"];
 const OAUTH2_ADDITIONAL_PARAMETER: &[&str] = &["name", "value", "placement"];
 const OAUTH2_PARAMS_TOKEN_ONLY: &[&str] = &["accessTokenRequest", "refreshTokenRequest"];
-const OAUTH2_PARAMS_AUTH_CODE: &[&str] =
-    &["authorizationRequest", "accessTokenRequest", "refreshTokenRequest"];
+const OAUTH2_PARAMS_AUTH_CODE: &[&str] = &[
+    "authorizationRequest",
+    "accessTokenRequest",
+    "refreshTokenRequest",
+];
 const OAUTH2_PARAMS_IMPLICIT: &[&str] = &["authorizationRequest"];
 
 #[derive(Default)]
@@ -140,7 +197,9 @@ fn check_auth(v: &mut Violations, at: &str, auth: &Value) {
     let auth_type = auth.get("type").and_then(Value::as_str).unwrap_or("");
     let flow = auth.get("flow").and_then(Value::as_str);
     let Some(allowed) = auth_keys(auth_type, flow) else {
-        v.0.push(format!("{at}: auth type `{auth_type}` (flow {flow:?}) is not a spec Auth member"));
+        v.0.push(format!(
+            "{at}: auth type `{auth_type}` (flow {flow:?}) is not a spec Auth member"
+        ));
         return;
     };
     v.keys(&format!("Auth[{auth_type}]"), at, auth, allowed);
@@ -178,7 +237,12 @@ fn check_auth(v: &mut Violations, at: &str, auth: &Value) {
         if let Some(map) = ap.as_mapping() {
             for (_, list) in map.iter() {
                 for p in seq(Some(list)) {
-                    v.keys("OAuth2AdditionalParameter", at, p, OAUTH2_ADDITIONAL_PARAMETER);
+                    v.keys(
+                        "OAuth2AdditionalParameter",
+                        at,
+                        p,
+                        OAUTH2_ADDITIONAL_PARAMETER,
+                    );
                 }
             }
         }
@@ -347,10 +411,17 @@ fn sample_bodies() -> Vec<(&'static str, Body)> {
         ("xml", raw(BodyMode::Xml, "<a/>")),
         ("text", raw(BodyMode::Text, "hi")),
         ("sparql", raw(BodyMode::Sparql, "SELECT * WHERE {}")),
-        ("form-urlencoded", form(BodyMode::FormUrlEncoded, FormDataType::Text, None)),
+        (
+            "form-urlencoded",
+            form(BodyMode::FormUrlEncoded, FormDataType::Text, None),
+        ),
         (
             "multipart",
-            form(BodyMode::FormData, FormDataType::File, Some("image/png".into())),
+            form(
+                BodyMode::FormData,
+                FormDataType::File,
+                Some("image/png".into()),
+            ),
         ),
         (
             "file",
@@ -379,18 +450,44 @@ fn sample_auths() -> Vec<(&'static str, Auth)> {
         })
     };
     vec![
-        ("basic", Auth::Basic { username: "u".into(), password: "p".into() }),
+        (
+            "basic",
+            Auth::Basic {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        ),
         ("bearer", Auth::Bearer { token: "t".into() }),
         (
             "apikey",
-            Auth::ApiKey { key: "X-Key".into(), value: "v".into(), placement: "header".into() },
+            Auth::ApiKey {
+                key: "X-Key".into(),
+                value: "v".into(),
+                placement: "header".into(),
+            },
         ),
-        ("digest", Auth::Digest { username: "u".into(), password: "p".into() }),
+        (
+            "digest",
+            Auth::Digest {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        ),
         (
             "ntlm",
-            Auth::Ntlm { username: "u".into(), password: "p".into(), domain: "CORP".into() },
+            Auth::Ntlm {
+                username: "u".into(),
+                password: "p".into(),
+                domain: "CORP".into(),
+            },
         ),
-        ("wsse", Auth::Wsse { username: "u".into(), password: "p".into() }),
+        (
+            "wsse",
+            Auth::Wsse {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        ),
         (
             "awsv4",
             Auth::AwsSigV4 {
@@ -442,7 +539,10 @@ fn sample_auths() -> Vec<(&'static str, Auth)> {
                 credentials: creds(),
                 scope: Some("openid".into()),
                 state: Some("xyz".into()),
-                pkce: Some(OAuth2PKCE { disabled: Some(true), method: Some("S256".into()) }),
+                pkce: Some(OAuth2PKCE {
+                    disabled: Some(true),
+                    method: Some("S256".into()),
+                }),
                 additional_parameters: None,
                 token_config: None,
                 settings: oauth_settings(),
@@ -468,7 +568,12 @@ fn full_request(name: &str, body: Body, auth: Auth) -> Request {
     let mut req = Request::new(name, HttpMethod::Post, "https://api.example.com/users/:id");
     req.headers = vec![
         Header::new("Accept", "application/json"),
-        Header { key: "X-Off".into(), value: "1".into(), enabled: false, description: None },
+        Header {
+            key: "X-Off".into(),
+            value: "1".into(),
+            enabled: false,
+            description: None,
+        },
     ];
     req.query_params = vec![QueryParam {
         key: "page".into(),
@@ -476,7 +581,11 @@ fn full_request(name: &str, body: Body, auth: Auth) -> Request {
         enabled: true,
         description: None,
     }];
-    req.path_params = vec![PathParam { name: "id".into(), value: "42".into(), description: None }];
+    req.path_params = vec![PathParam {
+        name: "id".into(),
+        value: "42".into(),
+        description: None,
+    }];
     req.body = Some(body);
     req.auth = auth;
     req.pre_request_script = Some("console.log('pre')".into());
@@ -553,8 +662,16 @@ fn written_collection_files_only_use_schema_keys() {
     fs::write(col_dir.join("users/chat-ws.yml"), WEBSOCKET_FIXTURE).unwrap();
 
     let mut v = Violations::default();
-    check_collection_root(&mut v, "opencollection.yml", &read_yaml(&col_dir.join("opencollection.yml")));
-    check_folder(&mut v, "users/folder.yml", &read_yaml(&col_dir.join("users/folder.yml")));
+    check_collection_root(
+        &mut v,
+        "opencollection.yml",
+        &read_yaml(&col_dir.join("opencollection.yml")),
+    );
+    check_folder(
+        &mut v,
+        "users/folder.yml",
+        &read_yaml(&col_dir.join("users/folder.yml")),
+    );
     for rel in &written {
         check_http_request(&mut v, rel, &read_yaml(&col_dir.join(rel)));
     }
@@ -575,7 +692,11 @@ fn written_collection_files_only_use_schema_keys() {
         }
     }
     protocols.sort();
-    assert_eq!(protocols, vec!["graphql", "websocket"], "non-HTTP fixtures must load");
+    assert_eq!(
+        protocols,
+        vec!["graphql", "websocket"],
+        "non-HTTP fixtures must load"
+    );
     assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
 }
 
@@ -583,7 +704,11 @@ fn written_collection_files_only_use_schema_keys() {
 fn checker_flags_known_bad_shapes() {
     let mut v = Violations::default();
     let parse = |yaml: &str| -> Value { serde_yaml::from_str(yaml).expect("fixture yaml") };
-    check_folder(&mut v, "legacy folder", &parse("name: legacy\ntype: folder\n"));
+    check_folder(
+        &mut v,
+        "legacy folder",
+        &parse("name: legacy\ntype: folder\n"),
+    );
     check_auth(&mut v, "none auth", &parse("type: none\n"));
     check_auth(
         &mut v,

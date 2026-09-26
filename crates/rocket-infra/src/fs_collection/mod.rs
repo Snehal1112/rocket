@@ -19,6 +19,8 @@ mod variables;
 
 #[cfg(test)]
 mod tests;
+
+// Kept in its own group so rustfmt does not sort it before `tests`.
 #[cfg(test)]
 mod schema_shape_tests;
 

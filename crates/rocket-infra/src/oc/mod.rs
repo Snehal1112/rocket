@@ -241,7 +241,7 @@ mod tests {
                 OcAuthTyped::OAuth2 { flow, pkce, .. } => {
                     assert_eq!(flow, "authorization_code");
                     assert!(pkce.is_some());
-                assert_eq!(pkce.unwrap().method, Some("S256".into()));
+                    assert_eq!(pkce.unwrap().method, Some("S256".into()));
                 }
                 _ => panic!("expected OAuth2"),
             },
@@ -252,10 +252,22 @@ mod tests {
     #[test]
     fn oc_auth_oauth2_pkce_spec_and_legacy_fields() {
         let cases = [
-            ("type: oauth2\nflow: authorization_code\npkce:\n  disabled: true\n  method: S256", false),
-            ("type: oauth2\nflow: authorization_code\npkce:\n  enabled: false", false),
-            ("type: oauth2\nflow: authorization_code\npkce:\n  enabled: true", true),
-            ("type: oauth2\nflow: authorization_code\npkce:\n  method: S256", true),
+            (
+                "type: oauth2\nflow: authorization_code\npkce:\n  disabled: true\n  method: S256",
+                false,
+            ),
+            (
+                "type: oauth2\nflow: authorization_code\npkce:\n  enabled: false",
+                false,
+            ),
+            (
+                "type: oauth2\nflow: authorization_code\npkce:\n  enabled: true",
+                true,
+            ),
+            (
+                "type: oauth2\nflow: authorization_code\npkce:\n  method: S256",
+                true,
+            ),
         ];
         for (yaml, expect_enabled) in cases {
             let auth: OcAuth = serde_yaml::from_str(yaml).unwrap();
@@ -650,10 +662,12 @@ websocket:
         let out = serde_yaml::to_string(&item).unwrap();
         let back: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
         assert_eq!(back["settings"]["timeout"].as_f64(), Some(5000.0), "{out}");
-        assert_eq!(back["settings"]["keepAliveInterval"].as_str(), Some("inherit"), "{out}");
+        assert_eq!(
+            back["settings"]["keepAliveInterval"].as_str(),
+            Some("inherit"),
+            "{out}"
+        );
     }
-
-
 
     #[test]
     fn oc_script_file_yaml() {
@@ -865,7 +879,8 @@ externalSecrets:
       - name: stripe-key
         secretId: b6f1c2e0-1234-4a5b-9abc-000000000001
 "#;
-        let env: OcEnvironment = serde_yaml::from_str(yaml).expect("parse environment with external secrets");
+        let env: OcEnvironment =
+            serde_yaml::from_str(yaml).expect("parse environment with external secrets");
         assert_eq!(env.external_secrets.len(), 1);
         let binding = &env.external_secrets[0];
         assert_eq!(binding.alias, "payments");
@@ -880,11 +895,23 @@ externalSecrets:
 
         // Round-trip and confirm the serialized form is camelCase, not snake_case.
         let out = serde_yaml::to_string(&env).expect("serialize environment");
-        assert!(out.contains("connectionId:"), "expected camelCase, got:\n{out}");
-        assert!(out.contains("vaultName:"), "expected camelCase, got:\n{out}");
-        assert!(out.contains("secretNames:"), "expected camelCase, got:\n{out}");
+        assert!(
+            out.contains("connectionId:"),
+            "expected camelCase, got:\n{out}"
+        );
+        assert!(
+            out.contains("vaultName:"),
+            "expected camelCase, got:\n{out}"
+        );
+        assert!(
+            out.contains("secretNames:"),
+            "expected camelCase, got:\n{out}"
+        );
         assert!(out.contains("secretId:"), "expected camelCase, got:\n{out}");
-        assert!(!out.contains("connection_id:"), "must not emit snake_case:\n{out}");
+        assert!(
+            !out.contains("connection_id:"),
+            "must not emit snake_case:\n{out}"
+        );
     }
 
     #[test]

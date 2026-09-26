@@ -526,7 +526,11 @@ fn legacy_uid_migrated_into_folder_yml() {
     let content = fs::read_to_string(folder_dir.join("folder.yml")).unwrap();
     let mut folder = crate::fs_collection::folder_file::parse_folder_yml(&content).unwrap();
     folder.info.uid = None;
-    fs::write(folder_dir.join("folder.yml"), serde_yaml::to_string(&folder).unwrap()).unwrap();
+    fs::write(
+        folder_dir.join("folder.yml"),
+        serde_yaml::to_string(&folder).unwrap(),
+    )
+    .unwrap();
 
     // Load the collection — build_folder_tree should trigger migration.
     let col = repo.get("my-api").unwrap();
@@ -1235,8 +1239,14 @@ fn create_folder_writes_spec_folder_shape() {
     let raw = read_yaml_value(&dir.path().join("my-api/auth/folder.yml"));
     assert_eq!(raw["info"]["name"].as_str(), Some("auth"), "{raw:?}");
     assert_eq!(raw["info"]["type"].as_str(), Some("folder"), "{raw:?}");
-    assert!(raw.get("name").is_none(), "folder.yml must not be a bare FolderInfo: {raw:?}");
-    assert!(raw.get("items").is_none(), "items must never be written: {raw:?}");
+    assert!(
+        raw.get("name").is_none(),
+        "folder.yml must not be a bare FolderInfo: {raw:?}"
+    );
+    assert!(
+        raw.get("items").is_none(),
+        "items must never be written: {raw:?}"
+    );
 }
 
 #[test]
@@ -1245,10 +1255,27 @@ fn folder_uid_is_stable_across_reloads() {
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "auth").unwrap();
 
-    let first = repo.get("my-api").unwrap().root.find_folder("auth").unwrap().uid.clone();
-    let second = repo.get("my-api").unwrap().root.find_folder("auth").unwrap().uid.clone();
+    let first = repo
+        .get("my-api")
+        .unwrap()
+        .root
+        .find_folder("auth")
+        .unwrap()
+        .uid
+        .clone();
+    let second = repo
+        .get("my-api")
+        .unwrap()
+        .root
+        .find_folder("auth")
+        .unwrap()
+        .uid
+        .clone();
     assert!(!first.is_empty());
-    assert_eq!(first, second, "folder uid must not regenerate on every load");
+    assert_eq!(
+        first, second,
+        "folder uid must not regenerate on every load"
+    );
 }
 
 #[test]
@@ -1280,7 +1307,9 @@ fn legacy_bare_folder_yml_still_loads_and_is_upgraded_on_write() {
     // Legacy folder variables still feed the chain.
     let req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://example.com");
     repo.save_request("my-api", "auth/login.yml", &req).unwrap();
-    let chain = repo.get_folder_chain_variables("my-api", "auth/login.yml").unwrap();
+    let chain = repo
+        .get_folder_chain_variables("my-api", "auth/login.yml")
+        .unwrap();
     assert_eq!(chain.len(), 1);
     assert_eq!(chain[0].key, "token");
 
@@ -1298,11 +1327,25 @@ fn legacy_bare_folder_yml_still_loads_and_is_upgraded_on_write() {
     )
     .unwrap();
     let raw = read_yaml_value(&folder_dir.join("folder.yml"));
-    assert_eq!(raw["info"]["uid"].as_str(), Some("legacy-folder-uid"), "{raw:?}");
+    assert_eq!(
+        raw["info"]["uid"].as_str(),
+        Some("legacy-folder-uid"),
+        "{raw:?}"
+    );
     assert_eq!(raw["info"]["name"].as_str(), Some("Auth Flows"), "{raw:?}");
-    assert!(raw["info"].get("request").is_none(), "request defaults must leave info: {raw:?}");
-    assert_eq!(raw["request"]["variables"][0]["name"].as_str(), Some("token"), "{raw:?}");
-    assert_eq!(repo.get_folder_variables("my-api", "auth").unwrap()[0].value, "xyz");
+    assert!(
+        raw["info"].get("request").is_none(),
+        "request defaults must leave info: {raw:?}"
+    );
+    assert_eq!(
+        raw["request"]["variables"][0]["name"].as_str(),
+        Some("token"),
+        "{raw:?}"
+    );
+    assert_eq!(
+        repo.get_folder_variables("my-api", "auth").unwrap()[0].value,
+        "xyz"
+    );
 }
 
 #[test]
@@ -1313,16 +1356,26 @@ fn rename_folder_keeps_spec_shape_and_uid() {
     let before = read_yaml_value(&dir.path().join("my-api/old-name/folder.yml"));
     let uid = before["info"]["uid"].as_str().unwrap().to_string();
 
-    repo.move_item("my-api", "old-name", "my-api", "new-name").unwrap();
+    repo.move_item("my-api", "old-name", "my-api", "new-name")
+        .unwrap();
 
     let after = read_yaml_value(&dir.path().join("my-api/new-name/folder.yml"));
-    assert_eq!(after["info"]["name"].as_str(), Some("new-name"), "{after:?}");
-    assert_eq!(after["info"]["uid"].as_str(), Some(uid.as_str()), "{after:?}");
+    assert_eq!(
+        after["info"]["name"].as_str(),
+        Some("new-name"),
+        "{after:?}"
+    );
+    assert_eq!(
+        after["info"]["uid"].as_str(),
+        Some(uid.as_str()),
+        "{after:?}"
+    );
 }
 
 const GRAPHQL_ITEM_YML: &str = "info:\n  name: List Users\n  type: graphql\ngraphql:\n  url: https://api.example.com/graphql\n  body:\n    query: '{ users { id } }'\n";
 const GRPC_ITEM_YML: &str = "info:\n  name: Get User\n  type: grpc\ngrpc:\n  url: grpc://api.example.com\n  method: users.UserService/GetUser\n  methodType: unary\n";
-const WEBSOCKET_ITEM_YML: &str = "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\n";
+const WEBSOCKET_ITEM_YML: &str =
+    "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\n";
 
 fn opaque_items(
     folder: &rocket_collection::Folder,
@@ -1432,7 +1485,12 @@ fn websocket_settings_preserved_in_opaque_item() {
     let col = repo.get("my-api").unwrap();
     let ws = opaque_items(&col.root);
     assert_eq!(ws.len(), 1);
-    assert_eq!(ws[0].raw["settings"]["timeout"].as_f64(), Some(5000.0), "{:?}", ws[0].raw);
+    assert_eq!(
+        ws[0].raw["settings"]["timeout"].as_f64(),
+        Some(5000.0),
+        "{:?}",
+        ws[0].raw
+    );
     assert_eq!(
         ws[0].raw["settings"]["keepAliveInterval"].as_f64(),
         Some(30000.0),
@@ -1454,7 +1512,10 @@ fn save_settings_omits_none_auth_instead_of_writing_type_none() {
     let content = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
     assert!(!content.contains("type: none"), "{content}");
     let raw: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
-    assert!(raw.get("request").is_none(), "no empty request block: {content}");
+    assert!(
+        raw.get("request").is_none(),
+        "no empty request block: {content}"
+    );
     assert_eq!(repo.get_settings("my-api").unwrap().auth, None);
 }
 

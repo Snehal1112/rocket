@@ -137,9 +137,15 @@ mod tests {
 
         let raw: serde_yaml::Value =
             serde_yaml::from_str(&fs::read_to_string(&path).expect("read")).expect("yaml");
-        assert!(raw.get("info").is_some(), "must be wrapped in info: {raw:?}");
+        assert!(
+            raw.get("info").is_some(),
+            "must be wrapped in info: {raw:?}"
+        );
         assert!(raw.get("name").is_none(), "no bare top-level name: {raw:?}");
-        assert!(raw.get("items").is_none(), "items must never be written: {raw:?}");
+        assert!(
+            raw.get("items").is_none(),
+            "items must never be written: {raw:?}"
+        );
         assert_eq!(raw["info"]["name"].as_str(), Some("auth"));
     }
 }

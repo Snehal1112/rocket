@@ -277,7 +277,10 @@ mod tests {
             method: Some("S256".into()),
         };
         let json = serde_json::to_string(&pkce).unwrap();
-        assert!(!json.contains("enabled"), "legacy field must never be written: {json}");
+        assert!(
+            !json.contains("enabled"),
+            "legacy field must never be written: {json}"
+        );
         let back: OAuth2PKCE = serde_json::from_str(&json).unwrap();
         assert_eq!(pkce, back);
         assert!(back.is_enabled());
@@ -289,7 +292,10 @@ mod tests {
             disabled: Some(true),
             method: None,
         };
-        assert_eq!(serde_json::to_string(&pkce).unwrap(), r#"{"disabled":true}"#);
+        assert_eq!(
+            serde_json::to_string(&pkce).unwrap(),
+            r#"{"disabled":true}"#
+        );
         assert!(!pkce.is_enabled());
     }
 
