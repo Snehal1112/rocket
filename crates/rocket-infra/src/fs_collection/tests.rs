@@ -1418,3 +1418,25 @@ fn get_summaries_skips_non_http_items_without_error() {
         rocket_collection::CollectionItem::Summary(s) if s.name == "Good"
     ));
 }
+
+#[test]
+fn websocket_settings_preserved_in_opaque_item() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/chat.yml"),
+        "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\nsettings:\n  timeout: 5000\n  keepAliveInterval: 30000\n",
+    )
+    .unwrap();
+
+    let col = repo.get("my-api").unwrap();
+    let ws = opaque_items(&col.root);
+    assert_eq!(ws.len(), 1);
+    assert_eq!(ws[0].raw["settings"]["timeout"].as_f64(), Some(5000.0), "{:?}", ws[0].raw);
+    assert_eq!(
+        ws[0].raw["settings"]["keepAliveInterval"].as_f64(),
+        Some(30000.0),
+        "{:?}",
+        ws[0].raw
+    );
+}

@@ -3,7 +3,7 @@
 use rocket_shared::description::Description as OcDescription;
 use serde::{Deserialize, Serialize};
 
-use super::auth::OcAuth;
+use super::auth::{InheritableNumber, OcAuth};
 use super::http::{OcHttpRequestHeader, OcScript};
 use super::variables::OcVariable;
 
@@ -69,6 +69,16 @@ pub struct OcWebSocketRequestRuntime {
     pub auth: Option<OcAuth>,
 }
 
+/// WebSocket request settings. Schema: { timeout, keepAliveInterval }, each a number or "inherit".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcWebSocketRequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_interval: Option<InheritableNumber>,
+}
+
 /// Complete WebSocket request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcWebSocketRequest {
@@ -76,6 +86,8 @@ pub struct OcWebSocketRequest {
     pub websocket: OcWebSocketRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<OcWebSocketRequestRuntime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<OcWebSocketRequestSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
 }

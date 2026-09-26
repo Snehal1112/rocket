@@ -633,6 +633,27 @@ websocket:
         assert_eq!(req.websocket.url, "wss://chat.example.com/ws");
         assert!(req.websocket.message.is_some());
     }
+    #[test]
+    fn oc_websocket_settings_survive_item_roundtrip() {
+        let yaml = "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\nsettings:\n  timeout: 5000\n  keepAliveInterval: inherit\n";
+        let item: OcItem = serde_yaml::from_str(yaml).unwrap();
+        let OcItem::WebSocket(ref ws) = item else {
+            panic!("expected WebSocket, got {item:?}")
+        };
+        let settings = ws.settings.as_ref().expect("settings parsed");
+        assert_eq!(settings.timeout, Some(InheritableNumber::Value(5000.0)));
+        assert_eq!(
+            settings.keep_alive_interval,
+            Some(InheritableNumber::Inherit("inherit".into()))
+        );
+
+        let out = serde_yaml::to_string(&item).unwrap();
+        let back: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(back["settings"]["timeout"].as_f64(), Some(5000.0), "{out}");
+        assert_eq!(back["settings"]["keepAliveInterval"].as_str(), Some("inherit"), "{out}");
+    }
+
+
 
     #[test]
     fn oc_script_file_yaml() {
