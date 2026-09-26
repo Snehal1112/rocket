@@ -37,6 +37,13 @@ pub(crate) fn env_secret_store() -> Arc<dyn SecretStore> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Work around a WebKitGTK GPU-compositing bug that renders the Scripts tab
+    // Monaco editors transparent. Set before any thread or webview exists.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+
     // Bound libgit2's network operations before anything else runs. These
     // write process-global C state with no synchronization, so they are only
     // safe here, before any other thread exists. Without this, a stalled
@@ -328,6 +335,19 @@ pub fn run() {
                     width: 1440,
                     height: 900,
                 }));
+
+                // WebKitGTK defaults its cache model to WebBrowser, sized for
+                // navigating many sites. Rocket's webview only ever loads its
+                // own single-page app, so the browser-sized page/object caches
+                // are pure overhead.
+                #[cfg(target_os = "linux")]
+                win.with_webview(|webview| {
+                    use webkit2gtk::{CacheModel, WebContextExt, WebViewExt};
+                    if let Some(ctx) = webview.inner().context() {
+                        ctx.set_cache_model(CacheModel::DocumentViewer);
+                    }
+                })
+                .ok();
             }
 
             tracing::info!(data_dir = %data_dir.display(), "RocketAPI initialized");
