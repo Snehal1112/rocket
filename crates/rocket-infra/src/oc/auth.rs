@@ -91,7 +91,9 @@ pub enum OcAuthTyped {
 #[serde(rename_all = "camelCase")]
 pub struct OcOAuth2Credentials {
     pub client_id: String,
-    pub client_secret: String,
+    /// Absent for the implicit flow, whose spec credentials hold only `clientId`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement: Option<String>,
 }

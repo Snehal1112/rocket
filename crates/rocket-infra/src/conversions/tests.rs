@@ -238,7 +238,7 @@ fn auth_oauth2_client_credentials_oc_to_domain() {
         callback_url: None,
         credentials: Some(OcOAuth2Credentials {
             client_id: "id".into(),
-            client_secret: "s".into(),
+            client_secret: Some("s".into()),
             placement: None,
         }),
         resource_owner: None,
@@ -1407,4 +1407,81 @@ fn request_variables_survive_oc_roundtrip() {
     assert_eq!(back.variables[0].value, "abc");
     assert_eq!(back.variables[1].key, "disabled_var");
     assert!(!back.variables[1].enabled);
+}
+
+#[test]
+fn oauth2_implicit_writes_no_client_secret() {
+    use rocket_shared::oauth2::OAuth2Flow;
+    let auth = Auth::OAuth2(Box::new(OAuth2Flow::Implicit {
+        authorization_url: "https://auth.example.com/authorize".into(),
+        callback_url: None,
+        client_id: "spa-client".into(),
+        scope: None,
+        state: None,
+        additional_parameters: None,
+        token_config: None,
+        settings: None,
+    }));
+    let yaml = serde_yaml::to_string(&OcAuth::from(auth.clone())).unwrap();
+    assert!(yaml.contains("clientId: spa-client"), "{yaml}");
+    assert!(
+        !yaml.contains("clientSecret"),
+        "implicit credentials hold only clientId: {yaml}"
+    );
+    let back: Auth = serde_yaml::from_str::<OcAuth>(&yaml).unwrap().into();
+    assert_eq!(back, auth);
+}
+
+#[test]
+fn oauth2_implicit_legacy_empty_client_secret_still_loads() {
+    use rocket_shared::oauth2::OAuth2Flow;
+    let yaml = "type: oauth2\nflow: implicit\nauthorizationUrl: https://auth.example.com/authorize\ncredentials:\n  clientId: spa-client\n  clientSecret: ''\n";
+    let auth: Auth = serde_yaml::from_str::<OcAuth>(yaml).unwrap().into();
+    match auth {
+        Auth::OAuth2(flow) => assert!(
+            matches!(*flow, OAuth2Flow::Implicit { ref client_id, .. } if client_id == "spa-client"),
+            "{flow:?}"
+        ),
+        other => panic!("expected OAuth2, got {other:?}"),
+    }
+}
+
+#[test]
+fn oauth2_client_credentials_keeps_client_secret() {
+    use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+    let auth = Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+        access_token_url: "https://auth.example.com/token".into(),
+        refresh_token_url: None,
+        credentials: OAuth2ClientCredentials {
+            client_id: "svc".into(),
+            client_secret: "s3cret".into(),
+            placement: None,
+        },
+        scope: None,
+        additional_parameters: None,
+        token_config: None,
+        settings: None,
+    }));
+    let yaml = serde_yaml::to_string(&OcAuth::from(auth.clone())).unwrap();
+    assert!(yaml.contains("clientSecret: s3cret"), "{yaml}");
+    let back: Auth = serde_yaml::from_str::<OcAuth>(&yaml).unwrap().into();
+    assert_eq!(back, auth);
+}
+
+#[test]
+fn oauth2_client_credentials_without_client_secret_key_parses() {
+    use rocket_shared::oauth2::OAuth2Flow;
+    let yaml = "type: oauth2\nflow: client_credentials\naccessTokenUrl: https://auth.example.com/token\ncredentials:\n  clientId: svc\n";
+    let oc: OcAuth =
+        serde_yaml::from_str(yaml).expect("a missing clientSecret must not reject the file");
+    match Auth::from(oc) {
+        Auth::OAuth2(flow) => match *flow {
+            OAuth2Flow::ClientCredentials { credentials, .. } => {
+                assert_eq!(credentials.client_id, "svc");
+                assert_eq!(credentials.client_secret, "");
+            }
+            other => panic!("expected client_credentials, got {other:?}"),
+        },
+        other => panic!("expected OAuth2, got {other:?}"),
+    }
 }

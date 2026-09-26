@@ -137,7 +137,7 @@ impl From<OcAuthTyped> for Auth {
 fn oc_creds_to_domain(c: OcOAuth2Credentials) -> OAuth2ClientCredentials {
     OAuth2ClientCredentials {
         client_id: c.client_id,
-        client_secret: c.client_secret,
+        client_secret: c.client_secret.unwrap_or_default(),
         placement: c.placement,
     }
 }
@@ -362,7 +362,7 @@ fn domain_oauth2_to_oc_fields(
             callback_url,
             Some(OcOAuth2Credentials {
                 client_id,
-                client_secret: String::new(),
+                client_secret: None,
                 placement: None,
             }),
             None,
@@ -379,7 +379,7 @@ fn domain_oauth2_to_oc_fields(
 fn domain_creds_to_oc(c: OAuth2ClientCredentials) -> OcOAuth2Credentials {
     OcOAuth2Credentials {
         client_id: c.client_id,
-        client_secret: c.client_secret,
+        client_secret: Some(c.client_secret),
         placement: c.placement,
     }
 }
