@@ -16,15 +16,18 @@ if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
   document.documentElement.classList.remove('dark');
 }
 
-// Register Monaco workers before any editor mounts. Only JSON and the base
-// editor worker are needed — TypeScript/CSS/HTML workers are not used in an
-// API client and each adds several MB to the initial load.
+// Register Monaco workers before any editor mounts. JSON and the JS/TS
+// language-service worker are needed — the JS/TS worker backs ScriptsTab's
+// language='javascript' editors and their addExtraLib-based rok/req/res
+// IntelliSense. CSS/HTML workers are still unused and skipped.
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
 self.MonacoEnvironment = {
   getWorker(_: unknown, label: string) {
     if (label === 'json') return new jsonWorker();
+    if (label === 'javascript' || label === 'typescript') return new tsWorker();
     return new editorWorker();
   },
 };
