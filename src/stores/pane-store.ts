@@ -587,9 +587,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   setFlowRunState(tabId, runState, runId) {
     set({
-      root: updateTabInTree(get().root, tabId, (tab) =>
-        isFlowTab(tab) ? { ...tab, runState, runId } : tab,
-      ),
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        // A new run starts from a clean canvas. Otherwise the last run's
+        // results stay on nodes this run skips or never reaches.
+        if (runState === 'running') {
+          return { ...tab, runState, runId, nodeStatus: {}, nodeDetail: {} };
+        }
+        return { ...tab, runState, runId };
+      }),
     });
   },
 

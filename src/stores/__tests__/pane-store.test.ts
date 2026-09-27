@@ -914,4 +914,30 @@ describe('Flow tab actions', () => {
     expect(tab?.nodeStatus.n1).toBe('success');
     expect(tab?.nodeDetail?.n1).toEqual({ statusCode: 200, durationMs: 184 });
   });
+
+  it('setFlowRunState clears the last run results when a new run starts', async () => {
+    await usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    usePaneStore.setState({
+      root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+        tab.tabType === 'flow'
+          ? {
+              ...tab,
+              nodes: [
+                { id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } },
+              ],
+            }
+          : tab,
+      ),
+    });
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'failed', { error: 'boom' });
+    usePaneStore.getState().setFlowRunState(tabId, 'done', 'run-1');
+    expect(findFirstFlowTab()?.nodeStatus.n1).toBe('failed');
+
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'run-2');
+    const tab = findFirstFlowTab();
+    expect(tab?.nodeStatus).toEqual({});
+    expect(tab?.nodeDetail).toEqual({});
+  });
 });
