@@ -27,6 +27,12 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::FlowRunStarted { .. } => "flow-run-started",
             DomainEvent::FlowStepCompleted { .. } => "flow-step-completed",
             DomainEvent::FlowRunFinished { .. } => "flow-run-finished",
+            // ACP AI-assist session events — mirrors the Flow/Collection
+            // Runner events above: each variant gets its own frontend channel.
+            DomainEvent::AcpSessionStarted { .. } => "agent-session-started",
+            DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
+            DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
+            DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",
