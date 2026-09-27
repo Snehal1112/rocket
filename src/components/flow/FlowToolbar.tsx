@@ -23,6 +23,16 @@ export function FlowToolbar({
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
+  // A ref, not state: `activeRunId` is only set once the `flow-run-started`
+  // event round-trips through the backend, so between a click and that
+  // event the Run button's `disabled` prop alone does not prevent a second,
+  // concurrent `handleRun` call (e.g. a fast double-click). Two concurrent
+  // calls would each subscribe their own listener pair and overwrite
+  // `unlistenRefs.current`, permanently orphaning whichever pair loses the
+  // race — a real leaked-listener bug, not just a double `runFlow` call.
+  // A ref guard, checked and set synchronously before any `await`, closes
+  // that window regardless of render timing.
+  const isStartingRef = useRef(false);
 
   const cleanupListeners = useCallback(() => {
     for (const unlisten of unlistenRefs.current) unlisten();
@@ -33,6 +43,8 @@ export function FlowToolbar({
   useEffect(() => cleanupListeners, [cleanupListeners]);
 
   const handleRun = async () => {
+    if (isStartingRef.current || activeRunId !== null) return;
+    isStartingRef.current = true;
     cleanupListeners();
     // Held in a local, not state, so the event handlers see it at once.
     let runId: string | null = null;
@@ -75,6 +87,7 @@ export function FlowToolbar({
     } finally {
       setActiveRunId(null);
       cleanupListeners();
+      isStartingRef.current = false;
     }
   };
 

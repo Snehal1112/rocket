@@ -76,6 +76,9 @@ describe('FlowToolbar', () => {
     onPatchStatus.mockClear();
     onRunStateChange.mockClear();
     vi.mocked(tauriApi.cancelFlowRun).mockClear();
+    vi.mocked(tauriApi.onFlowRunStarted).mockClear();
+    vi.mocked(tauriApi.onFlowStepCompleted).mockClear();
+    vi.mocked(tauriApi.runFlow).mockClear();
   });
 
   it('subscribes before running, takes the run id from flow-run-started, and finishes on resolve', async () => {
@@ -151,5 +154,20 @@ describe('FlowToolbar', () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(tauriApi.cancelFlowRun).not.toHaveBeenCalled();
+  });
+
+  it('a rapid double-click on Run only starts one run and does not orphan a listener pair', async () => {
+    renderToolbar();
+    const runButton = screen.getByRole('button', { name: 'Run' });
+    // `activeRunId` (and thus the button's `disabled` prop) is only set once
+    // the flow-run-started event round-trips through the backend, so a
+    // second click before that event arrives must still be a no-op — both
+    // for the backend call and for listener subscription (a second
+    // subscribe pass would overwrite unlistenRefs and orphan the first
+    // pair, since only the ref's current contents get unlistened later).
+    await userEvent.click(runButton);
+    await userEvent.click(runButton);
+    await waitFor(() => expect(tauriApi.onFlowRunStarted).toHaveBeenCalledTimes(1));
+    expect(tauriApi.runFlow).toHaveBeenCalledTimes(1);
   });
 });
