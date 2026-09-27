@@ -374,6 +374,9 @@ function renderNode(data: Parameters<typeof RequestNode>[0]['data']) {
         dragging={false}
         zIndex={0}
         isConnectable
+        draggable
+        selectable
+        deletable
         positionAbsoluteX={0}
         positionAbsoluteY={0}
       />
@@ -614,6 +617,9 @@ describe('InputNode', () => {
         dragging={false}
         zIndex={0}
         isConnectable
+        draggable
+        selectable
+        deletable
         positionAbsoluteX={0}
         positionAbsoluteY={0}
       />,
@@ -632,6 +638,9 @@ describe('InputNode', () => {
         dragging={false}
         zIndex={0}
         isConnectable
+        draggable
+        selectable
+        deletable
         positionAbsoluteX={0}
         positionAbsoluteY={0}
       />,
@@ -651,6 +660,9 @@ describe('OutputNode', () => {
         dragging={false}
         zIndex={0}
         isConnectable
+        draggable
+        selectable
+        deletable
         positionAbsoluteX={0}
         positionAbsoluteY={0}
       />,
