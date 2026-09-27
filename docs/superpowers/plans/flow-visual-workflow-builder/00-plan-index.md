@@ -240,14 +240,17 @@ schema-validation code.
 
 ```rust
 // crates/rocket-infra/src/fs_flow_repo.rs
-pub struct FsFlowRepo { /* workspaces_root: PathBuf, same base the FsCollectionRepo uses */ }
+pub struct FsFlowRepo { /* base_dir: PathBuf, the collections dir FsCollectionRepo uses */ }
 impl FsFlowRepo {
-    pub fn new(workspaces_root: PathBuf) -> Self;
+    pub fn new(base_dir: PathBuf) -> Self; // collections dir, not workspace root
 }
 impl FlowRepository for FsFlowRepo { /* ... */ }
 // On-disk: <collection-dir>/flows/<slugify(flow.name)>.yml — mirrors
-// FsCollectionRepo's slugification and directory-creation conventions
-// exactly (see FsCollectionRepo::save_request for the pattern to copy).
+// FsCollectionRepo's directory-creation conventions (see
+// FsCollectionRepo::save_request). Collection names go through
+// Collection::validate_name. A name whose slug is empty is InvalidInput;
+// saving a different name that shares an existing file's slug is Conflict;
+// get/delete only match a file whose stored name equals the requested name.
 ```
 
 ### `rocket-shared` (modified, Plan 04)
