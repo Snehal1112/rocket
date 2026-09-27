@@ -41,7 +41,9 @@ pub trait AcpSessionClient: Send + Sync {
     /// whole application is shutting down (Tauri does not drop managed
     /// state on exit, so nothing else calls `end_session` for sessions
     /// still open at quit time). Best-effort: an individual session's kill
-    /// failure must not prevent cleanup of the rest.
+    /// failure must not prevent cleanup of the rest. It must also cover a
+    /// session still in its handshake, and later `start_session` calls may be
+    /// refused, since nothing would kill a session stored after the sweep.
     async fn end_all_sessions(&self) -> DomainResult<()>;
 }
 

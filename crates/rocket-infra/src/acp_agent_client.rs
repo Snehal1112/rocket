@@ -5,7 +5,8 @@
 //! background task rather than directly inside `start_session`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, PoisonError, Weak};
 
 use agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation, InitializeRequest,
@@ -40,7 +41,9 @@ struct RunningSession {
     connection: ConnectionTo<AgentRole>,
     /// The agent process and its background dispatch task. Every path that
     /// removes a session from the map calls `terminate()` on it explicitly.
-    process: std::sync::Mutex<AgentProcess>,
+    /// Shared (as a `Weak`) with the in-flight registry while the handshake
+    /// runs, so `end_all_sessions` can reach it before it is in the map.
+    process: SharedProcess,
     /// Serializes prompts on one session. `current_chunk_tx` holds a single
     /// sender, so two overlapping prompts would otherwise steal or clear
     /// each other's chunk stream. ACP also allows only one turn at a time.
@@ -53,6 +56,17 @@ struct RunningSession {
 }
 
 type ChunkSlot = Arc<std::sync::Mutex<Option<UnboundedSender<String>>>>;
+
+type SharedProcess = Arc<std::sync::Mutex<AgentProcess>>;
+
+/// Terminates a shared agent process. A poisoned lock is recovered because
+/// `terminate()` is idempotent and safe to call on any state.
+fn terminate_process(process: &SharedProcess) -> std::io::Result<()> {
+    process
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .terminate()
+}
 
 /// Sets the per-prompt chunk sender. A poisoned lock is recovered because
 /// the guarded value is a plain `Option` that cannot be left half-written.
@@ -113,11 +127,23 @@ impl Drop for AgentProcess {
 
 /// Explicitly terminates a session that was removed from the map.
 fn terminate_session(running: &RunningSession) -> std::io::Result<()> {
-    running
-        .process
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .terminate()
+    terminate_process(&running.process)
+}
+
+/// Removes one entry from the in-flight registry when `start_session`
+/// finishes, fails, or is dropped mid-handshake.
+struct InFlightGuard<'a> {
+    in_flight: &'a std::sync::Mutex<HashMap<u64, Weak<std::sync::Mutex<AgentProcess>>>>,
+    id: u64,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+    }
 }
 
 /// `AcpSessionClient` implementation backed by the real `agent-client-protocol`
@@ -125,6 +151,14 @@ fn terminate_session(running: &RunningSession) -> std::io::Result<()> {
 /// connection alive in a background task for the life of the session.
 pub struct AcpAgentClient {
     sessions: Mutex<HashMap<String, Arc<RunningSession>>>,
+    /// Processes spawned by a `start_session` call whose handshake has not
+    /// finished yet, so they are not in `sessions`. Held as `Weak` so the
+    /// `AgentProcess` drop safety net still fires when that call is dropped.
+    in_flight: std::sync::Mutex<HashMap<u64, Weak<std::sync::Mutex<AgentProcess>>>>,
+    next_in_flight_id: AtomicU64,
+    /// Set once by `end_all_sessions`. After that, no new session may be
+    /// stored, because the app is exiting and nothing would kill it.
+    shutting_down: AtomicBool,
 }
 
 impl Default for AcpAgentClient {
@@ -137,6 +171,9 @@ impl AcpAgentClient {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            in_flight: std::sync::Mutex::new(HashMap::new()),
+            next_in_flight_id: AtomicU64::new(0),
+            shutting_down: AtomicBool::new(false),
         }
     }
 }
@@ -290,11 +327,30 @@ impl AcpSessionClient for AcpAgentClient {
 
         // Owned from here on, so every early return below (and a caller
         // dropping this future mid-handshake) still tears the process down.
-        let mut process = AgentProcess {
+        let process: SharedProcess = Arc::new(std::sync::Mutex::new(AgentProcess {
             child,
             dispatch_task,
             terminated: false,
+        }));
+
+        // Register the process before the handshake so an app-exit sweep
+        // that runs meanwhile can still kill it. The flag is checked after
+        // registering: either the sweep sees this entry, or this call sees
+        // the flag. Both use `SeqCst`, and the sweep sets the flag before it
+        // drains this registry.
+        let in_flight_id = self.next_in_flight_id.fetch_add(1, Ordering::SeqCst);
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(in_flight_id, Arc::downgrade(&process));
+        let _in_flight_guard = InFlightGuard {
+            in_flight: &self.in_flight,
+            id: in_flight_id,
         };
+        if self.shutting_down.load(Ordering::SeqCst) {
+            let _ = terminate_process(&process);
+            return Err(shutting_down_error());
+        }
 
         let handshake = match ready_rx.await {
             Ok(Ok(ready)) => Ok(ready),
@@ -306,21 +362,27 @@ impl AcpSessionClient for AcpAgentClient {
         let (session_id, connection) = match handshake {
             Ok(ready) => ready,
             Err(e) => {
-                let _ = process.terminate();
+                let _ = terminate_process(&process);
                 return Err(e);
             }
         };
 
         let running = Arc::new(RunningSession {
             connection,
-            process: std::sync::Mutex::new(process),
+            process,
             prompt_lock: Mutex::new(()),
             current_chunk_tx,
         });
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id.clone(), running);
+        // The flag is read under the `sessions` lock, which the sweep also
+        // takes after setting it. So a session is either stored before the
+        // sweep drains the map, or it is refused and killed here.
+        let mut sessions = self.sessions.lock().await;
+        if self.shutting_down.load(Ordering::SeqCst) {
+            drop(sessions);
+            let _ = terminate_session(&running);
+            return Err(shutting_down_error());
+        }
+        sessions.insert(session_id.clone(), running);
         Ok(session_id)
     }
 
@@ -376,6 +438,23 @@ impl AcpSessionClient for AcpAgentClient {
     }
 
     async fn end_all_sessions(&self) -> DomainResult<()> {
+        // Refuse new sessions first. See `start_session` for how this flag
+        // pairs with the in-flight registry and the `sessions` lock.
+        self.shutting_down.store(true, Ordering::SeqCst);
+
+        // Kill processes still in their handshake. They are not in the map
+        // yet, and the app exits right after this call returns.
+        let in_flight: Vec<_> = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for process in &in_flight {
+            let _ = terminate_process(process);
+        }
+
         // Drain the whole map (rather than iterating a snapshot and removing
         // one-by-one) so a session that finishes naturally mid-sweep can't be
         // double-terminated, and so the lock is held only for the swap itself.
@@ -403,6 +482,10 @@ impl AcpAgentClient {
             let _ = terminate_session(&running);
         }
     }
+}
+
+fn shutting_down_error() -> DomainError {
+    DomainError::Internal("agent sessions are shutting down".to_string())
 }
 
 /// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-

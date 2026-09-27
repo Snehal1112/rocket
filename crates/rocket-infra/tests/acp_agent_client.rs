@@ -399,3 +399,71 @@ async fn acp_agent_client_end_all_sessions_on_empty_map_succeeds() {
         .await
         .expect("end_all_sessions on an empty session map must succeed, not error");
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn acp_agent_client_end_all_sessions_kills_a_session_still_in_its_handshake() {
+    // An agent that never answers `initialize` is not in the session map
+    // yet. The app-exit sweep must still kill its whole process group, or
+    // quitting mid-handshake would orphan it with its credential.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pid_file = dir.path().join("grandchild.pid");
+    let script = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
+
+    let client = std::sync::Arc::new(AcpAgentClient::new());
+    let starter = {
+        let client = std::sync::Arc::clone(&client);
+        tokio::spawn(async move {
+            client
+                .start_session("sh", &["-c".to_string(), script], "/tmp", &[])
+                .await
+        })
+    };
+
+    let mut pid = None;
+    for _ in 0..50 {
+        if let Ok(text) = std::fs::read_to_string(&pid_file) {
+            if !text.trim().is_empty() {
+                pid = Some(text.trim().to_string());
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let pid = pid.expect("grandchild pid file was never written");
+
+    client
+        .end_all_sessions()
+        .await
+        .expect("end_all_sessions should succeed");
+
+    assert!(
+        wait_for_process_exit(&pid).await,
+        "grandchild process {pid} survived end_all_sessions during its handshake"
+    );
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), starter)
+        .await
+        .expect("start_session must finish once its process is killed")
+        .expect("start_session task must not panic");
+    assert!(
+        outcome.is_err(),
+        "a killed handshake must not yield a session"
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_after_end_all_sessions_is_refused() {
+    let client = AcpAgentClient::new();
+    client
+        .end_all_sessions()
+        .await
+        .expect("end_all_sessions should succeed");
+
+    let result = client
+        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .await;
+    assert!(
+        result.is_err(),
+        "no session may be stored after the app-exit sweep"
+    );
+}
