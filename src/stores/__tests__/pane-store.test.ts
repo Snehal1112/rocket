@@ -850,4 +850,33 @@ describe('Flow tab actions', () => {
     ).not.toThrow();
     expect(findFirstFlowTab()?.nodeStatus['does-not-exist']).toBeUndefined();
   });
+
+  it('keeps node status separate for the same flow opened twice', async () => {
+    vi.mocked(getFlow).mockResolvedValue({
+      name: 'My Flow',
+      nodes: [{ id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } }],
+      edges: [],
+    });
+    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    const root = usePaneStore.getState().root;
+    if (root.type !== 'leaf') throw new Error('Expected a single leaf');
+    const [first, second] = root.tabs.filter(isFlowTab);
+    expect(first.id).not.toBe(second.id);
+
+    usePaneStore.getState().patchFlowNodeStatus(first.id, 'n1', 'success');
+    const after = usePaneStore.getState().root;
+    if (after.type !== 'leaf') throw new Error('Expected a single leaf');
+    const [firstAfter, secondAfter] = after.tabs.filter(isFlowTab);
+    expect(firstAfter.nodeStatus.n1).toBe('success');
+    expect(secondAfter.nodeStatus.n1).toBeUndefined();
+  });
+
+  it('keeps the collection on the picker tab when getFlow rejects', async () => {
+    vi.mocked(getFlow).mockRejectedValue('Not found: flow');
+    await usePaneStore.getState().openFlowTab('my-collection', 'Missing Flow');
+    const tab = findFirstFlowTab();
+    expect(tab?.flowName).toBeNull();
+    expect(tab?.collectionName).toBe('my-collection');
+  });
 });

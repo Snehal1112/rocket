@@ -11,6 +11,7 @@ import {
   Plus,
   Radio,
   Save,
+  Workflow,
   X,
   Zap,
 } from 'lucide-react';
@@ -49,6 +50,7 @@ export function TabBar({
   const updateTabTitle = usePaneStore((s) => s.updateTabTitle);
   const openEphemeralTab = usePaneStore((s) => s.openEphemeralTab);
   const openRunnerTab = usePaneStore((s) => s.openRunnerTab);
+  const openFlowTab = usePaneStore((s) => s.openFlowTab);
 
   // Other panes available for moving tabs into.
   const otherGroupIds = collectLeafGroupIds(root).filter((id) => id !== node.groupId);
@@ -257,6 +259,9 @@ export function TabBar({
           </ContextMenuItem>
           <ContextMenuItem onClick={() => void openRunnerTab(null)}>
             <ListChecks className='h-3.5 w-3.5 mr-2' /> Runner
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => void openFlowTab(null)}>
+            <Workflow className='h-3.5 w-3.5 mr-2' /> Flow
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
