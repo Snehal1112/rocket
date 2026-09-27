@@ -363,6 +363,20 @@ pub fn run() {
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
+            // Flow execution — both repos are workspace-following (SharedPathFlowRepo,
+            // SharedPathCollectionRepo), matching runner_svc's own collection_repo
+            // exactly and for the same reason: a run must follow workspace switches,
+            // not read whatever workspace was active at process startup.
+            let flow_exec_svc = rocket_app::FlowExecutionService::new(
+                Box::new(rocket_infra::SharedPathFlowRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            );
+
             let git_svc = GitAppService::new(
                 Box::new(rocket_git::Git2Service::new()),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
@@ -392,6 +406,7 @@ pub fn run() {
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
             app.manage(runner_svc);
+            app.manage(flow_exec_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
             app.manage(flow_svc);
@@ -485,6 +500,8 @@ pub fn run() {
             commands::flow::get_flow,
             commands::flow::delete_flow,
             commands::flow::save_flow,
+            commands::flow::run_flow,
+            commands::flow::cancel_flow_run,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,

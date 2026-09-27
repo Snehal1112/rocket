@@ -1,4 +1,6 @@
-use rocket_app::FlowService;
+use rocket_app::{
+    FlowExecutionService, FlowRunSummary, FlowService, RequestExecutionService, RunFlowInput,
+};
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
     RequestSource,
@@ -262,6 +264,50 @@ pub fn save_flow(
     svc: State<'_, FlowService>,
 ) -> Result<(), DomainError> {
     svc.save(&collection, flow.into())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFlowInputDto {
+    pub collection: String,
+    pub flow_name: String,
+    pub environment_name: Option<String>,
+}
+impl From<RunFlowInputDto> for RunFlowInput {
+    fn from(i: RunFlowInputDto) -> Self {
+        Self {
+            collection: i.collection,
+            flow_name: i.flow_name,
+            environment_name: i.environment_name,
+        }
+    }
+}
+
+/// Runs a Flow to completion. Streams `flow-run-started`,
+/// `flow-step-completed`, and `flow-run-finished` events while it runs
+/// (`FlowExecutionService::run` publishes these through the injected
+/// `TauriEventBus` as it goes) and returns the same data as one summary when
+/// the run ends — mirroring `run_collection` in `runner.rs` exactly. The
+/// frontend reads `run_id` off the `flow-run-started` event payload, not off
+/// this command's return value, so Stop is available before the run finishes.
+#[tauri::command]
+pub async fn run_flow(
+    input: RunFlowInputDto,
+    flow_exec: State<'_, FlowExecutionService>,
+    exec: State<'_, RequestExecutionService>,
+) -> Result<FlowRunSummary, DomainError> {
+    flow_exec.run(&exec, input.into()).await
+}
+
+/// Asks an in-progress Flow run to stop. An unknown or already-finished run
+/// id is a no-op, matching `stop_collection_run`'s existing behavior.
+#[tauri::command]
+pub fn cancel_flow_run(
+    run_id: String,
+    flow_exec: State<'_, FlowExecutionService>,
+) -> Result<(), DomainError> {
+    flow_exec.cancel(&run_id);
+    Ok(())
 }
 
 #[cfg(test)]

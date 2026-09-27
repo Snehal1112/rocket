@@ -37,7 +37,9 @@ pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
 pub use export_service::{ExportFormat, ExportService};
-pub use flow_execution_service::CapturedOutput;
+pub use flow_execution_service::{
+    CapturedOutput, FlowExecutionService, FlowRunSummary, FlowStepResult, RunFlowInput,
+};
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
 pub use history_service::HistoryService;

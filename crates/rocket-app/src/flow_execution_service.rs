@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use rocket_collection::Request;
 use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, InlineRequestData, RequestSource};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -289,8 +291,9 @@ pub struct RunFlowInput {
 }
 
 /// One node's outcome within a run, as reported in `FlowRunSummary::steps`
-/// and the `FlowStepCompleted` event.
-#[derive(Debug, Clone)]
+/// and the `FlowStepCompleted` event. IPC DTO.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowStepResult {
     pub node_id: String,
     pub status: FlowNodeStatus,
@@ -299,8 +302,9 @@ pub struct FlowStepResult {
     pub error: Option<String>,
 }
 
-/// The full result of one `FlowExecutionService::run` call.
-#[derive(Debug, Clone)]
+/// The full result of one `FlowExecutionService::run` call. IPC DTO.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowRunSummary {
     pub run_id: String,
     pub steps: Vec<FlowStepResult>,
