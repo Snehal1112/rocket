@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rocket_collection::Request;
 use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, InlineRequestData, RequestSource};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
+use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 use rocket_shared::VariableValue;
 
 use crate::execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
@@ -130,6 +130,63 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
         file_path: None,
     });
     Ok(request)
+}
+
+/// Mutates `input` in place, applying each edge in `edges` whose id is a key
+/// in `resolved` onto the field its `target_field` path names. Supported
+/// paths for Phase 1: `"url"`, `"headers[N].value"`, `"body"`. Any other
+/// path, or an out-of-range header index, is a `DomainError` — never a
+/// silent no-op, since a wire the user drew that quietly does nothing would
+/// be far more confusing than a run that fails with a clear reason.
+pub fn apply_wired_overrides(
+    input: &mut ExecuteRequestInput,
+    resolved: &HashMap<String, String>,
+    edges: &[FlowEdge],
+) -> DomainResult<()> {
+    for e in edges {
+        let Some(value) = resolved.get(&e.id) else {
+            continue;
+        };
+        match e.target_field.as_str() {
+            "url" => input.url = value.clone(),
+            "body" => {
+                let body = input.body.get_or_insert(Body {
+                    mode: BodyMode::Json,
+                    content: None,
+                    form_data: None,
+                    file_path: None,
+                });
+                body.content = Some(value.clone());
+            }
+            field => {
+                if let Some(index_str) = field
+                    .strip_prefix("headers[")
+                    .and_then(|rest| rest.strip_suffix("].value"))
+                {
+                    let index: usize = index_str.parse().map_err(|_| {
+                        DomainError::InvalidInput(format!(
+                            "edge '{}': malformed target_field '{}'",
+                            e.id, e.target_field
+                        ))
+                    })?;
+                    let headers_len = input.headers.len();
+                    let header = input.headers.get_mut(index).ok_or_else(|| {
+                        DomainError::InvalidInput(format!(
+                            "edge '{}': header index {} out of range (request has {} headers)",
+                            e.id, index, headers_len
+                        ))
+                    })?;
+                    header.value = value.clone();
+                } else {
+                    return Err(DomainError::InvalidInput(format!(
+                        "edge '{}': unrecognized target_field '{}'",
+                        e.id, e.target_field
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -566,6 +623,96 @@ mod tests {
         let err = build_execute_request_input(&repo, "my-api", None, &node)
             .expect_err("an Output node has no request to build");
 
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    fn edge(id: &str, target_node: &str, target_field: &str) -> FlowEdge {
+        FlowEdge {
+            id: id.to_string(),
+            source_node_id: "src".to_string(),
+            target_node_id: target_node.to_string(),
+            target_field: target_field.to_string(),
+            expression: "response.body".to_string(),
+        }
+    }
+
+    fn sample_execute_input() -> ExecuteRequestInput {
+        let repo = FakeCollectionRepo::new();
+        build_execute_request_input(&repo, "my-api", None, &inline_flow_node("n2"))
+            .expect("build sample input")
+    }
+
+    #[test]
+    fn empty_overrides_leave_input_unchanged() {
+        let input = sample_execute_input();
+        let mut mutated = input.clone();
+        apply_wired_overrides(&mut mutated, &HashMap::new(), &[]).expect("no-op must succeed");
+        assert_eq!(mutated.url, input.url);
+        assert_eq!(mutated.headers, input.headers);
+        assert_eq!(mutated.body, input.body);
+    }
+
+    #[test]
+    fn url_override_replaces_url() {
+        let mut input = sample_execute_input();
+        let edges = vec![edge("e1", "n2", "url")];
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), "https://api.example.com/v2/ping".to_string());
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("url override must apply");
+
+        assert_eq!(input.url, "https://api.example.com/v2/ping");
+    }
+
+    #[test]
+    fn header_value_override_replaces_the_named_index() {
+        let mut input = sample_execute_input();
+        let edges = vec![edge("e1", "n2", "headers[0].value")];
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), "42".to_string());
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("header override must apply");
+
+        assert_eq!(input.headers[0].value, "42");
+    }
+
+    #[test]
+    fn header_value_override_out_of_range_is_an_error_not_a_panic() {
+        let mut input = sample_execute_input();
+        let out_of_range = input.headers.len();
+        let edges = vec![edge("e1", "n2", &format!("headers[{out_of_range}].value"))];
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), "42".to_string());
+
+        let err = apply_wired_overrides(&mut input, &resolved, &edges)
+            .expect_err("an out-of-range header index must error");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn body_override_replaces_body_content() {
+        let mut input = sample_execute_input();
+        let edges = vec![edge("e1", "n2", "body")];
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), r#"{"replaced":true}"#.to_string());
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("body override must apply");
+
+        assert_eq!(
+            input.body.expect("body must be set").content.as_deref(),
+            Some(r#"{"replaced":true}"#)
+        );
+    }
+
+    #[test]
+    fn unrecognized_target_field_is_an_error_not_a_silent_noop() {
+        let mut input = sample_execute_input();
+        let edges = vec![edge("e1", "n2", "auth.token")];
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), "x".to_string());
+
+        let err = apply_wired_overrides(&mut input, &resolved, &edges)
+            .expect_err("an unrecognized target_field must error, not silently do nothing");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 }
