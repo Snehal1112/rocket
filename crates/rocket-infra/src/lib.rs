@@ -27,6 +27,7 @@ pub mod secret_store;
 pub mod shared_collection_environment_repo;
 pub mod shared_path_collection_repo;
 mod yaml_io;
+pub use acp_agent_client::AcpAgentClient;
 pub use atomic_write::{atomic_write, atomic_write_bulk};
 pub use clone_destination_capabilities::{
     CloneDestinationCapabilities, CloneDestinationGrant, DEFAULT_CLONE_DESTINATION_CAPABILITY_TTL,

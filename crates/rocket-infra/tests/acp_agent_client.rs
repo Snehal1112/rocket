@@ -9,6 +9,19 @@
 use agent_client_protocol::schema::v1::InitializeRequest;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent as AgentRole, Client, ConnectionTo};
+use rocket_acp::AcpSessionClient;
+use rocket_infra::AcpAgentClient;
+use rocket_shared::error::DomainError;
+
+// Returns the path to the fixture ACP agent binary (crates/rocket-infra/src/
+// bin/test_acp_agent.rs). Cargo only populates `CARGO_BIN_EXE_<name>` for
+// integration-test targets under `tests/`, not for unit tests compiled into
+// the lib target -- see the task report for why these tests live here
+// rather than in a `#[cfg(test)] mod tests` block inside
+// `src/acp_agent_client.rs`.
+fn fixture_command() -> String {
+    env!("CARGO_BIN_EXE_test_acp_agent").to_string()
+}
 
 // Named with an "acp_agent_client" prefix (rather than the brief's plain
 // "fixture_agent_completes_initialize_handshake") so it still matches
@@ -37,4 +50,46 @@ async fn acp_agent_client_fixture_agent_completes_initialize_handshake() {
         .await;
 
     result.expect("initialize handshake should succeed against the fixture agent");
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_returns_a_session_id() {
+    let client = AcpAgentClient::new();
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .await
+        .expect("start_session should succeed against the fixture agent");
+    assert!(!session_id.is_empty());
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_fails_clearly_for_a_nonexistent_command() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .start_session("definitely-not-a-real-binary-xyz123", &[], "/tmp", &[])
+        .await
+        .expect_err("nonexistent command must fail, not panic");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_error_never_contains_the_credential_value() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .start_session(
+            "definitely-not-a-real-binary-xyz123",
+            &[],
+            "/tmp",
+            &[(
+                "ANTHROPIC_API_KEY".to_string(),
+                "sk-super-secret-test-value".to_string(),
+            )],
+        )
+        .await
+        .expect_err("nonexistent command must fail");
+    let message = err.to_string();
+    assert!(
+        !message.contains("sk-super-secret-test-value"),
+        "error message must never contain the credential value, got: {message}"
+    );
 }

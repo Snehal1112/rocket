@@ -4972,6 +4972,7 @@ name = "rocket-infra"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "async-process",
  "async-trait",
  "base64 0.22.1",
  "chrono",

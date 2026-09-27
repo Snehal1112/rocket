@@ -35,6 +35,7 @@ thiserror.workspace = true
 url = "2"
 keyring.workspace = true
 agent-client-protocol = "2.2"
+async-process = "2"
 
 [[bin]]
 name = "test_acp_agent"
