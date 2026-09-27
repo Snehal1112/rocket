@@ -312,6 +312,31 @@ pub fn run() {
                 agent_config_secret_manager,
             );
 
+            // A dedicated SecretManagerService + AgentConfigService pair for
+            // AcpSessionService's own use, mirroring the pattern already used for
+            // agent_config_svc above — sharing the same
+            // vault_connection_secret_store/vault_fetcher Arcs, per this plan's Global
+            // Constraints.
+            let acp_agent_config_secret_manager = Arc::new(rocket_app::SecretManagerService::new(
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
+            ));
+            let acp_agent_config_svc = Arc::new(rocket_app::AgentConfigService::new(
+                Box::new(rocket_infra::FsAgentConfigRepo::new(
+                    data_dir.join("agent_configs.yml"),
+                )),
+                acp_agent_config_secret_manager,
+            ));
+
+            let acp_session_svc = rocket_app::AcpSessionService::new(
+                Box::new(rocket_infra::AcpAgentClient::new()),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                acp_agent_config_svc,
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -384,6 +409,7 @@ pub fn run() {
             app.manage(exec_svc);
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
+            app.manage(acp_session_svc);
             app.manage(runner_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
@@ -593,6 +619,9 @@ pub fn run() {
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,
             commands::agent_configs::test_agent_config,
+            commands::acp_sessions::start_agent_session,
+            commands::acp_sessions::send_agent_prompt,
+            commands::acp_sessions::end_agent_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
