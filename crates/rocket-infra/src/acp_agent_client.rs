@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation, InitializeRequest,
-    NewSessionRequest, SessionNotification, SessionUpdate,
+    NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
@@ -19,6 +19,7 @@ use async_process::Child;
 use rocket_acp::AcpSessionClient;
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
+use tokio::task::JoinHandle;
 
 /// A running ACP agent process plus the connection handle used to talk to
 /// it. Stored in the session map keyed by the ACP-provided session id.
@@ -47,6 +48,20 @@ struct RunningSession {
     /// is a push notification uncorrelated with any specific request, so
     /// this indirection is how a fresh per-call `chunk_tx` receives it.
     current_chunk_tx: Arc<std::sync::Mutex<Option<UnboundedSender<String>>>>,
+    /// Handle to the background task (spawned in `start_session`) that drives
+    /// the `connect_with(...)` dispatch loop for the life of this session.
+    ///
+    /// Per `agent-client-protocol`'s own docs
+    /// (`agent-client-protocol-2.2.0/src/concepts/connections.rs`, "Clean
+    /// Incoming EOF" section): `connect_with`'s closure is foreground-owned,
+    /// and a transport EOF (e.g. the child process crashing or being killed)
+    /// "does not cancel unrelated work in its closure" -- only pending
+    /// requests fail. Our closure parks in `std::future::pending::<()>()`
+    /// after the handshake, so nothing ever stops it on its own, on any exit
+    /// path (explicit end, crash, or a future timeout). Every code path that
+    /// removes a `RunningSession` from the session map MUST call
+    /// `.abort()` on this handle, or the background task leaks forever.
+    join_handle: JoinHandle<()>,
 }
 
 /// `AcpSessionClient` implementation backed by the real `agent-client-protocol`
@@ -126,7 +141,7 @@ impl AcpSessionClient for AcpAgentClient {
         let cwd = cwd.to_string();
         let command_owned = command.to_string();
 
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             let outcome = Client
                 .builder()
                 .on_receive_notification(
@@ -224,6 +239,7 @@ impl AcpSessionClient for AcpAgentClient {
             connection,
             child: Mutex::new(child),
             current_chunk_tx,
+            join_handle,
         });
         self.sessions
             .lock()
@@ -234,14 +250,107 @@ impl AcpSessionClient for AcpAgentClient {
 
     async fn send_prompt(
         &self,
-        _session_id: &str,
-        _prompt: String,
-        _chunk_tx: UnboundedSender<String>,
+        session_id: &str,
+        prompt: String,
+        chunk_tx: UnboundedSender<String>,
     ) -> DomainResult<String> {
-        todo!("implemented in Task 3")
+        let running = self
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))?;
+
+        {
+            let mut guard = running.current_chunk_tx.lock().expect("lock chunk sender");
+            *guard = Some(chunk_tx);
+        }
+
+        // `connection.send_request(...)` takes `&self` and `ConnectionTo` is
+        // cheaply `Clone` and safe to call concurrently, so no lock is needed
+        // around the connection itself (see `RunningSession`'s doc comment).
+        let result = running
+            .connection
+            .send_request(PromptRequest::new(
+                session_id.to_string(),
+                vec![ContentBlock::Text(TextContent::new(prompt))],
+            ))
+            .block_task()
+            .await;
+
+        {
+            let mut guard = running.current_chunk_tx.lock().expect("lock chunk sender");
+            *guard = None;
+        }
+
+        match result {
+            Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
+            Err(e) => {
+                self.fail_and_remove(session_id).await;
+                Err(DomainError::Internal(format!("agent session failed: {e}")))
+            }
+        }
     }
 
-    async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
-        todo!("implemented in Task 3")
+    async fn end_session(&self, session_id: &str) -> DomainResult<()> {
+        let running = self
+            .sessions
+            .lock()
+            .await
+            .remove(session_id)
+            .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))?;
+        running.join_handle.abort();
+        running
+            .child
+            .lock()
+            .await
+            .kill()
+            .map_err(|e| DomainError::Internal(format!("failed to kill agent process: {e}")))?;
+        Ok(())
+    }
+}
+
+impl AcpAgentClient {
+    /// Removes a session that has failed (e.g. the agent process crashed
+    /// mid-request) from the session map, killing its child process and
+    /// aborting its background dispatch-loop task. Mirrors `end_session`'s
+    /// cleanup so a crashed session never survives past its process's death
+    /// on any exit path.
+    async fn fail_and_remove(&self, session_id: &str) {
+        // Bind the removal to a `let` statement (rather than the `sessions`
+        // lock guard's temporary being extended across an `if let` body) so
+        // the `sessions` lock is dropped here, before `child.lock()` runs --
+        // matching `end_session`'s locking discipline.
+        let removed = self.sessions.lock().await.remove(session_id);
+        if let Some(running) = removed {
+            running.join_handle.abort();
+            let _ = running.child.lock().await.kill();
+        }
+    }
+}
+
+/// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-
+/// schema-1.9.1, `src/v1/agent.rs:3178-3201`) to the lowercase `snake_case`
+/// wire strings the spec and `DomainEvent::AcpSessionFinished` expect. The
+/// enum's own `#[serde(rename_all = "snake_case")]` attribute confirms this
+/// casing, but `{:?}` (Debug) still renders `PascalCase` variant names, so it
+/// cannot be used directly here.
+///
+/// Unlike `agent-client-protocol-schema` v2's `StopReason`, the v1 variant
+/// this crate uses (`agent_client_protocol::schema::v1::StopReason`, which is
+/// what `start_session`/`send_prompt` are built against throughout this file)
+/// has no `Other(String)` catch-all carrying a custom reason -- v1 only has
+/// the five fixed variants below. It is still `#[non_exhaustive]`, so a
+/// wildcard arm is required to compile against a future crate version that
+/// adds a variant.
+fn stop_reason_to_wire_string(reason: StopReason) -> String {
+    match reason {
+        StopReason::EndTurn => "end_turn".to_string(),
+        StopReason::MaxTokens => "max_tokens".to_string(),
+        StopReason::MaxTurnRequests => "max_turn_requests".to_string(),
+        StopReason::Refusal => "refusal".to_string(),
+        StopReason::Cancelled => "cancelled".to_string(),
+        _ => "unknown".to_string(),
     }
 }
