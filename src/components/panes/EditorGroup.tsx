@@ -26,6 +26,9 @@ const AuditLogTab = lazy(() =>
 const RunnerPane = lazy(() =>
   import('@/components/request/runner/RunnerPane').then((m) => ({ default: m.RunnerPane })),
 );
+const FlowPane = lazy(() =>
+  import('@/components/flow/FlowPane').then((m) => ({ default: m.FlowPane })),
+);
 const WorkspaceEnvironmentsTab = lazy(() =>
   import('@/components/workspace/WorkspaceEnvironmentsTab').then((m) => ({
     default: m.WorkspaceEnvironmentsTab,
@@ -56,6 +59,7 @@ import {
   isContractDiffTab,
   isContractTab,
   isDiffTab,
+  isFlowTab,
   isGitTab,
   isRequestTab,
   isRunnerTab,
@@ -250,6 +254,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           ) : isRunnerTab(activeTab) ? (
             <Suspense fallback={<EditorSkeleton />}>
               <RunnerPane tab={activeTab} groupId={node.groupId} />
+            </Suspense>
+          ) : isFlowTab(activeTab) ? (
+            <Suspense fallback={<EditorSkeleton />}>
+              <FlowPane tab={activeTab} groupId={node.groupId} />
             </Suspense>
           ) : (
             <CollectionOverviewTab tab={activeTab} />

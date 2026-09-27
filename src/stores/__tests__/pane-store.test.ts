@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { getFlow } from '@/lib/tauri-api';
 import type {
   CollectionTab,
+  FlowTab,
   LeafNode,
+  PaneNode,
   RequestTab,
   ResponseState,
   SplitNode,
+  Tab,
 } from '@/types/pane-types';
-import { isRequestTab, isRunnerTab } from '@/types/pane-types';
+import { isFlowTab, isRequestTab, isRunnerTab } from '@/types/pane-types';
 import { usePaneStore } from '../pane-store';
 
 vi.mock('@/lib/auto-save', () => ({
@@ -17,7 +21,7 @@ vi.mock('@/lib/auto-save', () => ({
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, getCollection: vi.fn() };
+  return { ...actual, getCollection: vi.fn(), getFlow: vi.fn() };
 });
 
 vi.mock('@/lib/runner-execute', () => ({
@@ -53,6 +57,37 @@ function makeTab(): RequestTab {
 function setupWithTab(): LeafNode {
   usePaneStore.getState().openTab(makeTab());
   return getLeaf();
+}
+
+// Helper: find the first flow tab anywhere in the pane tree.
+function findFirstFlowTab(): FlowTab | undefined {
+  function search(node: PaneNode): FlowTab | undefined {
+    if (node.type === 'leaf') {
+      return node.tabs.find(isFlowTab);
+    }
+    return search(node.children[0]) ?? search(node.children[1]);
+  }
+  return search(usePaneStore.getState().root);
+}
+
+// Test-only mirror of pane-store.ts's module-private updateTabInTree —
+// applies an updater to one tab by id, anywhere in the pane tree.
+function updateTabInTreeForTest(
+  node: PaneNode,
+  tabId: string,
+  updater: (tab: Tab) => Tab,
+): PaneNode {
+  if (node.type === 'leaf') {
+    const idx = node.tabs.findIndex((t) => t.id === tabId);
+    if (idx === -1) return node;
+    const tabs = node.tabs.slice();
+    tabs[idx] = updater(tabs[idx]);
+    return { ...node, tabs };
+  }
+  const left = updateTabInTreeForTest(node.children[0], tabId, updater);
+  const right = updateTabInTreeForTest(node.children[1], tabId, updater);
+  if (left === node.children[0] && right === node.children[1]) return node;
+  return { ...node, children: [left, right] };
 }
 
 describe('pane-store', () => {
@@ -747,5 +782,72 @@ describe('Runner tab actions', () => {
     // after being superseded.
     expect(executeRunnerEntry).toHaveBeenCalledTimes(4);
     expect(calls.filter((p) => p === 'second.yml')).toHaveLength(2);
+  });
+});
+
+describe('Flow tab actions', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('openFlowTab with no flowName opens a picker-state tab', () => {
+    usePaneStore.getState().openFlowTab('my-collection');
+    const tab = findFirstFlowTab();
+    expect(tab?.tabType).toBe('flow');
+    expect(tab?.flowName).toBeNull();
+    expect(tab?.nodes).toEqual([]);
+  });
+
+  it('openFlowTab with a flowName loads nodes/edges immediately', async () => {
+    vi.mocked(getFlow).mockResolvedValue({
+      name: 'My Flow',
+      nodes: [{ id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } }],
+      edges: [],
+    });
+    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    const tab = findFirstFlowTab();
+    expect(tab?.flowName).toBe('My Flow');
+    expect(tab?.nodes).toHaveLength(1);
+  });
+
+  it('openFlowTab falls back to picker state if getFlow rejects', async () => {
+    vi.mocked(getFlow).mockRejectedValue(new Error('not found'));
+    await usePaneStore.getState().openFlowTab('my-collection', 'Missing Flow');
+    const tab = findFirstFlowTab();
+    expect(tab?.nodes).toEqual([]);
+  });
+
+  it('patchFlowNodeStatus updates only the targeted node', () => {
+    usePaneStore.getState().openFlowTab('my-collection');
+    const openedTab = findFirstFlowTab();
+    if (!openedTab) throw new Error('Expected a flow tab');
+    const tabId = openedTab.id;
+    usePaneStore.setState({
+      root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+        tab.tabType === 'flow'
+          ? {
+              ...tab,
+              nodes: [
+                { id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } },
+              ],
+            }
+          : tab,
+      ),
+    });
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'running');
+    const tab = findFirstFlowTab();
+    expect(tab?.nodeStatus.n1).toBe('running');
+  });
+
+  it('patchFlowNodeStatus for an unknown node id is a safe no-op', () => {
+    usePaneStore.getState().openFlowTab('my-collection');
+    const openedTab = findFirstFlowTab();
+    if (!openedTab) throw new Error('Expected a flow tab');
+    const tabId = openedTab.id;
+    expect(() =>
+      usePaneStore.getState().patchFlowNodeStatus(tabId, 'does-not-exist', 'running'),
+    ).not.toThrow();
+    expect(findFirstFlowTab()?.nodeStatus['does-not-exist']).toBeUndefined();
   });
 });

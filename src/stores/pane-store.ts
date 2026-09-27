@@ -11,12 +11,21 @@ import {
 } from '@/lib/pane-utils';
 import { executeRunnerEntry } from '@/lib/runner-execute';
 import { flattenRunnerEntries } from '@/lib/runner-flatten';
-import { getCollection, renameRequest } from '@/lib/tauri-api';
+import {
+  type Flow,
+  type FlowEdge,
+  type FlowNode,
+  type FlowNodeStatus,
+  getCollection,
+  getFlow,
+  renameRequest,
+} from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 import type {
   CollectionSection,
   CollectionTab,
   ContractTab,
+  FlowTab,
   LeafNode,
   PaneNode,
   RequestState,
@@ -29,7 +38,7 @@ import type {
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isRequestTab, isRunnerTab } from '@/types/pane-types';
+import { isFlowTab, isRequestTab, isRunnerTab } from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -125,6 +134,12 @@ export interface PaneState {
   startRun: (tabId: string) => Promise<void>;
   stopRun: (tabId: string) => void;
   rerunAll: (tabId: string) => Promise<void>;
+
+  // Flow tab.
+  openFlowTab: (collectionName: string | null, flowName?: string) => Promise<void>;
+  updateFlowNodes: (tabId: string, nodes: FlowNode[]) => void;
+  updateFlowEdges: (tabId: string, edges: FlowEdge[]) => void;
+  patchFlowNodeStatus: (tabId: string, nodeId: string, status: FlowNodeStatus) => void;
 }
 
 // Monotonic source for RunnerTab.runId. Module-level (not per-tab) is
@@ -503,6 +518,61 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       }),
     });
     await get().startRun(tabId);
+  },
+
+  async openFlowTab(collectionName, flowName) {
+    let nodes: FlowNode[] = [];
+    let edges: FlowEdge[] = [];
+    let resolvedFlowName: string | null = flowName ?? null;
+    if (collectionName && flowName) {
+      try {
+        const flow: Flow = await getFlow(collectionName, flowName);
+        nodes = flow.nodes;
+        edges = flow.edges;
+      } catch (err) {
+        console.error('[pane-store] openFlowTab: failed to load flow', err);
+        resolvedFlowName = null;
+      }
+    }
+    const tab: FlowTab = {
+      id: crypto.randomUUID(),
+      title: resolvedFlowName ? `Flow: ${resolvedFlowName}` : 'Flow',
+      isDirty: false,
+      tabType: 'flow',
+      collectionName,
+      flowName: resolvedFlowName,
+      nodes,
+      edges,
+      nodeStatus: {},
+      runState: 'idle',
+    };
+    get().openTab(tab);
+  },
+
+  updateFlowNodes(tabId, nodes) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, nodes, isDirty: true } : tab,
+      ),
+    });
+  },
+
+  updateFlowEdges(tabId, edges) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, edges, isDirty: true } : tab,
+      ),
+    });
+  },
+
+  patchFlowNodeStatus(tabId, nodeId, status) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
+        return { ...tab, nodeStatus: { ...tab.nodeStatus, [nodeId]: status } };
+      }),
+    });
   },
 
   setActiveCollection(name) {

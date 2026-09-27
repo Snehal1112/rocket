@@ -136,6 +136,20 @@ export function isRunnerTab(tab: Tab): tab is RunnerTab {
   return tab.tabType === 'runner';
 }
 
+export interface FlowTab extends BaseTab {
+  tabType: 'flow';
+  collectionName: string | null;
+  flowName: string | null;
+  nodes: import('@/lib/tauri-api').FlowNode[];
+  edges: import('@/lib/tauri-api').FlowEdge[];
+  nodeStatus: Record<string, import('@/lib/tauri-api').FlowNodeStatus>;
+  runState: 'idle' | 'running' | 'done';
+}
+
+export function isFlowTab(tab: Tab): tab is FlowTab {
+  return tab.tabType === 'flow';
+}
+
 export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
@@ -149,7 +163,8 @@ export type Tab =
   | GitTab
   | ContractTab
   | ContractDiffTab
-  | RunnerTab;
+  | RunnerTab
+  | FlowTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

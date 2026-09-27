@@ -28,6 +28,7 @@ import {
   isContractDiffTab,
   isContractTab,
   isDiffTab,
+  isFlowTab,
   isGitTab,
   isRequestTab,
   isRunnerTab,
@@ -431,6 +432,10 @@ function deriveSegments(
 
   if (isRunnerTab(tab)) {
     return [{ label: tab.collectionName || 'Collection Runner' }];
+  }
+
+  if (isFlowTab(tab)) {
+    return [{ label: tab.collectionName || 'Flow' }];
   }
 
   const _exhaustive: never = tab;
