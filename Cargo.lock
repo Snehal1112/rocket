@@ -4609,9 +4609,11 @@ dependencies = [
 name = "rocket-acp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "rocket-shared",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
