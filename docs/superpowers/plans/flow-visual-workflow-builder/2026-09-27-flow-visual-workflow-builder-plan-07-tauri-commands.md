@@ -64,22 +64,24 @@ the full locked interface contract every plan in this series depends on).
   wrapper DTO — its own fields (`type`/`data`) are already single lowercase
   words, identical under snake_case and camelCase, and it is already used
   directly in other IPC DTOs elsewhere in this codebase.
-- **`FlowExecutionService`'s `collection_repo` must be a `SharedPathCollectionRepo`,
-  not a path-pinned `FsCollectionRepo::new_standalone`.** `src-tauri/src/lib.rs:326-336`
-  constructs `CollectionRunnerService` with
-  `Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path)))`
+- **Every `FsFlowRepo` use in this plan must go through a new
+  `SharedPathFlowRepo` wrapper, never a path-pinned `FsFlowRepo` directly —
+  resolved during Plan 03's post-implementation review (Opus), which found
+  this gap.** `src-tauri/src/lib.rs:326-336` constructs `CollectionRunnerService`
+  with `Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path)))`
   specifically because, per that file's own comment, "the run set... must
   follow workspace switches the same way `collection_svc`'s sidebar reads
-  do, not read whatever workspace was active at process startup." Flow is
-  the same kind of multi-request orchestration surface a user can invoke
-  after switching workspaces mid-session, so `FlowExecutionService`'s
-  `collection_repo` field gets the identical treatment in Task 3 below.
-  `FlowService`'s own `flow_repo` (CRUD, Task 1) is constructed the simpler,
-  path-pinned way (mirroring `FsCollectionRepo::new_standalone(collections_dir.clone())`,
-  used for `exec_svc`/`oauth2_svc` at `src-tauri/src/lib.rs:301,323`) since
-  it is Plan 03's `FsFlowRepo`, not a `CollectionRepository` — no
-  `SharedPathCollectionRepo`-equivalent exists for it in this plan's scope;
-  flag this at the Post-Implementation Review if Plan 03 introduces one.
+  do, not read whatever workspace was active at process startup." Flow CRUD
+  (`FlowService`, Task 1) and Flow execution (`FlowExecutionService`, Task 3)
+  are both surfaces a user can invoke after switching workspaces mid-session,
+  so both need the identical treatment — a path-pinned `FsFlowRepo` (like
+  `FsCollectionRepo::new_standalone` used for `exec_svc`/`oauth2_svc` at
+  `src-tauri/src/lib.rs:301,323`) would silently keep reading/writing the
+  workspace active at process startup after a switch. Task 1 below creates
+  `crates/rocket-infra/src/shared_path_flow_repo.rs` (`SharedPathFlowRepo`,
+  mirroring `SharedPathCollectionRepo` exactly — an `Arc<Mutex<PathBuf>>`
+  resolved to a fresh `FsFlowRepo` per call) before wiring `FlowService`, and
+  Task 3 uses the same wrapper for `FlowExecutionService`'s `flow_repo` field.
 - Production command and service code never panics on a fallible call (no
   bare panicking shorthand on a `Result`/`Option`) — always propagate via
   `DomainResult`/`?`. Test code may use `.expect("message")`, matching this
@@ -634,26 +636,130 @@ runner;` declaration:
 pub mod flow;
 ```
 
-- [ ] **Step 8: Wire `FlowService` into `lib.rs`**
+- [ ] **Step 8: Create `SharedPathFlowRepo` and wire `FlowService` into `lib.rs`**
 
-In `src-tauri/src/lib.rs`, immediately after the existing `oauth2_svc`
+**Corrected during Plan 03's post-implementation review (Opus):** `FsFlowRepo`
+must **not** be pinned to the collections directory at process startup the
+way `exec_svc`/`oauth2_svc` pin their collection repos — a user can switch
+workspaces mid-session, and Flow CRUD (this task) and Flow execution
+(Task 3) both need to follow that switch, exactly like `collection_svc`'s
+sidebar reads and `CollectionRunnerService`'s `collection_repo` already do
+via `SharedPathCollectionRepo`
+(`crates/rocket-infra/src/shared_path_collection_repo.rs`). Create the
+equivalent wrapper for `FsFlowRepo` first:
+
+Create `crates/rocket-infra/src/shared_path_flow_repo.rs`:
+
+```rust
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use rocket_flow::{Flow, FlowRepository};
+use rocket_shared::error::DomainResult;
+
+use crate::FsFlowRepo;
+
+/// Delegates all `FlowRepository` operations to a short-lived `FsFlowRepo`
+/// whose base directory is resolved from a shared, mutable workspace path
+/// at call time — mirrors `SharedPathCollectionRepo` exactly, so Flow CRUD
+/// and Flow execution follow workspace switches without rebuilding the
+/// Tauri service graph.
+pub struct SharedPathFlowRepo {
+    active_workspace_path: Arc<Mutex<PathBuf>>,
+}
+
+impl SharedPathFlowRepo {
+    pub fn new(active_workspace_path: Arc<Mutex<PathBuf>>) -> Self {
+        Self {
+            active_workspace_path,
+        }
+    }
+
+    fn repo(&self) -> FsFlowRepo {
+        let base = self
+            .active_workspace_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .join("collections");
+        FsFlowRepo::new(base)
+    }
+}
+
+impl FlowRepository for SharedPathFlowRepo {
+    fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
+        self.repo().list(collection)
+    }
+
+    fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
+        self.repo().get(collection, name)
+    }
+
+    fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()> {
+        self.repo().save(collection, flow)
+    }
+
+    fn delete(&self, collection: &str, name: &str) -> DomainResult<()> {
+        self.repo().delete(collection, name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn sample(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn switching_workspace_path_redirects_subsequent_calls() {
+        let dir_a = TempDir::new().expect("temp dir a");
+        let dir_b = TempDir::new().expect("temp dir b");
+        std::fs::create_dir_all(dir_a.path().join("collections").join("acme"))
+            .expect("create collection a");
+        std::fs::create_dir_all(dir_b.path().join("collections").join("acme"))
+            .expect("create collection b");
+
+        let shared_path = Arc::new(Mutex::new(dir_a.path().to_path_buf()));
+        let repo = SharedPathFlowRepo::new(Arc::clone(&shared_path));
+
+        repo.save("acme", &sample("A-side Flow")).expect("save in workspace a");
+        assert_eq!(repo.list("acme").expect("list a").len(), 1);
+
+        *shared_path.lock().expect("lock shared path") = dir_b.path().to_path_buf();
+
+        assert!(
+            repo.list("acme").expect("list b").is_empty(),
+            "after workspace switch, list() should show workspace B's flows"
+        );
+    }
+}
+```
+
+Add `pub mod shared_path_flow_repo; pub use shared_path_flow_repo::SharedPathFlowRepo;`
+to `crates/rocket-infra/src/lib.rs`, alongside the existing
+`shared_path_collection_repo` module declaration.
+
+Run: `cargo test -p rocket-infra shared_path_flow_repo -j4`
+Expected: PASS — 1 test.
+
+Then, in `src-tauri/src/lib.rs`, immediately after the existing `oauth2_svc`
 construction (after its closing `);` — see the block ending around line
 324), add:
 
 ```rust
-// Flow CRUD — path-pinned like exec_svc/oauth2_svc's own collection repos;
-// FlowExecutionService (wired in Task 3) gets the workspace-following
-// SharedPathCollectionRepo instead, matching CollectionRunnerService.
+// Flow CRUD and Flow execution both need to follow workspace switches, the
+// same reasoning CollectionRunnerService's collection_repo already follows
+// — see SharedPathFlowRepo's doc comment.
 let flow_svc = rocket_app::FlowService::new(Box::new(
-    rocket_infra::FsFlowRepo::new(collections_dir.clone()),
+    rocket_infra::SharedPathFlowRepo::new(Arc::clone(&active_workspace_path)),
 ));
 ```
-
-(If Plan 03's `FsFlowRepo::new` takes a different parameter than
-`collections_dir` — e.g. a full workspace root instead of the collections
-subdirectory — adjust this line to match Plan 03's actual constructor
-signature and flag the mismatch against the plan index at this plan's
-Post-Implementation Review.)
 
 Add, alongside the existing `app.manage(oauth2_svc);`:
 
@@ -928,12 +1034,14 @@ In `src-tauri/src/lib.rs`, immediately after the existing `runner_svc`
 construction (after its closing `);` around line 336), add:
 
 ```rust
-// Flow execution — SharedPathCollectionRepo, matching runner_svc's own
-// collection_repo exactly and for the same reason: a run must follow
-// workspace switches, not read whatever workspace was active at process
-// startup.
+// Flow execution — both repos are workspace-following (SharedPathFlowRepo,
+// SharedPathCollectionRepo), matching runner_svc's own collection_repo
+// exactly and for the same reason: a run must follow workspace switches,
+// not read whatever workspace was active at process startup.
 let flow_exec_svc = rocket_app::FlowExecutionService::new(
-    Box::new(rocket_infra::FsFlowRepo::new(collections_dir.clone())),
+    Box::new(rocket_infra::SharedPathFlowRepo::new(Arc::clone(
+        &active_workspace_path,
+    ))),
     Box::new(SharedPathCollectionRepo::new(Arc::clone(
         &active_workspace_path,
     ))),
@@ -1009,10 +1117,11 @@ Before starting Plan 08, dispatch a subagent (Agent tool,
 > 3. DDD/IPC boundary conformance per `.claude/rules/tauri-ipc-boundaries.md`
 >    and `.claude/rules/rust-ddd-boundaries.md` — commands stay thin,
 >    camelCase appears only on the DTO tree (never on `rocket_flow`'s or
->    `rocket_app`'s domain types), and `FlowExecutionService`'s
->    `collection_repo` is genuinely a `SharedPathCollectionRepo` (not a
->    `FsCollectionRepo::new_standalone` that would silently ignore workspace
->    switches).
+>    `rocket_app`'s domain types), and both `FlowService`'s `flow_repo` and
+>    `FlowExecutionService`'s `flow_repo`/`collection_repo` are genuinely
+>    `SharedPathFlowRepo`/`SharedPathCollectionRepo` (never a path-pinned
+>    `FsFlowRepo`/`FsCollectionRepo::new_standalone` that would silently
+>    ignore workspace switches).
 >
 > You have explicit authority to apply fixes directly for anything you find,
 > including updating the plan index file. After fixing, re-run
