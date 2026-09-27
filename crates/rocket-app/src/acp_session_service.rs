@@ -158,6 +158,14 @@ impl AcpSessionService {
     pub async fn end_session(&self, session_id: &str) -> DomainResult<()> {
         self.session_client.end_session(session_id).await
     }
+
+    /// Kills every currently-tracked agent session's process. Intended for
+    /// app-exit cleanup — the caller does not know individual session ids at
+    /// that point, so this delegates straight to the session client, which
+    /// owns the session map. No event is published.
+    pub async fn end_all_sessions(&self) -> DomainResult<()> {
+        self.session_client.end_all_sessions().await
+    }
 }
 
 #[cfg(test)]
@@ -338,6 +346,7 @@ mod tests {
         prompt_should_fail: bool,
         prompt_delay: Duration,
         end_session_called: Arc<AtomicBool>,
+        end_all_sessions_called: Arc<AtomicBool>,
     }
     impl Default for FakeSessionClient {
         fn default() -> Self {
@@ -348,6 +357,7 @@ mod tests {
                 prompt_should_fail: false,
                 prompt_delay: Duration::ZERO,
                 end_session_called: Arc::new(AtomicBool::new(false)),
+                end_all_sessions_called: Arc::new(AtomicBool::new(false)),
             }
         }
     }
@@ -384,6 +394,10 @@ mod tests {
         }
         async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
             self.end_session_called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        async fn end_all_sessions(&self) -> DomainResult<()> {
+            self.end_all_sessions_called.store(true, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -626,5 +640,26 @@ mod tests {
                 .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
             "AcpSessionFailed must be published on timeout, got {events:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn end_all_sessions_delegates_to_session_client() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_all_sessions_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            end_all_sessions_called: Arc::clone(&end_all_sessions_called),
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+        );
+
+        service
+            .end_all_sessions()
+            .await
+            .expect("end_all_sessions should succeed");
+        assert!(end_all_sessions_called.load(Ordering::SeqCst));
     }
 }

@@ -622,8 +622,20 @@ pub fn run() {
             commands::acp_sessions::send_agent_prompt,
             commands::acp_sessions::end_agent_session,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(acp_session_svc) =
+                    app_handle.try_state::<rocket_app::AcpSessionService>()
+                {
+                    // Best-effort on app exit. The process is about to tear
+                    // down regardless, so there is no caller left to report
+                    // a kill failure to.
+                    let _ = tauri::async_runtime::block_on(acp_session_svc.end_all_sessions());
+                }
+            }
+        });
 }
 
 #[cfg(all(test, target_os = "linux"))]
