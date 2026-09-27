@@ -313,10 +313,9 @@ pub fn run() {
             );
 
             // A dedicated SecretManagerService + AgentConfigService pair for
-            // AcpSessionService's own use, mirroring the pattern already used for
-            // agent_config_svc above — sharing the same
-            // vault_connection_secret_store/vault_fetcher Arcs, per this plan's Global
-            // Constraints.
+            // AcpSessionService, mirroring agent_config_svc above. It must
+            // share the same vault_connection_secret_store/vault_fetcher Arcs,
+            // so connection secrets and the vault token cache stay shared.
             let acp_agent_config_secret_manager = Arc::new(rocket_app::SecretManagerService::new(
                 Box::new(rocket_infra::FsSecretManagerRepo::new(
                     data_dir.join("secret_managers.yml"),
