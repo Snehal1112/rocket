@@ -121,6 +121,22 @@ impl SecretManagerService {
             .list_secrets(&connection, &secret, vault_name)
             .await
     }
+
+    /// Fetches one secret's raw value directly, without going through the
+    /// per-environment `ExternalSecretBinding`/alias flow — for callers (like
+    /// `AgentConfigService`) that need an app-global credential rather than a
+    /// value bound to a specific `Environment`.
+    pub async fn resolve_secret_value(
+        &self,
+        connection_id: &str,
+        vault_name: &str,
+        secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        let (connection, client_secret) = self.connection_and_secret(connection_id)?;
+        self.fetcher
+            .get_secret_value(&connection, &client_secret, vault_name, secret_id)
+            .await
+    }
 }
 
 /// Rejects a connection record that could never work, before anything is
@@ -276,6 +292,7 @@ mod tests {
     struct ConfigurableFakeFetcher {
         list_result: DomainResult<Vec<ExternalSecretRef>>,
         test_result: DomainResult<()>,
+        secret_value_result: DomainResult<Option<String>>,
     }
 
     // DomainError derives PartialEq but not Clone — this test-only helper
@@ -310,7 +327,10 @@ mod tests {
             _vault_name: &str,
             _secret_id: &str,
         ) -> DomainResult<Option<String>> {
-            Ok(None)
+            match &self.secret_value_result {
+                Ok(v) => Ok(v.clone()),
+                Err(err) => Err(clone_domain_error(err)),
+            }
         }
         async fn test_connection(
             &self,
@@ -475,6 +495,7 @@ mod tests {
             Arc::new(ConfigurableFakeFetcher {
                 list_result: Ok(Vec::new()),
                 test_result: Ok(()),
+                secret_value_result: Ok(None),
             }),
         );
 
@@ -503,6 +524,7 @@ mod tests {
             Arc::new(ConfigurableFakeFetcher {
                 list_result: Ok(expected.clone()),
                 test_result: Ok(()),
+                secret_value_result: Ok(None),
             }),
         );
 
@@ -525,6 +547,7 @@ mod tests {
             Arc::new(ConfigurableFakeFetcher {
                 list_result: Ok(Vec::new()),
                 test_result: Ok(()),
+                secret_value_result: Ok(None),
             }),
         );
 
@@ -544,6 +567,7 @@ mod tests {
             Arc::new(ConfigurableFakeFetcher {
                 list_result: Ok(Vec::new()),
                 test_result: Ok(()),
+                secret_value_result: Ok(None),
             }),
         );
 
@@ -595,5 +619,83 @@ mod tests {
             .get(VAULT_CONNECTION_SCOPE, "c1")
             .expect("get")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_secret_value_returns_fetcher_result_unchanged() {
+        let repo = FakeRepo::new();
+        let store = FakeSecretStore::new();
+        store
+            .set("vault-connection", "conn-1", "shh-its-a-secret")
+            .expect("seed keychain entry");
+        repo.save(&sample_connection("conn-1"))
+            .expect("seed connection");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(store),
+            Arc::new(ConfigurableFakeFetcher {
+                list_result: Ok(Vec::new()),
+                test_result: Ok(()),
+                secret_value_result: Ok(Some("sk-abc123".to_string())),
+            }),
+        );
+
+        let value = service
+            .resolve_secret_value("conn-1", "prod-vault", "secret-id-1")
+            .await
+            .expect("resolve_secret_value should succeed");
+
+        assert_eq!(value, Some("sk-abc123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_secret_value_unknown_connection_errors() {
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::new(FakeSecretStore::new()),
+            Arc::new(ConfigurableFakeFetcher {
+                list_result: Ok(Vec::new()),
+                test_result: Ok(()),
+                secret_value_result: Ok(None),
+            }),
+        );
+
+        let result = service
+            .resolve_secret_value("no-such-conn", "prod-vault", "secret-id-1")
+            .await;
+
+        assert!(
+            matches!(result, Err(DomainError::NotFound(_))),
+            "expected DomainError::NotFound for an unknown connection id, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_secret_value_propagates_transport_failure() {
+        let repo = FakeRepo::new();
+        let store = FakeSecretStore::new();
+        store
+            .set("vault-connection", "conn-1", "shh-its-a-secret")
+            .expect("seed keychain entry");
+        repo.save(&sample_connection("conn-1"))
+            .expect("seed connection");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(store),
+            Arc::new(ConfigurableFakeFetcher {
+                list_result: Ok(Vec::new()),
+                test_result: Ok(()),
+                secret_value_result: Err(DomainError::Internal("network timeout".to_string())),
+            }),
+        );
+
+        let result = service
+            .resolve_secret_value("conn-1", "prod-vault", "secret-id-1")
+            .await;
+
+        assert!(
+            matches!(result, Err(DomainError::Internal(_))),
+            "a transport failure must surface as DomainError::Internal, not be swallowed, got {result:?}"
+        );
     }
 }
