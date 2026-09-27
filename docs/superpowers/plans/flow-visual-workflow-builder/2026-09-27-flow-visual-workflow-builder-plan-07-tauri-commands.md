@@ -24,6 +24,21 @@ the full locked interface contract every plan in this series depends on).
 
 ## Global Constraints
 
+- **Corrected during Plan 01's post-implementation review (Opus):**
+  `RequestSourceDto` and `FlowNodeKindDto` (Task 1, below) use
+  `#[serde(tag = "...", rename_all_fields = "camelCase")]`, **not**
+  `#[serde(tag = "...", rename_all = "camelCase")]`. On a `#[serde(tag = ...)]`
+  enum, plain `rename_all` renames the variant tags themselves (e.g. `Saved`
+  → `saved`), which would both break the TS contract's `type: 'Saved'` value
+  and leave nested fields like `request_path` untouched (still snake_case) —
+  the opposite of what's needed. `rename_all_fields` (stable since serde
+  1.0.127; this workspace is on 1.0.228) renames only the fields *inside*
+  each variant, leaving the tag values as-written (`Saved`/`Request`/etc.),
+  which is what makes this plan's own
+  `flow_dto_serializes_camelcase_including_nested_fields` test (asserting
+  `"requestPath"` while the TS union still discriminates on `'Saved'`)
+  actually pass. The code block below already reflects this fix — do not
+  revert to plain `rename_all` on these two enums.
 - **`FlowService` is a new addition beyond the plan index's original
   contract** — the index only specified `FlowExecutionService` (Plan 06).
   Tauri's IPC boundary rule (`.claude/rules/tauri-ipc-boundaries.md`)
@@ -369,7 +384,7 @@ impl From<InlineRequestDataDto> for InlineRequestData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum RequestSourceDto {
     Saved { request_path: String },
     Inline { request: InlineRequestDataDto },
@@ -396,7 +411,7 @@ impl From<RequestSourceDto> for RequestSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum FlowNodeKindDto {
     Request {
         label: String,
