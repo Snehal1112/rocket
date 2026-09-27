@@ -67,3 +67,54 @@ describe('FlowPane picker', () => {
     expect(openFlowTab).not.toHaveBeenCalled();
   });
 });
+
+describe('FlowPane save', () => {
+  const outputNode = (id: string) => ({
+    id,
+    kind: { kind: 'Output' as const, label: `Out ${id}` },
+    position: { x: 0, y: 0 },
+  });
+  const flowTab: FlowTab = {
+    id: 'flow-open-1',
+    title: 'Flow: my-flow',
+    isDirty: true,
+    tabType: 'flow',
+    collectionName: 'demo',
+    flowName: 'my-flow',
+    nodes: [outputNode('a'), outputNode('b'), outputNode('c')],
+    edges: [],
+    nodeStatus: {},
+    runState: 'idle',
+  };
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+    usePaneStore.getState().openTab(flowTab);
+  });
+
+  it('flags the node ids named in a cycle rejection', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(
+      'Invalid input: flow contains a cycle through node(s): a, b',
+    );
+    render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('output-node-card');
+      const flagged = cards.filter((c) => c.className.includes('ring-red-500'));
+      expect(flagged.map((c) => c.textContent)).toEqual(['Out a—', 'Out b—']);
+    });
+  });
+
+  it('marks the tab clean after a successful save', async () => {
+    vi.mocked(saveFlow).mockResolvedValue(undefined);
+    render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(saveFlow).toHaveBeenCalled());
+    const { root } = usePaneStore.getState();
+    const tab = root.type === 'leaf' ? root.tabs.find((t) => t.id === flowTab.id) : undefined;
+    expect(tab?.isDirty).toBe(false);
+  });
+});

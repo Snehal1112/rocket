@@ -36,6 +36,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+  const markClean = usePaneStore((s) => s.markClean);
   // There is no `activeEnvironmentName` anywhere. The active environment's
   // name is env-store's `activeEnvId` (it holds the name; see
   // src/lib/execute-request.ts, which passes it as environmentName).
@@ -172,7 +173,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
   };
 
-  const handleSave = async () => {
+  // Returns whether the save succeeded, so Run can stop on a failed save.
+  const handleSave = async (quiet = false): Promise<boolean> => {
     try {
       await saveFlow(collectionName, {
         name: flowName,
@@ -180,7 +182,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         edges: tab.edges,
       });
       setCycleNodeIds([]);
-      toast.success('Flow saved.');
+      markClean(tab.id);
+      if (!quiet) toast.success('Flow saved.');
+      return true;
     } catch (err) {
       // Plan 07's save_flow rejects with the plain string
       // "Invalid input: flow contains a cycle through node(s): a, b"
@@ -193,8 +197,13 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         setCycleNodeIds(match[1].split(', ').map((s) => s.trim()));
       }
       toast.error(`Could not save flow: ${message}`);
+      return false;
     }
   };
+
+  // `run_flow` runs the saved file, not the canvas. Save unsaved edits
+  // first, so Run executes what the user sees.
+  const handleBeforeRun = () => (tab.isDirty ? handleSave(true) : Promise.resolve(true));
 
   // A bare `headers` target is not a valid target_field (the backend
   // rejects it). If a headers-target edge's popover is dismissed — or
@@ -235,6 +244,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)
           }
           onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
+          tabRunState={tab.runState}
+          tabRunId={tab.runId}
+          onBeforeRun={handleBeforeRun}
         />
         <Button size='sm' variant='outline' onClick={() => void handleSave()}>
           Save

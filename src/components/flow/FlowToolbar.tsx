@@ -12,6 +12,13 @@ interface FlowToolbarProps {
   environmentName: string | null;
   onPatchStatus: (nodeId: string, status: string, detail?: NodeDetail) => void;
   onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
+  // The tab's stored run state. The toolbar unmounts when its tab is hidden,
+  // so a remounted toolbar reads an in-progress run from here.
+  tabRunState?: 'idle' | 'running' | 'done';
+  tabRunId?: string;
+  // Runs before a new run starts. `run_flow` runs the flow saved on disk, so
+  // this saves unsaved canvas edits first. Returning false aborts the run.
+  onBeforeRun?: () => Promise<boolean>;
 }
 
 export function FlowToolbar({
@@ -20,8 +27,19 @@ export function FlowToolbar({
   environmentName,
   onPatchStatus,
   onRunStateChange,
+  tabRunState,
+  tabRunId,
+  onBeforeRun,
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // A run started by an earlier mount of this toolbar, still in progress.
+  const resumedRunId =
+    activeRunId === null && tabRunState === 'running' ? (tabRunId ?? null) : null;
+  const liveRunId = activeRunId ?? resumedRunId;
+  // The parent passes a new callback each render. A ref keeps the resumed
+  // subscription below from resubscribing on every status patch.
+  const onPatchStatusRef = useRef(onPatchStatus);
+  onPatchStatusRef.current = onPatchStatus;
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   // A ref, not state: `activeRunId` is only set once the `flow-run-started`
   // event round-trips through the backend, so between a click and that
@@ -42,9 +60,44 @@ export function FlowToolbar({
   // Unsubscribe when the tab closes mid-run.
   useEffect(() => cleanupListeners, [cleanupListeners]);
 
+  // Keep streaming step results for a run this mount did not start. The
+  // mount that started it still applies the final summary when it ends.
+  useEffect(() => {
+    if (!resumedRunId) return;
+    let unlisten: UnlistenFn | undefined;
+    let disposed = false;
+    void onFlowStepCompleted((event) => {
+      if (event.run_id !== resumedRunId) return;
+      onPatchStatusRef.current(event.node_id, event.status, {
+        statusCode: event.status_code ?? undefined,
+        durationMs: event.duration_ms ?? undefined,
+        error: event.error ?? undefined,
+      });
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [resumedRunId]);
+
   const handleRun = async () => {
-    if (isStartingRef.current || activeRunId !== null) return;
+    if (isStartingRef.current || liveRunId !== null) return;
     isStartingRef.current = true;
+    if (onBeforeRun) {
+      let ready = false;
+      try {
+        ready = await onBeforeRun();
+      } catch {
+        ready = false;
+      }
+      if (!ready) {
+        isStartingRef.current = false;
+        return;
+      }
+    }
     cleanupListeners();
     // Held in a local, not state, so the event handlers see it at once.
     let runId: string | null = null;
@@ -92,13 +145,14 @@ export function FlowToolbar({
   };
 
   const handleStop = () => {
-    if (!activeRunId) return;
-    void cancelFlowRun(activeRunId);
+    if (!liveRunId) return;
+    // Cancelling a run that just finished is a no-op on the backend.
+    cancelFlowRun(liveRunId).catch((err) => console.error('[FlowToolbar] cancel failed', err));
   };
 
   return (
     <div className='flex items-center gap-2'>
-      <Button size='sm' onClick={() => void handleRun()} disabled={activeRunId !== null}>
+      <Button size='sm' onClick={() => void handleRun()} disabled={liveRunId !== null}>
         Run
       </Button>
       <Button size='sm' variant='outline' onClick={handleStop}>

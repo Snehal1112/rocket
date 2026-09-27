@@ -170,4 +170,54 @@ describe('FlowToolbar', () => {
     await waitFor(() => expect(tauriApi.onFlowRunStarted).toHaveBeenCalledTimes(1));
     expect(tauriApi.runFlow).toHaveBeenCalledTimes(1);
   });
+
+  it('does not start a run when onBeforeRun reports a failed save', async () => {
+    const onBeforeRun = vi.fn().mockResolvedValue(false);
+    render(
+      <FlowToolbar
+        collection='my-collection'
+        flowName='my-flow'
+        environmentName={null}
+        onPatchStatus={onPatchStatus}
+        onRunStateChange={onRunStateChange}
+        onBeforeRun={onBeforeRun}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(onBeforeRun).toHaveBeenCalledTimes(1));
+    expect(tauriApi.onFlowRunStarted).not.toHaveBeenCalled();
+    expect(tauriApi.runFlow).not.toHaveBeenCalled();
+  });
+
+  it('a remounted toolbar picks up a run still in progress from the tab state', async () => {
+    render(
+      <FlowToolbar
+        collection='my-collection'
+        flowName='my-flow'
+        environmentName={null}
+        onPatchStatus={onPatchStatus}
+        onRunStateChange={onRunStateChange}
+        tabRunState='running'
+        tabRunId='run-9'
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-9',
+      node_id: 'node-a',
+      status: 'success',
+      status_code: 200,
+      duration_ms: 5,
+      error: null,
+    });
+    expect(onPatchStatus).toHaveBeenCalledWith('node-a', 'success', {
+      statusCode: 200,
+      durationMs: 5,
+      error: undefined,
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-9');
+  });
 });
