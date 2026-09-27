@@ -1,5 +1,5 @@
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -45,7 +45,11 @@ const emptyForm = {
 
 export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogProps) {
   const { data: configs = [], isLoading, isError, error, refetch } = useAgentConfigs();
-  const { data: connections = [] } = useSecretManagerConnections();
+  const {
+    data: connections = [],
+    isLoading: connectionsLoading,
+    isError: connectionsError,
+  } = useSecretManagerConnections();
   const saveMutation = useSaveAgentConfig();
   const deleteMutation = useDeleteAgentConfig();
   const testMutation = useTestAgentConfig();
@@ -54,18 +58,32 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   const [vaultSecrets, setVaultSecrets] = useState<ExternalSecretRef[]>([]);
   const [fetchingSecrets, setFetchingSecrets] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Bumped whenever the fetched secret list becomes stale. A fetch that resolves
+  // after a bump is dropped, so it cannot leak into another edit session.
+  const fetchGeneration = useRef(0);
+
+  const resetVaultSecrets = () => {
+    fetchGeneration.current += 1;
+    setVaultSecrets([]);
+    setFetchingSecrets(false);
+  };
 
   useEffect(() => {
     if (!open) {
       setEditing(null);
+      fetchGeneration.current += 1;
       setVaultSecrets([]);
       setFetchingSecrets(false);
       setDeletingId(null);
     }
   }, [open]);
 
-  const startAdd = () => setEditing({ ...emptyForm, id: crypto.randomUUID(), isNew: true });
-  const startEdit = (c: AgentConfig) =>
+  const startAdd = () => {
+    resetVaultSecrets();
+    setEditing({ ...emptyForm, id: crypto.randomUUID(), isNew: true });
+  };
+  const startEdit = (c: AgentConfig) => {
+    resetVaultSecrets();
     setEditing({
       id: c.id,
       label: c.label,
@@ -79,26 +97,34 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       vaultSecretName: c.vaultSecretName,
       isNew: false,
     });
+  };
+  const cancelEdit = () => {
+    resetVaultSecrets();
+    setEditing(null);
+  };
 
   const handleFetchSecrets = async () => {
     if (!editing?.vaultConnectionId || !editing.vaultName.trim()) {
       toast.error('Select a connection and enter a vault name first.');
       return;
     }
+    const generation = ++fetchGeneration.current;
     setFetchingSecrets(true);
     try {
       const secrets = await fetchExternalSecretNames(
         editing.vaultConnectionId,
         editing.vaultName.trim(),
       );
+      if (generation !== fetchGeneration.current) return;
       setVaultSecrets(secrets);
       if (secrets.length === 0) {
         toast.error('No secrets found in that vault.');
       }
     } catch (e) {
+      if (generation !== fetchGeneration.current) return;
       toast.error(`Could not fetch secrets: ${String(e)}`);
     } finally {
-      setFetchingSecrets(false);
+      if (generation === fetchGeneration.current) setFetchingSecrets(false);
     }
   };
 
@@ -109,9 +135,12 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       !editing.command.trim() ||
       !editing.credentialEnvVar.trim() ||
       !editing.vaultConnectionId ||
+      !editing.vaultName.trim() ||
       !editing.vaultSecretId
     ) {
-      toast.error('Label, command, credential env var, vault connection, and secret are required.');
+      toast.error(
+        'Label, command, credential env var, vault connection, vault name, and secret are required.',
+      );
       return;
     }
     const config: AgentConfig = {
@@ -131,7 +160,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     };
     try {
       await saveMutation.mutateAsync(config);
-      setEditing(null);
+      cancelEdit();
     } catch (e) {
       toast.error(`Could not save agent: ${String(e)}`);
     }
@@ -164,13 +193,19 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         </DialogHeader>
 
         {editing ? (
-          connections.length === 0 ? (
+          connectionsLoading ? (
+            <div className='flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground'>
+              <Loader2 className='h-4 w-4 animate-spin' />
+              Loading vault connections…
+            </div>
+          ) : connectionsError || connections.length === 0 ? (
             <div className='space-y-3'>
               <p className='text-sm text-muted-foreground'>
-                No RocketVault connections configured yet. Add a Secret Manager connection first,
-                then come back to configure an agent's credential.
+                {connectionsError
+                  ? 'Could not load RocketVault connections. Check the Secret Manager connections dialog, then try again.'
+                  : "No RocketVault connections configured yet. Add a Secret Manager connection first, then come back to configure an agent's credential."}
               </p>
-              <Button variant='outline' size='sm' onClick={() => setEditing(null)}>
+              <Button variant='outline' size='sm' onClick={cancelEdit}>
                 Cancel
               </Button>
             </div>
@@ -238,14 +273,16 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 <Label className='text-sm'>Vault Connection</Label>
                 <Select
                   value={editing.vaultConnectionId}
-                  onValueChange={(value) =>
+                  onValueChange={(value) => {
+                    // Secrets fetched for the previous connection no longer apply.
+                    resetVaultSecrets();
                     setEditing({
                       ...editing,
                       vaultConnectionId: value,
                       vaultSecretId: '',
                       vaultSecretName: '',
-                    })
-                  }
+                    });
+                  }}
                 >
                   <SelectTrigger className='h-8 text-sm'>
                     <SelectValue placeholder='Select a connection…' />
@@ -267,7 +304,16 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   <Input
                     id='ac-vault-name'
                     value={editing.vaultName}
-                    onChange={(e) => setEditing({ ...editing, vaultName: e.target.value })}
+                    onChange={(e) => {
+                      // Secrets fetched for the previous vault no longer apply.
+                      resetVaultSecrets();
+                      setEditing({
+                        ...editing,
+                        vaultName: e.target.value,
+                        vaultSecretId: '',
+                        vaultSecretName: '',
+                      });
+                    }}
                     placeholder='prod-vault'
                     className='h-8 text-sm'
                   />
@@ -282,6 +328,15 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   Fetch Secrets
                 </Button>
               </div>
+              {vaultSecrets.length === 0 && editing.vaultSecretId && (
+                <p className='text-xs text-muted-foreground'>
+                  Current secret:{' '}
+                  <span className='font-medium text-foreground'>
+                    {editing.vaultSecretName || editing.vaultSecretId}
+                  </span>
+                  . Fetch secrets to pick a different one.
+                </p>
+              )}
               {vaultSecrets.length > 0 && (
                 <div>
                   <Label className='text-sm'>Secret</Label>
@@ -310,7 +365,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 </div>
               )}
               <div className='flex gap-2'>
-                <Button variant='outline' size='sm' onClick={() => setEditing(null)}>
+                <Button variant='outline' size='sm' onClick={cancelEdit}>
                   Cancel
                 </Button>
                 <Button

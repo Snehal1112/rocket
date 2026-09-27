@@ -72,11 +72,16 @@ describe('agent config queries', () => {
     expect(tauriApi.listAgentConfigs).toHaveBeenCalledTimes(2);
   });
 
-  it('useDeleteAgentConfig calls deleteAgentConfig with the id', async () => {
-    const { useDeleteAgentConfig } = await import('../agent-config-queries');
+  it('useDeleteAgentConfig calls deleteAgentConfig and invalidates the list', async () => {
+    const { useAgentConfigs, useDeleteAgentConfig } = await import('../agent-config-queries');
+    const { result: list } = renderHook(() => useAgentConfigs(), { wrapper });
+    await waitFor(() => expect(list.current.data).toEqual([sampleConfig]));
+
     const { result } = renderHook(() => useDeleteAgentConfig(), { wrapper });
     await result.current.mutateAsync('agent-1');
+
     expect(tauriApi.deleteAgentConfig).toHaveBeenCalledWith('agent-1');
+    expect(tauriApi.listAgentConfigs).toHaveBeenCalledTimes(2);
   });
 
   it('useTestAgentConfig calls testAgentConfig with the id', async () => {
