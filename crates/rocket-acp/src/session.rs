@@ -36,6 +36,13 @@ pub trait AcpSessionClient: Send + Sync {
     /// default in either `std` or `tokio`, so this must be an active kill,
     /// not passive cleanup. No ACP-level shutdown handshake exists.
     async fn end_session(&self, session_id: &str) -> DomainResult<()>;
+
+    /// Kills every currently-tracked session's process, for use when the
+    /// whole application is shutting down (Tauri does not drop managed
+    /// state on exit, so nothing else calls `end_session` for sessions
+    /// still open at quit time). Best-effort: an individual session's kill
+    /// failure must not prevent cleanup of the rest.
+    async fn end_all_sessions(&self) -> DomainResult<()>;
 }
 
 #[cfg(test)]
@@ -69,6 +76,10 @@ mod tests {
         }
 
         async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+
+        async fn end_all_sessions(&self) -> DomainResult<()> {
             Ok(())
         }
     }
@@ -117,6 +128,9 @@ mod tests {
                 unreachable!("not exercised by this test")
             }
             async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
+                unreachable!("not exercised by this test")
+            }
+            async fn end_all_sessions(&self) -> DomainResult<()> {
                 unreachable!("not exercised by this test")
             }
         }

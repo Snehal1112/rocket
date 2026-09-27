@@ -374,6 +374,17 @@ impl AcpSessionClient for AcpAgentClient {
         terminate_session(&running)
             .map_err(|e| DomainError::Internal(format!("failed to kill agent process: {e}")))
     }
+
+    async fn end_all_sessions(&self) -> DomainResult<()> {
+        // Drain the whole map (rather than iterating a snapshot and removing
+        // one-by-one) so a session that finishes naturally mid-sweep can't be
+        // double-terminated, and so the lock is held only for the swap itself.
+        let sessions = std::mem::take(&mut *self.sessions.lock().await);
+        for running in sessions.values() {
+            let _ = terminate_session(running);
+        }
+        Ok(())
+    }
 }
 
 impl AcpAgentClient {

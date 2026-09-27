@@ -358,3 +358,44 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
         "background dispatch tasks appear to have leaked: baseline={baseline}, after 5 start/end cycles={after}"
     );
 }
+
+#[tokio::test]
+async fn acp_agent_client_end_all_sessions_kills_every_running_session() {
+    let client = AcpAgentClient::new();
+    let session_a = client
+        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .await
+        .expect("start_session a");
+    let session_b = client
+        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .await
+        .expect("start_session b");
+
+    client
+        .end_all_sessions()
+        .await
+        .expect("end_all_sessions should succeed");
+
+    let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
+    let err_a = client
+        .send_prompt(&session_a, "hi".to_string(), tx_a)
+        .await
+        .expect_err("session a must be gone after end_all_sessions");
+    assert!(matches!(err_a, DomainError::NotFound(_)));
+
+    let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
+    let err_b = client
+        .send_prompt(&session_b, "hi".to_string(), tx_b)
+        .await
+        .expect_err("session b must be gone after end_all_sessions");
+    assert!(matches!(err_b, DomainError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_end_all_sessions_on_empty_map_succeeds() {
+    let client = AcpAgentClient::new();
+    client
+        .end_all_sessions()
+        .await
+        .expect("end_all_sessions on an empty session map must succeed, not error");
+}
