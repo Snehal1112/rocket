@@ -1,5 +1,6 @@
 // Application services — orchestration layer
 
+pub mod agent_config_service;
 pub mod assertion_evaluator;
 pub mod collection_runner_service;
 pub mod collection_service;
@@ -15,7 +16,6 @@ pub mod load_test_service;
 pub mod oauth2_service;
 pub mod request_guard;
 pub mod runner_sequence;
-pub mod agent_config_service;
 pub mod secret_manager_service;
 pub mod security_audit_service;
 pub mod template_service;
@@ -24,6 +24,7 @@ pub(crate) mod test_doubles;
 pub mod vault_secret_resolution;
 pub mod workspace_service;
 
+pub use agent_config_service::AgentConfigService;
 pub use collection_runner_service::{
     CollectionRunnerService, RunCollectionInput, RunStepResult, RunStepStatus, RunSummary,
     StoppedReason,
@@ -39,7 +40,6 @@ pub use history_service::HistoryService;
 pub use load_test_service::LoadTestService;
 pub use oauth2_service::OAuth2Service;
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};
-pub use agent_config_service::AgentConfigService;
 pub use secret_manager_service::SecretManagerService;
 pub use security_audit_service::SecurityAuditService;
 pub use template_service::TemplateService;

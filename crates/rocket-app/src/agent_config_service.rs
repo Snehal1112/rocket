@@ -11,7 +11,10 @@ pub struct AgentConfigService {
 }
 
 impl AgentConfigService {
-    pub fn new(repo: Box<dyn AgentConfigRepository>, secret_manager: Arc<SecretManagerService>) -> Self {
+    pub fn new(
+        repo: Box<dyn AgentConfigRepository>,
+        secret_manager: Arc<SecretManagerService>,
+    ) -> Self {
         Self {
             repo,
             secret_manager,
@@ -42,14 +45,42 @@ impl AgentConfigService {
         self.repo.delete(id)
     }
 
+    /// Resolves the agent's API key from RocketVault. A vault secret that no
+    /// longer exists maps to `NotFound`; connection, keychain, and transport
+    /// failures from `SecretManagerService` propagate unchanged.
     pub async fn resolve_credential(&self, id: &str) -> DomainResult<String> {
-        let config = self
-            .repo
+        let config = self.get_config(id)?;
+        self.resolve_credential_for(&config).await
+    }
+
+    /// Checks that `command` resolves on PATH (no process is spawned) and
+    /// that the credential resolves. Both checks must pass.
+    pub async fn test_agent_config(&self, id: &str) -> DomainResult<()> {
+        let config = self.get_config(id)?;
+        which::which(&config.command).map_err(|e| {
+            DomainError::InvalidInput(format!(
+                "agent '{}': command '{}' not found: {e}",
+                config.label, config.command
+            ))
+        })?;
+        self.resolve_credential_for(&config).await?;
+        Ok(())
+    }
+
+    fn get_config(&self, id: &str) -> DomainResult<AgentConfig> {
+        self.repo
             .get(id)?
-            .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
+            .ok_or_else(|| DomainError::NotFound(format!("agent config '{id}'")))
+    }
+
+    async fn resolve_credential_for(&self, config: &AgentConfig) -> DomainResult<String> {
         let value = self
             .secret_manager
-            .resolve_secret_value(&config.vault_connection_id, &config.vault_name, &config.vault_secret_id)
+            .resolve_secret_value(
+                &config.vault_connection_id,
+                &config.vault_name,
+                &config.vault_secret_id,
+            )
             .await?;
         value.ok_or_else(|| {
             DomainError::NotFound(format!(
@@ -58,25 +89,11 @@ impl AgentConfigService {
             ))
         })
     }
-
-    pub async fn test_agent_config(&self, id: &str) -> DomainResult<()> {
-        let config = self
-            .repo
-            .get(id)?
-            .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
-        which::which(&config.command).map_err(|e| {
-            DomainError::InvalidInput(format!(
-                "agent '{}': command '{}' not found: {e}",
-                config.label, config.command
-            ))
-        })?;
-        self.resolve_credential(id).await?;
-        Ok(())
-    }
 }
 
 fn validate_config(config: &AgentConfig) -> DomainResult<()> {
     let required = [
+        ("id", &config.id),
         ("label", &config.label),
         ("command", &config.command),
         ("credential_env_var", &config.credential_env_var),
@@ -271,11 +288,33 @@ mod tests {
 
     #[test]
     fn save_rejects_blank_required_fields() {
+        type Blanker = (&'static str, fn(&mut AgentConfig));
         let service = service_with(Ok(None), true);
-        let mut blank_label = sample_config("agent-1", "conn-1");
-        blank_label.label = "  ".to_string();
-        let err = service.save(blank_label).expect_err("must reject blank label");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
+        let blankers: [Blanker; 7] = [
+            ("id", |c| c.id = " ".to_string()),
+            ("label", |c| c.label = "  ".to_string()),
+            ("command", |c| c.command = String::new()),
+            ("credential_env_var", |c| {
+                c.credential_env_var = " ".to_string()
+            }),
+            ("vault_connection_id", |c| {
+                c.vault_connection_id = String::new()
+            }),
+            ("vault_name", |c| c.vault_name = String::new()),
+            ("vault_secret_id", |c| c.vault_secret_id = "\t".to_string()),
+        ];
+        for (field, blank) in blankers {
+            let mut config = sample_config("agent-1", "conn-1");
+            blank(&mut config);
+            let err = service
+                .save(config)
+                .expect_err("must reject a blank required field");
+            assert!(
+                matches!(err, DomainError::InvalidInput(_)),
+                "blank {field} should be InvalidInput, got {err:?}"
+            );
+        }
+        assert!(service.list().expect("list").is_empty());
     }
 
     #[test]
@@ -285,6 +324,10 @@ mod tests {
             .save(sample_config("agent-1", "no-such-conn"))
             .expect_err("must reject unknown vault_connection_id");
         assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(
+            service.list().expect("list").is_empty(),
+            "a rejected save must not persist the config"
+        );
     }
 
     #[test]
@@ -328,6 +371,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_credential_propagates_transport_failure_distinct_from_stale() {
+        let service = service_with(
+            Err(DomainError::Internal("network timeout".to_string())),
+            true,
+        );
+        service
+            .save(sample_config("agent-1", "conn-1"))
+            .expect("save");
+
+        let err = service
+            .resolve_credential("agent-1")
+            .await
+            .expect_err("a transport failure must be an error, not a panic");
+
+        // A transport failure stays Internal so it is not confused with a
+        // stale secret, which maps to NotFound.
+        assert!(
+            matches!(err, DomainError::Internal(_)),
+            "expected DomainError::Internal, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_agent_config_propagates_transport_failure() {
+        let service = service_with(
+            Err(DomainError::Internal("network timeout".to_string())),
+            true,
+        );
+        let mut config = sample_config("agent-1", "conn-1");
+        config.command = env!("CARGO").to_string();
+        service.save(config).expect("save");
+
+        let err = service
+            .test_agent_config("agent-1")
+            .await
+            .expect_err("a transport failure must fail the test action");
+        assert!(matches!(err, DomainError::Internal(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn test_agent_config_unknown_config_id_errors() {
+        let service = service_with(Ok(Some("sk-abc123".to_string())), true);
+        let err = service
+            .test_agent_config("no-such-agent")
+            .await
+            .expect_err("unknown agent config id must error");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
     async fn resolve_credential_unknown_config_id_errors() {
         let service = service_with(Ok(None), true);
         let err = service
@@ -351,7 +444,10 @@ mod tests {
                 secret_value_result: Ok(Some("sk-abc123".to_string())),
             }),
         ));
-        let service = AgentConfigService::new(Box::new(FakeAgentConfigRepo::new()), Arc::clone(&secret_manager));
+        let service = AgentConfigService::new(
+            Box::new(FakeAgentConfigRepo::new()),
+            Arc::clone(&secret_manager),
+        );
         service
             .save(sample_config("agent-1", "conn-1"))
             .expect("save while connection still exists");

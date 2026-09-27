@@ -4622,6 +4622,7 @@ dependencies = [
  "chrono",
  "regex",
  "reqwest 0.12.28",
+ "rocket-acp",
  "rocket-audit",
  "rocket-collection",
  "rocket-environment",
@@ -4640,6 +4641,7 @@ dependencies = [
  "tracing",
  "ulid",
  "url",
+ "which",
 ]
 
 [[package]]
