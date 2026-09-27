@@ -14,6 +14,7 @@ members = [
     "crates/rocket-import",
     "crates/rocket-scripting",
     "crates/rocket-acp",
+    "crates/rocket-flow",
     "src-tauri",
 ]
 
@@ -61,3 +62,4 @@ rocket-workspace = { path = "crates/rocket-workspace" }
 rocket-import = { path = "crates/rocket-import" }
 rocket-scripting = { path = "crates/rocket-scripting" }
 rocket-acp = { path = "crates/rocket-acp" }
+rocket-flow = { path = "crates/rocket-flow" }
