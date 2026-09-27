@@ -204,6 +204,19 @@ export interface Environment {
   externalSecrets?: ExternalSecretBinding[];
 }
 
+export interface AgentConfig {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  workingDir?: string;
+  credentialEnvVar: string;
+  vaultConnectionId: string;
+  vaultName: string;
+  vaultSecretId: string;
+  vaultSecretName: string;
+}
+
 export interface Template {
   name: string;
   method: HttpMethod;
@@ -1697,3 +1710,16 @@ export const testSecretManagerConnection = (id: string, vaultName: string) =>
 
 export const fetchExternalSecretNames = (id: string, vaultName: string) =>
   invoke<ExternalSecretRef[]>('fetch_external_secret_names', { id, vaultName });
+
+// ============================================================
+// Agent configs (ACP AI assist)
+// ============================================================
+
+export const listAgentConfigs = () => invoke<AgentConfig[]>('list_agent_configs');
+
+export const saveAgentConfig = (config: AgentConfig) =>
+  invoke<void>('save_agent_config', { config });
+
+export const deleteAgentConfig = (id: string) => invoke<void>('delete_agent_config', { id });
+
+export const testAgentConfig = (id: string) => invoke<void>('test_agent_config', { id });
