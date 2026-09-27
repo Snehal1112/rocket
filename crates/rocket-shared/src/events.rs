@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowNodeStatus {
+    Running,
+    Success,
+    Failed,
+    Skipped,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -145,6 +154,36 @@ pub enum DomainEvent {
         stopped_reason: String,
         step_count: usize,
         failed_count: usize,
+    },
+
+    // Flow events
+    /// Emitted once when a Flow run starts, before its first node executes.
+    FlowRunStarted {
+        run_id: String,
+        flow_name: String,
+        collection: String,
+        total_nodes: usize,
+    },
+    /// Emitted after every node of a run, in topological execution order.
+    FlowStepCompleted {
+        run_id: String,
+        node_id: String,
+        status: FlowNodeStatus,
+        /// `None` for a node with no HTTP response (Input/Output nodes, or
+        /// a Skipped/Failed Request node that never got a response).
+        status_code: Option<u16>,
+        /// `None` for a node that never executed (Skipped) or has no
+        /// meaningful duration (Input/Output nodes).
+        duration_ms: Option<u64>,
+        error: Option<String>,
+    },
+    /// Emitted once when a Flow run ends, for any reason.
+    FlowRunFinished {
+        run_id: String,
+        stopped_reason: String,
+        node_count: usize,
+        failed_count: usize,
+        skipped_count: usize,
     },
 
     // File system events
@@ -535,6 +574,91 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#
+        );
+    }
+
+    #[test]
+    fn flow_node_status_wire_shapes() {
+        assert_eq!(
+            serde_json::to_string(&FlowNodeStatus::Running).expect("serialize"),
+            r#""running""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowNodeStatus::Success).expect("serialize"),
+            r#""success""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowNodeStatus::Failed).expect("serialize"),
+            r#""failed""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowNodeStatus::Skipped).expect("serialize"),
+            r#""skipped""#
+        );
+    }
+
+    #[test]
+    fn flow_run_started_wire_shape() {
+        let event = DomainEvent::FlowRunStarted {
+            run_id: "01J".into(),
+            flow_name: "Login Flow".into(),
+            collection: "acme".into(),
+            total_nodes: 3,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"Login Flow","collection":"acme","total_nodes":3}"#
+        );
+    }
+
+    #[test]
+    fn flow_step_completed_wire_shape_with_all_fields_present() {
+        let event = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "node-1".into(),
+            status: FlowNodeStatus::Success,
+            status_code: Some(200),
+            duration_ms: Some(184),
+            error: None,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"node-1","status":"success","status_code":200,"duration_ms":184,"error":null}"#
+        );
+    }
+
+    #[test]
+    fn flow_step_completed_serializes_with_optional_fields_absent() {
+        let event = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "node-2".into(),
+            status: FlowNodeStatus::Skipped,
+            status_code: None,
+            duration_ms: None,
+            error: Some("upstream failed".into()),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""status":"skipped""#));
+        assert!(json.contains(r#""status_code":null"#));
+        assert!(json.contains(r#""duration_ms":null"#));
+        assert!(json.contains(r#""error":"upstream failed""#));
+    }
+
+    #[test]
+    fn flow_run_finished_wire_shape_tracks_failed_and_skipped_separately() {
+        let event = DomainEvent::FlowRunFinished {
+            run_id: "01J".into(),
+            stopped_reason: "completed".into(),
+            node_count: 5,
+            failed_count: 1,
+            skipped_count: 2,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowRunFinished","run_id":"01J","stopped_reason":"completed","node_count":5,"failed_count":1,"skipped_count":2}"#
         );
     }
 }
