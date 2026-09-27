@@ -274,6 +274,82 @@ fn apply_header_override(
     Ok(())
 }
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+/// Orchestrates one Flow run: loads the graph, walks it in dependency order,
+/// and dispatches each node using the building blocks in this same module
+/// (`build_execute_request_input`, `apply_wired_overrides`,
+/// `resolve_flow_wire_expression`). Holds no execution machinery of its own —
+/// `run()` takes the `RequestExecutionService` to drive, the same pattern
+/// `CollectionRunnerService::run` uses.
+pub struct FlowExecutionService {
+    flow_repo: Box<dyn rocket_flow::FlowRepository>,
+    collection_repo: Box<dyn rocket_collection::CollectionRepository>,
+    events: Box<dyn rocket_shared::events::EventPublisher>,
+    cancelled: Arc<Mutex<HashSet<String>>>,
+    in_flight: Arc<Mutex<HashSet<String>>>,
+}
+
+impl FlowExecutionService {
+    pub fn new(
+        flow_repo: Box<dyn rocket_flow::FlowRepository>,
+        collection_repo: Box<dyn rocket_collection::CollectionRepository>,
+        events: Box<dyn rocket_shared::events::EventPublisher>,
+    ) -> Self {
+        Self {
+            flow_repo,
+            collection_repo,
+            events,
+            cancelled: Arc::new(Mutex::new(HashSet::new())),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Loads the named flow and validates it into a dependency-ordered node id
+    /// list. A cyclic graph is rejected here (defense in depth — `save_flow`,
+    /// Plan 07, should already have refused to persist one) rather than ever
+    /// starting a run against it.
+    fn load_ordered_nodes(
+        &self,
+        collection: &str,
+        flow_name: &str,
+    ) -> DomainResult<(rocket_flow::Flow, Vec<String>)> {
+        let flow = self.flow_repo.get(collection, flow_name)?;
+        let order = rocket_flow::topological_sort(&flow).map_err(|e| {
+            DomainError::InvalidInput(format!("flow '{flow_name}' is not runnable: {e}"))
+        })?;
+        Ok((flow, order))
+    }
+
+    /// Asks an in-progress run to stop. The run ends before its next node; a
+    /// node already executing finishes first. Cancelling an unknown or
+    /// finished run id is a no-op, mirroring `CollectionRunnerService::cancel`.
+    pub fn cancel(&self, run_id: &str) {
+        if let Ok(in_flight) = self.in_flight.lock() {
+            if !in_flight.contains(run_id) {
+                return;
+            }
+        }
+        if let Ok(mut cancelled) = self.cancelled.lock() {
+            cancelled.insert(run_id.to_string());
+        }
+    }
+
+    fn is_cancelled(&self, run_id: &str) -> bool {
+        self.cancelled
+            .lock()
+            .map(|set| set.contains(run_id))
+            .unwrap_or(false)
+    }
+
+    fn clear_cancellation(&self, run_id: &str) {
+        if let Ok(mut set) = self.cancelled.lock() {
+            set.remove(run_id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,5 +1040,169 @@ mod tests {
         let err = apply_wired_overrides(&mut input, &resolved, &edges)
             .expect_err("an unrecognized target_field must error, not silently do nothing");
         assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    use rocket_flow::{Flow, FlowRepository};
+
+    struct FakeFlowRepository {
+        flows: std::sync::Mutex<HashMap<(String, String), Flow>>,
+    }
+    impl FakeFlowRepository {
+        fn new() -> Self {
+            Self {
+                flows: std::sync::Mutex::new(HashMap::new()),
+            }
+        }
+        fn with_flow(self, collection: &str, flow: Flow) -> Self {
+            self.flows
+                .lock()
+                .expect("lock FakeFlowRepository")
+                .insert((collection.to_string(), flow.name.clone()), flow);
+            self
+        }
+    }
+    impl FlowRepository for FakeFlowRepository {
+        fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
+            Ok(self
+                .flows
+                .lock()
+                .expect("lock FakeFlowRepository")
+                .keys()
+                .filter(|(c, _)| c == collection)
+                .map(|(_, name)| name.clone())
+                .collect())
+        }
+        fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
+            self.flows
+                .lock()
+                .expect("lock FakeFlowRepository")
+                .get(&(collection.to_string(), name.to_string()))
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(format!("{collection}/{name}")))
+        }
+        fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()> {
+            self.flows
+                .lock()
+                .expect("lock FakeFlowRepository")
+                .insert((collection.to_string(), flow.name.clone()), flow.clone());
+            Ok(())
+        }
+        fn delete(&self, collection: &str, name: &str) -> DomainResult<()> {
+            self.flows
+                .lock()
+                .expect("lock FakeFlowRepository")
+                .remove(&(collection.to_string(), name.to_string()));
+            Ok(())
+        }
+    }
+
+    fn service_with_flow(flow: Flow) -> FlowExecutionService {
+        FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        )
+    }
+
+    fn linear_flow() -> Flow {
+        Flow {
+            name: "auth-flow".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Input {
+                        label: "Username".to_string(),
+                        value: VariableValue::simple("bob"),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                FlowNode {
+                    id: "b".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Result".to_string(),
+                    },
+                    position: NodePosition { x: 100.0, y: 0.0 },
+                },
+            ],
+            edges: vec![FlowEdge {
+                id: "e1".to_string(),
+                source_node_id: "a".to_string(),
+                target_node_id: "b".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body".to_string(),
+            }],
+        }
+    }
+
+    fn cyclic_flow() -> Flow {
+        Flow {
+            name: "cyclic".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "A".to_string(),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                FlowNode {
+                    id: "b".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "B".to_string(),
+                    },
+                    position: NodePosition { x: 100.0, y: 0.0 },
+                },
+            ],
+            edges: vec![
+                FlowEdge {
+                    id: "e1".to_string(),
+                    source_node_id: "a".to_string(),
+                    target_node_id: "b".to_string(),
+                    target_field: "value".to_string(),
+                    expression: "response.body".to_string(),
+                },
+                FlowEdge {
+                    id: "e2".to_string(),
+                    source_node_id: "b".to_string(),
+                    target_node_id: "a".to_string(),
+                    target_field: "value".to_string(),
+                    expression: "response.body".to_string(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn load_ordered_nodes_returns_dependency_order_for_a_valid_flow() {
+        let service = service_with_flow(linear_flow());
+        let (flow, order) = service
+            .load_ordered_nodes("my-api", "auth-flow")
+            .expect("valid flow must load and sort");
+        assert_eq!(flow.name, "auth-flow");
+        assert_eq!(order, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn load_ordered_nodes_rejects_a_cyclic_flow() {
+        let service = service_with_flow(cyclic_flow());
+        let err = service
+            .load_ordered_nodes("my-api", "cyclic")
+            .expect_err("a cyclic flow must not load for execution");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn load_ordered_nodes_propagates_unknown_flow_name() {
+        let service = service_with_flow(linear_flow());
+        let err = service
+            .load_ordered_nodes("my-api", "does-not-exist")
+            .expect_err("an unknown flow name must error");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn cancel_on_unknown_run_id_is_a_harmless_noop() {
+        let service = service_with_flow(linear_flow());
+        service.cancel("no-such-run-id"); // must not panic
     }
 }
