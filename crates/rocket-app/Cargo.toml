@@ -10,6 +10,7 @@ rocket-acp = { path = "../rocket-acp" }
 rocket-audit = { path = "../rocket-audit" }
 rocket-collection.workspace = true
 rocket-environment.workspace = true
+rocket-flow.workspace = true
 rocket-git.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
