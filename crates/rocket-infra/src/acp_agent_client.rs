@@ -5,7 +5,7 @@
 //! background task rather than directly inside `start_session`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation, InitializeRequest,
@@ -29,7 +29,7 @@ use tokio::task::JoinHandle;
 /// foreground-owned: the JSON-RPC dispatch loop that actually drives message
 /// I/O only runs while that closure's future is being polled. Since
 /// `start_session` must return long before `send_prompt`/`end_session`
-/// (Task 3) are called, the whole `connect_with(...)` future is driven in a
+/// are called, the whole `connect_with(...)` future is driven in a
 /// background task that outlives this call (see `start_session`), and the
 /// cheaply-clonable `ConnectionTo` handle is handed back out through a
 /// channel. `ConnectionTo` is `Clone` and safe to use from any task as long
@@ -38,30 +38,86 @@ struct RunningSession {
     /// Connection handle for sending `session/prompt` and other requests to
     /// the agent.
     connection: ConnectionTo<AgentRole>,
-    /// The spawned agent process. `end_session` (Task 3) must kill it
-    /// explicitly -- dropping a connection handle does not kill the
-    /// underlying child process by default in either `std` or `tokio`, and
-    /// there is no ACP-level shutdown handshake.
-    child: Mutex<Child>,
+    /// The agent process and its background dispatch task. Every path that
+    /// removes a session from the map calls `terminate()` on it explicitly.
+    process: std::sync::Mutex<AgentProcess>,
+    /// Serializes prompts on one session. `current_chunk_tx` holds a single
+    /// sender, so two overlapping prompts would otherwise steal or clear
+    /// each other's chunk stream. ACP also allows only one turn at a time.
+    prompt_lock: Mutex<()>,
     /// Set by `send_prompt` for the duration of one call, read by the
     /// notification handler registered at connect time -- `session/update`
     /// is a push notification uncorrelated with any specific request, so
     /// this indirection is how a fresh per-call `chunk_tx` receives it.
-    current_chunk_tx: Arc<std::sync::Mutex<Option<UnboundedSender<String>>>>,
-    /// Handle to the background task (spawned in `start_session`) that drives
-    /// the `connect_with(...)` dispatch loop for the life of this session.
-    ///
-    /// Per `agent-client-protocol`'s own docs
-    /// (`agent-client-protocol-2.2.0/src/concepts/connections.rs`, "Clean
-    /// Incoming EOF" section): `connect_with`'s closure is foreground-owned,
-    /// and a transport EOF (e.g. the child process crashing or being killed)
-    /// "does not cancel unrelated work in its closure" -- only pending
-    /// requests fail. Our closure parks in `std::future::pending::<()>()`
-    /// after the handshake, so nothing ever stops it on its own, on any exit
-    /// path (explicit end, crash, or a future timeout). Every code path that
-    /// removes a `RunningSession` from the session map MUST call
-    /// `.abort()` on this handle, or the background task leaks forever.
-    join_handle: JoinHandle<()>,
+    current_chunk_tx: ChunkSlot,
+}
+
+type ChunkSlot = Arc<std::sync::Mutex<Option<UnboundedSender<String>>>>;
+
+/// Sets the per-prompt chunk sender. A poisoned lock is recovered because
+/// the guarded value is a plain `Option` that cannot be left half-written.
+fn set_chunk_sender(slot: &ChunkSlot, sender: Option<UnboundedSender<String>>) {
+    *slot.lock().unwrap_or_else(PoisonError::into_inner) = sender;
+}
+
+/// Owns a spawned agent process and the background task that drives its
+/// ACP connection, and tears both down together.
+///
+/// Per `agent-client-protocol`'s own docs
+/// (`agent-client-protocol-2.2.0/src/concepts/connections.rs`, "Clean
+/// Incoming EOF" section): `connect_with`'s closure is foreground-owned, and
+/// a transport EOF (e.g. the child crashing or being killed) "does not cancel
+/// unrelated work in its closure" -- only pending requests fail. Our closure
+/// parks in `std::future::pending::<()>()` after the handshake, so the task
+/// never stops on its own and must be aborted.
+///
+/// `terminate()` is called explicitly on every normal exit path (end, crash,
+/// failed handshake). `Drop` also calls it as a safety net for paths that
+/// have no explicit hook. The main one is a caller dropping a pending
+/// `start_session` future (e.g. on timeout) before the session is stored.
+struct AgentProcess {
+    child: Child,
+    dispatch_task: JoinHandle<()>,
+    terminated: bool,
+}
+
+impl AgentProcess {
+    /// Aborts the dispatch task and kills the agent's process tree.
+    /// Idempotent, so the `Drop` safety net never signals a second time.
+    fn terminate(&mut self) -> std::io::Result<()> {
+        if self.terminated {
+            return Ok(());
+        }
+        self.terminated = true;
+        self.dispatch_task.abort();
+        // `spawn_process` makes the child its own process-group leader on
+        // unix. Agents are often started through wrappers (`npx`, `uvx`), so
+        // killing only the direct child would orphan the real agent. An error
+        // here (e.g. `ESRCH`) just means the group is already gone.
+        #[cfg(unix)]
+        if let Some(pid) = i32::try_from(self.child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        }
+        self.child.kill()
+    }
+}
+
+impl Drop for AgentProcess {
+    fn drop(&mut self) {
+        let _ = self.terminate();
+    }
+}
+
+/// Explicitly terminates a session that was removed from the map.
+fn terminate_session(running: &RunningSession) -> std::io::Result<()> {
+    running
+        .process
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .terminate()
 }
 
 /// `AcpSessionClient` implementation backed by the real `agent-client-protocol`
@@ -110,22 +166,21 @@ impl AcpSessionClient for AcpAgentClient {
         // itself as the transport: passing `AcpAgent` directly (as the
         // crate's own examples and the fixture-binary test do) spawns and
         // owns the child process internally with no way to get it back out.
-        // We need the raw `Child` handle so `end_session` (Task 3) can kill
+        // We need the raw `Child` handle so `end_session` can kill
         // it explicitly.
         //
         // This also means a nonexistent command fails synchronously right
         // here, before any connection/handshake machinery starts, and the
         // resulting error is built only from `command`'s OS-level spawn
         // failure (e.g. "No such file or directory") -- never from `env`.
-        let (child_stdin, child_stdout, _child_stderr, child) =
+        let (child_stdin, child_stdout, child_stderr, child) =
             agent.spawn_process().map_err(|e| {
                 DomainError::InvalidInput(format!("failed to spawn agent command '{command}': {e}"))
             })?;
 
         let transport = ByteStreams::new(child_stdin, child_stdout);
 
-        let current_chunk_tx: Arc<std::sync::Mutex<Option<UnboundedSender<String>>>> =
-            Arc::new(std::sync::Mutex::new(None));
+        let current_chunk_tx: ChunkSlot = Arc::new(std::sync::Mutex::new(None));
         let notif_chunk_tx = Arc::clone(&current_chunk_tx);
 
         // See the `RunningSession` doc comment for why this whole connection
@@ -141,8 +196,15 @@ impl AcpSessionClient for AcpAgentClient {
         let cwd = cwd.to_string();
         let command_owned = command.to_string();
 
-        let join_handle = tokio::spawn(async move {
-            let outcome = Client
+        let dispatch_task = tokio::spawn(async move {
+            // The agent's stderr must be drained. Dropping the pipe would make
+            // the agent's next stderr write fail with EPIPE/SIGPIPE, which
+            // kills or breaks many real agents. The output is discarded, not
+            // logged, because an agent may echo its environment (credentials).
+            let drain_stderr = async move {
+                let _ = futures_lite::io::copy(child_stderr, futures_lite::io::sink()).await;
+            };
+            let connect = Client
                 .builder()
                 .on_receive_notification(
                     move |notification: SessionNotification, _cx: ConnectionTo<AgentRole>| {
@@ -198,7 +260,7 @@ impl AcpSessionClient for AcpAgentClient {
                                     }
                                 }
                                 // The session stays open until `end_session`
-                                // (Task 3) kills `child`; this closure must
+                                // aborts this task; this closure must
                                 // keep the connection's dispatch loop alive
                                 // until then.
                                 std::future::pending::<()>().await;
@@ -214,8 +276,8 @@ impl AcpSessionClient for AcpAgentClient {
                             }
                         }
                     }
-                })
-                .await;
+                });
+            let (outcome, ()) = tokio::join!(connect, drain_stderr);
 
             if let Err(e) = outcome {
                 if let Ok(mut guard) = ready_tx.lock() {
@@ -226,20 +288,34 @@ impl AcpSessionClient for AcpAgentClient {
             }
         });
 
-        let (session_id, connection) = ready_rx
-            .await
-            .map_err(|_| {
-                DomainError::Internal(format!(
-                    "agent command '{command_owned}': ACP handshake task ended without a result"
-                ))
-            })?
-            .map_err(|e| DomainError::Internal(format!("ACP handshake failed: {e}")))?;
+        // Owned from here on, so every early return below (and a caller
+        // dropping this future mid-handshake) still tears the process down.
+        let mut process = AgentProcess {
+            child,
+            dispatch_task,
+            terminated: false,
+        };
+
+        let handshake = match ready_rx.await {
+            Ok(Ok(ready)) => Ok(ready),
+            Ok(Err(e)) => Err(DomainError::Internal(format!("ACP handshake failed: {e}"))),
+            Err(_) => Err(DomainError::Internal(format!(
+                "agent command '{command_owned}': ACP handshake task ended without a result"
+            ))),
+        };
+        let (session_id, connection) = match handshake {
+            Ok(ready) => ready,
+            Err(e) => {
+                let _ = process.terminate();
+                return Err(e);
+            }
+        };
 
         let running = Arc::new(RunningSession {
             connection,
-            child: Mutex::new(child),
+            process: std::sync::Mutex::new(process),
+            prompt_lock: Mutex::new(()),
             current_chunk_tx,
-            join_handle,
         });
         self.sessions
             .lock()
@@ -262,10 +338,8 @@ impl AcpSessionClient for AcpAgentClient {
             .cloned()
             .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))?;
 
-        {
-            let mut guard = running.current_chunk_tx.lock().expect("lock chunk sender");
-            *guard = Some(chunk_tx);
-        }
+        let _turn = running.prompt_lock.lock().await;
+        set_chunk_sender(&running.current_chunk_tx, Some(chunk_tx));
 
         // `connection.send_request(...)` takes `&self` and `ConnectionTo` is
         // cheaply `Clone` and safe to call concurrently, so no lock is needed
@@ -279,10 +353,7 @@ impl AcpSessionClient for AcpAgentClient {
             .block_task()
             .await;
 
-        {
-            let mut guard = running.current_chunk_tx.lock().expect("lock chunk sender");
-            *guard = None;
-        }
+        set_chunk_sender(&running.current_chunk_tx, None);
 
         match result {
             Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
@@ -300,14 +371,8 @@ impl AcpSessionClient for AcpAgentClient {
             .await
             .remove(session_id)
             .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))?;
-        running.join_handle.abort();
-        running
-            .child
-            .lock()
-            .await
-            .kill()
-            .map_err(|e| DomainError::Internal(format!("failed to kill agent process: {e}")))?;
-        Ok(())
+        terminate_session(&running)
+            .map_err(|e| DomainError::Internal(format!("failed to kill agent process: {e}")))
     }
 }
 
@@ -320,12 +385,11 @@ impl AcpAgentClient {
     async fn fail_and_remove(&self, session_id: &str) {
         // Bind the removal to a `let` statement (rather than the `sessions`
         // lock guard's temporary being extended across an `if let` body) so
-        // the `sessions` lock is dropped here, before `child.lock()` runs --
+        // the `sessions` lock is dropped here, before termination runs --
         // matching `end_session`'s locking discipline.
         let removed = self.sessions.lock().await.remove(session_id);
         if let Some(running) = removed {
-            running.join_handle.abort();
-            let _ = running.child.lock().await.kill();
+            let _ = terminate_session(&running);
         }
     }
 }

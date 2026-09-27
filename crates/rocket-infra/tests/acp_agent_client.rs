@@ -239,6 +239,79 @@ async fn acp_agent_client_a_crashed_agent_is_removed_from_the_session_map() {
 }
 
 #[tokio::test]
+async fn acp_agent_client_end_session_unblocks_an_in_flight_prompt() {
+    // Plan 04's timeout path ends a session while its prompt is still
+    // pending. The pending `send_prompt` must then fail promptly, not hang.
+    let client = std::sync::Arc::new(AcpAgentClient::new());
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .await
+        .expect("start_session");
+
+    let prompt_client = std::sync::Arc::clone(&client);
+    let prompt_session = session_id.clone();
+    let pending = tokio::spawn(async move {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        prompt_client
+            .send_prompt(&prompt_session, "__HANG__".to_string(), tx)
+            .await
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    client
+        .end_session(&session_id)
+        .await
+        .expect("end_session should succeed");
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("send_prompt must not hang after end_session")
+        .expect("prompt task must not panic");
+    assert!(result.is_err(), "an ended session's prompt must fail");
+}
+
+// Returns true once `pid` is gone or only left as an unreaped zombie.
+#[cfg(target_os = "linux")]
+async fn wait_for_process_exit(pid: &str) -> bool {
+    for _ in 0..50 {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => return true,
+            Ok(stat) if stat.split(") ").nth(1).is_some_and(|s| s.starts_with('Z')) => {
+                return true;
+            }
+            Ok(_) => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn acp_agent_client_cancelled_start_session_kills_the_whole_process_group() {
+    // A wrapper launcher (like `npx`) whose real worker is a grandchild that
+    // never answers `initialize`. Dropping `start_session` (as a caller-side
+    // timeout does) must kill the grandchild too, not orphan it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pid_file = dir.path().join("grandchild.pid");
+    let script = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
+
+    let client = AcpAgentClient::new();
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        client.start_session("sh", &["-c".to_string(), script], "/tmp", &[]),
+    )
+    .await;
+    assert!(outcome.is_err(), "the handshake must still be pending");
+
+    let pid = std::fs::read_to_string(&pid_file).expect("read grandchild pid");
+    assert!(
+        wait_for_process_exit(pid.trim()).await,
+        "grandchild process {} survived a cancelled start_session",
+        pid.trim()
+    );
+}
+
+#[tokio::test]
 async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
     // Structural proof for the JoinHandle-abort requirement: every
     // `RunningSession` stores the `tokio::spawn` handle of the background

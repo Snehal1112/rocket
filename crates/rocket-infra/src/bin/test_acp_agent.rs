@@ -41,6 +41,11 @@ async fn main() -> Result<()> {
                     if text.text == "__CRASH__" {
                         std::process::exit(1);
                     }
+                    // Test hook: never answer, so tests can cancel a prompt
+                    // that is still in flight.
+                    if text.text == "__HANG__" {
+                        std::future::pending::<()>().await;
+                    }
                 }
                 conn.send_notification(SessionNotification::new(
                     req.session_id,
