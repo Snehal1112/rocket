@@ -10,10 +10,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { type CollectionSummary, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
+import {
+  type CollectionSummary,
+  type FlowNode,
+  listCollections,
+  listFlows,
+  saveFlow,
+} from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowCanvas } from './FlowCanvas';
+import { NodePalette } from './NodePalette';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
@@ -131,16 +138,23 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     );
   }
 
+  const handleAddNode = (node: FlowNode) => {
+    updateFlowNodes(tab.id, [...tab.nodes, node]);
+  };
+
   return (
-    <FlowCanvas
-      nodes={tab.nodes}
-      edges={tab.edges}
-      nodeStatus={tab.nodeStatus}
-      onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
-      onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
-      onConnect={() => {
-        /* Plan 10 replaces this with real edge-creation + the expression editor popover */
-      }}
-    />
+    <div className='relative h-full'>
+      <NodePalette onAddNode={handleAddNode} />
+      <FlowCanvas
+        nodes={tab.nodes}
+        edges={tab.edges}
+        nodeStatus={tab.nodeStatus}
+        onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
+        onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
+        onConnect={() => {
+          /* Plan 10 replaces this with real edge-creation + the expression editor popover */
+        }}
+      />
+    </div>
   );
 }
