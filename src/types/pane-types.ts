@@ -143,7 +143,9 @@ export interface FlowTab extends BaseTab {
   nodes: import('@/lib/tauri-api').FlowNode[];
   edges: import('@/lib/tauri-api').FlowEdge[];
   nodeStatus: Record<string, import('@/lib/tauri-api').FlowNodeStatus>;
+  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>;
   runState: 'idle' | 'running' | 'done';
+  runId?: string;
 }
 
 export function isFlowTab(tab: Tab): tab is FlowTab {

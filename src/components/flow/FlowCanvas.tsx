@@ -40,6 +40,10 @@ export interface FlowCanvasProps {
   // (see rocket-app/flow_execution_service.rs), so a cross-collection drop
   // would silently resolve to the wrong file (or fail to resolve at all).
   flowCollectionName?: string | null;
+  // Per-node status-code/timing/error, keyed by node id. Populated by a run.
+  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>;
+  // Node ids implicated in a stored cycle, reported by the last failed save.
+  cycleNodeIds?: string[];
 }
 
 type Measured = { width: number; height: number };
@@ -57,12 +61,19 @@ function toRfNodes(
   nodeStatus: Record<string, FlowNodeStatus>,
   selectedIds: ReadonlySet<string>,
   measured: ReadonlyMap<string, Measured>,
+  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>,
+  cycleNodeIds?: string[],
 ): Node[] {
   return nodes.map((n) => ({
     id: n.id,
     type: n.kind.kind,
     position: n.position,
-    data: { kind: n.kind, status: nodeStatus[n.id] ?? 'idle' },
+    data: {
+      kind: n.kind,
+      status: nodeStatus[n.id] ?? 'idle',
+      ...nodeDetail?.[n.id],
+      hasCycleError: cycleNodeIds?.includes(n.id) ?? false,
+    },
     selected: selectedIds.has(n.id),
     measured: measured.get(n.id),
   }));
@@ -120,6 +131,8 @@ function FlowCanvasInner({
   onConnect,
   onAddNode,
   flowCollectionName,
+  nodeDetail,
+  cycleNodeIds,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -129,8 +142,9 @@ function FlowCanvasInner({
   const measuredRef = useRef(new Map<string, Measured>());
 
   const rfNodes = useMemo(
-    () => toRfNodes(nodes, nodeStatus, selectedNodeIds, measuredRef.current),
-    [nodes, nodeStatus, selectedNodeIds],
+    () =>
+      toRfNodes(nodes, nodeStatus, selectedNodeIds, measuredRef.current, nodeDetail, cycleNodeIds),
+    [nodes, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
   );
   const rfEdges = useMemo(() => toRfEdges(edges, selectedEdgeIds), [edges, selectedEdgeIds]);
 

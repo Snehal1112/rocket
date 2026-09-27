@@ -139,7 +139,13 @@ export interface PaneState {
   openFlowTab: (collectionName: string | null, flowName?: string) => Promise<void>;
   updateFlowNodes: (tabId: string, nodes: FlowNode[]) => void;
   updateFlowEdges: (tabId: string, edges: FlowEdge[]) => void;
-  patchFlowNodeStatus: (tabId: string, nodeId: string, status: FlowNodeStatus) => void;
+  patchFlowNodeStatus: (
+    tabId: string,
+    nodeId: string,
+    status: FlowNodeStatus,
+    detail?: { statusCode?: number; durationMs?: number; error?: string },
+  ) => void;
+  setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
 }
 
 // Monotonic source for RunnerTab.runId. Module-level (not per-tab) is
@@ -565,13 +571,25 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     });
   },
 
-  patchFlowNodeStatus(tabId, nodeId, status) {
+  patchFlowNodeStatus(tabId, nodeId, status, detail) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
-        return { ...tab, nodeStatus: { ...tab.nodeStatus, [nodeId]: status } };
+        return {
+          ...tab,
+          nodeStatus: { ...tab.nodeStatus, [nodeId]: status },
+          nodeDetail: detail ? { ...tab.nodeDetail, [nodeId]: detail } : tab.nodeDetail,
+        };
       }),
+    });
+  },
+
+  setFlowRunState(tabId, runState, runId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, runState, runId } : tab,
+      ),
     });
   },
 

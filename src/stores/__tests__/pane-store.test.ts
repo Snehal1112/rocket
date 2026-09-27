@@ -879,4 +879,39 @@ describe('Flow tab actions', () => {
     expect(tab?.flowName).toBeNull();
     expect(tab?.collectionName).toBe('my-collection');
   });
+
+  it('setFlowRunState stores the run id and state on the tab', async () => {
+    await usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'run-123');
+    const tab = findFirstFlowTab();
+    expect(tab?.runState).toBe('running');
+    expect(tab?.runId).toBe('run-123');
+  });
+
+  it('patchFlowNodeStatus records optional detail alongside the status', async () => {
+    await usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    usePaneStore.setState({
+      root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+        tab.tabType === 'flow'
+          ? {
+              ...tab,
+              nodes: [
+                { id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } },
+              ],
+            }
+          : tab,
+      ),
+    });
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'success', {
+      statusCode: 200,
+      durationMs: 184,
+    });
+    const tab = findFirstFlowTab();
+    expect(tab?.nodeStatus.n1).toBe('success');
+    expect(tab?.nodeDetail?.n1).toEqual({ statusCode: 200, durationMs: 184 });
+  });
 });

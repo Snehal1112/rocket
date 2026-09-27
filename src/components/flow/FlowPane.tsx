@@ -16,13 +16,16 @@ import {
   type CollectionSummary,
   type FlowEdge,
   type FlowNode,
+  type FlowNodeStatus,
   listCollections,
   listFlows,
   saveFlow,
 } from '@/lib/tauri-api';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowCanvas } from './FlowCanvas';
+import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { WireExpressionPopover } from './WireExpressionPopover';
 
@@ -31,6 +34,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const closeTab = usePaneStore((s) => s.closeTab);
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
   const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
+  const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
+  const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+  // There is no `activeEnvironmentName` anywhere. The active environment's
+  // name is env-store's `activeEnvId` (it holds the name; see
+  // src/lib/execute-request.ts, which passes it as environmentName).
+  const activeEnvironmentName = useEnvStore((s) => s.activeEnvId);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   // Start from the tab's own collection, so a tab opened for a collection
   // (or one that fell back after a failed load) keeps that choice.
@@ -39,6 +48,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [newFlowName, setNewFlowName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
+  const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
@@ -146,8 +156,44 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     );
   }
 
+  // tab.flowName is narrowed non-null by the picker-state return above.
+  // tab.collectionName is a separate optional field on FlowTab; in practice
+  // it is always set alongside a resolved flowName (the picker only calls
+  // openFlowTab with a chosen collection), but guard it explicitly rather
+  // than asserting, since a null value here would misdirect run/save calls.
+  const flowName = tab.flowName;
+  const collectionName = tab.collectionName;
+  if (!collectionName) {
+    console.error('[FlowPane] flow tab is missing a collection name');
+    return null;
+  }
+
   const handleAddNode = (node: FlowNode) => {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
+  };
+
+  const handleSave = async () => {
+    try {
+      await saveFlow(collectionName, {
+        name: flowName,
+        nodes: tab.nodes,
+        edges: tab.edges,
+      });
+      setCycleNodeIds([]);
+      toast.success('Flow saved.');
+    } catch (err) {
+      // Plan 07's save_flow rejects with the plain string
+      // "Invalid input: flow contains a cycle through node(s): a, b"
+      // (ids joined by ", ", no brackets or quotes — verified in the Plan 07
+      // review). Parse and flag them rather than showing only a generic
+      // toast, per this plan's Review Focus.
+      const message = String(err);
+      const match = message.match(/flow contains a cycle through node\(s\): (.*)$/);
+      if (match) {
+        setCycleNodeIds(match[1].split(', ').map((s) => s.trim()));
+      }
+      toast.error(`Could not save flow: ${message}`);
+    }
   };
 
   // A bare `headers` target is not a valid target_field (the backend
@@ -180,11 +226,27 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
 
   return (
     <div className='relative h-full'>
+      <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
+        <FlowToolbar
+          collection={collectionName}
+          flowName={flowName}
+          environmentName={activeEnvironmentName}
+          onPatchStatus={(nodeId, status, detail) =>
+            patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)
+          }
+          onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
+        />
+        <Button size='sm' variant='outline' onClick={() => void handleSave()}>
+          Save
+        </Button>
+      </div>
       <NodePalette onAddNode={handleAddNode} />
       <FlowCanvas
         nodes={tab.nodes}
         edges={tab.edges}
         nodeStatus={tab.nodeStatus}
+        nodeDetail={tab.nodeDetail}
+        cycleNodeIds={cycleNodeIds}
         onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
         onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
         onConnect={handleConnect}
