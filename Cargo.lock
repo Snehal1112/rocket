@@ -4569,6 +4569,7 @@ dependencies = [
  "git2",
  "keyring",
  "reqwest 0.12.28",
+ "rocket-acp",
  "rocket-app",
  "rocket-audit",
  "rocket-collection",
