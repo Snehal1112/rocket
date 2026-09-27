@@ -101,9 +101,19 @@ impl FlowService {
     /// Runs `rocket_flow::topological_sort` before persisting; a
     /// `FlowGraphError::Cycle` is mapped to a `DomainError` that names the
     /// offending node ids, and nothing is written to disk in that case.
-    pub fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()>;
+    /// (As built: takes `Flow` by value, not `&Flow`.)
+    pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()>;
 }
 ```
+
+As built, `save` maps every `FlowGraphError` to `DomainError::InvalidInput`.
+`DomainError` serializes over IPC as its plain `Display` string, so the
+frontend receives exactly one of:
+
+- `"Invalid input: flow contains a cycle through node(s): a, b"` (ids joined
+  by `", "`, order unspecified)
+- `"Invalid input: edge references unknown node: <id>"`
+- `"Invalid input: flow has more than one node with id: <id>"`
 
 `run_flow` also does not return a `run_id` immediately and stream events for
 a caller to await separately — Plan 07 corrected this against the real
@@ -333,7 +343,11 @@ pub struct RunFlowInput {
     pub environment_name: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+// As built (Plan 07 Task 3): both are IPC DTOs returned by `run_flow`, so they
+// derive Serialize/Deserialize with camelCase — the same justified exception
+// RunStepResult/RunSummary already are (in-memory results, never persisted).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowStepResult {
     pub node_id: String,
     pub status: FlowNodeStatus,      // from rocket_shared::events
@@ -342,7 +356,8 @@ pub struct FlowStepResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FlowRunSummary {
     pub run_id: String,
     pub steps: Vec<FlowStepResult>,
@@ -372,38 +387,86 @@ impl FlowExecutionService {
 ```
 
 `run()` mirrors `CollectionRunnerService::run`'s outer shell (Ulid run id,
-`exec.resolve_external_secrets` called once, cancellation checked per node,
-a `MAX_RUN_STEPS`-equivalent guard reusing that same constant) but does
+`exec.resolve_external_secrets` called once, cancellation checked per node;
+no `MAX_RUN_STEPS` guard — see the Plan 06 correction above) but does
 **not** share a base type with it (spec §7 — deliberately duplicated
 scaffolding, not a forced abstraction). A failed node's downstream
 dependents are marked `FlowNodeStatus::Skipped` and not executed;
 independent branches continue.
 
-### `src-tauri` (new, Plan 07)
+### `src-tauri` (new, Plan 07) — as built, verified in the Plan 07 review
+
+The original sketch here (opaque `serde_json::Value` kind, tuple position,
+`Result<T, String>`, `run_flow` returning a `run_id`) was superseded. The
+as-built DTO tree fully mirrors the `rocket-flow` types, one DTO per domain
+type, each with `From` impls in both directions:
 
 ```rust
 // src-tauri/src/commands/flow.rs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowDto { pub name: String, pub nodes: Vec<FlowNodeDto>, pub edges: Vec<FlowEdgeDto> }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowNodeDto { pub id: String, pub kind: serde_json::Value, pub position: (f64, f64) }
-// FlowNodeDto.kind carries FlowNodeKind's JSON shape opaquely (same tagged
-// enum, camelCase re-keyed at the boundary is not required since the tagged
-// variant fields are already the DTO's job to rename — see Plan 07 Task 1
-// for the exact per-field camelCase mapping, not a raw passthrough).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowEdgeDto { pub id: String, pub source_node_id: String, pub target_node_id: String, pub target_field: String, pub expression: String }
+#[serde(rename_all = "camelCase")] struct NodePositionDto { x: f64, y: f64 }
+#[serde(rename_all = "camelCase")] struct InlineHeaderDto { name: String, value: String }
+#[serde(rename_all = "camelCase")] struct InlineRequestDataDto {
+    method: String, url: String,
+    #[serde(default)] headers: Vec<InlineHeaderDto>,
+    #[serde(default)] body: Option<String>,   // serialized as null when None
+}
+#[serde(tag = "type", rename_all_fields = "camelCase")]
+enum RequestSourceDto { Saved { request_path: String }, Inline { request: InlineRequestDataDto } }
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+enum FlowNodeKindDto {
+    Request { label: String, source: RequestSourceDto },
+    Input { label: String, value: rocket_shared::VariableValue },
+    Output { label: String },
+}
+#[serde(rename_all = "camelCase")] struct FlowNodeDto { id: String, kind: FlowNodeKindDto, position: NodePositionDto }
+#[serde(rename_all = "camelCase")] struct FlowEdgeDto { id, source_node_id, target_node_id, target_field, expression: String }
+#[serde(rename_all = "camelCase")] struct FlowDto { name: String, nodes: Vec<FlowNodeDto>, edges: Vec<FlowEdgeDto> }
+#[serde(rename_all = "camelCase")] struct RunFlowInputDto { collection: String, flow_name: String, environment_name: Option<String> }
+// Tag *values* stay PascalCase ("Saved", "Inline", "Request", "Input",
+// "Output"); only variant *fields* are camelCased (requestPath).
 
-// list_flows(collection: String) -> Result<Vec<String>, String>
-// get_flow(collection: String, name: String) -> Result<FlowDto, String>
-// save_flow(collection: String, flow: FlowDto) -> Result<(), String>   // runs topological_sort first; a Cycle error surfaces as a distinguishable error string/code
-// delete_flow(collection: String, name: String) -> Result<(), String>
-// run_flow(collection: String, name: String, environment_name: Option<String>) -> Result<String, String>  // returns run_id; streams "flow-step-completed" / "flow-run-finished" via TauriEventBus
-// cancel_flow_run(run_id: String) -> Result<(), String>
+#[tauri::command] fn list_flows(collection: String) -> Result<Vec<String>, DomainError>;
+#[tauri::command] fn get_flow(collection: String, name: String) -> Result<FlowDto, DomainError>;
+#[tauri::command] fn delete_flow(collection: String, name: String) -> Result<(), DomainError>;
+#[tauri::command] fn save_flow(collection: String, flow: FlowDto) -> Result<(), DomainError>;
+#[tauri::command] async fn run_flow(input: RunFlowInputDto) -> Result<FlowRunSummary, DomainError>;
+#[tauri::command] fn cancel_flow_run(run_id: String) -> Result<(), DomainError>;
 ```
+
+Wiring (`src-tauri/src/lib.rs`): `FlowService` and `FlowExecutionService`
+are both `.manage()`d; both use `SharedPathFlowRepo`, and
+`FlowExecutionService` uses `SharedPathCollectionRepo`, so both follow
+workspace switches. All six commands are in the single
+`generate_handler!` list.
+
+**Wire contract the frontend must code against (exact JSON):**
+
+- `invoke` argument keys: `list_flows {collection}`, `get_flow {collection,
+  name}`, `delete_flow {collection, name}`, `save_flow {collection, flow}`,
+  `run_flow {input: {collection, flowName, environmentName}}` (note the
+  nested `input` object), `cancel_flow_run {runId}`.
+- Errors reject the `invoke` promise with a plain string (the
+  `DomainError` `Display` text, e.g. `"Not found: ..."`), not an object.
+- `run_flow` stays pending until the run ends, then resolves with
+  `FlowRunSummary` in camelCase:
+  `{ runId, steps: [{ nodeId, status, statusCode, durationMs, error }], stoppedReason }`.
+  `stoppedReason` is `"completed"` or `"cancelled"`. Optional fields are
+  `null`, not absent.
+- A run that cannot start (flow not found, cyclic graph on disk, secret
+  fetch failure) rejects **before** any event is emitted.
+- Streamed events are `DomainEvent` payloads. Their fields are
+  **snake_case** (the `DomainEvent` enum's `rename_all` only renames the
+  `type` tag, matching every other `DomainEvent`, e.g. `runner-*`):
+  - `flow-run-started`: `{ type: "flowRunStarted", run_id, flow_name, collection, total_nodes }`
+  - `flow-step-completed`: `{ type: "flowStepCompleted", run_id, node_id, status, status_code, duration_ms, error }`
+  - `flow-run-finished`: `{ type: "flowRunFinished", run_id, stopped_reason, node_count, failed_count, skipped_count }`
+  - `status` is `"running" | "success" | "failed" | "skipped"`.
+- Because `run_flow` only resolves at the end, the frontend must subscribe
+  to all three events **before** calling `runFlow`. It learns the `run_id`
+  from the `flow-run-started` event whose `collection` and `flow_name`
+  match the flow it just started, and only then can Stop call
+  `cancelFlowRun`. `cancel_flow_run` on an unknown or finished id is a
+  no-op.
 
 ### Frontend (new, Plans 08–10)
 
@@ -424,7 +487,7 @@ export type FlowNodeKind =
 
 export type RequestSource =
   | { type: 'Saved'; requestPath: string }
-  | { type: 'Inline'; request: { method: string; url: string; headers: { name: string; value: string }[]; body?: string } };
+  | { type: 'Inline'; request: { method: string; url: string; headers: { name: string; value: string }[]; body?: string | null } };
 
 export interface FlowNode { id: string; kind: FlowNodeKind; position: { x: number; y: number } }
 export interface FlowEdge { id: string; sourceNodeId: string; targetNodeId: string; targetField: string; expression: string }
@@ -432,8 +495,16 @@ export interface Flow { name: string; nodes: FlowNode[]; edges: FlowEdge[] }
 
 export type FlowNodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped';
 
-// listFlows, getFlow, saveFlow, deleteFlow, runFlow, cancelFlowRun
-// onFlowStepCompleted(runId, cb), onFlowRunFinished(runId, cb)
+// Corrected in the Plan 07 review against the as-built backend (see the
+// "Wire contract" list in the src-tauri section above):
+// listFlows, getFlow, saveFlow, deleteFlow, cancelFlowRun — flat args.
+// runFlow(collection, flowName, environmentName?) invokes
+//   'run_flow' with { input: { collection, flowName, environmentName } }
+//   and resolves with FlowRunSummary (camelCase) when the run ENDS.
+// onFlowRunStarted(cb), onFlowStepCompleted(cb), onFlowRunFinished(cb) —
+//   no runId argument; payloads are snake_case (run_id, node_id,
+//   status_code, duration_ms, stopped_reason, ...). Filter by run_id
+//   inside the handler.
 
 // src/types/pane-types.ts (Plan 08) — tabType/collectionName, NOT type/collectionRoot
 // (collectionRoot is a distinct field ContractTab already uses for an absolute path)
@@ -445,6 +516,8 @@ export interface FlowTab extends BaseTab {
   edges: FlowEdge[];
   nodeStatus: Record<string, FlowNodeStatus>;
   runState: 'idle' | 'running' | 'done';
+  // Consistent with the as-built DTOs: nodes/edges are exactly the
+  // camelCase FlowDto shape get_flow returns and save_flow accepts.
   // Added by Plan 10: runId?: string (correlates streamed run events to the
   // active run) and nodeDetail?: Record<string, { statusCode?: number;
   // durationMs?: number; error?: string }> (status-code/timing shown on

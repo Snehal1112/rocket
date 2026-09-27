@@ -45,6 +45,30 @@ is lazy-loaded and switched on there (`isRunnerTab(activeTab) ? <RunnerPane .../
 `FlowPane` follows the identical lazy-load + `isFlowTab` pattern in that same
 file.
 
+### Corrections from the Plan 07 post-implementation review
+
+This plan was first written before Plan 07 was built. The review checked it
+against the real `src-tauri/src/commands/flow.rs` and `DomainEvent`
+serialization, and corrected Task 1's code below in place:
+
+- `run_flow` takes one nested argument, `input: RunFlowInputDto`. The
+  binding must invoke `'run_flow'` with
+  `{ input: { collection, flowName, environmentName } }`, not flat
+  `{ collection, name, environmentName }` (that would reject with a
+  missing-`input` error).
+- `run_flow` resolves only when the run ends, with a camelCase
+  `FlowRunSummary`, not a `run_id` string.
+- Streamed event payloads are `DomainEvent`s with **snake_case** fields
+  (`run_id`, `node_id`, `status_code`, `duration_ms`, `stopped_reason`,
+  `node_count`, ...) plus a `type` tag, like every other `DomainEvent`.
+  The event interfaces below mirror that exactly.
+- An `onFlowRunStarted` binding is added, since `flow-run-started` is the
+  only place the `run_id` is available while the run is still going.
+- Optional Rust fields arrive as `null`, not absent, so they are typed
+  `T | null`.
+
+See the "Wire contract" list in the plan index's `src-tauri` section.
+
 ## Global Constraints
 
 - Domain types (`FlowNodeKind`, `RequestSource`, `InlineRequestData`,
@@ -102,9 +126,11 @@ file.
 **Interfaces:**
 - Produces: `FlowNodeKind`, `RequestSource`, `InlineRequestData`,
   `InlineHeader`, `NodePosition`, `FlowNode`, `FlowEdge`, `Flow`,
-  `FlowNodeStatus`, `FlowStepCompletedEvent`, `FlowRunFinishedEvent` types;
+  `FlowNodeStatus`, `FlowRunNodeStatus`, `FlowStepResult`, `FlowRunSummary`,
+  `FlowRunStartedEvent`, `FlowStepCompletedEvent`, `FlowRunFinishedEvent` types;
   `listFlows`, `getFlow`, `saveFlow`, `deleteFlow`, `runFlow`,
-  `cancelFlowRun`, `onFlowStepCompleted`, `onFlowRunFinished` functions —
+  `cancelFlowRun`, `onFlowRunStarted`, `onFlowStepCompleted`,
+  `onFlowRunFinished` functions —
   consumed by Task 2 of this plan and every later Flow frontend plan.
 
 - [ ] **Step 1: Write the failing test**
@@ -157,16 +183,28 @@ describe('flow tauri-api bindings', () => {
     });
   });
 
-  it('runFlow invokes run_flow with collection, name, and optional environmentName', async () => {
-    vi.mocked(invoke).mockResolvedValue('run-1');
+  it('runFlow invokes run_flow with a nested input object and resolves with the summary', async () => {
+    const summary = { runId: 'run-1', steps: [], stoppedReason: 'completed' };
+    vi.mocked(invoke).mockResolvedValue(summary);
     const { runFlow } = await import('@/lib/tauri-api');
-    const runId = await runFlow('my-collection', 'My Flow', 'staging');
+    const result = await runFlow('my-collection', 'My Flow', 'staging');
     expect(invoke).toHaveBeenCalledWith('run_flow', {
-      collection: 'my-collection',
-      name: 'My Flow',
-      environmentName: 'staging',
+      input: {
+        collection: 'my-collection',
+        flowName: 'My Flow',
+        environmentName: 'staging',
+      },
     });
-    expect(runId).toBe('run-1');
+    expect(result).toEqual(summary);
+  });
+
+  it('runFlow sends a null environmentName when none is given', async () => {
+    vi.mocked(invoke).mockResolvedValue({ runId: 'run-1', steps: [], stoppedReason: 'completed' });
+    const { runFlow } = await import('@/lib/tauri-api');
+    await runFlow('my-collection', 'My Flow');
+    expect(invoke).toHaveBeenCalledWith('run_flow', {
+      input: { collection: 'my-collection', flowName: 'My Flow', environmentName: null },
+    });
   });
 
   it('cancelFlowRun invokes cancel_flow_run with the run id', async () => {
@@ -176,8 +214,35 @@ describe('flow tauri-api bindings', () => {
     expect(invoke).toHaveBeenCalledWith('cancel_flow_run', { runId: 'run-1' });
   });
 
+  it('onFlowRunStarted subscribes to the flow-run-started event and unwraps the payload', async () => {
+    const payload = {
+      type: 'flowRunStarted',
+      run_id: 'run-1',
+      flow_name: 'My Flow',
+      collection: 'my-collection',
+      total_nodes: 2,
+    };
+    vi.mocked(listen).mockImplementation(((_event: string, cb: (e: { payload: unknown }) => void) => {
+      cb({ payload });
+      return Promise.resolve(() => {});
+    }) as typeof listen);
+    const { onFlowRunStarted } = await import('@/lib/tauri-api');
+    const handler = vi.fn();
+    await onFlowRunStarted(handler);
+    expect(listen).toHaveBeenCalledWith('flow-run-started', expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
+
   it('onFlowStepCompleted subscribes to the flow-step-completed event and unwraps the payload', async () => {
-    const payload = { runId: 'run-1', nodeId: 'n1', status: 'success' as const };
+    const payload = {
+      type: 'flowStepCompleted',
+      run_id: 'run-1',
+      node_id: 'n1',
+      status: 'success' as const,
+      status_code: 200,
+      duration_ms: 12,
+      error: null,
+    };
     vi.mocked(listen).mockImplementation(((_event: string, cb: (e: { payload: unknown }) => void) => {
       cb({ payload });
       return Promise.resolve(() => {});
@@ -191,11 +256,12 @@ describe('flow tauri-api bindings', () => {
 
   it('onFlowRunFinished subscribes to the flow-run-finished event and unwraps the payload', async () => {
     const payload = {
-      runId: 'run-1',
-      stoppedReason: 'completed',
-      nodeCount: 3,
-      failedCount: 0,
-      skippedCount: 0,
+      type: 'flowRunFinished',
+      run_id: 'run-1',
+      stopped_reason: 'completed',
+      node_count: 3,
+      failed_count: 0,
+      skipped_count: 0,
     };
     vi.mocked(listen).mockImplementation(((_event: string, cb: (e: { payload: unknown }) => void) => {
       cb({ payload });
@@ -240,7 +306,8 @@ export interface InlineRequestData {
   method: string;
   url: string;
   headers: InlineHeader[];
-  body?: string;
+  // The backend sends null for "no body"; it accepts null or absent.
+  body?: string | null;
 }
 
 export type RequestSource =
@@ -286,18 +353,59 @@ export const saveFlow = (collection: string, flow: Flow) =>
 export const deleteFlow = (collection: string, name: string) =>
   invoke<void>('delete_flow', { collection, name });
 
-export const runFlow = (collection: string, name: string, environmentName?: string) =>
-  invoke<string>('run_flow', { collection, name, environmentName });
+/** Backend-reported node status. `'idle'` is frontend-only. */
+export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
+
+/** `run_flow`'s return value. Camel-cased by the Rust IPC DTO. */
+export interface FlowStepResult {
+  nodeId: string;
+  status: FlowRunNodeStatus;
+  statusCode: number | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface FlowRunSummary {
+  runId: string;
+  steps: FlowStepResult[];
+  stoppedReason: 'completed' | 'cancelled' | string;
+}
+
+/**
+ * Runs a flow. The promise resolves only when the run ENDS. Subscribe to
+ * the flow-run-* events before calling this; the run id arrives first on
+ * `flow-run-started`.
+ */
+export const runFlow = (collection: string, flowName: string, environmentName?: string | null) =>
+  invoke<FlowRunSummary>('run_flow', {
+    input: { collection, flowName, environmentName: environmentName ?? null },
+  });
 
 export const cancelFlowRun = (runId: string) => invoke<void>('cancel_flow_run', { runId });
 
+// Event payloads are DomainEvent JSON. Their fields are snake_case, like
+// every other DomainEvent. Do not camelCase them here.
+export interface FlowRunStartedEvent {
+  type: 'flowRunStarted';
+  run_id: string;
+  flow_name: string;
+  collection: string;
+  total_nodes: number;
+}
+
+export const onFlowRunStarted = (
+  handler: (event: FlowRunStartedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowRunStartedEvent>('flow-run-started', (e) => handler(e.payload));
+
 export interface FlowStepCompletedEvent {
-  runId: string;
-  nodeId: string;
-  status: FlowNodeStatus;
-  statusCode?: number;
-  durationMs?: number;
-  error?: string;
+  type: 'flowStepCompleted';
+  run_id: string;
+  node_id: string;
+  status: FlowRunNodeStatus;
+  status_code: number | null;
+  duration_ms: number | null;
+  error: string | null;
 }
 
 export const onFlowStepCompleted = (
@@ -306,11 +414,12 @@ export const onFlowStepCompleted = (
   listen<FlowStepCompletedEvent>('flow-step-completed', (e) => handler(e.payload));
 
 export interface FlowRunFinishedEvent {
-  runId: string;
-  stoppedReason: string;
-  nodeCount: number;
-  failedCount: number;
-  skippedCount: number;
+  type: 'flowRunFinished';
+  run_id: string;
+  stopped_reason: string;
+  node_count: number;
+  failed_count: number;
+  skipped_count: number;
 }
 
 export const onFlowRunFinished = (
@@ -322,7 +431,7 @@ export const onFlowRunFinished = (
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `yarn vitest run src/lib/queries/__tests__/flow-api.test.ts`
-Expected: PASS — 8 tests. Also run `yarn tsc --noEmit` to confirm no type
+Expected: PASS — 10 tests. Also run `yarn tsc --noEmit` to confirm no type
 errors elsewhere in the codebase.
 
 - [ ] **Step 5: Commit**

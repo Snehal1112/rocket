@@ -30,7 +30,7 @@ interface contract every plan in this series depends on).
 
 - Dropping a request that already has a node elsewhere on the canvas must create a **second, independent** node — this is not a duplicate-prevention error; multiple nodes referencing the same saved request is valid (e.g. calling the same "refresh token" request from two branches).
 - Creating a connection that would form a cycle is still allowed at the canvas/UI level — live cycle prevention is not required. Cycle rejection happens only at Save (Plan 07's `save_flow`). A test must confirm the UI does **not** block the connection itself.
-- The run-event listener (`onFlowStepCompleted`/`onFlowRunFinished`) must be unsubscribed on tab close/unmount and when a new run starts — no leaked listeners accumulating across multiple runs of the same tab.
+- The run-event listeners (`onFlowRunStarted`/`onFlowStepCompleted`, subscribed *before* `runFlow` is called — see Task 3's correction note) must be unsubscribed on tab close/unmount and when a new run starts — no leaked listeners accumulating across multiple runs of the same tab.
 - Clicking Stop after a run has already finished is a harmless no-op (matches Plan 07's `cancel_flow_run` semantics for an unknown/finished run id) — it must not throw or show an error toast.
 - A `save_flow` rejection whose error indicates a cycle must visually flag the specific node ids named in the error, not just show a generic toast — a user with a 10-node canvas needs to find the bad connection without hunting.
 
@@ -586,7 +586,6 @@ git commit -m "feat(flow): add connection wiring with expression popover"
 ## Task 3: Run/Stop/Save toolbar with live status streaming
 
 **Files:**
-- Modify: `src/lib/tauri-api.ts`
 - Create: `src/components/flow/FlowToolbar.tsx`
 - Modify: `src/components/flow/FlowPane.tsx`
 - Modify: `src/types/pane-types.ts` (add `runId?: string` and `nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>` to `FlowTab` — neither exists in Plan 08's `FlowTab`, both are needed here to correlate streamed events to the active run and to show status/timing on each node)
@@ -595,20 +594,32 @@ git commit -m "feat(flow): add connection wiring with expression popover"
 - Test: `src/components/flow/__tests__/FlowToolbar.test.tsx`
 
 **Interfaces:**
-- Consumes: `runFlow`, `cancelFlowRun`, `saveFlow` (Plan 08 bindings over Plan 07's Tauri commands); `updateFlowNodes`/`updateFlowEdges` (Plan 08, for reference — not called directly in this task).
-- Produces: `onFlowStepCompleted`, `onFlowRunFinished` (added to `tauri-api.ts`); `setFlowRunState` and the widened `patchFlowNodeStatus` (added to `pane-store.ts`) — terminal deliverables of this plan; no later plan consumes them.
+- Consumes: `runFlow`, `cancelFlowRun`, `saveFlow`, `onFlowRunStarted`, `onFlowStepCompleted` and the `FlowRunSummary`/`FlowStepCompletedEvent` types (all Plan 08 bindings over Plan 07's Tauri commands); `updateFlowNodes`/`updateFlowEdges` (Plan 08, for reference — not called directly in this task).
+- Produces: `FlowToolbar`; `setFlowRunState` and the widened `patchFlowNodeStatus` (added to `pane-store.ts`) — terminal deliverables of this plan; no later plan consumes them.
 
-The closest existing precedent for "subscribe to a streamed Tauri event and
-clean up on unmount" is `onCollectionChanged`/`onFileChange`
-(`src/lib/tauri-api.ts:1019-1035`): a thin wrapper over `listen<T>(eventName,
-handler)` returning `Promise<UnlistenFn>`, called inside a component's
-`useEffect` that awaits the promise and returns the `UnlistenFn` for cleanup.
-There is **no existing per-run-id-scoped variant** — the sequential Collection
-Runner's frontend (`RunnerPane.tsx`) drives its loop by directly `await`ing
-`executeRequest` calls rather than listening to streamed backend events, so
-it is not a precedent to follow here. This task follows the
-`onCollectionChanged` shape and adds `runId` filtering inside the handler,
-since a Tauri event payload — not the event name — carries the run id.
+**Corrected in the Plan 07 post-implementation review.** This task was first
+written against the plan index's original sketch, where `run_flow` returned
+a `run_id` at once. The as-built `run_flow` instead stays pending until the
+run **ends** and then resolves with a `FlowRunSummary`. Every
+`flow-step-completed` event is emitted *before* that promise resolves. So a
+toolbar that awaits `runFlow` first and subscribes afterwards never sees a
+single event. The corrected lifecycle is:
+
+1. Subscribe to `flow-run-started` and `flow-step-completed` **before**
+   calling `runFlow`.
+2. Take the `run_id` from the first `flow-run-started` event whose
+   `collection` and `flow_name` match. Only then is Stop enabled.
+3. Filter step events by that `run_id`. Event payloads are snake_case
+   (`run_id`, `node_id`, `status_code`, `duration_ms`) — see Plan 08.
+4. When `runFlow` resolves, apply `summary.steps` once more as the
+   authoritative final state. Tauri does not promise that event delivery
+   finishes before the command response arrives. Then mark the run done
+   and unsubscribe.
+5. If `runFlow` rejects (flow not found, stored cycle, secret fetch
+   failure), no event was emitted. Show the error and mark the run done.
+
+The event bindings already exist from Plan 08 Task 1. This task does not
+add or redeclare any `tauri-api.ts` binding.
 
 - [ ] **Step 1: Write the failing test for the toolbar's run lifecycle**
 
@@ -627,87 +638,135 @@ vi.mock('@/lib/tauri-api', async () => {
     runFlow: vi.fn(),
     cancelFlowRun: vi.fn(),
     saveFlow: vi.fn(),
+    onFlowRunStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
-    onFlowRunFinished: vi.fn(),
   };
 });
 
 const onPatchStatus = vi.fn();
 const onRunStateChange = vi.fn();
 
+type StartedHandler = Parameters<typeof tauriApi.onFlowRunStarted>[0];
+type StepHandler = Parameters<typeof tauriApi.onFlowStepCompleted>[0];
+
+let startedHandler: StartedHandler | undefined;
+let stepHandler: StepHandler | undefined;
+let resolveRun: (summary: tauriApi.FlowRunSummary) => void = () => {};
+
+const started = (runId: string, flowName = 'my-flow') =>
+  startedHandler?.({
+    type: 'flowRunStarted',
+    run_id: runId,
+    flow_name: flowName,
+    collection: 'my-collection',
+    total_nodes: 1,
+  });
+
+const renderToolbar = () =>
+  render(
+    <FlowToolbar
+      collection='my-collection'
+      flowName='my-flow'
+      environmentName={null}
+      onPatchStatus={onPatchStatus}
+      onRunStateChange={onRunStateChange}
+    />,
+  );
+
 describe('FlowToolbar', () => {
   beforeEach(() => {
-    vi.mocked(tauriApi.runFlow).mockResolvedValue('run-123');
-    vi.mocked(tauriApi.onFlowStepCompleted).mockResolvedValue(() => {});
-    vi.mocked(tauriApi.onFlowRunFinished).mockResolvedValue(() => {});
+    startedHandler = undefined;
+    stepHandler = undefined;
+    vi.mocked(tauriApi.onFlowRunStarted).mockImplementation(async (h) => {
+      startedHandler = h;
+      return () => {};
+    });
+    vi.mocked(tauriApi.onFlowStepCompleted).mockImplementation(async (h) => {
+      stepHandler = h;
+      return () => {};
+    });
+    // run_flow stays pending until the test resolves it, like the real backend.
+    vi.mocked(tauriApi.runFlow).mockImplementation(
+      () => new Promise((resolve) => {
+        resolveRun = resolve;
+      }),
+    );
     vi.mocked(tauriApi.saveFlow).mockResolvedValue(undefined);
     vi.mocked(tauriApi.cancelFlowRun).mockResolvedValue(undefined);
     onPatchStatus.mockClear();
     onRunStateChange.mockClear();
+    vi.mocked(tauriApi.cancelFlowRun).mockClear();
   });
 
-  it('starts a run, subscribes to step/finish events, and reports the run id', async () => {
-    render(
-      <FlowToolbar
-        collection='my-collection'
-        flowName='my-flow'
-        environmentName={null}
-        onPatchStatus={onPatchStatus}
-        onRunStateChange={onRunStateChange}
-      />,
-    );
+  it('subscribes before running, takes the run id from flow-run-started, and finishes on resolve', async () => {
+    renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null));
+    expect(startedHandler).toBeDefined();
+    expect(stepHandler).toBeDefined();
+
+    started('run-123');
     expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
+
+    resolveRun({ runId: 'run-123', steps: [], stoppedReason: 'completed' });
+    await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-123'));
+  });
+
+  it('ignores a flow-run-started event for a different flow', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-other', 'some-other-flow');
+    expect(onRunStateChange).not.toHaveBeenCalled();
   });
 
   it('a step-completed event for a different run id is ignored', async () => {
-    let capturedHandler: ((e: { runId: string; nodeId: string; status: string }) => void) | undefined;
-    vi.mocked(tauriApi.onFlowStepCompleted).mockImplementation(async (handler) => {
-      capturedHandler = handler;
-      return () => {};
-    });
-    render(
-      <FlowToolbar
-        collection='my-collection'
-        flowName='my-flow'
-        environmentName={null}
-        onPatchStatus={onPatchStatus}
-        onRunStateChange={onRunStateChange}
-      />,
-    );
+    renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
-    await waitFor(() => expect(capturedHandler).toBeDefined());
-    capturedHandler?.({ runId: 'some-other-run', nodeId: 'node-a', status: 'success' });
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'some-other-run',
+      node_id: 'node-a',
+      status: 'success',
+      status_code: 200,
+      duration_ms: 5,
+      error: null,
+    });
     expect(onPatchStatus).not.toHaveBeenCalled();
   });
 
-  it('Stop calls cancelFlowRun with the active run id', async () => {
-    render(
-      <FlowToolbar
-        collection='my-collection'
-        flowName='my-flow'
-        environmentName={null}
-        onPatchStatus={onPatchStatus}
-        onRunStateChange={onRunStateChange}
-      />,
-    );
+  it('applies the returned summary steps as the final state', async () => {
+    renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
-    await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123'));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-123');
+    resolveRun({
+      runId: 'run-123',
+      steps: [{ nodeId: 'n1', status: 'success', statusCode: 200, durationMs: 184, error: null }],
+      stoppedReason: 'completed',
+    });
+    await waitFor(() =>
+      expect(onPatchStatus).toHaveBeenCalledWith('n1', 'success', {
+        statusCode: 200,
+        durationMs: 184,
+        error: undefined,
+      }),
+    );
+  });
+
+  it('Stop calls cancelFlowRun with the active run id', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-123');
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-123');
   });
 
   it('Stop is a no-op when no run is active', async () => {
-    render(
-      <FlowToolbar
-        collection='my-collection'
-        flowName='my-flow'
-        environmentName={null}
-        onPatchStatus={onPatchStatus}
-        onRunStateChange={onRunStateChange}
-      />,
-    );
+    renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(tauriApi.cancelFlowRun).not.toHaveBeenCalled();
   });
@@ -717,44 +776,14 @@ describe('FlowToolbar', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `yarn vitest run src/components/flow/__tests__/FlowToolbar.test.tsx`
-Expected: FAIL — `FlowToolbar`, `onFlowStepCompleted`, `onFlowRunFinished` do
-not exist yet.
+Expected: FAIL — `FlowToolbar` does not exist yet.
 
-- [ ] **Step 3: Add the streamed-event bindings**
+- [ ] **Step 3: Confirm the Plan 08 bindings are present**
 
-In `src/lib/tauri-api.ts`, alongside the existing "Realtime events" section
-(`src/lib/tauri-api.ts:1015-1041`):
-
-```typescript
-export interface FlowStepCompletedEvent {
-  runId: string;
-  nodeId: string;
-  status: 'running' | 'success' | 'failed' | 'skipped';
-  statusCode?: number;
-  durationMs?: number;
-  error?: string;
-}
-
-export interface FlowRunFinishedEvent {
-  runId: string;
-  stoppedReason: string;
-  nodeCount: number;
-  failedCount: number;
-  skippedCount: number;
-}
-
-export const onFlowStepCompleted = (
-  handler: (event: FlowStepCompletedEvent) => void,
-): Promise<UnlistenFn> => listen<FlowStepCompletedEvent>('flow-step-completed', (e) => handler(e.payload));
-
-export const onFlowRunFinished = (
-  handler: (event: FlowRunFinishedEvent) => void,
-): Promise<UnlistenFn> => listen<FlowRunFinishedEvent>('flow-run-finished', (e) => handler(e.payload));
-```
-
-(`runFlow`, `cancelFlowRun`, `saveFlow` are assumed already added by Plan 08
-— this task only adds the event-listener bindings, which are this plan's own
-responsibility per the index.)
+`onFlowRunStarted`, `onFlowStepCompleted`, `onFlowRunFinished`, `runFlow`,
+`cancelFlowRun`, `saveFlow` and the `FlowRunSummary`/event types were all
+added by Plan 08 Task 1. Check they exist in `src/lib/tauri-api.ts`. Do not
+add a second copy of any of them.
 
 - [ ] **Step 4: Extend pane-store with `setFlowRunState` and a widened `patchFlowNodeStatus`**
 
@@ -862,16 +891,24 @@ Expected: PASS.
 
 ```tsx
 // src/components/flow/FlowToolbar.tsx
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { cancelFlowRun, onFlowRunFinished, onFlowStepCompleted, runFlow } from '@/lib/tauri-api';
+import {
+  cancelFlowRun,
+  onFlowRunStarted,
+  onFlowStepCompleted,
+  runFlow,
+} from '@/lib/tauri-api';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+
+type NodeDetail = { statusCode?: number; durationMs?: number; error?: string };
 
 interface FlowToolbarProps {
   collection: string;
   flowName: string;
   environmentName: string | null;
-  onPatchStatus: (nodeId: string, status: string, detail?: { statusCode?: number; durationMs?: number; error?: string }) => void;
+  onPatchStatus: (nodeId: string, status: string, detail?: NodeDetail) => void;
   onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
 }
 
@@ -890,26 +927,53 @@ export function FlowToolbar({
     unlistenRefs.current = [];
   };
 
+  // Unsubscribe when the tab closes mid-run.
+  useEffect(() => cleanupListeners, []);
+
   const handleRun = async () => {
     cleanupListeners();
-    const runId = await runFlow(collection, flowName, environmentName ?? undefined);
-    setActiveRunId(runId);
-    onRunStateChange('running', runId);
+    // Held in a local, not state, so the event handlers see it at once.
+    let runId: string | null = null;
 
+    // Subscribe first. run_flow only resolves when the run ends, so every
+    // event is emitted while its promise is still pending.
+    const unlistenStarted = await onFlowRunStarted((event) => {
+      if (runId !== null) return;
+      if (event.collection !== collection || event.flow_name !== flowName) return;
+      runId = event.run_id;
+      setActiveRunId(event.run_id);
+      onRunStateChange('running', event.run_id);
+    });
     const unlistenStep = await onFlowStepCompleted((event) => {
-      if (event.runId !== runId) return;
-      onPatchStatus(event.nodeId, event.status, {
-        statusCode: event.statusCode,
-        durationMs: event.durationMs,
-        error: event.error,
+      if (runId === null || event.run_id !== runId) return;
+      onPatchStatus(event.node_id, event.status, {
+        statusCode: event.status_code ?? undefined,
+        durationMs: event.duration_ms ?? undefined,
+        error: event.error ?? undefined,
       });
     });
-    const unlistenFinish = await onFlowRunFinished((event) => {
-      if (event.runId !== runId) return;
-      onRunStateChange('done', runId);
+    unlistenRefs.current = [unlistenStarted, unlistenStep];
+
+    try {
+      const summary = await runFlow(collection, flowName, environmentName);
+      // The summary is the authoritative final state. Event delivery is not
+      // guaranteed to finish before the command response arrives.
+      for (const step of summary.steps) {
+        onPatchStatus(step.nodeId, step.status, {
+          statusCode: step.statusCode ?? undefined,
+          durationMs: step.durationMs ?? undefined,
+          error: step.error ?? undefined,
+        });
+      }
+      onRunStateChange('done', summary.runId);
+    } catch (err) {
+      // A run that cannot start rejects before any event is emitted.
+      toast.error(`Could not run flow: ${String(err)}`);
+      onRunStateChange('done');
+    } finally {
+      setActiveRunId(null);
       cleanupListeners();
-    });
-    unlistenRefs.current = [unlistenStep, unlistenFinish];
+    }
   };
 
   const handleStop = () => {
@@ -919,7 +983,7 @@ export function FlowToolbar({
 
   return (
     <div className='flex items-center gap-2'>
-      <Button size='sm' onClick={() => void handleRun()}>
+      <Button size='sm' onClick={() => void handleRun()} disabled={activeRunId !== null}>
         Run
       </Button>
       <Button size='sm' variant='outline' onClick={handleStop}>
@@ -930,10 +994,15 @@ export function FlowToolbar({
 }
 ```
 
+Known limit: if the same flow is started from two tabs at once, the
+`flow-run-started` match by collection and flow name can pick up the other
+tab's run id. Phase 1 accepts this. The returned summary still carries the
+correct final state for each tab.
+
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `yarn vitest run src/components/flow/__tests__/FlowToolbar.test.tsx`
-Expected: PASS — 4 tests.
+Expected: PASS — 6 tests.
 
 - [ ] **Step 7: Wire `FlowToolbar` into `FlowPane`, plus Save and cycle-error flagging**
 
@@ -953,13 +1022,15 @@ const handleSave = async () => {
     setCycleNodeIds([]);
     toast.success('Flow saved.');
   } catch (err) {
-    // Plan 07's save_flow surfaces a cycle error as a message containing the
-    // offending node ids — parse and flag them rather than showing only a
-    // generic toast, per this plan's Review Focus.
+    // Plan 07's save_flow rejects with the plain string
+    // "Invalid input: flow contains a cycle through node(s): a, b"
+    // (ids joined by ", ", no brackets or quotes — verified in the Plan 07
+    // review). Parse and flag them rather than showing only a generic
+    // toast, per this plan's Review Focus.
     const message = String(err);
-    const match = message.match(/cycle detected through node\(s\): \[(.*?)\]/);
+    const match = message.match(/flow contains a cycle through node\(s\): (.*)$/);
     if (match) {
-      setCycleNodeIds(match[1].split(',').map((s) => s.trim().replace(/['"]/g, '')));
+      setCycleNodeIds(match[1].split(', ').map((s) => s.trim()));
     }
     toast.error(`Could not save flow: ${message}`);
   }
@@ -991,14 +1062,14 @@ plan does not itself style the node border since that visual lives in Plan
 - [ ] **Step 8: Verify the app builds**
 
 Run: `yarn tsc --noEmit`
-Expected: succeeds — no type errors across `FlowToolbar.tsx`, the
-`tauri-api.ts` additions, `pane-store.ts`'s widened action, and
+Expected: succeeds — no type errors across `FlowToolbar.tsx`,
+`pane-store.ts`'s widened action, and
 `FlowPane.tsx`'s new wiring.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/lib/tauri-api.ts src/components/flow/FlowToolbar.tsx src/components/flow/FlowPane.tsx src/components/flow/__tests__/FlowToolbar.test.tsx src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts
+git add src/components/flow/FlowToolbar.tsx src/components/flow/FlowPane.tsx src/components/flow/__tests__/FlowToolbar.test.tsx src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts
 git commit -m "feat(flow): add run/stop/save toolbar with live status streaming"
 ```
 
@@ -1024,7 +1095,7 @@ brief:
 > `src/lib/__tests__/flow-wiring.test.ts`,
 > `src/components/flow/WireExpressionPopover.tsx`,
 > `src/components/flow/__tests__/WireExpressionPopover.test.tsx`,
-> `src/lib/tauri-api.ts`, `src/components/flow/FlowToolbar.tsx`,
+> `src/components/flow/FlowToolbar.tsx`,
 > `src/components/flow/__tests__/FlowToolbar.test.tsx`,
 > `src/types/pane-types.ts`, `src/stores/pane-store.ts`,
 > `src/stores/__tests__/pane-store.test.ts`.
