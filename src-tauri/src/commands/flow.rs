@@ -306,6 +306,14 @@ mod tests {
             json.contains("\"targetField\""),
             "FlowEdgeDto field must be camelCase, got: {json}"
         );
+        assert!(
+            json.contains("\"type\":\"Saved\""),
+            "RequestSource tag value must stay 'Saved', not be renamed by rename_all_fields, got: {json}"
+        );
+        assert!(
+            json.contains("\"kind\":\"Request\""),
+            "FlowNodeKind tag value must stay 'Request', not be renamed by rename_all_fields, got: {json}"
+        );
     }
 
     #[test]
