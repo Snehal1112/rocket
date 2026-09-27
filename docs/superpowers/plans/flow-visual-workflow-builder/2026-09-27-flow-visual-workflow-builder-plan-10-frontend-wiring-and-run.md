@@ -31,6 +31,12 @@ interface contract every plan in this series depends on).
   - `ReactFlowProvider` and `<ReactFlow>` both live inside Plan 09's `FlowCanvas`, not `FlowPane`, so `FlowPane` cannot call `useReactFlow()` (it is outside the provider and would throw). Drop handling therefore goes in `FlowCanvas` — see Step 6.
   - `FlowTab` has no `nodeDetail` until this plan's Task 3 adds it, and Plan 09's `toRfNodes` passes only `{ kind, status }`. Task 3 must also extend `FlowCanvas` so each node's `data` includes `...nodeDetail[id]` (and `hasCycleError`), otherwise the "200 · 184ms" line never shows on the real canvas.
   - A "Flow" entry in the tab bar's "+" context menu (`openFlowTab(null)`) and a create-new-flow control in `FlowPane`'s picker (saves an empty flow, then opens it) already exist from the Plan 08 review. Do not add second copies.
+- **Corrections from the Plan 09 post-implementation review (checked against the as-built code):**
+  - `FlowCanvas` is now a thin wrapper: `FlowCanvas` renders `<ReactFlowProvider><FlowCanvasInner {...props} /></ReactFlowProvider>`, and `FlowCanvasInner` (same file, not exported) owns `<ReactFlow>` and the `data-testid='flow-canvas'` wrapper `<div>`. So `useReactFlow()` **can** be called synchronously inside `FlowCanvasInner`. Use that for drop handling (Task 1 Step 6), not `onInit` — `onInit` fires on a `setTimeout` after the viewport initializes, so a test that renders and drops at once would see a `null` instance.
+  - `FlowCanvasInner` keeps node/edge **selection** and each node's **measured size** in canvas-local state (neither is persisted). Selection is what makes the Backspace delete work; measured size keeps nodes visible across status patches. `toRfNodes(nodes, nodeStatus, selectedIds, measured)` and `toRfEdges(edges, selectedIds)` take those extra arguments — when Task 3 extends `toRfNodes`, keep them. `toRfEdges` also sets `sourceHandle: 'result'`.
+  - All three node `data` types already accept an optional `hasCycleError?: boolean` and render a red ring for it. `RequestNodeData` also accepts an optional `method?: string`; a Saved node with no `method` shows a neutral `SAVED` badge (never a guessed `GET`). `FlowNode` has nowhere to persist a Saved request's method, so Task 1 does not need to pass it.
+  - The wire expression is evaluated against a response-shaped object for **every** source kind: an Input node's value is exposed as `response.body` (`resolve_flow_wire_expression` in `crates/rocket-app/src/flow_execution_service.rs`). There is no bare `value` binding, so an expression of `value` fails the run. The default expression is `response.body` for all sources (Task 2).
+  - Output nodes: `OutputNodeData.result` exists but nothing fills it. Neither `FlowStepResult` nor `flow-step-completed` carries an Output node's resolved value, so spec §6's "captured output shown read-only in the node body" is not reachable in Phase 1 without a backend change. Out of scope for this plan; do not fake it.
 - **Handle ids — confirmed against Plan 09's actual `<Handle>` markup:** `RequestNode`'s per-field target handles are `id='url'`, `id='headers'`, `id='body'`; its (and `InputNode`'s) single source handle is `id='result'` (not `'output'`); `OutputNode`'s single target handle is `id='value'`. This plan's code and tests below use these exact ids.
 
 ## Review Focus
@@ -175,27 +181,26 @@ and a native `dragstart` do not interfere with `onClick`.
 
 - [ ] **Step 6: Handle the drop on the Flow canvas**
 
-**Corrected in the Plan 08 review:** `<ReactFlow>` and its
-`ReactFlowProvider` live in `src/components/flow/FlowCanvas.tsx` (Plan 09),
-and Plan 09's wrapper `<div data-testid='flow-canvas'>` is already there. Put
-the drag/drop handlers on that wrapper `<div>` inside `FlowCanvas`, not in
-`FlowPane`. Get the instance with `const [rf, setRf] =
-useState<ReactFlowInstance | null>(null)` plus `<ReactFlow onInit={setRf}>`
-(a `useReactFlow()` call in `FlowCanvas` itself would sit outside its own
-provider). Add an optional `onAddNode?: (node: FlowNode) => void` prop to
-`FlowCanvas`; `FlowPane` passes
-`(node) => updateFlowNodes(tab.id, [...tab.nodes, node])`. The snippet below
-shows the handler logic; apply it in `FlowCanvas` with `rf` in place of
-`reactFlowInstance` and `onAddNode?.(newNode)` in place of the direct
-`updateFlowNodes` call. Add `src/components/flow/FlowCanvas.tsx` to Step 9's
-`git add` list:
+**Corrected in the Plan 08 and Plan 09 reviews:** `<ReactFlow>` and its
+`ReactFlowProvider` live in `src/components/flow/FlowCanvas.tsx` (Plan 09).
+As built, `FlowCanvas` only renders the provider around a same-file
+`FlowCanvasInner`, which owns `<ReactFlow>` and the wrapper
+`<div data-testid='flow-canvas'>`. Put the drag/drop handlers on that
+wrapper `<div>` inside `FlowCanvasInner`, not in `FlowPane`, and get
+`screenToFlowPosition` from `useReactFlow()` there (it is inside the
+provider). Do not use `onInit`: it fires on a timer, so a drop right after
+render would find no instance. Add an optional
+`onAddNode?: (node: FlowNode) => void` prop to `FlowCanvasProps`; `FlowPane`
+passes its existing `handleAddNode` (the same one `NodePalette` uses). Add
+`src/components/flow/FlowCanvas.tsx` to Step 9's `git add` list:
 
 ```tsx
+// src/components/flow/FlowCanvas.tsx
+import { useReactFlow } from '@xyflow/react';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
-import { usePaneStore } from '@/stores/pane-store';
 
-// inside the FlowPane component, alongside the existing reactFlowInstance ref/hook from Plan 09:
-const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
+// inside FlowCanvasInner, whose props now also include onAddNode:
+const { screenToFlowPosition } = useReactFlow();
 
 const handleDragOver = (e: React.DragEvent) => {
   e.preventDefault();
@@ -207,22 +212,23 @@ const handleDrop = (e: React.DragEvent) => {
   const payload = decodeFlowRequestDragPayload(e.dataTransfer);
   if (!payload) return;
 
-  const position = reactFlowInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-  const newNode: FlowNode = {
+  const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+  onAddNode?.({
     id: crypto.randomUUID(),
     kind: { kind: 'Request', label: payload.name, source: { type: 'Saved', requestPath: payload.path } },
     position,
-  };
-  updateFlowNodes(tab.id, [...tab.nodes, newNode]);
+  });
 };
 
-// on the <ReactFlow ...> element from Plan 09:
-<ReactFlow
+// on the existing wrapper div (not on <ReactFlow>):
+<div
   data-testid='flow-canvas'
+  className='h-full w-full'
   onDragOver={handleDragOver}
   onDrop={handleDrop}
-  /* ...existing Plan 09 props */
 >
+  <ReactFlow /* ...existing Plan 09 props, unchanged */ />
+</div>
 ```
 
 `reactFlowInstance.screenToFlowPosition` is the current `@xyflow/react` API
@@ -339,7 +345,7 @@ git commit -m "feat(flow): drag a saved request from the sidebar onto the canvas
 // src/lib/__tests__/flow-wiring.test.ts
 import { describe, expect, it } from 'vitest';
 import { buildEdgeFromConnection, defaultExpressionFor } from '../flow-wiring';
-import type { FlowNode } from '@/types/flow-types';
+import type { FlowNode } from '@/lib/tauri-api';
 
 const requestSource: FlowNode = {
   id: 'node-a',
@@ -358,8 +364,10 @@ describe('defaultExpressionFor', () => {
     expect(defaultExpressionFor(requestSource)).toBe('response.body');
   });
 
-  it('defaults to "value" for an Input source node', () => {
-    expect(defaultExpressionFor(inputSource)).toBe('value');
+  it('defaults to "response.body" for an Input source node too', () => {
+    // The backend exposes an Input node's value as response.body. A bare
+    // `value` is not bound and would fail the run.
+    expect(defaultExpressionFor(inputSource)).toBe('response.body');
   });
 });
 
@@ -398,10 +406,13 @@ Expected: FAIL — `flow-wiring` module does not exist yet.
 ```typescript
 // src/lib/flow-wiring.ts
 import type { Connection } from '@xyflow/react';
-import type { FlowEdge, FlowNode } from '@/types/flow-types';
+import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 
-export function defaultExpressionFor(sourceNode: FlowNode): string {
-  return sourceNode.kind.kind === 'Input' ? 'value' : 'response.body';
+// Every source kind is evaluated as a response-shaped object. An Input
+// node's value is its `response.body` (see resolve_flow_wire_expression).
+// The node argument is kept so a later per-kind default is a local change.
+export function defaultExpressionFor(_sourceNode: FlowNode): string {
+  return 'response.body';
 }
 
 export function buildEdgeFromConnection(connection: Connection, sourceNode: FlowNode): FlowEdge | null {
@@ -434,8 +445,9 @@ import { useState } from 'react';
 import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { FlowEdge, FlowNode } from '@/types/flow-types';
+import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 
 interface WireExpressionPopoverProps {
   edge: FlowEdge;
@@ -489,7 +501,7 @@ export function WireExpressionPopover({
       <PopoverContent className='w-72 space-y-2'>
         {isHeadersTarget && (
           <div>
-            <label className='text-xs font-medium'>Header name</label>
+            <Label className='text-xs font-medium'>Header name</Label>
             <Input
               value={headerName}
               onChange={(e) => setHeaderName(e.target.value)}
@@ -499,7 +511,7 @@ export function WireExpressionPopover({
           </div>
         )}
         <div>
-          <label className='text-xs font-medium'>Value from source</label>
+          <Label className='text-xs font-medium'>Value from source</Label>
           <SingleLineEditor value={expression} onChange={setExpression} placeholder='response.body' className='text-xs' />
         </div>
         <Button size='sm' onClick={handleCommit}>
@@ -516,6 +528,7 @@ export function WireExpressionPopover({
 In `src/components/flow/FlowPane.tsx`:
 
 ```tsx
+import { useRef, useState } from 'react';
 import { buildEdgeFromConnection } from '@/lib/flow-wiring';
 import { WireExpressionPopover } from './WireExpressionPopover';
 import type { Connection } from '@xyflow/react';
@@ -523,6 +536,8 @@ import type { Connection } from '@xyflow/react';
 // inside FlowPane, alongside the updateFlowNodes selector from Task 1:
 const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
 const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
+// Set by onCommit, so closing the popover can tell a commit from a cancel.
+const committedEdgeIdRef = useRef<string | null>(null);
 
 const handleConnect = (connection: Connection) => {
   const sourceNode = tab.nodes.find((n) => n.id === connection.source);
@@ -533,18 +548,28 @@ const handleConnect = (connection: Connection) => {
   setPendingEdge(edge); // opens the popover immediately, per spec §6
 };
 
-// on <ReactFlow ...>:
-<ReactFlow onConnect={handleConnect} /* ...existing props */ />
+// on the existing <FlowCanvas ...> element (FlowPane never renders <ReactFlow> itself):
+<FlowCanvas onConnect={handleConnect} /* ...existing props */ />
 
 {pendingEdge && (
   <WireExpressionPopover
     edge={pendingEdge}
     targetNode={tab.nodes.find((n) => n.id === pendingEdge.targetNodeId)!}
     open={pendingEdge !== null}
-    onOpenChange={(open) => !open && setPendingEdge(null)}
-    onCommit={(updated) =>
-      updateFlowEdges(tab.id, tab.edges.map((e) => (e.id === updated.id ? updated : e)))
-    }
+    onOpenChange={(open) => {
+      if (open) return;
+      // A bare `headers` target is not a valid target_field (the backend
+      // rejects it). If the popover closes without a commit, drop that edge
+      // instead of leaving it to fail the run.
+      if (committedEdgeIdRef.current !== pendingEdge.id && pendingEdge.targetField === 'headers') {
+        updateFlowEdges(tab.id, tab.edges.filter((e) => e.id !== pendingEdge.id));
+      }
+      setPendingEdge(null);
+    }}
+    onCommit={(updated) => {
+      committedEdgeIdRef.current = updated.id;
+      updateFlowEdges(tab.id, tab.edges.map((e) => (e.id === updated.id ? updated : e)));
+    }}
   >
     {/* Plan 09's edge/handle DOM node the popover anchors to */}
     <span />
@@ -559,7 +584,7 @@ const handleConnect = (connection: Connection) => {
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WireExpressionPopover } from '../WireExpressionPopover';
-import type { FlowEdge, FlowNode } from '@/types/flow-types';
+import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 
 const edge: FlowEdge = {
   id: 'edge-1',
@@ -1073,6 +1098,10 @@ const handleSave = async () => {
 // alongside the updateFlowNodes/updateFlowEdges selectors from earlier tasks:
 const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
 const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+// There is no `activeEnvironmentName` anywhere. The active environment's
+// name is env-store's `activeEnvId` (it holds the name; see
+// src/lib/execute-request.ts, which passes it as environmentName).
+const activeEnvironmentName = useEnvStore((s) => s.activeEnvId);
 
 // in the toolbar row:
 <FlowToolbar
@@ -1087,11 +1116,15 @@ const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
 </Button>
 ```
 
-Pass `cycleNodeIds` down to each `RequestNode`/`InputNode`/`OutputNode`
-render (Plan 09) as a boolean `hasCycleError` prop (`cycleNodeIds.includes(node.id)`)
-so Plan 09's node components can render the temporary red outline — this
-plan does not itself style the node border since that visual lives in Plan
-09's node components; it only supplies which node ids are implicated.
+(Import `useEnvStore` from `@/stores/env-store`.)
+
+Pass `cycleNodeIds` to `FlowCanvas` as a new optional `cycleNodeIds?: string[]`
+prop. In `toRfNodes`, set `hasCycleError: cycleNodeIds.includes(n.id)` in each
+node's `data`, next to the `...nodeDetail?.[n.id]` spread. As built after the
+Plan 09 review, all three node components already accept
+`data.hasCycleError` and draw a red ring for it, so this plan only supplies
+which node ids are implicated. Keep `toRfNodes`'s existing `selectedIds` and
+`measured` arguments when adding these; see Global Constraints.
 
 - [ ] **Step 8: Verify the app builds**
 
@@ -1145,8 +1178,8 @@ brief:
 >    further. Specifically re-confirm: the new `setFlowRunState` action and
 >    the widened `patchFlowNodeStatus(tabId, nodeId, status, detail?)`
 >    signature compile against every call site across Plans 08-10, and the
->    `flow-canvas` test id actually exists on the rendered `<ReactFlow>`
->    element.
+>    `flow-canvas` test id actually exists on `FlowCanvasInner`'s wrapper
+>    `<div>` (which also carries the drop handlers).
 > 2. Code quality versus this plan's Review Focus section (independent nodes
 >    from repeated drags, no live cycle prevention in the UI, listener
 >    cleanup on unmount/new-run, Stop-after-finish no-op, cycle-error node

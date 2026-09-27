@@ -538,6 +538,16 @@ export interface FlowTab extends BaseTab {
 // Plan 09: ReactFlowProvider and <ReactFlow> live inside FlowCanvas, whose
 // wrapper div has data-testid='flow-canvas'. Plan 10's drop handling and
 // nodeDetail plumbing therefore go through FlowCanvas, not FlowPane.
+// As built after the Plan 09 review: FlowCanvas = <ReactFlowProvider> around
+// a same-file FlowCanvasInner, which owns <ReactFlow> and the test-id div,
+// so useReactFlow() works inside FlowCanvasInner (use it, not onInit).
+// Selection and measured node sizes are canvas-local state, not persisted.
+// Handle ids: Request targets url/headers/body, source result; Input source
+// result; Output target value. Node data accepts optional hasCycleError;
+// RequestNodeData also accepts optional method (Saved nodes show "SAVED"
+// without it). Wire expressions see every source as a response object: an
+// Input node's value is response.body, so the default expression is
+// response.body for all sources.
 
 // Registration: FlowPane is wired into src/components/panes/EditorGroup.tsx
 // (NOT PaneRenderer.tsx, which only handles the resizable split/leaf tree),
