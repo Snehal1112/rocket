@@ -4690,6 +4690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-flow"
+version = "0.1.0"
+dependencies = [
+ "rocket-shared",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rocket-git"
 version = "0.1.0"
 dependencies = [

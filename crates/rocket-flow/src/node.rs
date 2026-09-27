@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+/// Canvas coordinates of a node. Purely visual; it has no effect on execution order.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct NodePosition {
     pub x: f64,
@@ -13,9 +14,17 @@ pub struct NodePosition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
-    Request { label: String, source: RequestSource },
-    Input { label: String, value: rocket_shared::VariableValue },
-    Output { label: String },
+    Request {
+        label: String,
+        source: RequestSource,
+    },
+    Input {
+        label: String,
+        value: rocket_shared::VariableValue,
+    },
+    Output {
+        label: String,
+    },
 }
 
 /// Where a `Request` node's method/url/headers/body/auth come from.
@@ -32,8 +41,11 @@ pub enum RequestSource {
     Inline { request: InlineRequestData },
 }
 
+/// Minimal ad hoc request carried by `RequestSource::Inline`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InlineRequestData {
+    /// Plain HTTP method string such as "GET" or "POST". It is parsed into
+    /// `rocket_shared::types::HttpMethod` at run time (Plan 05), not here.
     pub method: String,
     pub url: String,
     #[serde(default)]
@@ -42,6 +54,9 @@ pub struct InlineRequestData {
     pub body: Option<String>,
 }
 
+/// One header of an `InlineRequestData`. Kept local instead of reusing
+/// `rocket_shared::Header`, which is camelCase-renamed and carries
+/// `enabled`/`description` fields this format does not have.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InlineHeader {
     pub name: String,
@@ -79,6 +94,19 @@ mod tests {
     }
 
     #[test]
+    fn flow_node_kind_input_with_typed_value_roundtrip() {
+        let kind = FlowNodeKind::Input {
+            label: "Retries".to_string(),
+            value: rocket_shared::VariableValue::typed("3", "number"),
+        };
+        let json = serde_json::to_string(&kind).expect("serialize FlowNodeKind");
+        assert!(json.contains("\"kind\":\"Input\""), "got: {json}");
+        assert!(json.contains("\"type\":\"number\""), "got: {json}");
+        let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
     fn flow_node_kind_output_tagged_roundtrip() {
         let kind = FlowNodeKind::Output {
             label: "Result".to_string(),
@@ -110,7 +138,7 @@ mod tests {
                     name: "Accept".to_string(),
                     value: "application/json".to_string(),
                 }],
-                body: None,
+                body: Some("{\"name\":\"alice\"}".to_string()),
             },
         };
         let json = serde_json::to_string(&source).expect("serialize RequestSource");

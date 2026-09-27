@@ -2,6 +2,7 @@ use crate::node::{FlowNodeKind, NodePosition};
 use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
 
+/// A placed node. `id` is the only identity key within a `Flow`'s `nodes`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowNode {
     pub id: String,
@@ -9,15 +10,22 @@ pub struct FlowNode {
     pub position: NodePosition,
 }
 
+/// A wire from one node's captured output into one field of another node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowEdge {
     pub id: String,
     pub source_node_id: String,
     pub target_node_id: String,
+    /// Path into the target node's own field set, e.g. "url",
+    /// "headers[1].value", "body". Not a fixed enum, so new wireable fields
+    /// on a node type don't require a schema change here.
     pub target_field: String,
+    /// JS expression evaluated against the source node's captured output
+    /// (Plan 05). This crate only carries it as data and never evaluates it.
     pub expression: String,
 }
 
+/// The Flow aggregate. `name` is its identity within a collection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Flow {
     pub name: String,
@@ -26,8 +34,10 @@ pub struct Flow {
 }
 
 /// Persistence boundary for `Flow`. No I/O in this crate —
-/// `rocket-infra`'s `FsFlowRepo` (Plan 03) implements this.
+/// `rocket-infra`'s `FsFlowRepo` (Plan 03) implements this. Flows are keyed
+/// by `(collection, flow.name)`; `save` replaces any flow with the same key.
 pub trait FlowRepository: Send + Sync {
+    /// Returns the names of all flows in `collection`.
     fn list(&self, collection: &str) -> DomainResult<Vec<String>>;
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow>;
     fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()>;
@@ -124,7 +134,8 @@ mod tests {
             repo.list("my-collection").expect("list flows"),
             vec![flow.name.clone()]
         );
-        repo.delete("my-collection", &flow.name).expect("delete flow");
+        repo.delete("my-collection", &flow.name)
+            .expect("delete flow");
         assert!(repo.get("my-collection", &flow.name).is_err());
     }
 
@@ -145,12 +156,65 @@ mod tests {
     }
 
     #[test]
-    fn two_nodes_with_different_ids_are_not_conflated() {
-        let flow = sample_flow();
-        assert_ne!(flow.nodes[0].id, flow.nodes[1].id);
-        let by_id = |id: &str| flow.nodes.iter().find(|n| n.id == id).expect("node exists");
+    fn repository_keeps_different_names_and_collections_separate() {
+        let repo = FakeRepo::new();
+        let first = sample_flow();
+        let mut second = sample_flow();
+        second.name = "Another flow".to_string();
+        second.nodes.truncate(1);
+        repo.save("my-collection", &first).expect("save first");
+        repo.save("my-collection", &second).expect("save second");
+        repo.save("other-collection", &first)
+            .expect("save in other collection");
+
+        let mut names = repo.list("my-collection").expect("list");
+        names.sort();
+        assert_eq!(names, vec![second.name.clone(), first.name.clone()]);
+        assert_eq!(
+            repo.get("my-collection", &first.name).expect("get first"),
+            first
+        );
+        assert_eq!(
+            repo.get("my-collection", &second.name).expect("get second"),
+            second
+        );
+
+        repo.delete("other-collection", &first.name)
+            .expect("delete other");
+        assert_eq!(
+            repo.get("my-collection", &first.name)
+                .expect("still present"),
+            first
+        );
+    }
+
+    #[test]
+    fn two_nodes_with_same_kind_and_different_ids_are_not_conflated() {
+        let repo = FakeRepo::new();
+        let mut flow = sample_flow();
+        flow.nodes.push(FlowNode {
+            id: "node-3".to_string(),
+            kind: FlowNodeKind::Output {
+                label: "Token".to_string(),
+            },
+            position: NodePosition { x: 200.0, y: 100.0 },
+        });
+        repo.save("my-collection", &flow).expect("save flow");
+        let fetched = repo.get("my-collection", &flow.name).expect("get flow");
+        assert_eq!(fetched.nodes.len(), 3);
+        let by_id = |id: &str| {
+            fetched
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .expect("node exists")
+        };
         assert!(matches!(by_id("node-1").kind, FlowNodeKind::Request { .. }));
-        assert!(matches!(by_id("node-2").kind, FlowNodeKind::Output { .. }));
+        assert_eq!(by_id("node-2").position, NodePosition { x: 200.0, y: 0.0 });
+        assert_eq!(
+            by_id("node-3").position,
+            NodePosition { x: 200.0, y: 100.0 }
+        );
     }
 
     #[test]
