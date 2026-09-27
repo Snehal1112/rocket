@@ -156,6 +156,25 @@ fn cycle_nodes(flow: &Flow, in_degree: &HashMap<&str, usize>) -> Vec<String> {
         .collect()
 }
 
+/// Every node id reachable by following edges forward from `start_node_id`
+/// (exclusive) — a plain BFS. Used to compute which nodes must be skipped
+/// when `start_node_id` fails during execution.
+pub fn reachable_from(flow: &Flow, start_node_id: &str) -> Vec<String> {
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    queue.push_back(start_node_id);
+
+    while let Some(current) = queue.pop_front() {
+        for edge in flow.edges.iter().filter(|e| e.source_node_id == current) {
+            if visited.insert(edge.target_node_id.clone()) {
+                queue.push_back(&edge.target_node_id);
+            }
+        }
+    }
+
+    visited.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +377,59 @@ mod tests {
             topological_sort(&flow),
             Ok(vec!["a".to_string(), "b".to_string()])
         );
+    }
+
+    fn diamond_flow() -> Flow {
+        // a -> b -> d
+        //  \-> c -/
+        // plus an unrelated, disconnected node e.
+        Flow {
+            name: "diamond".to_string(),
+            nodes: vec!["a", "b", "c", "d", "e"]
+                .into_iter()
+                .map(|id| FlowNode {
+                    id: id.to_string(),
+                    kind: FlowNodeKind::Output { label: id.to_string() },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                })
+                .collect(),
+            edges: vec![
+                edge_fixture("e1", "a", "b"),
+                edge_fixture("e2", "a", "c"),
+                edge_fixture("e3", "b", "d"),
+                edge_fixture("e4", "c", "d"),
+            ],
+        }
+    }
+
+    fn edge_fixture(id: &str, source: &str, target: &str) -> FlowEdge {
+        FlowEdge {
+            id: id.to_string(),
+            source_node_id: source.to_string(),
+            target_node_id: target.to_string(),
+            target_field: "value".to_string(),
+            expression: "response.body".to_string(),
+        }
+    }
+
+    #[test]
+    fn reachable_from_root_includes_every_downstream_node_once() {
+        let flow = diamond_flow();
+        let mut reached = reachable_from(&flow, "a");
+        reached.sort();
+        assert_eq!(reached, vec!["b".to_string(), "c".to_string(), "d".to_string()]);
+    }
+
+    #[test]
+    fn reachable_from_excludes_unrelated_disconnected_nodes() {
+        let flow = diamond_flow();
+        let reached = reachable_from(&flow, "a");
+        assert!(!reached.contains(&"e".to_string()));
+    }
+
+    #[test]
+    fn reachable_from_a_leaf_node_is_empty() {
+        let flow = diamond_flow();
+        assert!(reachable_from(&flow, "d").is_empty());
     }
 }

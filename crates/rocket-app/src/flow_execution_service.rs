@@ -409,6 +409,8 @@ impl FlowExecutionService {
         let mut steps: Vec<FlowStepResult> = Vec::new();
         let mut stopped_reason = "completed".to_string();
 
+        let mut skipped: HashSet<String> = HashSet::new();
+
         for node_id in &order {
             if self.is_cancelled(&run_id) {
                 stopped_reason = "cancelled".to_string();
@@ -420,6 +422,26 @@ impl FlowExecutionService {
                 .find(|n| &n.id == node_id)
                 .expect("topological_sort only returns ids present in flow.nodes");
 
+            if skipped.contains(node_id) {
+                let step = FlowStepResult {
+                    node_id: node_id.clone(),
+                    status: FlowNodeStatus::Skipped,
+                    status_code: None,
+                    duration_ms: None,
+                    error: Some("upstream node failed".to_string()),
+                };
+                self.events.publish(DomainEvent::FlowStepCompleted {
+                    run_id: run_id.clone(),
+                    node_id: step.node_id.clone(),
+                    status: step.status,
+                    status_code: step.status_code,
+                    duration_ms: step.duration_ms,
+                    error: step.error.clone(),
+                });
+                steps.push(step);
+                continue;
+            }
+
             let result = self
                 .execute_node(exec, &input, &flow, node, &captured)
                 .await;
@@ -428,6 +450,11 @@ impl FlowExecutionService {
                 captured.insert(node_id.clone(), output.clone());
             }
             let step = result_to_step(node_id, result);
+            if step.status == FlowNodeStatus::Failed {
+                for downstream in rocket_flow::graph::reachable_from(&flow, node_id) {
+                    skipped.insert(downstream);
+                }
+            }
             self.events.publish(DomainEvent::FlowStepCompleted {
                 run_id: run_id.clone(),
                 node_id: step.node_id.clone(),
@@ -1471,6 +1498,48 @@ mod tests {
         }
     }
 
+    /// Returns a 500 for `failing_url` and a 200 for everything else — used
+    /// to prove a failure on one node does not affect an unrelated node's
+    /// own HTTP outcome, which a single shared status (`exec_with_status`)
+    /// cannot express since it applies the same status to every request.
+    struct UrlAwareExecutor {
+        failing_url: String,
+    }
+    #[async_trait]
+    impl HttpExecutor for UrlAwareExecutor {
+        async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
+            let status = if request.url == self.failing_url { 500 } else { 200 };
+            Ok(HttpResponse {
+                status,
+                status_text: "status".into(),
+                headers: vec![],
+                body: r#"{"value":"ok"}"#.into(),
+                duration_ms: 5,
+                ttfb_ms: 2,
+                size_bytes: 15,
+            })
+        }
+    }
+
+    fn exec_failing_for_url(failing_url: &str) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(UrlAwareExecutor {
+                failing_url: failing_url.to_string(),
+            }),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(FixedJsonqEngine {
+            value: serde_json::json!("ok"),
+        }))
+    }
+
     fn exec_with_status(status: u16) -> RequestExecutionService {
         RequestExecutionService::new(
             Box::new(NullEnvRepo),
@@ -1588,5 +1657,54 @@ mod tests {
             .await
             .expect("run must still complete normally");
         assert_eq!(summary.steps.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn failed_node_skips_only_its_downstream_dependents() {
+        // a (fails, 500) -> b (depends on a)      -- b must be Skipped
+        // c (independent, succeeds)               -- c must still run
+        let flow = Flow {
+            name: "skip-cascade".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c"),
+            ],
+            edges: vec![FlowEdge {
+                id: "e1".to_string(),
+                source_node_id: "a".to_string(),
+                target_node_id: "b".to_string(),
+                target_field: "url".to_string(),
+                expression: "response.body".to_string(),
+            }],
+        };
+        let service = service_with_flow(flow);
+        let exec = exec_failing_for_url("https://api.example.com/a");
+
+        let summary = service
+            .run(
+                &exec,
+                RunFlowInput {
+                    collection: "my-api".to_string(),
+                    flow_name: "skip-cascade".to_string(),
+                    environment_name: None,
+                },
+            )
+            .await
+            .expect("run must complete even with a failed node");
+
+        let status_of = |id: &str| {
+            summary
+                .steps
+                .iter()
+                .find(|s| s.node_id == id)
+                .expect("step must be recorded for this node id")
+                .status
+        };
+        assert_eq!(status_of("a"), FlowNodeStatus::Failed);
+        assert_eq!(status_of("b"), FlowNodeStatus::Skipped);
+        assert_eq!(status_of("c"), FlowNodeStatus::Success);
+        assert_eq!(summary.steps.iter().filter(|s| s.status == FlowNodeStatus::Failed).count(), 1);
+        assert_eq!(summary.steps.iter().filter(|s| s.status == FlowNodeStatus::Skipped).count(), 1);
     }
 }
