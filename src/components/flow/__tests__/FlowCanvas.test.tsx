@@ -98,6 +98,41 @@ describe('FlowCanvas', () => {
     expect(onEdges).toHaveBeenLastCalledWith([wires[1]]);
   });
 
+  it('deletes a clicked node even when an unrelated input held focus beforehand', async () => {
+    // React Flow's delete-key handler is gated on document.activeElement:
+    // it no-ops if focus is on an input/textarea/contenteditable. Chromium
+    // auto-focuses (and blurs the prior element for) any clicked tabIndex
+    // div, so this never surfaces there — but WebKitGTK (the engine Tauri
+    // actually runs on Linux) does not, so a node click that never moves
+    // focus off a still-focused text field silently breaks delete.
+    render(
+      <>
+        <input aria-label='distraction' />
+        <Harness initialNodes={nodes} initialEdges={edges} />
+      </>,
+    );
+    act(() => screen.getByLabelText('distraction').focus());
+    expect(document.activeElement).toBe(screen.getByLabelText('distraction'));
+
+    fireEvent.click(screen.getByText('Result'));
+    await waitFor(() =>
+      expect(document.querySelector('.react-flow__node[data-id="n1"]')).toHaveClass('selected'),
+    );
+
+    // A real keydown always targets whatever currently has focus, then
+    // bubbles to `document` where React Flow's delete handler listens. If
+    // the click above never moved focus off the distraction input, this is
+    // still where the event originates — exactly like a real browser.
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Backspace' });
+    });
+    await act(async () => {
+      fireEvent.keyUp(document.activeElement ?? document.body, { key: 'Backspace' });
+    });
+
+    await waitFor(() => expect(screen.queryByText('Result')).not.toBeInTheDocument());
+  });
+
   describe('with measurable nodes', () => {
     const observed: Element[] = [];
 

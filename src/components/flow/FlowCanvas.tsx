@@ -140,6 +140,15 @@ function FlowCanvasInner({
   // A ref, not state: React Flow already holds the new size internally, so
   // recording it must not trigger a re-render.
   const measuredRef = useRef(new Map<string, Measured>());
+  // React Flow's delete-key handler no-ops while focus sits on an
+  // input/textarea/contenteditable (@xyflow/react's isInputDOMNode check).
+  // Clicking a node only flips its `selected` flag; it never moves DOM
+  // focus. Chromium auto-focuses (and blurs the prior element for) any
+  // clicked tabIndex element, so this never surfaces there, but WebKitGTK
+  // (what Tauri runs on Linux) does not — leaving focus stuck in whatever
+  // text field was last active and silently breaking Backspace/Delete.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const focusPane = () => paneRef.current?.focus();
 
   const rfNodes = useMemo(
     () =>
@@ -215,8 +224,10 @@ function FlowCanvasInner({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for sidebar request drag-and-drop
     <div
+      ref={paneRef}
+      tabIndex={-1}
       data-testid='flow-canvas'
-      className='h-full w-full'
+      className='h-full w-full outline-none'
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -227,6 +238,9 @@ function FlowCanvasInner({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        onNodeClick={focusPane}
+        onEdgeClick={focusPane}
+        onPaneClick={focusPane}
         fitView
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
