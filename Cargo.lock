@@ -4605,6 +4605,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-acp"
+version = "0.1.0"
+dependencies = [
+ "rocket-shared",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rocket-app"
 version = "0.1.0"
 dependencies = [

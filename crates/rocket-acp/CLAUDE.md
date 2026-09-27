@@ -42,4 +42,5 @@ cargo test -p rocket-acp -j4
 ### Dependencies
 
 - `rocket-shared` — `DomainResult`
-- `serde` / `serde_json` — serialization
+- `serde` — serialization derives
+- `serde_json` (dev-only) — serde roundtrip tests

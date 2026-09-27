@@ -1,3 +1,4 @@
+use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
 
 /// One registered ACP agent binary/command and where to find its API key.
@@ -20,20 +21,26 @@ pub struct AgentConfig {
     pub vault_secret_name: String,
 }
 
-use rocket_shared::error::DomainResult;
-
 /// Persistence boundary for `AgentConfig`. No I/O in this crate —
 /// `rocket-infra`'s `FsAgentConfigRepo` (Plan 02) implements this.
+///
+/// `id` is the only identity key. Two configs that share a `label` but have
+/// different ids are distinct entries.
 pub trait AgentConfigRepository: Send + Sync {
+    /// Returns every stored config. An empty store yields an empty list.
     fn list(&self) -> DomainResult<Vec<AgentConfig>>;
+    /// Returns the config with this id, or `None` if it does not exist.
     fn get(&self, id: &str) -> DomainResult<Option<AgentConfig>>;
+    /// Inserts the config, or replaces the existing entry with the same id.
     fn save(&self, config: &AgentConfig) -> DomainResult<()>;
+    /// Removes the config with this id. Deleting an unknown id is a no-op.
     fn delete(&self, id: &str) -> DomainResult<()>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn sample() -> AgentConfig {
         AgentConfig {
@@ -71,8 +78,13 @@ mod tests {
         let mut c = sample();
         c.args = Vec::new();
         let json = serde_json::to_string(&c).expect("serialize AgentConfig");
+        assert!(
+            json.contains("\"args\":[]"),
+            "empty args must still be serialized, got: {json}"
+        );
         let back: AgentConfig = serde_json::from_str(&json).expect("deserialize AgentConfig");
         assert!(back.args.is_empty());
+        assert_eq!(c, back);
     }
 
     #[test]
@@ -88,8 +100,7 @@ mod tests {
         assert!(c.args.is_empty());
     }
 
-    use std::sync::Mutex;
-
+    // In-memory fake exercising the trait contract.
     struct FakeRepo(Mutex<Vec<AgentConfig>>);
     impl FakeRepo {
         fn new() -> Self {
@@ -145,7 +156,34 @@ mod tests {
     }
 
     #[test]
+    fn repository_save_keeps_distinct_ids_with_the_same_label() {
+        let repo = FakeRepo::new();
+        let first = sample();
+        let mut second = sample();
+        second.id = "agent-2".to_string();
+        repo.save(&first).expect("save first");
+        repo.save(&second).expect("save second");
+        assert_eq!(
+            repo.list().expect("list").len(),
+            2,
+            "id, not label, is identity"
+        );
+        assert_eq!(repo.get("agent-1").expect("get first"), Some(first));
+        assert_eq!(repo.get("agent-2").expect("get second"), Some(second));
+    }
+
+    #[test]
+    fn repository_delete_of_unknown_id_is_a_no_op() {
+        let repo = FakeRepo::new();
+        repo.save(&sample()).expect("save");
+        repo.delete("no-such-id")
+            .expect("delete of unknown id must not error");
+        assert_eq!(repo.list().expect("list").len(), 1);
+    }
+
+    #[test]
     fn trait_is_object_safe() {
-        fn _assert(_: Box<dyn AgentConfigRepository>) {}
+        let repo: Box<dyn AgentConfigRepository> = Box::new(FakeRepo::new());
+        assert!(repo.list().expect("list via trait object").is_empty());
     }
 }
