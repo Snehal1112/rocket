@@ -1,9 +1,12 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import type { FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 
 export interface OutputNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Output' }>;
   status: FlowNodeStatus;
+  /** Set when a save was rejected because this node is part of a cycle. */
+  hasCycleError?: boolean;
   result?: string;
 }
 
@@ -11,7 +14,10 @@ export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNo
   return (
     <div
       data-testid='output-node-card'
-      className='w-48 rounded-md border bg-card text-card-foreground text-xs shadow-sm'
+      className={cn(
+        'w-48 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
+        data.hasCycleError && 'ring-2 ring-red-500',
+      )}
     >
       <Handle
         type='target'

@@ -1,7 +1,35 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import { FlowCanvas } from '../FlowCanvas';
+
+// Holds nodes/edges in state, like FlowPane does through the pane store.
+function Harness({
+  initialNodes,
+  initialEdges,
+  onEdges,
+}: {
+  initialNodes: FlowNode[];
+  initialEdges: FlowEdge[];
+  onEdges?: (edges: FlowEdge[]) => void;
+}) {
+  const [nodes, setNodes] = useState(initialNodes);
+  const [edges, setEdges] = useState(initialEdges);
+  return (
+    <FlowCanvas
+      nodes={nodes}
+      edges={edges}
+      nodeStatus={{}}
+      onNodesChange={setNodes}
+      onEdgesChange={(next) => {
+        onEdges?.(next);
+        setEdges(next);
+      }}
+      onConnect={vi.fn()}
+    />
+  );
+}
 
 describe('FlowCanvas', () => {
   const nodes: FlowNode[] = [
@@ -20,9 +48,118 @@ describe('FlowCanvas', () => {
         onConnect={vi.fn()}
       />,
     );
-    // React Flow renders its background as an SVG pattern container with
-    // this test id in @xyflow/react — confirmed via its own testing docs.
+    // React Flow renders its dotted background inside this container.
     expect(document.querySelector('.react-flow__background')).toBeInTheDocument();
     expect(screen.getByText('Result')).toBeInTheDocument();
+  });
+
+  it('deletes a selected node and drops the edges that touched it', async () => {
+    const graph: FlowNode[] = [
+      { id: 'in', kind: { kind: 'Input', label: 'Key', value: 'k' }, position: { x: 0, y: 0 } },
+      { id: 'out', kind: { kind: 'Output', label: 'Shown' }, position: { x: 300, y: 0 } },
+      { id: 'out2', kind: { kind: 'Output', label: 'Other' }, position: { x: 300, y: 200 } },
+    ];
+    const wires: FlowEdge[] = [
+      {
+        id: 'e1',
+        sourceNodeId: 'in',
+        targetNodeId: 'out',
+        targetField: 'value',
+        expression: 'response.body',
+      },
+      {
+        id: 'e2',
+        sourceNodeId: 'in',
+        targetNodeId: 'out2',
+        targetField: 'value',
+        expression: 'response.body',
+      },
+    ];
+    const onEdges = vi.fn();
+    render(<Harness initialNodes={graph} initialEdges={wires} onEdges={onEdges} />);
+
+    // A click must select the node. Selection is canvas-local state; without
+    // it the delete key has nothing to delete.
+    fireEvent.click(screen.getByText('Shown'));
+    await waitFor(() =>
+      expect(document.querySelector('.react-flow__node[data-id="out"]')).toHaveClass('selected'),
+    );
+
+    // Separate acts, so React Flow sees the key as pressed before release.
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: 'Backspace' });
+    });
+    await act(async () => {
+      fireEvent.keyUp(document.body, { key: 'Backspace' });
+    });
+
+    await waitFor(() => expect(screen.queryByText('Shown')).not.toBeInTheDocument());
+    expect(screen.getByText('Other')).toBeInTheDocument();
+    expect(onEdges).toHaveBeenLastCalledWith([wires[1]]);
+  });
+
+  describe('with measurable nodes', () => {
+    const observed: Element[] = [];
+
+    // jsdom has no layout, so give every element a size and make the
+    // ResizeObserver report each observed node at once.
+    function stubLayout() {
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80);
+      vi.stubGlobal(
+        'DOMMatrixReadOnly',
+        class {
+          m22 = 1;
+        },
+      );
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private cb: ResizeObserverCallback) {}
+          observe(target: Element) {
+            // Only node elements matter here; other observers are left idle.
+            if (!target.classList.contains('react-flow__node')) return;
+            observed.push(target);
+            this.cb([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+          }
+          unobserve() {
+            // Not needed by these tests.
+          }
+          disconnect() {
+            // Not needed by these tests.
+          }
+        },
+      );
+    }
+
+    afterEach(() => {
+      observed.length = 0;
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    it('keeps measured nodes visible when their status changes', async () => {
+      stubLayout();
+      const props = {
+        nodes,
+        edges,
+        onNodesChange: vi.fn(),
+        onEdgesChange: vi.fn(),
+        onConnect: vi.fn(),
+      };
+      const { rerender } = render(<FlowCanvas {...props} nodeStatus={{}} />);
+      const node = () => document.querySelector<HTMLElement>('.react-flow__node[data-id="n1"]');
+      await waitFor(() => expect(node()?.style.visibility).toBe('visible'));
+      const observeCalls = observed.length;
+
+      // A run patches status many times. Each patch builds new React Flow
+      // node objects; they must keep their size instead of being hidden and
+      // re-measured.
+      rerender(<FlowCanvas {...props} nodeStatus={{ n1: 'running' }} />);
+      expect(node()?.style.visibility).toBe('visible');
+      rerender(<FlowCanvas {...props} nodeStatus={{ n1: 'success' }} />);
+      expect(node()?.style.visibility).toBe('visible');
+      expect(observed.length).toBe(observeCalls);
+    });
   });
 });

@@ -3,8 +3,10 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import { RequestNode } from '../RequestNode';
 
-function renderNode(data: Parameters<typeof RequestNode>[0]['data']) {
-  return render(
+type Data = Parameters<typeof RequestNode>[0]['data'];
+
+function nodeElement(data: Data) {
+  return (
     <ReactFlowProvider>
       <RequestNode
         id='n1'
@@ -20,8 +22,12 @@ function renderNode(data: Parameters<typeof RequestNode>[0]['data']) {
         positionAbsoluteX={0}
         positionAbsoluteY={0}
       />
-    </ReactFlowProvider>,
+    </ReactFlowProvider>
   );
+}
+
+function renderNode(data: Data) {
+  return render(nodeElement(data));
 }
 
 const baseKind = {
@@ -69,5 +75,59 @@ describe('RequestNode', () => {
   it('renders running state distinctly from idle', () => {
     renderNode({ kind: baseKind, status: 'running' });
     expect(screen.getByTestId('request-node-card')).toHaveAttribute('data-status', 'running');
+  });
+
+  it('exposes url, headers, and body target handles plus one result source handle', () => {
+    renderNode({ kind: baseKind, status: 'idle' });
+    const card = screen.getByTestId('request-node-card');
+    const targets = [...card.querySelectorAll('.react-flow__handle.target')].map((h) =>
+      h.getAttribute('data-handleid'),
+    );
+    expect(targets).toEqual(['url', 'headers', 'body']);
+    const sources = [...card.querySelectorAll('.react-flow__handle.source')].map((h) =>
+      h.getAttribute('data-handleid'),
+    );
+    expect(sources).toEqual(['result']);
+  });
+
+  it('does not guess a method for a Saved source', () => {
+    renderNode({ kind: baseKind, status: 'idle' });
+    expect(screen.queryByText('GET')).not.toBeInTheDocument();
+    expect(screen.getByText('SAVED')).toBeInTheDocument();
+  });
+
+  it('shows a Saved source method when the caller supplies one', () => {
+    renderNode({ kind: baseKind, status: 'idle', method: 'POST' });
+    expect(screen.getByText('POST')).toBeInTheDocument();
+  });
+
+  it('shows the method of an Inline source', () => {
+    renderNode({
+      kind: {
+        kind: 'Request',
+        label: 'Inline',
+        source: { type: 'Inline', request: { method: 'PUT', url: '', headers: [] } },
+      },
+      status: 'idle',
+    });
+    expect(screen.getByText('PUT')).toBeInTheDocument();
+  });
+
+  it('shows only the final state after rapid status transitions', () => {
+    const { rerender } = renderNode({ kind: baseKind, status: 'idle' });
+    rerender(nodeElement({ kind: baseKind, status: 'running' }));
+    rerender(nodeElement({ kind: baseKind, status: 'success', statusCode: 200, durationMs: 5 }));
+    const card = screen.getByTestId('request-node-card');
+    expect(card).toHaveAttribute('data-status', 'success');
+    expect(card.className).not.toContain('animate-pulse');
+    rerender(nodeElement({ kind: baseKind, status: 'failed', error: 'boom' }));
+    expect(card).toHaveAttribute('data-status', 'failed');
+    expect(screen.queryByText(/200/)).not.toBeInTheDocument();
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+  });
+
+  it('outlines the card when it is part of a rejected cycle', () => {
+    renderNode({ kind: baseKind, status: 'idle', hasCycleError: true });
+    expect(screen.getByTestId('request-node-card').className).toContain('ring-red-500');
   });
 });

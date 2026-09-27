@@ -11,16 +11,17 @@ export interface RequestNodeData {
   error?: string;
   headerCount?: number;
   bodyPreview?: string;
+  /** Method of a Saved request, when the caller has looked it up. */
+  method?: string;
+  /** Set when a save was rejected because this node is part of a cycle. */
+  hasCycleError?: boolean;
 }
 
-const METHOD_FROM_SOURCE = (kind: RequestNodeData['kind']) =>
-  kind.source.type === 'Inline' ? kind.source.request.method : 'GET';
-// Saved sources don't carry their method on the node itself (it lives in the
-// referenced request file, resolved server-side at run time) — v1 shows a
-// generic method badge for Saved nodes until Plan 10's sidebar-drag flow
-// optionally hydrates a cached method label. Not a gap in this task: the
-// spec's Saved/Inline distinction (§4) never promises client-visible method
-// for Saved without an extra read, and no task in this plan claims to add one.
+// A Saved source stores only its request path, not its method. The method
+// lives in the referenced request file. Show it only when the caller passes
+// `data.method`, and a neutral "SAVED" badge otherwise, never a guessed GET.
+const methodLabel = (data: RequestNodeData) =>
+  data.kind.source.type === 'Inline' ? data.kind.source.request.method : (data.method ?? 'SAVED');
 
 const statusStyles: Record<FlowNodeStatus, string> = {
   idle: 'border-border',
@@ -32,7 +33,7 @@ const statusStyles: Record<FlowNodeStatus, string> = {
 
 export function RequestNode({ data, isConnectable }: NodeProps & { data: RequestNodeData }) {
   const { kind, status, statusCode, durationMs, error } = data;
-  const method = METHOD_FROM_SOURCE(kind);
+  const method = methodLabel(data);
   const url = kind.source.type === 'Inline' ? kind.source.request.url : kind.source.requestPath;
   const headerCount =
     kind.source.type === 'Inline' ? kind.source.request.headers.length : (data.headerCount ?? 0);
@@ -46,6 +47,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
       className={cn(
         'w-64 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         statusStyles[status],
+        data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
       <div className='flex items-center justify-between gap-2 border-b px-2 py-1.5'>
@@ -67,6 +69,10 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
         </div>
       )}
 
+      {/* Every field row is always rendered, even when empty, so each target
+          handle stays connectable. There is one `headers` handle for all
+          header slots. Plan 10's connection UI picks the header by name and
+          writes a `headers[<name>].value` target field. */}
       <div className='relative space-y-1 px-2 py-1.5'>
         <div className='relative flex items-center gap-1.5 pl-2'>
           <Handle

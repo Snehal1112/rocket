@@ -27,7 +27,10 @@ describe('InputNode', () => {
       />,
     );
     expect(screen.getByText('API Key')).toBeInTheDocument();
-    expect(screen.getByTestId('input-node-card')).toBeInTheDocument();
+    const card = screen.getByTestId('input-node-card');
+    expect(card.querySelectorAll('.react-flow__handle.source')).toHaveLength(1);
+    expect(card.querySelectorAll('.react-flow__handle.target')).toHaveLength(0);
+    expect(card.querySelector('[data-handleid="result"]')).toBeInTheDocument();
   });
 
   it('renders without crashing when value is undefined', () => {
@@ -70,6 +73,9 @@ describe('OutputNode', () => {
       />,
     );
     expect(screen.getByText('Result')).toBeInTheDocument();
-    expect(screen.getByTestId('output-node-card')).toBeInTheDocument();
+    const card = screen.getByTestId('output-node-card');
+    expect(card.querySelectorAll('.react-flow__handle.target')).toHaveLength(1);
+    expect(card.querySelectorAll('.react-flow__handle.source')).toHaveLength(0);
+    expect(card.querySelector('[data-handleid="value"]')).toBeInTheDocument();
   });
 });
