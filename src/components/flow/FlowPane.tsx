@@ -13,10 +13,13 @@ import {
 import { type CollectionSummary, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
+import { FlowCanvas } from './FlowCanvas';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
   const closeTab = usePaneStore((s) => s.closeTab);
+  const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
+  const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
   // Start from the tab's own collection, so a tab opened for a collection
   // (or one that fell back after a failed load) keeps that choice.
@@ -128,12 +131,16 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     );
   }
 
-  // Real canvas rendering (React Flow) arrives in Plan 09 — this stub
-  // confirms the tab/data plumbing works end to end first.
   return (
-    <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-      Loaded flow &quot;{tab.flowName}&quot; with {tab.nodes.length} node(s) — canvas rendering
-      lands in Plan 09.
-    </div>
+    <FlowCanvas
+      nodes={tab.nodes}
+      edges={tab.edges}
+      nodeStatus={tab.nodeStatus}
+      onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
+      onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
+      onConnect={() => {
+        /* Plan 10 replaces this with real edge-creation + the expression editor popover */
+      }}
+    />
   );
 }
