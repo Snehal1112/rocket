@@ -449,6 +449,12 @@ git commit -m "feat(frontend): add Flow types and Tauri API bindings"
 - Modify: `src/types/pane-types.ts`
 - Modify: `src/stores/pane-store.ts`
 - Modify: `src/components/panes/EditorGroup.tsx`
+- Modify: `src/components/panes/BreadcrumbBar.tsx` (confirmed necessary during
+  implementation — this file has an exhaustive `const _exhaustive: never =
+  tab` switch over the `Tab` union; adding `FlowTab` to that union without a
+  matching branch here is a `tsc` compile error, not an optional cleanup. Add
+  an `isFlowTab(tab)` branch labeling the breadcrumb with
+  `tab.collectionName || 'Flow'`, mirroring the existing `RunnerTab` branch.)
 - Create: `src/components/flow/FlowPane.tsx`
 - Modify: `src/stores/__tests__/pane-store.test.ts`
 
@@ -754,7 +760,7 @@ Expected: succeeds.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts src/components/panes/EditorGroup.tsx src/components/flow/FlowPane.tsx
+git add src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts src/components/panes/EditorGroup.tsx src/components/panes/BreadcrumbBar.tsx src/components/flow/FlowPane.tsx
 git commit -m "feat(frontend): add FlowTab and pane-store actions"
 ```
 
