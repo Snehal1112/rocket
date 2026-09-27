@@ -23,6 +23,10 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::RunnerStarted { .. } => "runner-started",
             DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
             DomainEvent::RunnerFinished { .. } => "runner-finished",
+            // Flow events — mirrors the Collection Runner events above.
+            DomainEvent::FlowRunStarted { .. } => "flow-run-started",
+            DomainEvent::FlowStepCompleted { .. } => "flow-step-completed",
+            DomainEvent::FlowRunFinished { .. } => "flow-run-finished",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",
