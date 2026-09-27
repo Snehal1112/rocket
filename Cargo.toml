@@ -13,6 +13,7 @@ members = [
     "crates/rocket-workspace",
     "crates/rocket-import",
     "crates/rocket-scripting",
+    "crates/rocket-acp",
     "src-tauri",
 ]
 
@@ -59,3 +60,4 @@ rocket-git = { path = "crates/rocket-git" }
 rocket-workspace = { path = "crates/rocket-workspace" }
 rocket-import = { path = "crates/rocket-import" }
 rocket-scripting = { path = "crates/rocket-scripting" }
+rocket-acp = { path = "crates/rocket-acp" }
