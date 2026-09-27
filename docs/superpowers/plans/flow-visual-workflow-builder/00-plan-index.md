@@ -309,9 +309,13 @@ pub fn build_execute_request_input(
 ) -> DomainResult<ExecuteRequestInput>;
 
 /// Mutates `input` in place, applying each edge's resolved value into the
-/// field its `target_field` path names ("url", "headers[N].value", "body").
-/// An out-of-range header index or unknown path segment is a `DomainError`,
-/// not a silent no-op.
+/// field its `target_field` path names ("url", "headers[N].value",
+/// "headers[Name].value", "body"). An all-digit N addresses a header by
+/// index; any other selector addresses it by case-insensitive name and
+/// appends it if absent (the form the Flow UI uses — Plan 05 post-review).
+/// A wired header is always enabled. A "body" wire promotes a none-mode body
+/// to JSON and errors on form/binary bodies. An out-of-range header index or
+/// unknown path segment is a `DomainError`, not a silent no-op.
 pub fn apply_wired_overrides(
     input: &mut ExecuteRequestInput,
     resolved: &std::collections::HashMap<String, String>, // edge_id -> resolved value

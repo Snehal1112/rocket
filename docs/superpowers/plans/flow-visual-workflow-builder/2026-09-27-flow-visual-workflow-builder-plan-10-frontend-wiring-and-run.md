@@ -450,11 +450,13 @@ export function WireExpressionPopover({
     if (isHeadersTarget) {
       const trimmed = headerName.trim();
       if (!trimmed) return;
-      const existingIndex = existingHeaders.indexOf(trimmed);
-      // Match by name if the header already exists; otherwise this wire
-      // targets a new header appended at the next index — the execution
-      // side (Plan 05's apply_wired_overrides) creates it if absent.
-      targetField = `headers[${existingIndex === -1 ? existingHeaders.length : existingIndex}].value`;
+      // Address the header by name, never by index: the frontend does not
+      // know a Saved request's header order. Plan 05's apply_wired_overrides
+      // treats a non-numeric selector as a case-insensitive name, updating
+      // the matching header or appending it if absent. Reuse an existing
+      // inline header's spelling when one matches.
+      const existing = existingHeaders.find((h) => h.toLowerCase() === trimmed.toLowerCase());
+      targetField = `headers[${existing ?? trimmed}].value`;
     }
     onCommit({ ...edge, targetField, expression });
     onOpenChange(false);
