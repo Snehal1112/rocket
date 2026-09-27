@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use rocket_flow::{FlowEdge, FlowNode};
+use rocket_collection::Request;
+use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, InlineRequestData, RequestSource};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
 use rocket_shared::VariableValue;
@@ -54,6 +55,81 @@ impl RequestExecutionService {
             other => other.to_string(),
         })
     }
+}
+
+/// Builds an `ExecuteRequestInput` for a `FlowNodeKind::Request` node, before
+/// any wire overrides (see `apply_wired_overrides`) are applied.
+///
+/// Both `Saved` and `Inline` sources resolve down to a `rocket_collection::Request`
+/// value, then reuse `crate::runner_sequence::build_step_input` — the exact
+/// function the Collection Runner already uses for the same "saved request →
+/// ExecuteRequestInput" problem — rather than a second, parallel mapping.
+pub fn build_execute_request_input(
+    collection_repo: &dyn rocket_collection::CollectionRepository,
+    collection: &str,
+    environment_name: Option<&str>,
+    node: &FlowNode,
+) -> DomainResult<ExecuteRequestInput> {
+    let FlowNodeKind::Request { label, source } = &node.kind else {
+        return Err(DomainError::InvalidInput(format!(
+            "node '{}' is not a Request node",
+            node.id
+        )));
+    };
+
+    let (request, request_path) = match source {
+        RequestSource::Saved { request_path } => {
+            let request = collection_repo.get_request(collection, request_path)?;
+            (request, request_path.clone())
+        }
+        RequestSource::Inline { request: inline } => {
+            (build_inline_request(label, inline)?, format!("__flow_inline__/{}", node.id))
+        }
+    };
+
+    let item = RunItem {
+        name: request.name.clone(),
+        request_path,
+        request,
+    };
+    Ok(build_step_input(
+        &item,
+        collection,
+        environment_name,
+        None,
+        rocket_workspace::RequestGuardPolicy::default(),
+    ))
+}
+
+/// Turns an ad hoc `InlineRequestData` into a `rocket_collection::Request`
+/// value object so it can flow through the same `build_step_input` path a
+/// saved request uses. `request_path` for an inline node is a synthetic,
+/// never-resolves-to-a-real-file sentinel (`"__flow_inline__/<node id>"`) —
+/// `RequestExecutionService::build_variable_scopes` already treats a failed
+/// `get_folder_chain_variables`/`get_request_variables` lookup as "no
+/// variables at this scope" (`if let Ok(...)`), which is exactly correct
+/// here: an inline request isn't part of the collection tree and should not
+/// inherit folder-chain variables.
+fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult<Request> {
+    let method: HttpMethod = inline.method.parse()?;
+    let mut request = Request::new(label, method, inline.url.clone());
+    request.headers = inline
+        .headers
+        .iter()
+        .map(|h| Header {
+            key: h.name.clone(),
+            value: h.value.clone(),
+            enabled: true,
+            description: None,
+        })
+        .collect();
+    request.body = inline.body.as_ref().map(|content| Body {
+        mode: BodyMode::Json,
+        content: Some(content.clone()),
+        form_data: None,
+        file_path: None,
+    });
+    Ok(request)
 }
 
 #[cfg(test)]
@@ -375,6 +451,120 @@ mod tests {
             .resolve_flow_wire_expression("my-api", &output, "response.nope.nope")
             .await
             .expect_err("a throwing expression must be an Err, not a panic");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    use rocket_flow::{FlowNodeKind, InlineHeader, InlineRequestData, NodePosition, RequestSource};
+
+    fn saved_flow_node(id: &str, request_path: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Request {
+                label: "Get Auth Token".to_string(),
+                source: RequestSource::Saved {
+                    request_path: request_path.to_string(),
+                },
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn inline_flow_node(id: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Request {
+                label: "Ping".to_string(),
+                source: RequestSource::Inline {
+                    request: InlineRequestData {
+                        method: "post".to_string(),
+                        url: "https://api.example.com/ping".to_string(),
+                        headers: vec![InlineHeader {
+                            name: "X-Test".to_string(),
+                            value: "1".to_string(),
+                        }],
+                        body: Some(r#"{"ok":true}"#.to_string()),
+                    },
+                },
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    #[test]
+    fn saved_source_resolves_via_collection_repo_and_reuses_build_step_input() {
+        let mut saved = Request::new("Get Auth Token", HttpMethod::Get, "https://api.example.com/login");
+        saved.tags = vec!["auth".to_string()];
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+
+        let node = saved_flow_node("n1", "auth/login.yml");
+        let input = build_execute_request_input(&repo, "my-api", Some("dev"), &node)
+            .expect("saved source must resolve");
+
+        assert_eq!(input.method, HttpMethod::Get);
+        assert_eq!(input.url, "https://api.example.com/login");
+        assert_eq!(input.collection.as_deref(), Some("my-api"));
+        assert_eq!(input.environment_name.as_deref(), Some("dev"));
+        assert_eq!(input.request_path.as_deref(), Some("auth/login.yml"));
+        assert_eq!(input.tags, vec!["auth".to_string()]);
+    }
+
+    #[test]
+    fn saved_source_propagates_not_found_instead_of_defaulting() {
+        let repo = FakeCollectionRepo::new();
+        let node = saved_flow_node("n1", "does/not/exist.yml");
+
+        let err = build_execute_request_input(&repo, "my-api", None, &node)
+            .expect_err("a missing saved request must error, not silently build an empty request");
+
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn inline_source_builds_request_from_embedded_fields() {
+        let repo = FakeCollectionRepo::new();
+        let node = inline_flow_node("n2");
+
+        let input = build_execute_request_input(&repo, "my-api", None, &node)
+            .expect("inline source must build");
+
+        assert_eq!(input.method, HttpMethod::Post);
+        assert_eq!(input.url, "https://api.example.com/ping");
+        assert_eq!(input.headers.len(), 1);
+        assert_eq!(input.headers[0].key, "X-Test");
+        assert_eq!(input.headers[0].value, "1");
+        let body = input.body.expect("inline body must be set");
+        assert_eq!(body.content.as_deref(), Some(r#"{"ok":true}"#));
+        assert_eq!(body.mode, BodyMode::Json);
+    }
+
+    #[test]
+    fn inline_source_with_unparseable_method_is_invalid_input_not_a_panic() {
+        let repo = FakeCollectionRepo::new();
+        let mut node = inline_flow_node("n2");
+        if let FlowNodeKind::Request { source: RequestSource::Inline { request }, .. } = &mut node.kind {
+            request.method = "FETCH".to_string();
+        }
+
+        let err = build_execute_request_input(&repo, "my-api", None, &node)
+            .expect_err("an invalid method string must be InvalidInput");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn non_request_node_is_rejected() {
+        let repo = FakeCollectionRepo::new();
+        let node = FlowNode {
+            id: "n3".to_string(),
+            kind: FlowNodeKind::Output {
+                label: "Result".to_string(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        };
+
+        let err = build_execute_request_input(&repo, "my-api", None, &node)
+            .expect_err("an Output node has no request to build");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
