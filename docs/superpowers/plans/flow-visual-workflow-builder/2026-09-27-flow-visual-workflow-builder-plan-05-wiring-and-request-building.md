@@ -921,12 +921,17 @@ pub fn apply_wired_overrides(
                             e.id, e.target_field
                         ))
                     })?;
+                    // `headers.len()` is read into a local before the mutable
+                    // borrow below — reading it inline inside `get_mut`'s
+                    // `ok_or_else` closure is a real E0502 borrow-checker
+                    // conflict (the immutable borrow for `.len()` overlaps
+                    // the mutable borrow `get_mut` holds), caught during
+                    // Task 3's implementation.
+                    let headers_len = input.headers.len();
                     let header = input.headers.get_mut(index).ok_or_else(|| {
                         DomainError::InvalidInput(format!(
                             "edge '{}': header index {} out of range (request has {} headers)",
-                            e.id,
-                            index,
-                            input.headers.len()
+                            e.id, index, headers_len
                         ))
                     })?;
                     header.value = value.clone();
