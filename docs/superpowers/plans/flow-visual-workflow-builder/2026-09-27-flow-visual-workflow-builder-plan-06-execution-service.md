@@ -894,8 +894,50 @@ Expected: PASS — all `topological_sort` tests from Plan 02 plus 3 new
 
 - [ ] **Step 5: Write the failing skip-cascade test in `rocket-app`**
 
+**Correction:** `exec_with_status(500)` (Task 2) makes every HTTP call in the
+run return 500, including node `c`'s — that would make `c` fail too, breaking
+the "independent node still succeeds" assertion this test needs. Add a
+URL-aware executor test double instead, so only node `a`'s specific URL
+returns 500 and every other URL returns 200:
+
 ```rust
 // crates/rocket-app/src/flow_execution_service.rs (add to the existing tests module)
+
+struct UrlAwareExecutor {
+    failing_url: String,
+}
+#[async_trait]
+impl HttpExecutor for UrlAwareExecutor {
+    async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
+        let status = if request.url == self.failing_url { 500 } else { 200 };
+        Ok(HttpResponse {
+            status,
+            status_text: if status == 200 { "OK" } else { "Internal Server Error" }.into(),
+            headers: vec![],
+            body: r#"{"value":"ok"}"#.into(),
+            duration_ms: 5,
+            ttfb_ms: 2,
+            size_bytes: 15,
+        })
+    }
+}
+
+fn exec_failing_for_url(failing_url: &str) -> RequestExecutionService {
+    RequestExecutionService::new(
+        Box::new(NullEnvRepo),
+        Arc::new(UrlAwareExecutor { failing_url: failing_url.to_string() }),
+        Box::new(NullHistoryRepo),
+        Box::new(FakeCollectionRepo::new()),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    )
+    .with_script_engine(Box::new(FixedJsonqEngine {
+        value: serde_json::json!("ok"),
+    }))
+}
 
 #[tokio::test]
 async fn failed_node_skips_only_its_downstream_dependents() {
@@ -917,7 +959,7 @@ async fn failed_node_skips_only_its_downstream_dependents() {
         }],
     };
     let service = service_with_flow(flow);
-    let exec = exec_with_status(500);
+    let exec = exec_failing_for_url("https://api.example.com/a");
 
     let summary = service
         .run(
