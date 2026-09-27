@@ -154,6 +154,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         onConnect={() => {
           /* Plan 10 replaces this with real edge-creation + the expression editor popover */
         }}
+        onAddNode={handleAddNode}
+        flowCollectionName={tab.collectionName}
       />
     </div>
   );

@@ -9,9 +9,12 @@ import {
   type NodeChange,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
 } from '@xyflow/react';
 import { useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
+import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
@@ -30,6 +33,13 @@ export interface FlowCanvasProps {
   onNodesChange: (nodes: FlowNode[]) => void;
   onEdgesChange: (edges: FlowEdge[]) => void;
   onConnect: (connection: Connection) => void;
+  onAddNode?: (node: FlowNode) => void;
+  // The collection the current flow belongs to. A dropped request from a
+  // different collection is rejected: `RequestSource.Saved` only carries a
+  // `requestPath`, resolved at run time against the flow's own collection
+  // (see rocket-app/flow_execution_service.rs), so a cross-collection drop
+  // would silently resolve to the wrong file (or fail to resolve at all).
+  flowCollectionName?: string | null;
 }
 
 type Measured = { width: number; height: number };
@@ -108,7 +118,10 @@ function FlowCanvasInner({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onAddNode,
+  flowCollectionName,
 }: FlowCanvasProps) {
+  const { screenToFlowPosition } = useReactFlow();
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(() => new Set());
   // A ref, not state: React Flow already holds the new size internally, so
@@ -153,8 +166,46 @@ function FlowCanvasInner({
     if (next !== edges) onEdgesChange(next);
   };
 
+  // Drag-and-drop from the collection sidebar. A drop with no valid flow-drag
+  // payload (e.g. a stray file drag) is a no-op.
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const payload = decodeFlowRequestDragPayload(e.dataTransfer);
+    if (!payload) return;
+
+    // A saved request node only stores `requestPath`, resolved against this
+    // flow's own collection at run time. Dropping a request from a different
+    // collection would silently misresolve, so reject it instead.
+    if (flowCollectionName && payload.collection !== flowCollectionName) {
+      toast.error(`Cannot add "${payload.name}": it belongs to a different collection.`);
+      return;
+    }
+
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    onAddNode?.({
+      id: crypto.randomUUID(),
+      kind: {
+        kind: 'Request',
+        label: payload.name,
+        source: { type: 'Saved', requestPath: payload.path },
+      },
+      position,
+    });
+  };
+
   return (
-    <div data-testid='flow-canvas' className='h-full w-full'>
+    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for sidebar request drag-and-drop
+    <div
+      data-testid='flow-canvas'
+      className='h-full w-full'
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}

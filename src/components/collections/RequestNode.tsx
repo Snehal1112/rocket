@@ -34,6 +34,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
+import { encodeFlowRequestDragPayload, FLOW_REQUEST_DRAG_MIME } from '@/lib/flow-drag';
 import { collectLeafGroupIds, findTabInTree, mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { getRequest, renameRequest } from '@/lib/tauri-api';
@@ -237,6 +238,14 @@ export function RequestNode({
             active={active}
             className='flex-1'
             data-testid={`request-item-${method}-${name}`}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(
+                FLOW_REQUEST_DRAG_MIME,
+                encodeFlowRequestDragPayload({ collection: collectionName, path, name, method }),
+              );
+              e.dataTransfer.effectAllowed = 'copy';
+            }}
           >
             <TreeItemContent
               className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
