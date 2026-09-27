@@ -25,6 +25,7 @@ rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-app.workspace = true
 rocket-audit.workspace = true
+rocket-flow.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true
 rocket-scripting.workspace = true

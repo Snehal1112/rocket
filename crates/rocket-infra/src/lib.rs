@@ -25,6 +25,7 @@ pub mod scripting;
 pub mod secret_store;
 pub mod shared_collection_environment_repo;
 pub mod shared_path_collection_repo;
+pub mod shared_path_flow_repo;
 mod yaml_io;
 pub use atomic_write::{atomic_write, atomic_write_bulk};
 pub use clone_destination_capabilities::{
@@ -51,3 +52,4 @@ pub use rocketvault::ReqwestVaultSecretFetcher;
 pub use secret_store::KeyringSecretStore;
 pub use shared_collection_environment_repo::SharedCollectionEnvironmentRepo;
 pub use shared_path_collection_repo::SharedPathCollectionRepo;
+pub use shared_path_flow_repo::SharedPathFlowRepo;

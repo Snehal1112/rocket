@@ -7,6 +7,7 @@ pub mod contract_dtos;
 pub mod cookies;
 pub mod environments;
 pub mod execution;
+pub mod flow;
 pub mod git;
 pub mod history;
 pub mod import;

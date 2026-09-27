@@ -344,6 +344,13 @@ pub fn run() {
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
             );
 
+            // Flow CRUD and Flow execution both need to follow workspace switches, the
+            // same reasoning CollectionRunnerService's collection_repo already follows
+            // — see SharedPathFlowRepo's doc comment.
+            let flow_svc = rocket_app::FlowService::new(Box::new(
+                rocket_infra::SharedPathFlowRepo::new(Arc::clone(&active_workspace_path)),
+            ));
+
             // Collection Runner — SharedPathCollectionRepo, not a path-pinned
             // FsCollectionRepo: the run set is the entire content of a run (URLs,
             // scripts, auth), so it must follow workspace switches the same way
@@ -387,6 +394,7 @@ pub fn run() {
             app.manage(runner_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
+            app.manage(flow_svc);
             app.manage(git_svc);
             app.manage(CloneDestinationCapabilities::default());
             app.manage(audit_svc);
@@ -473,6 +481,9 @@ pub fn run() {
             commands::execution::evaluate_var_expression,
             commands::runner::run_collection,
             commands::runner::stop_collection_run,
+            commands::flow::list_flows,
+            commands::flow::get_flow,
+            commands::flow::delete_flow,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,
