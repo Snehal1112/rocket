@@ -41,6 +41,38 @@ impl AgentConfigService {
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         self.repo.delete(id)
     }
+
+    pub async fn resolve_credential(&self, id: &str) -> DomainResult<String> {
+        let config = self
+            .repo
+            .get(id)?
+            .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
+        let value = self
+            .secret_manager
+            .resolve_secret_value(&config.vault_connection_id, &config.vault_name, &config.vault_secret_id)
+            .await?;
+        value.ok_or_else(|| {
+            DomainError::NotFound(format!(
+                "agent '{}': credential no longer exists in RocketVault — reconfigure this agent",
+                config.label
+            ))
+        })
+    }
+
+    pub async fn test_agent_config(&self, id: &str) -> DomainResult<()> {
+        let config = self
+            .repo
+            .get(id)?
+            .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
+        which::which(&config.command).map_err(|e| {
+            DomainError::InvalidInput(format!(
+                "agent '{}': command '{}' not found: {e}",
+                config.label, config.command
+            ))
+        })?;
+        self.resolve_credential(id).await?;
+        Ok(())
+    }
 }
 
 fn validate_config(config: &AgentConfig) -> DomainResult<()> {
@@ -263,5 +295,117 @@ mod tests {
             .expect("save");
         service.delete("agent-1").expect("delete");
         assert!(service.list().expect("list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_credential_returns_value_when_secret_exists() {
+        let service = service_with(Ok(Some("sk-abc123".to_string())), true);
+        service
+            .save(sample_config("agent-1", "conn-1"))
+            .expect("save");
+
+        let value = service
+            .resolve_credential("agent-1")
+            .await
+            .expect("resolve_credential should succeed");
+
+        assert_eq!(value, "sk-abc123");
+    }
+
+    #[tokio::test]
+    async fn resolve_credential_errors_when_secret_stale() {
+        let service = service_with(Ok(None), true);
+        service
+            .save(sample_config("agent-1", "conn-1"))
+            .expect("save");
+
+        let err = service
+            .resolve_credential("agent-1")
+            .await
+            .expect_err("stale vault secret must be a hard error");
+
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn resolve_credential_unknown_config_id_errors() {
+        let service = service_with(Ok(None), true);
+        let err = service
+            .resolve_credential("no-such-agent")
+            .await
+            .expect_err("unknown agent config id must error");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn resolve_credential_errors_when_vault_connection_deleted_after_save() {
+        // Built directly (not via service_with) so the test keeps its own
+        // handle to the SecretManagerService and can delete the connection
+        // between save() and resolve_credential(), simulating a dangling
+        // reference.
+        let sm_repo = FakeSecretManagerRepo(Mutex::new(vec![sample_connection("conn-1")]));
+        let secret_manager = Arc::new(SecretManagerService::new(
+            Box::new(sm_repo),
+            Arc::new(FakeSecretStore),
+            Arc::new(FakeVaultFetcher {
+                secret_value_result: Ok(Some("sk-abc123".to_string())),
+            }),
+        ));
+        let service = AgentConfigService::new(Box::new(FakeAgentConfigRepo::new()), Arc::clone(&secret_manager));
+        service
+            .save(sample_config("agent-1", "conn-1"))
+            .expect("save while connection still exists");
+
+        secret_manager.delete("conn-1").expect("delete connection");
+
+        let err = service
+            .resolve_credential("agent-1")
+            .await
+            .expect_err("a dangling vault_connection_id must error, not panic");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_agent_config_fails_when_command_not_found() {
+        let service = service_with(Ok(Some("sk-abc123".to_string())), true);
+        let mut config = sample_config("agent-1", "conn-1");
+        config.command = "definitely-not-a-real-binary-xyz123".to_string();
+        service.save(config).expect("save");
+
+        let err = service
+            .test_agent_config("agent-1")
+            .await
+            .expect_err("nonexistent command must fail the test");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn test_agent_config_fails_when_credential_stale_even_if_command_exists() {
+        let service = service_with(Ok(None), true);
+        let mut config = sample_config("agent-1", "conn-1");
+        // env!("CARGO") is set by Cargo at build time to the exact cargo
+        // binary running this test — a real, executable, cross-platform-safe
+        // path.
+        config.command = env!("CARGO").to_string();
+        service.save(config).expect("save");
+
+        let err = service
+            .test_agent_config("agent-1")
+            .await
+            .expect_err("stale credential must fail the test even though the command resolves");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn test_agent_config_succeeds_when_command_and_credential_resolve() {
+        let service = service_with(Ok(Some("sk-abc123".to_string())), true);
+        let mut config = sample_config("agent-1", "conn-1");
+        config.command = env!("CARGO").to_string();
+        service.save(config).expect("save");
+
+        service
+            .test_agent_config("agent-1")
+            .await
+            .expect("test_agent_config should succeed");
     }
 }
