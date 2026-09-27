@@ -268,6 +268,11 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   placeholder='ANTHROPIC_API_KEY'
                   className='h-8 text-sm'
                 />
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  If the vault secret is a short-lived token (e.g. an OAuth access token) rather
+                  than a static API key, sessions may need to be restarted after it expires — the
+                  value is only re-fetched when a new agent session starts.
+                </p>
               </div>
               <div>
                 <Label className='text-sm'>Vault Connection</Label>
