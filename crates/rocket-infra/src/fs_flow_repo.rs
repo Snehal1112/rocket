@@ -117,6 +117,7 @@ impl FlowRepository for FsFlowRepo {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use rocket_flow::{InlineHeader, InlineRequestData, RequestSource};
 
     fn setup() -> (TempDir, FsFlowRepo) {
         let dir = TempDir::new().expect("create temp dir");
@@ -138,6 +139,10 @@ mod tests {
             }],
             edges: Vec::new(),
         }
+    }
+
+    fn repo_pair() -> (TempDir, FsFlowRepo) {
+        setup()
     }
 
     #[test]
@@ -256,5 +261,113 @@ mod tests {
         // list() should skip the malformed file and return only the valid one.
         let names = repo.list("acme").expect("list must succeed despite malformed file");
         assert_eq!(names, vec!["Good Flow".to_string()]);
+    }
+
+    #[test]
+    fn request_node_with_saved_source_roundtrips() {
+        let (_dir, repo) = setup();
+        let flow = Flow {
+            name: "Saved Source Flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "node-1".to_string(),
+                kind: FlowNodeKind::Request {
+                    label: "Get User".to_string(),
+                    source: RequestSource::Saved {
+                        request_path: "users/get-user.yml".to_string(),
+                    },
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+        };
+        repo.save("acme", &flow).expect("save");
+        let loaded = repo.get("acme", "Saved Source Flow").expect("get");
+        assert_eq!(loaded, flow);
+    }
+
+    #[test]
+    fn request_node_with_inline_source_roundtrips() {
+        let (_dir, repo) = repo_pair();
+        let flow = Flow {
+            name: "Inline Source Flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "node-1".to_string(),
+                kind: FlowNodeKind::Request {
+                    label: "Ad Hoc Login".to_string(),
+                    source: RequestSource::Inline {
+                        request: InlineRequestData {
+                            method: "POST".to_string(),
+                            url: "https://api.example.com/login".to_string(),
+                            headers: vec![InlineHeader {
+                                name: "Content-Type".to_string(),
+                                value: "application/json".to_string(),
+                            }],
+                            body: Some("{\"user\":\"{{u}}\"}".to_string()),
+                        },
+                    },
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+        };
+        repo.save("acme", &flow).expect("save");
+        let loaded = repo.get("acme", "Inline Source Flow").expect("get");
+        assert_eq!(loaded, flow);
+    }
+
+    #[test]
+    fn inline_request_with_no_body_roundtrips_as_none() {
+        let (_dir, repo) = repo_pair();
+        let flow = Flow {
+            name: "No Body Flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "node-1".to_string(),
+                kind: FlowNodeKind::Request {
+                    label: "Ping".to_string(),
+                    source: RequestSource::Inline {
+                        request: InlineRequestData {
+                            method: "GET".to_string(),
+                            url: "https://api.example.com/ping".to_string(),
+                            headers: Vec::new(),
+                            body: None,
+                        },
+                    },
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+        };
+        repo.save("acme", &flow).expect("save");
+        let loaded = repo.get("acme", "No Body Flow").expect("get");
+        match &loaded.nodes[0].kind {
+            FlowNodeKind::Request { source: RequestSource::Inline { request }, .. } => {
+                assert_eq!(request.body, None);
+                assert!(request.headers.is_empty());
+            }
+            other => panic!("expected an Inline Request node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn all_three_node_kinds_in_one_flow_roundtrip_together() {
+        let (_dir, repo) = repo_pair();
+        let mut flow = sample("Mixed Kinds Flow");
+        flow.nodes.push(FlowNode {
+            id: "node-2".to_string(),
+            kind: FlowNodeKind::Request {
+                label: "Call".to_string(),
+                source: RequestSource::Saved { request_path: "call.yml".to_string() },
+            },
+            position: NodePosition { x: 200.0, y: 0.0 },
+        });
+        flow.nodes.push(FlowNode {
+            id: "node-3".to_string(),
+            kind: FlowNodeKind::Output { label: "Result".to_string() },
+            position: NodePosition { x: 400.0, y: 0.0 },
+        });
+        repo.save("acme", &flow).expect("save");
+        let loaded = repo.get("acme", "Mixed Kinds Flow").expect("get");
+        assert_eq!(loaded.nodes.len(), 3);
+        assert_eq!(loaded, flow);
     }
 }
