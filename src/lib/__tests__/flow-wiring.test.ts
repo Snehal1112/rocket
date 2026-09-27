@@ -45,6 +45,19 @@ describe('buildEdgeFromConnection', () => {
     expect(edge?.id).toBeTruthy();
   });
 
+  it('does not block a connection that closes a cycle (Save rejects cycles, not the canvas)', () => {
+    // b -> a, when a -> b already exists. Cycle rejection is save_flow's job.
+    const edge = buildEdgeFromConnection(
+      { source: 'b', target: 'a', sourceHandle: 'result', targetHandle: 'url' },
+      {
+        id: 'b',
+        kind: { kind: 'Input', label: 'b', value: 'x' },
+        position: { x: 0, y: 0 },
+      },
+    );
+    expect(edge).toMatchObject({ sourceNodeId: 'b', targetNodeId: 'a', targetField: 'url' });
+  });
+
   it('returns null when the connection is missing a target handle', () => {
     const edge = buildEdgeFromConnection(
       { source: 'node-a', sourceHandle: 'result', target: 'node-c', targetHandle: null },

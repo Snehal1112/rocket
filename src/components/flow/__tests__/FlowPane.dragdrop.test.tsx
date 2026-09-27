@@ -66,6 +66,36 @@ describe('FlowPane drag-and-drop', () => {
     });
   });
 
+  it('dropping the same request twice creates two independent nodes', () => {
+    const { rerender } = render(
+      <FlowPane tab={baseTab} groupId={usePaneStore.getState().activeGroupId} />,
+    );
+    const dataTransfer = {
+      getData: (type: string) =>
+        type === FLOW_REQUEST_DRAG_MIME
+          ? encodeFlowRequestDragPayload({
+              collection: 'my-collection',
+              path: 'auth/refresh.yml',
+              name: 'Refresh',
+              method: 'POST',
+            })
+          : '',
+    };
+    fireEvent.drop(screen.getByTestId('flow-canvas'), { dataTransfer, clientX: 10, clientY: 10 });
+    // FlowPane reads nodes from its tab prop, so pass the updated tab back.
+    rerender(<FlowPane tab={getFlowTab()} groupId={usePaneStore.getState().activeGroupId} />);
+    fireEvent.drop(screen.getByTestId('flow-canvas'), { dataTransfer, clientX: 300, clientY: 10 });
+
+    const { nodes } = getFlowTab();
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].id).not.toBe(nodes[1].id);
+    for (const node of nodes) {
+      expect(node.kind).toMatchObject({
+        source: { type: 'Saved', requestPath: 'auth/refresh.yml' },
+      });
+    }
+  });
+
   it('ignores a drop whose dataTransfer carries no flow-request payload', () => {
     render(<FlowPane tab={baseTab} groupId={usePaneStore.getState().activeGroupId} />);
     const canvas = screen.getByTestId('flow-canvas');
