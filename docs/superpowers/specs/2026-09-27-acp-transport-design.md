@@ -65,7 +65,7 @@ pub trait AcpSessionClient: Send + Sync {
 }
 ```
 
-This trait stays protocol-focused — it has no knowledge of `DomainEvent` or Tauri, keeping `rocket-acp`'s dependencies to `rocket-shared` + serde + the new `agent-client-protocol` crate. Streaming comes back through a plain channel, not a publisher.
+This trait stays protocol-focused — it has no knowledge of `DomainEvent`, Tauri, or the `agent-client-protocol` crate's own types, using only primitives, `DomainResult`, and `UnboundedSender<String>`. `rocket-acp` therefore gains `async-trait` (for `#[async_trait]`) and `tokio` (for `UnboundedSender`) as new dependencies — **not** `agent-client-protocol` itself, which is needed only by the concrete implementation below. Streaming comes back through a plain channel, not a publisher.
 
 `rocket-infra` gets the concrete implementation, `AcpAgentClient`, built on `agent-client-protocol`. It holds a session map (`Arc<Mutex<HashMap<String, RunningSession>>>`, keyed by the ACP-provided `sessionId` directly — no separate Rocket-side id translation layer), spawns the process, and forwards `session/update` `agent_message_chunk` notifications into the `chunk_tx` channel passed to `send_prompt`. Other update kinds (`tool_call`, `plan`, `usage_update`, etc.) are ignored — out of scope until subproject D.
 
@@ -102,11 +102,11 @@ This is a normal small extension for a new consumer's sake, not scope creep — 
 **`send_prompt(session_id, text)`**
 1. `AcpSessionService` creates an `UnboundedSender`/`Receiver` pair, spawns a task reading the receiver and publishing `DomainEvent::AcpSessionChunk` per chunk, then calls `AcpSessionClient::send_prompt(session_id, text, tx)`.
 2. The infra impl sends `session/prompt`; as `agent_message_chunk` updates arrive, their text is forwarded through `tx`.
-3. When `session/prompt` resolves with `stopReason`, `AcpSessionService` publishes `DomainEvent::AcpSessionFinished { session_id, stop_reason }` and returns the stop reason.
+3. When `session/prompt` resolves with `stopReason`, `AcpSessionService` **drops its `tx` handle and awaits the chunk-reading task's completion** (it exits once the channel closes and drains) before publishing `DomainEvent::AcpSessionFinished { session_id, stop_reason }`. This ordering is required: `AcpSessionChunk` events for every chunk the agent sent must reach `TauriEventBus` before `AcpSessionFinished` does, or a consumer (subproject C's UI) could observe "finished" while chunk text is still arriving. Needs an explicit test pinning this ordering, not just an assumption that `tokio::spawn` scheduling happens to cooperate.
 
-**`end_session(session_id)`** — infra impl closes stdin / drops the connection and removes the map entry. No ACP-level shutdown handshake exists (see Protocol grounding), so this is plain process teardown.
+**`end_session(session_id)`** — infra impl **explicitly kills the child process** (not merely dropping the connection handle/stdin), then removes the map entry. This matters because neither `std::process::Child` nor `tokio::process::Child` kills the child on drop by default — that's opt-in behavior (e.g. `kill_on_drop`), never automatic — so "drop the connection" alone would leak the process. No ACP-level shutdown handshake exists (see Protocol grounding), so an explicit kill is the only teardown mechanism available.
 
-**Crash/hang handling:** if the child's stdout closes or a request errors mid-call, the infra impl surfaces this as a `DomainError`; `AcpSessionService` publishes `DomainEvent::AcpSessionFailed` and removes the session from its map. `send_prompt` has a bounded timeout — a fixed 120-second constant for this subproject, not user-configurable — on expiry it is treated identically to a crash: `DomainError::Internal` + `AcpSessionFailed` + map cleanup.
+**Crash/hang handling:** if the child's stdout closes or a request errors mid-call, the infra impl surfaces this as a `DomainError`; `AcpSessionService` publishes `DomainEvent::AcpSessionFailed` and removes the session from its map (the process is already gone in this case — no kill needed). `send_prompt` has a bounded timeout — a fixed 120-second constant for this subproject, not user-configurable — on expiry it is treated identically to a crash, **plus an explicit process kill**: the process is genuinely still running (hung, not crashed), so skipping the kill here would leak it indefinitely, with the injected credential still present in its environment for as long as it lives. Sequence on timeout: kill the process, then `DomainError::Internal` + `AcpSessionFailed` + map cleanup.
 
 ## Credential handling & security
 
@@ -125,7 +125,10 @@ This is a normal small extension for a new consumer's sake, not scope creep — 
 | Agent crash or protocol-level error | `DomainError::Internal`, session removed from the map, `AcpSessionFailed` published |
 | `send_prompt` timeout (fixed 120s) | `DomainError::Internal` with a message like `"agent did not respond within 120s"`, same cleanup as a crash |
 
-**Review Focus for the eventual plan:** calling `send_prompt`/`end_session` on an already-removed session must return `NotFound` cleanly, not panic — this falls out naturally from the map lookup as long as failure/end always removes the entry, but needs an explicit test pinning it.
+**Review Focus for the eventual plan:**
+- Calling `send_prompt`/`end_session` on an already-removed session must return `NotFound` cleanly, not panic — this falls out naturally from the map lookup as long as failure/end always removes the entry, but needs an explicit test pinning it.
+- Every `AcpSessionChunk` event for a prompt must be published before that prompt's `AcpSessionFinished` event (see Session lifecycle) — needs an explicit test, not an assumption about task-scheduling order.
+- `end_session` and the timeout path must actually terminate the child process, not merely stop tracking it (see Session lifecycle) — needs an explicit test that the process is gone (e.g. asserting its PID no longer exists, or that a wait/exit-status call resolves) after each path, not just that the map entry was removed.
 
 ## Tauri IPC surface
 
