@@ -45,6 +45,13 @@ impl AgentConfigService {
         self.repo.delete(id)
     }
 
+    /// Fetches one agent's full configuration by id — needed by `AcpSessionService`
+    /// (subproject B), which requires `command`/`args`/`working_dir`/
+    /// `credential_env_var`, not just the resolved credential value.
+    pub fn get(&self, id: &str) -> DomainResult<AgentConfig> {
+        self.get_config(id)
+    }
+
     /// Resolves the agent's API key from RocketVault. A vault secret that no
     /// longer exists maps to `NotFound`; connection, keychain, and transport
     /// failures from `SecretManagerService` propagate unchanged.
@@ -503,5 +510,24 @@ mod tests {
             .test_agent_config("agent-1")
             .await
             .expect("test_agent_config should succeed");
+    }
+
+    #[test]
+    fn get_returns_config_when_it_exists() {
+        let service = service_with(Ok(None), true);
+        service
+            .save(sample_config("agent-1", "conn-1"))
+            .expect("save");
+        let config = service.get("agent-1").expect("get should find the config");
+        assert_eq!(config.id, "agent-1");
+    }
+
+    #[test]
+    fn get_errors_when_unknown() {
+        let service = service_with(Ok(None), true);
+        let err = service
+            .get("no-such-agent")
+            .expect_err("unknown id must error");
+        assert!(matches!(err, DomainError::NotFound(_)));
     }
 }
