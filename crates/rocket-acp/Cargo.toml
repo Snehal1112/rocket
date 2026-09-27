@@ -4,8 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 rocket-shared.workspace = true
 serde.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
