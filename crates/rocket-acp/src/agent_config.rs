@@ -20,6 +20,17 @@ pub struct AgentConfig {
     pub vault_secret_name: String,
 }
 
+use rocket_shared::error::DomainResult;
+
+/// Persistence boundary for `AgentConfig`. No I/O in this crate —
+/// `rocket-infra`'s `FsAgentConfigRepo` (Plan 02) implements this.
+pub trait AgentConfigRepository: Send + Sync {
+    fn list(&self) -> DomainResult<Vec<AgentConfig>>;
+    fn get(&self, id: &str) -> DomainResult<Option<AgentConfig>>;
+    fn save(&self, config: &AgentConfig) -> DomainResult<()>;
+    fn delete(&self, id: &str) -> DomainResult<()>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +86,66 @@ mod tests {
         let c: AgentConfig = serde_json::from_str(json).expect("deserialize minimal AgentConfig");
         assert_eq!(c.working_dir, None);
         assert!(c.args.is_empty());
+    }
+
+    use std::sync::Mutex;
+
+    struct FakeRepo(Mutex<Vec<AgentConfig>>);
+    impl FakeRepo {
+        fn new() -> Self {
+            Self(Mutex::new(Vec::new()))
+        }
+    }
+    impl AgentConfigRepository for FakeRepo {
+        fn list(&self) -> DomainResult<Vec<AgentConfig>> {
+            Ok(self.0.lock().expect("lock FakeRepo").clone())
+        }
+        fn get(&self, id: &str) -> DomainResult<Option<AgentConfig>> {
+            Ok(self
+                .0
+                .lock()
+                .expect("lock FakeRepo")
+                .iter()
+                .find(|c| c.id == id)
+                .cloned())
+        }
+        fn save(&self, config: &AgentConfig) -> DomainResult<()> {
+            let mut guard = self.0.lock().expect("lock FakeRepo");
+            guard.retain(|c| c.id != config.id);
+            guard.push(config.clone());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> DomainResult<()> {
+            self.0.lock().expect("lock FakeRepo").retain(|c| c.id != id);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn repository_trait_save_get_delete_roundtrip() {
+        let repo = FakeRepo::new();
+        let c = sample();
+        repo.save(&c).expect("save config");
+        assert_eq!(repo.get("agent-1").expect("get config"), Some(c.clone()));
+        assert_eq!(repo.list().expect("list configs"), vec![c]);
+        repo.delete("agent-1").expect("delete config");
+        assert_eq!(repo.get("agent-1").expect("get after delete"), None);
+    }
+
+    #[test]
+    fn repository_save_replaces_existing_entry_with_same_id_instead_of_duplicating() {
+        let repo = FakeRepo::new();
+        repo.save(&sample()).expect("save first");
+        let mut updated = sample();
+        updated.label = "Renamed".to_string();
+        repo.save(&updated).expect("save update");
+        let all = repo.list().expect("list");
+        assert_eq!(all.len(), 1, "same id must replace, not append");
+        assert_eq!(all[0].label, "Renamed");
+    }
+
+    #[test]
+    fn trait_is_object_safe() {
+        fn _assert(_: Box<dyn AgentConfigRepository>) {}
     }
 }
