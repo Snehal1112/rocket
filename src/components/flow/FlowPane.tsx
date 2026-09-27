@@ -1,5 +1,6 @@
+import type { Connection } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,8 +11,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { buildEdgeFromConnection } from '@/lib/flow-wiring';
 import {
   type CollectionSummary,
+  type FlowEdge,
   type FlowNode,
   listCollections,
   listFlows,
@@ -21,6 +24,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowCanvas } from './FlowCanvas';
 import { NodePalette } from './NodePalette';
+import { WireExpressionPopover } from './WireExpressionPopover';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
@@ -34,6 +38,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [flowNames, setFlowNames] = useState<string[]>([]);
   const [newFlowName, setNewFlowName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
+  // Set by the popover's onCommit, so closing the popover can tell a commit
+  // from a cancel.
+  const committedEdgeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (tab.flowName === null) {
@@ -142,6 +150,19 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
   };
 
+  const handleConnect = (connection: Connection) => {
+    const sourceNode = tab.nodes.find((n) => n.id === connection.source);
+    if (!sourceNode) return;
+    const edge = buildEdgeFromConnection(connection, sourceNode);
+    if (!edge) return;
+    updateFlowEdges(tab.id, [...tab.edges, edge]);
+    setPendingEdge(edge); // Opens the popover immediately, per spec §6.
+  };
+
+  const pendingTargetNode = pendingEdge
+    ? tab.nodes.find((n) => n.id === pendingEdge.targetNodeId)
+    : undefined;
+
   return (
     <div className='relative h-full'>
       <NodePalette onAddNode={handleAddNode} />
@@ -151,12 +172,43 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         nodeStatus={tab.nodeStatus}
         onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
         onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
-        onConnect={() => {
-          /* Plan 10 replaces this with real edge-creation + the expression editor popover */
-        }}
+        onConnect={handleConnect}
         onAddNode={handleAddNode}
         flowCollectionName={tab.collectionName}
       />
+      {pendingEdge && pendingTargetNode && (
+        <WireExpressionPopover
+          edge={pendingEdge}
+          targetNode={pendingTargetNode}
+          open={pendingEdge !== null}
+          onOpenChange={(open) => {
+            if (open) return;
+            // A bare `headers` target is not a valid target_field (the
+            // backend rejects it). If the popover closes without a commit,
+            // drop that edge instead of leaving it to fail the run.
+            if (
+              committedEdgeIdRef.current !== pendingEdge.id &&
+              pendingEdge.targetField === 'headers'
+            ) {
+              updateFlowEdges(
+                tab.id,
+                tab.edges.filter((e) => e.id !== pendingEdge.id),
+              );
+            }
+            setPendingEdge(null);
+          }}
+          onCommit={(updated) => {
+            committedEdgeIdRef.current = updated.id;
+            updateFlowEdges(
+              tab.id,
+              tab.edges.map((e) => (e.id === updated.id ? updated : e)),
+            );
+          }}
+        >
+          {/* Plan 09's edge/handle DOM node the popover anchors to. */}
+          <span />
+        </WireExpressionPopover>
+      )}
     </div>
   );
 }

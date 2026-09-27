@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+import type { FlowNode } from '@/lib/tauri-api';
+import { buildEdgeFromConnection, defaultExpressionFor } from '../flow-wiring';
+
+const requestSource: FlowNode = {
+  id: 'node-a',
+  kind: {
+    kind: 'Request',
+    label: 'Login',
+    source: { type: 'Saved', requestPath: 'auth/login.yml' },
+  },
+  position: { x: 0, y: 0 },
+};
+
+const inputSource: FlowNode = {
+  id: 'node-b',
+  kind: { kind: 'Input', label: 'Username', value: 'alice' },
+  position: { x: 0, y: 0 },
+};
+
+describe('defaultExpressionFor', () => {
+  it('defaults to "response.body" for a Request source node', () => {
+    expect(defaultExpressionFor(requestSource)).toBe('response.body');
+  });
+
+  it('defaults to "response.body" for an Input source node too', () => {
+    // The backend exposes an Input node's value as response.body. A bare
+    // `value` is not bound and would fail the run.
+    expect(defaultExpressionFor(inputSource)).toBe('response.body');
+  });
+});
+
+describe('buildEdgeFromConnection', () => {
+  it('maps a React Flow connection into a FlowEdge with a generated id and default expression', () => {
+    const edge = buildEdgeFromConnection(
+      { source: 'node-a', sourceHandle: 'result', target: 'node-c', targetHandle: 'url' },
+      requestSource,
+    );
+    expect(edge).toMatchObject({
+      sourceNodeId: 'node-a',
+      targetNodeId: 'node-c',
+      targetField: 'url',
+      expression: 'response.body',
+    });
+    expect(edge?.id).toBeTruthy();
+  });
+
+  it('returns null when the connection is missing a target handle', () => {
+    const edge = buildEdgeFromConnection(
+      { source: 'node-a', sourceHandle: 'result', target: 'node-c', targetHandle: null },
+      requestSource,
+    );
+    expect(edge).toBeNull();
+  });
+});
