@@ -20,6 +20,8 @@ touches the filesystem or any I/O directly — those concerns live in
 | `GitAppService` | Full git workflow (status, stage, commit, push/pull/fetch, branch, stash, conflicts) with event publishing. |
 | `HistoryService` | List, search, and clear request history. |
 | `TemplateService` | CRUD for saved request templates (stored via `rocket-history`). |
+| `AgentConfigService` | CRUD for ACP agent configs; `resolve_credential` fetches the agent's API key from RocketVault. |
+| `AcpSessionService` | Starts/prompts/ends ACP agent sessions via `Box<dyn AcpSessionClient>`; publishes `AcpSessionStarted/Chunk/Finished/Failed` (all chunks before the terminal event); fixed 120s prompt timeout force-kills the session. |
 | `WorkspaceService` | Create, switch, rename, close, delete, pin/unpin workspaces; link external collections; toggle multi-workspace mode; mutates the shared `Arc<Mutex<PathBuf>>` active path on switch. |
 
 ## Service Method Details

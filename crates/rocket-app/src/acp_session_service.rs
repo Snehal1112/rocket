@@ -7,6 +7,12 @@ use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::agent_config_service::AgentConfigService;
 
+/// Orchestrates ACP agent sessions. It resolves an agent's command and
+/// credential through `AgentConfigService`, then drives the injected
+/// `AcpSessionClient`. It publishes `AcpSession*` domain events for the UI.
+///
+/// This service keeps no session map of its own. The session client owns
+/// session state and process lifecycle.
 pub struct AcpSessionService {
     session_client: Box<dyn AcpSessionClient>,
     event_publisher: Box<dyn EventPublisher>,
@@ -14,9 +20,11 @@ pub struct AcpSessionService {
     prompt_timeout: Duration,
 }
 
+/// Fixed per-prompt timeout from the spec. It is not user-configurable.
 const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl AcpSessionService {
+    /// Production constructor. Uses the fixed 120-second prompt timeout.
     pub fn new(
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
@@ -47,6 +55,13 @@ impl AcpSessionService {
         }
     }
 
+    /// Spawns the configured agent and opens an ACP session in `cwd`.
+    ///
+    /// `cwd` comes from the caller, not from `AgentConfig::working_dir`, as
+    /// the spec requires. Config lookup and credential resolution errors
+    /// propagate unchanged. No event is published on failure, because no
+    /// session id exists yet. On success, `AcpSessionStarted` is published
+    /// and the new session id is returned.
     pub async fn start_session(&self, agent_config_id: &str, cwd: &str) -> DomainResult<String> {
         let config = self.agent_config_service.get(agent_config_id)?;
         let credential = self
@@ -58,12 +73,33 @@ impl AcpSessionService {
             .session_client
             .start_session(&config.command, &config.args, cwd, &env)
             .await?;
-        self.event_publisher.publish(DomainEvent::AcpSessionStarted {
-            session_id: session_id.clone(),
-        });
+        self.event_publisher
+            .publish(DomainEvent::AcpSessionStarted {
+                session_id: session_id.clone(),
+            });
         Ok(session_id)
     }
 
+    /// Sends one prompt turn and returns the agent's stop reason string.
+    ///
+    /// Each streamed chunk is published as `AcpSessionChunk`. Then exactly one
+    /// terminal event follows: `AcpSessionFinished` on success, or
+    /// `AcpSessionFailed` on error or timeout. The error is still returned to
+    /// the caller in both failure cases.
+    ///
+    /// Ordering: every `AcpSessionChunk` is published before the terminal
+    /// event. `tokio::join!` only completes once the chunk channel closes,
+    /// and it closes only when the client's `send_prompt` future has resolved
+    /// and dropped its sender. This holds for any client implementation.
+    ///
+    /// Completeness is a separate client-side contract: the client must
+    /// forward all of a turn's chunks before its `send_prompt` resolves.
+    /// `AcpAgentClient` relies on the ACP connection dispatching a turn's
+    /// `session/update` notifications before its `PromptResponse`. A chunk
+    /// arriving later would be dropped, never reordered.
+    ///
+    /// On timeout, the session is force-killed via `end_session`, because a
+    /// hung agent process is still running.
     pub async fn send_prompt(&self, session_id: &str, prompt: String) -> DomainResult<String> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let session_id_owned = session_id.to_string();
@@ -85,10 +121,11 @@ impl AcpSessionService {
 
         match joined {
             Ok((_, Ok(stop_reason))) => {
-                self.event_publisher.publish(DomainEvent::AcpSessionFinished {
-                    session_id: session_id.to_string(),
-                    stop_reason: stop_reason.clone(),
-                });
+                self.event_publisher
+                    .publish(DomainEvent::AcpSessionFinished {
+                        session_id: session_id.to_string(),
+                        stop_reason: stop_reason.clone(),
+                    });
                 Ok(stop_reason)
             }
             Ok((_, Err(e))) => {
@@ -99,6 +136,9 @@ impl AcpSessionService {
                 Err(e)
             }
             Err(_elapsed) => {
+                // The kill result is ignored on purpose. The timeout is the
+                // error the caller must see. A kill failure, for example when
+                // the session already crashed and was removed, changes nothing.
                 let _ = self.session_client.end_session(session_id).await;
                 let message = format!(
                     "agent did not respond within {}s",
@@ -113,6 +153,8 @@ impl AcpSessionService {
         }
     }
 
+    /// Ends the session and kills its agent process. No event is published.
+    /// An unknown or already-ended session id returns the client's error.
     pub async fn end_session(&self, session_id: &str) -> DomainResult<()> {
         self.session_client.end_session(session_id).await
     }
@@ -358,7 +400,10 @@ mod tests {
     }
     impl EventPublisher for FakeEventPublisher {
         fn publish(&self, event: DomainEvent) {
-            self.events.lock().expect("lock FakeEventPublisher").push(event);
+            self.events
+                .lock()
+                .expect("lock FakeEventPublisher")
+                .push(event);
         }
     }
 
@@ -414,7 +459,11 @@ mod tests {
         assert_eq!(stop_reason, "end_turn");
 
         let events = publisher.events.lock().expect("lock");
-        assert_eq!(events.len(), 3, "expected 2 chunks then 1 finished, got {events:?}");
+        assert_eq!(
+            events.len(),
+            3,
+            "expected 2 chunks then 1 finished, got {events:?}"
+        );
         match (&events[0], &events[1], &events[2]) {
             (
                 DomainEvent::AcpSessionChunk { text: t0, .. },
