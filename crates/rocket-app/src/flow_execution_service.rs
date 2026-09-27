@@ -28,6 +28,10 @@ impl RequestExecutionService {
     /// whose `body` is that value's raw string, so a single expression
     /// convention ("response.xxx") works uniformly regardless of which kind
     /// of node produced the output.
+    ///
+    /// A string result is returned as-is and other JSON values are
+    /// stringified. A `null` or `undefined` result is an `InvalidInput`
+    /// error, so a wire never injects the literal text "null".
     pub async fn resolve_flow_wire_expression(
         &self,
         collection: &str,
@@ -52,10 +56,15 @@ impl RequestExecutionService {
         let result = self
             .evaluate_var_expression(collection, expression, &response_json)
             .await?;
-        Ok(match result {
-            serde_json::Value::String(s) => s,
-            other => other.to_string(),
-        })
+        match result {
+            // A `null` or `undefined` result would wire the literal text "null"
+            // into the request, so it is an error instead.
+            serde_json::Value::Null => Err(DomainError::InvalidInput(format!(
+                "expression '{expression}' resolved to null/undefined"
+            ))),
+            serde_json::Value::String(s) => Ok(s),
+            other => Ok(other.to_string()),
+        }
     }
 }
 
@@ -589,6 +598,42 @@ mod tests {
             .expect_err("a throwing expression must be an Err, not a panic");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn null_result_is_invalid_input_not_the_string_null() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::Value::Null,
+            }),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let err = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body.missing")
+            .await
+            .expect_err("a null result must be an Err, not Ok(\"null\")");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn non_string_result_is_stringified() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!(42),
+            }),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.status")
+            .await
+            .expect("a number must resolve");
+
+        assert_eq!(value, "42");
     }
 
     use rocket_flow::{InlineHeader, NodePosition};
