@@ -94,11 +94,24 @@ inline below and the index has been updated to match.**
 **Files:**
 - Create: `crates/rocket-app/src/flow_execution_service.rs`
 - Modify: `crates/rocket-app/src/lib.rs`
+- Modify: `crates/rocket-app/Cargo.toml` (add the `rocket-flow` dependency)
 
 **Interfaces:**
 - Produces: `CapturedOutput` enum, `RequestExecutionService::resolve_flow_wire_expression(&self, collection: &str, output: &CapturedOutput, expression: &str) -> DomainResult<String>` — consumed by Plan 06 Task 2.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add the `rocket-flow` dependency**
+
+`crates/rocket-app/Cargo.toml` does not yet depend on `rocket-flow` (Plan 01)
+— this task's imports need it. Add to `[dependencies]`:
+
+```toml
+rocket-flow.workspace = true
+```
+
+(The workspace root `Cargo.toml` already declares this path dependency from
+Plan 01 — this is just adding it to `rocket-app`'s own dependency list.)
+
+- [ ] **Step 2: Write the failing tests**
 
 ```rust
 // crates/rocket-app/src/flow_execution_service.rs
@@ -227,7 +240,7 @@ mod tests {
             &self,
             _c: &str,
             _p: &str,
-            _vars: &[rocket_collection::CollectionVariable],
+            _vars: Vec<rocket_collection::CollectionVariable>,
         ) -> DomainResult<()> {
             unimplemented!()
         }
@@ -242,7 +255,7 @@ mod tests {
             &self,
             _c: &str,
             _p: &str,
-            _vars: &[rocket_collection::CollectionVariable],
+            _vars: Vec<rocket_collection::CollectionVariable>,
         ) -> DomainResult<()> {
             unimplemented!()
         }
@@ -445,13 +458,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
 Run: `cargo test -p rocket-app flow_execution_service::tests -j4`
 Expected: FAIL — `resolve_flow_wire_expression` does not exist yet (compile
 error).
 
-- [ ] **Step 3: Implement `resolve_flow_wire_expression`**
+- [ ] **Step 4: Implement `resolve_flow_wire_expression`**
 
 ```rust
 // crates/rocket-app/src/flow_execution_service.rs (add above the tests module)
@@ -497,7 +510,7 @@ impl RequestExecutionService {
 }
 ```
 
-- [ ] **Step 4: Register the module**
+- [ ] **Step 5: Register the module**
 
 In `crates/rocket-app/src/lib.rs`, add alongside the existing `pub mod
 execution_service;` declaration:
@@ -507,15 +520,15 @@ pub mod flow_execution_service;
 pub use flow_execution_service::CapturedOutput;
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cargo test -p rocket-app flow_execution_service::tests -j4`
 Expected: PASS — 3 tests.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add crates/rocket-app/src/flow_execution_service.rs crates/rocket-app/src/lib.rs
+git add crates/rocket-app/src/flow_execution_service.rs crates/rocket-app/src/lib.rs crates/rocket-app/Cargo.toml Cargo.lock
 git commit -m "feat(app): add Flow wiring expression resolution"
 ```
 
