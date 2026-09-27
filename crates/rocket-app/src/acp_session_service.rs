@@ -112,6 +112,10 @@ impl AcpSessionService {
             }
         }
     }
+
+    pub async fn end_session(&self, session_id: &str) -> DomainResult<()> {
+        self.session_client.end_session(session_id).await
+    }
 }
 
 #[cfg(test)]
@@ -423,5 +427,155 @@ mod tests {
             }
             other => panic!("expected [Chunk, Chunk, Finished] in order, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn end_session_delegates_to_session_client() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+        );
+
+        service
+            .end_session("session-1")
+            .await
+            .expect("end_session should succeed");
+        assert!(end_session_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn start_session_unknown_agent_config_id_errors() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+        );
+
+        let err = service
+            .start_session("no-such-agent", "/tmp")
+            .await
+            .expect_err("unknown agent_config_id must error");
+        assert!(matches!(err, DomainError::NotFound(_)));
+        assert!(
+            publisher.events.lock().expect("lock").is_empty(),
+            "no event should publish when config resolution fails before any session starts"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_session_propagates_spawn_failure() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            start_should_fail: true,
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+        );
+
+        let err = service
+            .start_session("agent-1", "/tmp")
+            .await
+            .expect_err("spawn failure must propagate");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn start_session_propagates_credential_resolution_failure_unchanged() {
+        // Ok(None) simulates a stale/deleted vault secret — AgentConfigService
+        // maps this to NotFound (proven by its own tests in subproject A);
+        // this test's job is narrower: prove AcpSessionService::start_session
+        // doesn't re-wrap or swallow that result on its way through.
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service_with(FakeVaultFetcher {
+                secret_value_result: Ok(None),
+            }),
+        );
+
+        let err = service
+            .start_session("agent-1", "/tmp")
+            .await
+            .expect_err("a stale vault secret must fail start_session, not silently proceed");
+        assert!(matches!(err, DomainError::NotFound(_)));
+        assert!(
+            publisher.events.lock().expect("lock").is_empty(),
+            "no event should publish when credential resolution fails before any session starts"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_prompt_failure_publishes_failed_and_returns_the_error() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_should_fail: true,
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+        );
+
+        let err = service
+            .send_prompt("session-1", "hi".to_string())
+            .await
+            .expect_err("a crashed/errored prompt must return an error");
+        assert!(matches!(err, DomainError::Internal(_)));
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+            "AcpSessionFailed must be published, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_prompt_timeout_kills_the_session_and_publishes_failed() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_delay: Duration::from_millis(200),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = AcpSessionService::with_prompt_timeout(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            Duration::from_millis(20),
+        );
+
+        let err = service
+            .send_prompt("session-1", "hi".to_string())
+            .await
+            .expect_err("a hung prompt must time out as an error");
+        assert!(matches!(err, DomainError::Internal(_)));
+        assert!(
+            end_session_called.load(Ordering::SeqCst),
+            "timeout must force-kill the session via end_session"
+        );
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+            "AcpSessionFailed must be published on timeout, got {events:?}"
+        );
     }
 }
