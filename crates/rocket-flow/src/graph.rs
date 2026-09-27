@@ -4,14 +4,33 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum FlowGraphError {
+    /// Holds the nodes that lie on a cycle (or on a path between two
+    /// cycles). Nodes that are only downstream of a cycle are left out.
     #[error("cycle detected through node(s): {node_ids:?}")]
     Cycle { node_ids: Vec<String> },
     #[error("edge references unknown node: {node_id}")]
     UnknownNode { node_id: String },
+    /// Two nodes in `flow.nodes` share the same id.
+    #[error("duplicate node id: {node_id}")]
+    DuplicateNode { node_id: String },
 }
 
+/// Kahn's-algorithm topological sort. Returns node ids in an order where
+/// every node appears after all nodes it depends on (i.e. after every node
+/// that has an edge pointing *into* it). Independent nodes/branches may
+/// appear in either relative order.
+///
+/// Duplicate node ids and edges to unknown nodes are rejected before any
+/// sorting starts.
 pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
-    let node_ids: HashSet<&str> = flow.nodes.iter().map(|n| n.id.as_str()).collect();
+    let mut node_ids: HashSet<&str> = HashSet::with_capacity(flow.nodes.len());
+    for node in &flow.nodes {
+        if !node_ids.insert(node.id.as_str()) {
+            return Err(FlowGraphError::DuplicateNode {
+                node_id: node.id.clone(),
+            });
+        }
+    }
 
     for edge in &flow.edges {
         if !node_ids.contains(edge.source_node_id.as_str()) {
@@ -28,8 +47,11 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
 
     let mut in_degree: HashMap<&str, usize> =
         flow.nodes.iter().map(|n| (n.id.as_str(), 0)).collect();
-    let mut adjacency: HashMap<&str, Vec<&str>> =
-        flow.nodes.iter().map(|n| (n.id.as_str(), Vec::new())).collect();
+    let mut adjacency: HashMap<&str, Vec<&str>> = flow
+        .nodes
+        .iter()
+        .map(|n| (n.id.as_str(), Vec::new()))
+        .collect();
 
     for edge in &flow.edges {
         adjacency
@@ -41,11 +63,13 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
             .expect("target_node_id validated against node_ids above") += 1;
     }
 
+    // Node ids are unique, so each node is enqueued at most once. Each edge
+    // is therefore walked at most once, and a degree never drops below zero.
     let mut queue: VecDeque<&str> = flow
         .nodes
         .iter()
         .map(|n| n.id.as_str())
-        .filter(|id| in_degree[id] == 0)
+        .filter(|id| in_degree.get(id) == Some(&0))
         .collect();
 
     let mut order: Vec<String> = Vec::with_capacity(flow.nodes.len());
@@ -66,18 +90,70 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     }
 
     if order.len() != flow.nodes.len() {
-        let remaining: Vec<String> = flow
-            .nodes
-            .iter()
-            .map(|n| n.id.clone())
-            .filter(|id| !order.contains(id))
-            .collect();
         return Err(FlowGraphError::Cycle {
-            node_ids: remaining,
+            node_ids: cycle_nodes(flow, &in_degree),
         });
     }
 
     Ok(order)
+}
+
+/// Picks the nodes to report after Kahn's algorithm stalls. Every node it
+/// did not emit still has a non-zero in-degree. That set also holds nodes
+/// that only sit downstream of a cycle, so this peels those off by running
+/// Kahn's algorithm backwards over the leftover subgraph.
+fn cycle_nodes(flow: &Flow, in_degree: &HashMap<&str, usize>) -> Vec<String> {
+    let leftover: HashSet<&str> = in_degree
+        .iter()
+        .filter(|(_, &degree)| degree > 0)
+        .map(|(&id, _)| id)
+        .collect();
+
+    let mut out_degree: HashMap<&str, usize> = leftover.iter().map(|&id| (id, 0)).collect();
+    let mut predecessors: HashMap<&str, Vec<&str>> =
+        leftover.iter().map(|&id| (id, Vec::new())).collect();
+    for edge in &flow.edges {
+        let (source, target) = (edge.source_node_id.as_str(), edge.target_node_id.as_str());
+        if leftover.contains(source) && leftover.contains(target) {
+            *out_degree
+                .get_mut(source)
+                .expect("source is in leftover, which seeded out_degree") += 1;
+            predecessors
+                .get_mut(target)
+                .expect("target is in leftover, which seeded predecessors")
+                .push(source);
+        }
+    }
+
+    let mut queue: VecDeque<&str> = out_degree
+        .iter()
+        .filter(|(_, &degree)| degree == 0)
+        .map(|(&id, _)| id)
+        .collect();
+    let mut peeled: HashSet<&str> = HashSet::new();
+    while let Some(id) = queue.pop_front() {
+        peeled.insert(id);
+        for &prev in predecessors
+            .get(id)
+            .expect("queued ids come from out_degree, which shares keys with predecessors")
+        {
+            let degree = out_degree
+                .get_mut(prev)
+                .expect("prev came from predecessors, built only from leftover ids");
+            *degree -= 1;
+            if *degree == 0 {
+                queue.push_back(prev);
+            }
+        }
+    }
+
+    // Keep the caller's node order so the error message is stable.
+    flow.nodes
+        .iter()
+        .map(|n| n.id.as_str())
+        .filter(|id| leftover.contains(id) && !peeled.contains(id))
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(test)]
@@ -126,7 +202,10 @@ mod tests {
         };
         let mut order = topological_sort(&flow).expect("no cycle");
         order.sort();
-        assert_eq!(order, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            order,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
@@ -137,7 +216,10 @@ mod tests {
             edges: vec![edge("e1", "a", "b"), edge("e2", "b", "c")],
         };
         let order = topological_sort(&flow).expect("no cycle");
-        assert_eq!(order, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            order,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
@@ -225,6 +307,56 @@ mod tests {
             Err(FlowGraphError::UnknownNode {
                 node_id: "ghost".to_string()
             })
+        );
+    }
+
+    #[test]
+    fn cycle_error_leaves_out_nodes_only_downstream_of_the_cycle() {
+        // z -> a <-> b -> c -> d: z is upstream, c and d are downstream.
+        let flow = Flow {
+            name: "cycle-with-tail".to_string(),
+            nodes: vec![node("z"), node("a"), node("b"), node("c"), node("d")],
+            edges: vec![
+                edge("e0", "z", "a"),
+                edge("e1", "a", "b"),
+                edge("e2", "b", "a"),
+                edge("e3", "b", "c"),
+                edge("e4", "c", "d"),
+            ],
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Err(FlowGraphError::Cycle {
+                node_ids: vec!["a".to_string(), "b".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_node_id_is_rejected_without_panicking() {
+        let flow = Flow {
+            name: "dup".to_string(),
+            nodes: vec![node("a"), node("a"), node("b")],
+            edges: vec![edge("e1", "a", "b")],
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Err(FlowGraphError::DuplicateNode {
+                node_id: "a".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parallel_edges_between_the_same_nodes_still_sort() {
+        let flow = Flow {
+            name: "parallel".to_string(),
+            nodes: vec![node("b"), node("a")],
+            edges: vec![edge("e1", "a", "b"), edge("e2", "a", "b")],
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Ok(vec!["a".to_string(), "b".to_string()])
         );
     }
 }

@@ -211,10 +211,17 @@ pub trait FlowRepository: Send + Sync {
 // crates/rocket-flow/src/graph.rs (Plan 02)
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum FlowGraphError {
+    /// Nodes on a cycle (or on a path between two cycles); nodes that are
+    /// only downstream of a cycle are excluded.
     #[error("cycle detected through node(s): {node_ids:?}")]
     Cycle { node_ids: Vec<String> },
     #[error("edge references unknown node: {node_id}")]
     UnknownNode { node_id: String },
+    /// Added in the Plan 02 post-implementation review: duplicate ids would
+    /// otherwise underflow in-degree counts (debug panic) or yield a node
+    /// twice in the order (release). Checked before `UnknownNode`.
+    #[error("duplicate node id: {node_id}")]
+    DuplicateNode { node_id: String },
 }
 
 /// Kahn's-algorithm topological sort. Returns node ids in an order where

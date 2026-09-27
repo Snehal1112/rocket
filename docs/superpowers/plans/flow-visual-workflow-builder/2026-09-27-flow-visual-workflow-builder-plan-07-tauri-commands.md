@@ -803,6 +803,11 @@ impl FlowService {
                     "edge references unknown node: {node_id}"
                 ))
             }
+            FlowGraphError::DuplicateNode { node_id } => {
+                rocket_shared::error::DomainError::InvalidInput(format!(
+                    "flow has more than one node with id: {node_id}"
+                ))
+            }
         })?;
         self.flow_repo.save(collection, &flow)
     }
