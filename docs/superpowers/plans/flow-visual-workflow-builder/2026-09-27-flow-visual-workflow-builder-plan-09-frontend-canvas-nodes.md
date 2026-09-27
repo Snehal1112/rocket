@@ -45,11 +45,25 @@ Depends on Plan 08's `FlowTab`/pane-store actions/domain types.
   connection UI built in Plan 10, not by having one handle per header row.
   Say this explicitly in the `RequestNode` code comments so Plan 10's author
   isn't guessing.
-- `ReactFlowProvider` wraps the canvas exactly once, at the top of
-  `FlowPane`'s loaded-state branch — a component tree with no provider (or
-  more than one) breaks React Flow's internal state; this is the most common
-  integration mistake with this library and must be checked explicitly in
-  Step 3/Review Focus below.
+- `ReactFlowProvider` wraps the canvas exactly once, inside `FlowCanvas`
+  (as Task 1's code does) — not in `FlowPane`. A component tree with no
+  provider (or more than one) breaks React Flow's internal state; this is
+  the most common integration mistake with this library and must be checked
+  explicitly in Step 3/Review Focus below. (Corrected in the Plan 08 review:
+  this bullet used to say "at the top of `FlowPane`", which contradicted the
+  code below. Because the provider is inside `FlowCanvas`, `useReactFlow()`
+  cannot be called from `FlowPane` — see Plan 10 Step 6.)
+- The `FlowCanvas` wrapper `<div>` carries `data-testid='flow-canvas'`.
+  Plan 10's drag-and-drop test locates the canvas by this id.
+- `FlowPane`'s picker branch (as built in Plan 08, extended in its review)
+  now also has a "New flow name" `Input` + create `Button` that saves an
+  empty flow and opens it. Step 5 replaces only the final loaded-state
+  `return`; leave the picker branch as it is.
+- `FlowTab` (Plan 08, as built) has no per-node status detail. Until Plan 10
+  adds `nodeDetail`, `toRfNodes` passes only `{ kind, status }`, so
+  `RequestNode`'s `statusCode`/`durationMs`/`error` are always undefined on
+  the real canvas; they are exercised only by the node unit tests. Plan 10
+  Task 3 extends `toRfNodes` to spread `tab.nodeDetail?.[id]` into `data`.
 - Conventional-commit format for every Commit step.
 
 ## Review Focus
@@ -242,7 +256,7 @@ export function FlowCanvas({
 
   return (
     <ReactFlowProvider>
-      <div className='h-full w-full'>
+      <div data-testid='flow-canvas' className='h-full w-full'>
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}

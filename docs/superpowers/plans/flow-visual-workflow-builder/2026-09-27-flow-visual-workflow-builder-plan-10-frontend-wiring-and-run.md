@@ -24,6 +24,13 @@ interface contract every plan in this series depends on).
 - **Reconciled against Plan 08/09's actual output (verified on disk, not an assumption):** `FlowTab`'s discriminant field is `tabType` (not `type`) and its collection-scoping field is `collectionName: string | null` (not `collectionRoot`) — confirmed in `2026-09-27-flow-visual-workflow-builder-plan-08-frontend-types-and-tab.md`. Plan 08 provides three bespoke pane-store actions — `updateFlowNodes(tabId, nodes)`, `updateFlowEdges(tabId, edges)`, `patchFlowNodeStatus(tabId, nodeId, status)` — following this repo's one-setter-per-concern convention (`updateRequest`/`updateTabTitle`/`toggleRunnerEntry`). There is **no generic `updateFlowTab(tabId, patch)` action** — this repo doesn't use that pattern anywhere, so this plan does not invent one either. Where this plan needs state Plan 08 doesn't provide (run id/run state, and per-node status detail for the mockup's "200 OK · 184ms" line), it adds two small, additive extensions of its own in Task 3 (see that task's new pane-store step): a new `setFlowRunState` action, and a widened `patchFlowNodeStatus` signature with an optional 4th `detail` argument. Both follow Plan 08's exact `updateTabInTree`-based implementation shape.
 - **`RequestNode` naming — confirmed no collision, just distinct modules:** the existing sidebar row component is `src/components/collections/RequestNode.tsx`. Plan 09's React Flow node type is a *different* component at `src/components/flow/nodes/RequestNode.tsx`, also exported as `RequestNode`. Different files/import paths, so no compile-time collision — this plan's Task 1 imports only the sidebar one (as `RequestNodeProps`, for the drag payload) and never imports both in the same file, so no aliasing is needed here.
 - **`@xyflow/react` coordinate API — confirmed, not conditional:** Plan 09 installs `@xyflow/react` unpinned (`yarn add @xyflow/react`), i.e. whatever is current at implementation time (v12+, the `@xyflow/react` package name itself only exists from v12 onward — the pre-fork package was `reactflow`). `screenToFlowPosition` is the correct, current API name; there is no v11/`project` fallback to hedge for.
+- **Corrections from the Plan 08 post-implementation review (checked against the as-built code, commits 8b3ee94/395011e plus the review's own fix commit):**
+  - `openFlowTab(collectionName, flowName?)` returns `Promise<void>`, not a tab id. Tests `await` it and then look the tab up.
+  - The pane-store test file's Flow helpers are `findFirstFlowTab()` (no arguments; first `FlowTab` anywhere in the tree) and `updateTabInTreeForTest(root, tabId, updater)` (seeds a tab's fields). There is no `findFlowTab(root, id)` or `seedFlowTab`. Step 4's tests below use the real helpers.
+  - `FlowPane`'s props are `{ tab: FlowTab; groupId: string }`. `groupId` is required, so every `render(<FlowPane ... />)` must pass it.
+  - `ReactFlowProvider` and `<ReactFlow>` both live inside Plan 09's `FlowCanvas`, not `FlowPane`, so `FlowPane` cannot call `useReactFlow()` (it is outside the provider and would throw). Drop handling therefore goes in `FlowCanvas` — see Step 6.
+  - `FlowTab` has no `nodeDetail` until this plan's Task 3 adds it, and Plan 09's `toRfNodes` passes only `{ kind, status }`. Task 3 must also extend `FlowCanvas` so each node's `data` includes `...nodeDetail[id]` (and `hasCycleError`), otherwise the "200 · 184ms" line never shows on the real canvas.
+  - A "Flow" entry in the tab bar's "+" context menu (`openFlowTab(null)`) and a create-new-flow control in `FlowPane`'s picker (saves an empty flow, then opens it) already exist from the Plan 08 review. Do not add second copies.
 - **Handle ids — confirmed against Plan 09's actual `<Handle>` markup:** `RequestNode`'s per-field target handles are `id='url'`, `id='headers'`, `id='body'`; its (and `InputNode`'s) single source handle is `id='result'` (not `'output'`); `OutputNode`'s single target handle is `id='value'`. This plan's code and tests below use these exact ids.
 
 ## Review Focus
@@ -168,10 +175,20 @@ and a native `dragstart` do not interfere with `onClick`.
 
 - [ ] **Step 6: Handle the drop on the Flow canvas**
 
-In `src/components/flow/FlowPane.tsx` (Plan 09), add drop handling to the
-`ReactFlow` wrapper element. If Plan 09's `<ReactFlow>` element doesn't
-already carry `data-testid='flow-canvas'`, add it here too — Step 7's
-component test below needs it to locate the canvas:
+**Corrected in the Plan 08 review:** `<ReactFlow>` and its
+`ReactFlowProvider` live in `src/components/flow/FlowCanvas.tsx` (Plan 09),
+and Plan 09's wrapper `<div data-testid='flow-canvas'>` is already there. Put
+the drag/drop handlers on that wrapper `<div>` inside `FlowCanvas`, not in
+`FlowPane`. Get the instance with `const [rf, setRf] =
+useState<ReactFlowInstance | null>(null)` plus `<ReactFlow onInit={setRf}>`
+(a `useReactFlow()` call in `FlowCanvas` itself would sit outside its own
+provider). Add an optional `onAddNode?: (node: FlowNode) => void` prop to
+`FlowCanvas`; `FlowPane` passes
+`(node) => updateFlowNodes(tab.id, [...tab.nodes, node])`. The snippet below
+shows the handler logic; apply it in `FlowCanvas` with `rf` in place of
+`reactFlowInstance` and `onAddNode?.(newNode)` in place of the direct
+`updateFlowNodes` call. Add `src/components/flow/FlowCanvas.tsx` to Step 9's
+`git add` list:
 
 ```tsx
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
@@ -238,11 +255,13 @@ const baseTab: FlowTab = {
 
 describe('FlowPane drag-and-drop', () => {
   beforeEach(() => {
-    usePaneStore.setState({ /* seed whatever minimal store shape FlowPane reads, per Plan 08/09's actual store slice */ });
+    // The store only updates tabs that are in its tree, so seed baseTab.
+    usePaneStore.getState().reset();
+    usePaneStore.getState().openTab(baseTab);
   });
 
   it('adds a Saved Request node at the drop position when a sidebar request is dropped', () => {
-    render(<FlowPane tab={baseTab} />);
+    render(<FlowPane tab={baseTab} groupId={usePaneStore.getState().activeGroupId} />);
     const canvas = screen.getByTestId('flow-canvas'); // Plan 09 must expose this test id on the ReactFlow wrapper
 
     const dataTransfer = {
@@ -270,7 +289,7 @@ describe('FlowPane drag-and-drop', () => {
   });
 
   it('ignores a drop whose dataTransfer carries no flow-request payload', () => {
-    render(<FlowPane tab={baseTab} />);
+    render(<FlowPane tab={baseTab} groupId={usePaneStore.getState().activeGroupId} />);
     const canvas = screen.getByTestId('flow-canvas');
     fireEvent.drop(canvas, { dataTransfer: { getData: () => '' } });
     const updatedTab = usePaneStore.getState().root as unknown as FlowTab;
@@ -281,8 +300,10 @@ describe('FlowPane drag-and-drop', () => {
 
 This test's exact store-lookup lines (`usePaneStore.getState().root /* find
 baseTab.id */`) depend on Plan 08's actual pane-store tree shape — adapt them
-to however Plan 08 exposes tab lookup (e.g. a `findTab(id)` selector already
-used elsewhere in `src/lib/pane-utils.ts`), keeping the same two assertions
+to however Plan 08 exposes tab lookup (as built: `findTabInTree` is private
+to `pane-store.ts`; read the seeded tab back with
+`usePaneStore.getState().root` — a single leaf after `reset()` — and
+`tabs.find((t) => t.id === baseTab.id)`), keeping the same two assertions
 (a matching node was added; a payload-less drop is a no-op).
 
 - [ ] **Step 8: Run tests to verify they pass**
@@ -293,7 +314,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/lib/flow-drag.ts src/lib/__tests__/flow-drag.test.ts src/components/collections/RequestNode.tsx src/components/flow/FlowPane.tsx src/components/flow/__tests__/FlowPane.dragdrop.test.tsx
+git add src/lib/flow-drag.ts src/lib/__tests__/flow-drag.test.ts src/components/collections/RequestNode.tsx src/components/flow/FlowPane.tsx src/components/flow/FlowCanvas.tsx src/components/flow/__tests__/FlowPane.dragdrop.test.tsx
 git commit -m "feat(flow): drag a saved request from the sidebar onto the canvas"
 ```
 
@@ -590,6 +611,7 @@ git commit -m "feat(flow): add connection wiring with expression popover"
 - Modify: `src/components/flow/FlowPane.tsx`
 - Modify: `src/types/pane-types.ts` (add `runId?: string` and `nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>` to `FlowTab` — neither exists in Plan 08's `FlowTab`, both are needed here to correlate streamed events to the active run and to show status/timing on each node)
 - Modify: `src/stores/pane-store.ts` (add `setFlowRunState`; widen `patchFlowNodeStatus` with an optional `detail` parameter)
+- Modify: `src/components/flow/FlowCanvas.tsx` (accept `nodeDetail` and `cycleNodeIds` props and spread `...nodeDetail?.[n.id]` plus `hasCycleError` into each node's `data` in `toRfNodes` — added by the Plan 08 review; without it the status-code/timing line never reaches the node components)
 - Modify: `src/stores/__tests__/pane-store.test.ts` (add the two new tests in Step 4, in the existing `'Flow tab actions'` block)
 - Test: `src/components/flow/__tests__/FlowToolbar.test.tsx`
 
@@ -796,30 +818,42 @@ Add to the existing `describe('Flow tab actions', ...)` block in
 `src/stores/__tests__/pane-store.test.ts`:
 
 ```typescript
-it('setFlowRunState stores the run id and state on the tab', () => {
-  const tabId = usePaneStore.getState().openFlowTab('my-collection', 'my-flow');
-  usePaneStore.getState().setFlowRunState(tabId as unknown as string, 'running', 'run-123');
-  const tab = findFlowTab(usePaneStore.getState().root, tabId as unknown as string);
+it('setFlowRunState stores the run id and state on the tab', async () => {
+  await usePaneStore.getState().openFlowTab('my-collection');
+  const tabId = findFirstFlowTab()?.id;
+  if (!tabId) throw new Error('Expected a flow tab');
+  usePaneStore.getState().setFlowRunState(tabId, 'running', 'run-123');
+  const tab = findFirstFlowTab();
   expect(tab?.runState).toBe('running');
   expect(tab?.runId).toBe('run-123');
 });
 
-it('patchFlowNodeStatus records optional detail alongside the status', () => {
-  const tabId = 'flow-1';
-  seedFlowTab(tabId, { nodes: [{ id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } }] });
+it('patchFlowNodeStatus records optional detail alongside the status', async () => {
+  await usePaneStore.getState().openFlowTab('my-collection');
+  const tabId = findFirstFlowTab()?.id;
+  if (!tabId) throw new Error('Expected a flow tab');
+  usePaneStore.setState({
+    root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+      tab.tabType === 'flow'
+        ? {
+            ...tab,
+            nodes: [{ id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } }],
+          }
+        : tab,
+    ),
+  });
   usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'success', {
     statusCode: 200,
     durationMs: 184,
   });
-  const tab = findFlowTab(usePaneStore.getState().root, tabId);
+  const tab = findFirstFlowTab();
   expect(tab?.nodeStatus.n1).toBe('success');
   expect(tab?.nodeDetail?.n1).toEqual({ statusCode: 200, durationMs: 184 });
 });
 ```
 
-(`findFlowTab`/`seedFlowTab` are whatever tab-lookup/seed test helpers Plan
-08's own `'Flow tab actions'` tests already use — reuse them, don't add a
-second helper.)
+(`findFirstFlowTab`/`updateTabInTreeForTest` are the helpers Plan 08 already
+added at the top of this test file. Reuse them; don't add a second helper.)
 
 Run: `yarn vitest run src/stores/__tests__/pane-store.test.ts -t "Flow tab actions"`
 Expected: FAIL — `setFlowRunState` doesn't exist; `patchFlowNodeStatus` doesn't accept a 4th argument yet (TypeScript error).
@@ -1069,7 +1103,7 @@ Expected: succeeds — no type errors across `FlowToolbar.tsx`,
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/components/flow/FlowToolbar.tsx src/components/flow/FlowPane.tsx src/components/flow/__tests__/FlowToolbar.test.tsx src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts
+git add src/components/flow/FlowToolbar.tsx src/components/flow/FlowPane.tsx src/components/flow/FlowCanvas.tsx src/components/flow/__tests__/FlowToolbar.test.tsx src/types/pane-types.ts src/stores/pane-store.ts src/stores/__tests__/pane-store.test.ts
 git commit -m "feat(flow): add run/stop/save toolbar with live status streaming"
 ```
 

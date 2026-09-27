@@ -531,6 +531,14 @@ export interface FlowTab extends BaseTab {
 // action; this repo's convention is one bespoke setter per concern
 // (see updateRequest/updateTabTitle/toggleRunnerEntry in pane-store.ts).
 
+// As built (Plan 08 + its review): openFlowTab returns Promise<void>, not a
+// tab id. FlowPane props are { tab, groupId } (groupId required). Entry
+// point: the tab bar "+" context menu's "Flow" item -> openFlowTab(null).
+// The picker can create a new, empty flow (saveFlow, then openFlowTab).
+// Plan 09: ReactFlowProvider and <ReactFlow> live inside FlowCanvas, whose
+// wrapper div has data-testid='flow-canvas'. Plan 10's drop handling and
+// nodeDetail plumbing therefore go through FlowCanvas, not FlowPane.
+
 // Registration: FlowPane is wired into src/components/panes/EditorGroup.tsx
 // (NOT PaneRenderer.tsx, which only handles the resizable split/leaf tree),
 // the same place RunnerPane is switched on.

@@ -806,3 +806,24 @@ Before starting Plan 09, dispatch a subagent (Agent tool,
 
 Only proceed to Plan 09 once this review comes back clean (or its fixes are
 applied and re-verified).
+
+### Review outcome (2026-09-27)
+
+Types, bindings, and the four store actions match the plan index and the
+Plan 07 wire contract. The Review Focus items hold, and there are now tests
+for them, including same-flow-opened-twice isolation. The review fixed these
+gaps:
+
+- There was no way to open a Flow tab from the UI. Added a "Flow" item to
+  the tab bar's "+" context menu (`TabBar.tsx`), next to "Runner".
+- There was no way to create a new flow, which the spec's acceptance
+  criteria require. The picker now has a "New flow name" `Input` and a create
+  `Button`. It saves an empty flow with `saveFlow`, then opens it.
+- The picker now starts from `tab.collectionName`, so a tab that fell back
+  after a failed `getFlow` keeps its collection. `listFlows` responses from an
+  earlier collection pick are now ignored (the same `cancelled` guard
+  `RunnerPane` uses), and a `listCollections` rejection is now caught.
+- Plans 09 and 10 had drifted from the as-built code. Both were corrected:
+  where `ReactFlowProvider` lives, the `flow-canvas` test id, `openFlowTab`
+  returning `Promise<void>`, the real test helper names, the required
+  `groupId` prop, and `nodeDetail` reaching the node components.
