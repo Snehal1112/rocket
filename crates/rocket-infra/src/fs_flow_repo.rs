@@ -73,10 +73,15 @@ impl FlowRepository for FsFlowRepo {
             if path.extension().is_none_or(|ext| ext != "yml") {
                 continue;
             }
-            let content = fs::read_to_string(&path).map_err(|e| DomainError::Io(e.to_string()))?;
-            let flow: Flow = serde_yaml::from_str(&content).map_err(|e| {
-                DomainError::InvalidInput(format!("Failed to parse flow YAML: {e}"))
-            })?;
+            // Skip files that can't be read or parsed, continue with the rest.
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let flow: Flow = match serde_yaml::from_str(&content) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
             names.push(flow.name);
         }
         names.sort();
@@ -234,5 +239,22 @@ mod tests {
             .expect("read saved flow file");
         assert!(raw.contains("source_node_id"), "expected snake_case field, got:\n{raw}");
         assert!(!raw.contains("sourceNodeId"), "must not contain camelCase, got:\n{raw}");
+    }
+
+    #[test]
+    fn list_skips_malformed_entry_and_continues() {
+        let (dir, repo) = setup();
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+
+        // Create one malformed file.
+        fs::write(flows_dir.join("broken.yml"), b"not: valid: yaml: [").expect("write malformed file");
+
+        // Create one valid flow file.
+        repo.save("acme", &sample("Good Flow")).expect("save valid flow");
+
+        // list() should skip the malformed file and return only the valid one.
+        let names = repo.list("acme").expect("list must succeed despite malformed file");
+        assert_eq!(names, vec!["Good Flow".to_string()]);
     }
 }
