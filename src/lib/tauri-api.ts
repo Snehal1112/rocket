@@ -1723,3 +1723,141 @@ export const saveAgentConfig = (config: AgentConfig) =>
 export const deleteAgentConfig = (id: string) => invoke<void>('delete_agent_config', { id });
 
 export const testAgentConfig = (id: string) => invoke<void>('test_agent_config', { id });
+
+// ============================================================
+// Flow (visual workflow builder)
+// ============================================================
+
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
+export interface InlineHeader {
+  name: string;
+  value: string;
+}
+
+export interface InlineRequestData {
+  method: string;
+  url: string;
+  headers: InlineHeader[];
+  // The backend sends null for "no body"; it accepts null or absent.
+  body?: string | null;
+}
+
+export type RequestSource =
+  | { type: 'Saved'; requestPath: string }
+  | { type: 'Inline'; request: InlineRequestData };
+
+export type FlowNodeKind =
+  | { kind: 'Request'; label: string; source: RequestSource }
+  | { kind: 'Input'; label: string; value: unknown }
+  | { kind: 'Output'; label: string };
+
+export interface FlowNode {
+  id: string;
+  kind: FlowNodeKind;
+  position: NodePosition;
+}
+
+export interface FlowEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  targetField: string;
+  expression: string;
+}
+
+export interface Flow {
+  name: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+}
+
+export type FlowNodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped';
+
+export const listFlows = (collection: string) => invoke<string[]>('list_flows', { collection });
+
+export const getFlow = (collection: string, name: string) =>
+  invoke<Flow>('get_flow', { collection, name });
+
+export const saveFlow = (collection: string, flow: Flow) =>
+  invoke<void>('save_flow', { collection, flow });
+
+export const deleteFlow = (collection: string, name: string) =>
+  invoke<void>('delete_flow', { collection, name });
+
+/** Backend-reported node status. `'idle'` is frontend-only. */
+export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
+
+/** `run_flow`'s return value. Camel-cased by the Rust IPC DTO. */
+export interface FlowStepResult {
+  nodeId: string;
+  status: FlowRunNodeStatus;
+  statusCode: number | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface FlowRunSummary {
+  runId: string;
+  steps: FlowStepResult[];
+  stoppedReason: 'completed' | 'cancelled' | string;
+}
+
+/**
+ * Runs a flow. The promise resolves only when the run ENDS. Subscribe to
+ * the flow-run-* events before calling this; the run id arrives first on
+ * `flow-run-started`.
+ */
+export const runFlow = (collection: string, flowName: string, environmentName?: string | null) =>
+  invoke<FlowRunSummary>('run_flow', {
+    input: { collection, flowName, environmentName: environmentName ?? null },
+  });
+
+export const cancelFlowRun = (runId: string) => invoke<void>('cancel_flow_run', { runId });
+
+// Event payloads are DomainEvent JSON. Their fields are snake_case, like
+// every other DomainEvent. Do not camelCase them here.
+export interface FlowRunStartedEvent {
+  type: 'flowRunStarted';
+  run_id: string;
+  flow_name: string;
+  collection: string;
+  total_nodes: number;
+}
+
+export const onFlowRunStarted = (
+  handler: (event: FlowRunStartedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowRunStartedEvent>('flow-run-started', (e) => handler(e.payload));
+
+export interface FlowStepCompletedEvent {
+  type: 'flowStepCompleted';
+  run_id: string;
+  node_id: string;
+  status: FlowRunNodeStatus;
+  status_code: number | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+export const onFlowStepCompleted = (
+  handler: (event: FlowStepCompletedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowStepCompletedEvent>('flow-step-completed', (e) => handler(e.payload));
+
+export interface FlowRunFinishedEvent {
+  type: 'flowRunFinished';
+  run_id: string;
+  stopped_reason: string;
+  node_count: number;
+  failed_count: number;
+  skipped_count: number;
+}
+
+export const onFlowRunFinished = (
+  handler: (event: FlowRunFinishedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowRunFinishedEvent>('flow-run-finished', (e) => handler(e.payload));
