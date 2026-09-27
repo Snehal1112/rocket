@@ -6,7 +6,9 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 use rocket_shared::VariableValue;
 
-use crate::execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
+use crate::execution_service::{
+    ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
+};
 use crate::runner_sequence::{build_step_input, RunItem};
 
 /// One node's fully-executed result, kept around so a downstream edge's
@@ -82,9 +84,10 @@ pub fn build_execute_request_input(
             let request = collection_repo.get_request(collection, request_path)?;
             (request, request_path.clone())
         }
-        RequestSource::Inline { request: inline } => {
-            (build_inline_request(label, inline)?, format!("__flow_inline__/{}", node.id))
-        }
+        RequestSource::Inline { request: inline } => (
+            build_inline_request(label, inline)?,
+            format!("__flow_inline__/{}", node.id),
+        ),
     };
 
     let item = RunItem {
@@ -134,10 +137,23 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
 
 /// Mutates `input` in place, applying each edge in `edges` whose id is a key
 /// in `resolved` onto the field its `target_field` path names. Supported
-/// paths for Phase 1: `"url"`, `"headers[N].value"`, `"body"`. Any other
-/// path, or an out-of-range header index, is a `DomainError` — never a
-/// silent no-op, since a wire the user drew that quietly does nothing would
-/// be far more confusing than a run that fails with a clear reason.
+/// paths for Phase 1:
+///
+/// - `"url"` replaces the URL.
+/// - `"body"` replaces the body content. A missing body or a `none`-mode body
+///   becomes a JSON body. A text-like mode (JSON, XML, text, SPARQL) is kept.
+///   A form or binary body has no single content string, so it is an error.
+/// - `"headers[N].value"` (all-digit `N`) sets the value of the header at
+///   index `N`. An out-of-range index is an error.
+/// - `"headers[Name].value"` (any other `Name`) sets the value of the first
+///   header whose key matches `Name` case-insensitively, or appends a new
+///   header when none matches. This is the form the Flow UI uses, because it
+///   does not know a saved request's header order.
+///
+/// A wired header is always enabled, so the wire takes effect. Any other
+/// path is a `DomainError` — never a silent no-op, since a wire the user drew
+/// that quietly does nothing would be far more confusing than a run that
+/// fails with a clear reason.
 pub fn apply_wired_overrides(
     input: &mut ExecuteRequestInput,
     resolved: &HashMap<String, String>,
@@ -149,42 +165,102 @@ pub fn apply_wired_overrides(
         };
         match e.target_field.as_str() {
             "url" => input.url = value.clone(),
-            "body" => {
-                let body = input.body.get_or_insert(Body {
-                    mode: BodyMode::Json,
-                    content: None,
-                    form_data: None,
-                    file_path: None,
-                });
-                body.content = Some(value.clone());
-            }
+            "body" => apply_body_override(input, e, value)?,
             field => {
-                if let Some(index_str) = field
+                let Some(selector) = field
                     .strip_prefix("headers[")
                     .and_then(|rest| rest.strip_suffix("].value"))
-                {
-                    let index: usize = index_str.parse().map_err(|_| {
-                        DomainError::InvalidInput(format!(
-                            "edge '{}': malformed target_field '{}'",
-                            e.id, e.target_field
-                        ))
-                    })?;
-                    let headers_len = input.headers.len();
-                    let header = input.headers.get_mut(index).ok_or_else(|| {
-                        DomainError::InvalidInput(format!(
-                            "edge '{}': header index {} out of range (request has {} headers)",
-                            e.id, index, headers_len
-                        ))
-                    })?;
-                    header.value = value.clone();
-                } else {
+                else {
                     return Err(DomainError::InvalidInput(format!(
                         "edge '{}': unrecognized target_field '{}'",
                         e.id, e.target_field
                     )));
-                }
+                };
+                apply_header_override(input, e, selector, value)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Writes `value` into the request body for a `"body"` wire.
+fn apply_body_override(
+    input: &mut ExecuteRequestInput,
+    e: &FlowEdge,
+    value: &str,
+) -> DomainResult<()> {
+    let body = input.body.get_or_insert(Body {
+        mode: BodyMode::Json,
+        content: None,
+        form_data: None,
+        file_path: None,
+    });
+    match body.mode {
+        // A `none` body sends nothing, so it is promoted to JSON.
+        BodyMode::None => body.mode = BodyMode::Json,
+        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => {}
+        // These modes never read `content`, so writing it would do nothing.
+        BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::Binary => {
+            return Err(DomainError::InvalidInput(format!(
+                "edge '{}': cannot wire a value into a {:?} body",
+                e.id, body.mode
+            )));
+        }
+    }
+    body.content = Some(value.to_string());
+    Ok(())
+}
+
+/// Writes `value` into the header `selector` names, for a
+/// `"headers[<selector>].value"` wire.
+fn apply_header_override(
+    input: &mut ExecuteRequestInput,
+    e: &FlowEdge,
+    selector: &str,
+    value: &str,
+) -> DomainResult<()> {
+    if selector.trim().is_empty() {
+        return Err(DomainError::InvalidInput(format!(
+            "edge '{}': malformed target_field '{}'",
+            e.id, e.target_field
+        )));
+    }
+
+    if selector.bytes().all(|b| b.is_ascii_digit()) {
+        let index: usize = selector.parse().map_err(|_| {
+            DomainError::InvalidInput(format!(
+                "edge '{}': malformed target_field '{}'",
+                e.id, e.target_field
+            ))
+        })?;
+        let headers_len = input.headers.len();
+        let header = input.headers.get_mut(index).ok_or_else(|| {
+            DomainError::InvalidInput(format!(
+                "edge '{}': header index {} out of range (request has {} headers)",
+                e.id, index, headers_len
+            ))
+        })?;
+        header.value = value.to_string();
+        header.enabled = true;
+        return Ok(());
+    }
+
+    let name = selector.trim();
+    match input
+        .headers
+        .iter_mut()
+        .find(|h| h.key.eq_ignore_ascii_case(name))
+    {
+        Some(header) => {
+            header.value = value.to_string();
+            header.enabled = true;
+        }
+        None => input.headers.push(Header {
+            key: name.to_string(),
+            value: value.to_string(),
+            enabled: true,
+            description: None,
+        }),
     }
     Ok(())
 }
@@ -386,7 +462,10 @@ mod tests {
         fn list(&self) -> DomainResult<Vec<rocket_environment::SecretManagerConnection>> {
             Ok(Vec::new())
         }
-        fn get(&self, _id: &str) -> DomainResult<Option<rocket_environment::SecretManagerConnection>> {
+        fn get(
+            &self,
+            _id: &str,
+        ) -> DomainResult<Option<rocket_environment::SecretManagerConnection>> {
             Ok(None)
         }
         fn save(&self, _c: &rocket_environment::SecretManagerConnection) -> DomainResult<()> {
@@ -512,7 +591,7 @@ mod tests {
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
-    use rocket_flow::{FlowNodeKind, InlineHeader, InlineRequestData, NodePosition, RequestSource};
+    use rocket_flow::{InlineHeader, NodePosition};
 
     fn saved_flow_node(id: &str, request_path: &str) -> FlowNode {
         FlowNode {
@@ -550,7 +629,11 @@ mod tests {
 
     #[test]
     fn saved_source_resolves_via_collection_repo_and_reuses_build_step_input() {
-        let mut saved = Request::new("Get Auth Token", HttpMethod::Get, "https://api.example.com/login");
+        let mut saved = Request::new(
+            "Get Auth Token",
+            HttpMethod::Get,
+            "https://api.example.com/login",
+        );
         saved.tags = vec!["auth".to_string()];
         let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
 
@@ -599,7 +682,11 @@ mod tests {
     fn inline_source_with_unparseable_method_is_invalid_input_not_a_panic() {
         let repo = FakeCollectionRepo::new();
         let mut node = inline_flow_node("n2");
-        if let FlowNodeKind::Request { source: RequestSource::Inline { request }, .. } = &mut node.kind {
+        if let FlowNodeKind::Request {
+            source: RequestSource::Inline { request },
+            ..
+        } = &mut node.kind
+        {
             request.method = "FETCH".to_string();
         }
 
@@ -647,9 +734,22 @@ mod tests {
         let input = sample_execute_input();
         let mut mutated = input.clone();
         apply_wired_overrides(&mut mutated, &HashMap::new(), &[]).expect("no-op must succeed");
+        // Compare every field, not just the ones a wire can target.
+        assert_eq!(
+            serde_json::to_value(&mutated).expect("serialize mutated"),
+            serde_json::to_value(&input).expect("serialize input")
+        );
+    }
+
+    #[test]
+    fn edge_without_resolved_value_is_skipped() {
+        let input = sample_execute_input();
+        let mut mutated = input.clone();
+        let edges = vec![edge("e1", "n2", "url")];
+
+        apply_wired_overrides(&mut mutated, &HashMap::new(), &edges).expect("skip must succeed");
+
         assert_eq!(mutated.url, input.url);
-        assert_eq!(mutated.headers, input.headers);
-        assert_eq!(mutated.body, input.body);
     }
 
     #[test]
@@ -657,7 +757,10 @@ mod tests {
         let mut input = sample_execute_input();
         let edges = vec![edge("e1", "n2", "url")];
         let mut resolved = HashMap::new();
-        resolved.insert("e1".to_string(), "https://api.example.com/v2/ping".to_string());
+        resolved.insert(
+            "e1".to_string(),
+            "https://api.example.com/v2/ping".to_string(),
+        );
 
         apply_wired_overrides(&mut input, &resolved, &edges).expect("url override must apply");
 
@@ -702,6 +805,108 @@ mod tests {
             input.body.expect("body must be set").content.as_deref(),
             Some(r#"{"replaced":true}"#)
         );
+    }
+
+    fn single_override(field: &str, value: &str) -> (Vec<FlowEdge>, HashMap<String, String>) {
+        let mut resolved = HashMap::new();
+        resolved.insert("e1".to_string(), value.to_string());
+        (vec![edge("e1", "n2", field)], resolved)
+    }
+
+    #[test]
+    fn named_header_override_updates_matching_header_case_insensitively() {
+        let mut input = sample_execute_input();
+        let (edges, resolved) = single_override("headers[x-test].value", "42");
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("named override must apply");
+
+        assert_eq!(input.headers.len(), 1);
+        assert_eq!(input.headers[0].key, "X-Test");
+        assert_eq!(input.headers[0].value, "42");
+    }
+
+    #[test]
+    fn named_header_override_appends_missing_header() {
+        let mut input = sample_execute_input();
+        let (edges, resolved) = single_override("headers[Authorization].value", "Bearer abc");
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("named override must append");
+
+        assert_eq!(input.headers.len(), 2);
+        assert_eq!(input.headers[1].key, "Authorization");
+        assert_eq!(input.headers[1].value, "Bearer abc");
+        assert!(input.headers[1].enabled);
+    }
+
+    #[test]
+    fn header_override_enables_a_disabled_header() {
+        let mut input = sample_execute_input();
+        input.headers[0].enabled = false;
+        let (edges, resolved) = single_override("headers[0].value", "42");
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("header override must apply");
+
+        assert!(
+            input.headers[0].enabled,
+            "a wired header must actually be sent"
+        );
+    }
+
+    #[test]
+    fn empty_header_selector_is_an_error() {
+        let mut input = sample_execute_input();
+        let (edges, resolved) = single_override("headers[].value", "42");
+
+        let err = apply_wired_overrides(&mut input, &resolved, &edges)
+            .expect_err("an empty header selector must error");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn body_override_promotes_none_mode_to_json() {
+        let mut input = sample_execute_input();
+        input.body = Some(Body {
+            mode: BodyMode::None,
+            content: None,
+            form_data: None,
+            file_path: None,
+        });
+        let (edges, resolved) = single_override("body", r#"{"a":1}"#);
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("body override must apply");
+
+        let body = input.body.expect("body must be set");
+        assert_eq!(body.mode, BodyMode::Json);
+        assert_eq!(body.content.as_deref(), Some(r#"{"a":1}"#));
+    }
+
+    #[test]
+    fn body_override_keeps_text_like_mode() {
+        let mut input = sample_execute_input();
+        if let Some(body) = input.body.as_mut() {
+            body.mode = BodyMode::Xml;
+        }
+        let (edges, resolved) = single_override("body", "<a/>");
+
+        apply_wired_overrides(&mut input, &resolved, &edges).expect("body override must apply");
+
+        assert_eq!(input.body.expect("body must be set").mode, BodyMode::Xml);
+    }
+
+    #[test]
+    fn body_override_into_form_body_is_an_error_not_a_silent_noop() {
+        let mut input = sample_execute_input();
+        input.body = Some(Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(Vec::new()),
+            file_path: None,
+        });
+        let (edges, resolved) = single_override("body", "x");
+
+        let err = apply_wired_overrides(&mut input, &resolved, &edges)
+            .expect_err("a form body ignores content, so a wire into it must error");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
     #[test]
