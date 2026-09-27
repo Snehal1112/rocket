@@ -647,6 +647,46 @@ mod tests {
     }
 
     #[test]
+    fn flow_step_completed_deserializes_with_optional_keys_missing() {
+        // Optional fields must be truly optional on the wire, not just nullable.
+        let json =
+            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"node-3","status":"failed"}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("deserialize");
+        match event {
+            DomainEvent::FlowStepCompleted {
+                run_id,
+                node_id,
+                status,
+                status_code,
+                duration_ms,
+                error,
+            } => {
+                assert_eq!(run_id, "01J");
+                assert_eq!(node_id, "node-3");
+                assert_eq!(status, FlowNodeStatus::Failed);
+                assert_eq!(status_code, None);
+                assert_eq!(duration_ms, None);
+                assert_eq!(error, None);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn flow_node_status_round_trips() {
+        for status in [
+            FlowNodeStatus::Running,
+            FlowNodeStatus::Success,
+            FlowNodeStatus::Failed,
+            FlowNodeStatus::Skipped,
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize");
+            let back: FlowNodeStatus = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, status);
+        }
+    }
+
+    #[test]
     fn flow_run_finished_wire_shape_tracks_failed_and_skipped_separately() {
         let event = DomainEvent::FlowRunFinished {
             run_id: "01J".into(),
