@@ -291,6 +291,27 @@ pub fn run() {
                 Arc::clone(&vault_fetcher),
             );
 
+            // A second SecretManagerService instance, dedicated to
+            // AgentConfigService, sharing the same
+            // vault_connection_secret_store/vault_fetcher Arcs as
+            // secret_manager_svc/exec_svc above — see Plan 04's Global
+            // Constraints for why this isn't a shared
+            // Arc<SecretManagerService> instead.
+            let agent_config_secret_manager = Arc::new(rocket_app::SecretManagerService::new(
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
+            ));
+
+            let agent_config_svc = rocket_app::AgentConfigService::new(
+                Box::new(rocket_infra::FsAgentConfigRepo::new(
+                    data_dir.join("agent_configs.yml"),
+                )),
+                agent_config_secret_manager,
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -362,6 +383,7 @@ pub fn run() {
             app.manage(cookie_svc);
             app.manage(exec_svc);
             app.manage(secret_manager_svc);
+            app.manage(agent_config_svc);
             app.manage(runner_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
@@ -567,6 +589,10 @@ pub fn run() {
             commands::secret_managers::delete_secret_manager_connection,
             commands::secret_managers::test_secret_manager_connection,
             commands::secret_managers::fetch_external_secret_names,
+            commands::agent_configs::list_agent_configs,
+            commands::agent_configs::save_agent_config,
+            commands::agent_configs::delete_agent_config,
+            commands::agent_configs::test_agent_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
