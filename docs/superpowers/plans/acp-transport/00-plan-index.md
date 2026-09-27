@@ -4,7 +4,7 @@
 
 **Context:** subproject B of the ACP AI-assist feature (see project memory `project_acp_ai_assist_feature.md`). Depends on subproject A (`rocket-acp`'s `AgentConfig`/`AgentConfigRepository`, `AgentConfigService`, the `agent_configs` Tauri commands — all implemented and reviewed already). Delivers process lifecycle, the ACP JSON-RPC handshake, and chat-only streamed turns, plus three Tauri commands so it's independently exercisable before subproject C's chat UI exists.
 
-## Plan breakdown — 5 plans, 11 tasks (max 3 per plan)
+## Plan breakdown — 6 plans, 13 tasks (max 3 per plan)
 
 | # | Plan | Tasks | Crate/area | Depends on |
 |---|---|---|---|---|
@@ -13,8 +13,11 @@
 | 03 | [AcpAgentClient + fixture test agent](2026-09-27-acp-transport-plan-03-infra-client.md) | 3 | `rocket-infra` | 01 |
 | 04 | [AgentConfigService::get + AcpSessionService](2026-09-27-acp-transport-plan-04-app-service.md) | 3 | `rocket-app` | 01, 02, 03 |
 | 05 | [Tauri commands + event bus + wiring](2026-09-27-acp-transport-plan-05-tauri-commands.md) | 3 | `src-tauri` | 02, 04 |
+| 06 | [App-exit session cleanup](2026-09-27-acp-transport-plan-06-exit-cleanup.md) | 2 | `rocket-acp`/`rocket-infra`/`rocket-app`/`src-tauri` | 01, 03, 04, 05 |
 
 Plans 01 and 02 are single-task plans — each is one cohesive, self-contained addition (a trait with no internal state to split, and four `DomainEvent` variants added the same way the just-landed `FlowRunStarted`/`FlowStepCompleted`/`FlowRunFinished` trio was, in one commit) with no natural second slice to carve out without artificial splitting.
+
+Plan 06 is an addendum discovered during Plan 05's Post-Implementation Review: nothing in Plans 01-05 terminates a still-running agent process when the Tauri app itself quits (no `RunEvent::Exit` handler; Tauri doesn't drop managed state on exit), which would leave a real credential sitting in an orphaned process's environment indefinitely. This closes that gap.
 
 Each plan file ends with a **Next Plan** section and a **Post-Implementation Review** section (an Opus-model subagent reviewing that plan's own diff for interface gaps, code quality, and DDD boundary conformance, with authority to fix what it finds) — same process this project used for subproject A.
 
@@ -153,6 +156,26 @@ pub async fn end_agent_session(session_id: String, svc: State<'_, AcpSessionServ
 ```
 
 `TauriEventBus` (`src-tauri/src/tauri_event_bus.rs`) gains match arms: `AcpSessionStarted` → `"agent-session-started"`, `AcpSessionChunk` → `"agent-session-chunk"`, `AcpSessionFinished` → `"agent-session-finished"`, `AcpSessionFailed` → `"agent-session-failed"`.
+
+### `rocket-acp`/`rocket-infra`/`rocket-app`/`src-tauri` (new, Plan 06)
+
+```rust
+// crates/rocket-acp/src/session.rs — new trait method
+#[async_trait]
+pub trait AcpSessionClient: Send + Sync {
+    // ...existing methods...
+    async fn end_all_sessions(&self) -> DomainResult<()>;
+}
+```
+
+```rust
+// crates/rocket-app/src/acp_session_service.rs — new method
+impl AcpSessionService {
+    pub async fn end_all_sessions(&self) -> DomainResult<()>;
+}
+```
+
+`src-tauri/src/lib.rs` gains a `RunEvent::Exit` handler that fetches `AcpSessionService` from managed state and calls `end_all_sessions` via `tauri::async_runtime::block_on`.
 
 ## Execution note for whoever runs these plans
 
