@@ -150,12 +150,27 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
   };
 
+  // A bare `headers` target is not a valid target_field (the backend
+  // rejects it). If a headers-target edge's popover is dismissed — or
+  // preempted by a new connection — without a commit, that edge must be
+  // dropped instead of left to fail the run.
+  const isUncommittedHeadersEdge = (edge: FlowEdge) =>
+    committedEdgeIdRef.current !== edge.id && edge.targetField === 'headers';
+
   const handleConnect = (connection: Connection) => {
     const sourceNode = tab.nodes.find((n) => n.id === connection.source);
     if (!sourceNode) return;
     const edge = buildEdgeFromConnection(connection, sourceNode);
     if (!edge) return;
-    updateFlowEdges(tab.id, [...tab.edges, edge]);
+    // A connection made while a previous popover is still open (before it
+    // was committed or dismissed) preempts it here — React never runs the
+    // popover's onOpenChange in that case, so drop its uncommitted pending
+    // edge in this same update rather than leaving it dangling.
+    const base =
+      pendingEdge && isUncommittedHeadersEdge(pendingEdge)
+        ? tab.edges.filter((e) => e.id !== pendingEdge.id)
+        : tab.edges;
+    updateFlowEdges(tab.id, [...base, edge]);
     setPendingEdge(edge); // Opens the popover immediately, per spec §6.
   };
 
@@ -178,18 +193,18 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       />
       {pendingEdge && pendingTargetNode && (
         <WireExpressionPopover
+          // Keyed by edge id so a second connection made before the first
+          // popover is committed/dismissed remounts this component instead
+          // of reusing it — otherwise its internal `expression`/`headerName`
+          // state (initialized once via useState) would leak from the
+          // previous edge onto the new one.
+          key={pendingEdge.id}
           edge={pendingEdge}
           targetNode={pendingTargetNode}
           open={pendingEdge !== null}
           onOpenChange={(open) => {
             if (open) return;
-            // A bare `headers` target is not a valid target_field (the
-            // backend rejects it). If the popover closes without a commit,
-            // drop that edge instead of leaving it to fail the run.
-            if (
-              committedEdgeIdRef.current !== pendingEdge.id &&
-              pendingEdge.targetField === 'headers'
-            ) {
+            if (isUncommittedHeadersEdge(pendingEdge)) {
               updateFlowEdges(
                 tab.id,
                 tab.edges.filter((e) => e.id !== pendingEdge.id),
