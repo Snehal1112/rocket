@@ -8,6 +8,7 @@ rocket-shared.workspace = true
 rocket-audit.workspace = true
 rocket-collection.workspace = true
 rocket-environment.workspace = true
+rocket-acp.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-workspace.workspace = true

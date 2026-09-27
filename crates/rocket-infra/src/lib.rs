@@ -3,6 +3,7 @@ pub mod clone_destination_capabilities;
 pub mod contract_records;
 pub(crate) mod conversions;
 pub mod file_watcher;
+pub mod fs_agent_config_repo;
 pub mod fs_audit_log_repo;
 pub mod fs_collection;
 pub mod fs_compliance_profile_repo;
@@ -30,6 +31,7 @@ pub use clone_destination_capabilities::{
     DEFAULT_CLONE_DESTINATION_MAX_ENTRIES,
 };
 pub use file_watcher::NotifyFileWatcher;
+pub use fs_agent_config_repo::FsAgentConfigRepo;
 pub use fs_audit_log_repo::FsAuditLogRepo;
 pub use fs_collection::FsCollectionRepo;
 pub use fs_compliance_profile_repo::FsComplianceProfileRepo;
