@@ -75,7 +75,8 @@ mod tests {
         let shared_path = Arc::new(Mutex::new(dir_a.path().to_path_buf()));
         let repo = SharedPathFlowRepo::new(Arc::clone(&shared_path));
 
-        repo.save("acme", &sample("A-side Flow")).expect("save in workspace a");
+        repo.save("acme", &sample("A-side Flow"))
+            .expect("save in workspace a");
         assert_eq!(repo.list("acme").expect("list a").len(), 1);
 
         *shared_path.lock().expect("lock shared path") = dir_b.path().to_path_buf();

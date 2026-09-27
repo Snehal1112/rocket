@@ -24,9 +24,12 @@ impl FlowService {
 
     pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
         topological_sort(&flow).map_err(|e| match e {
-            FlowGraphError::Cycle { node_ids } => rocket_shared::error::DomainError::InvalidInput(
-                format!("flow contains a cycle through node(s): {}", node_ids.join(", ")),
-            ),
+            FlowGraphError::Cycle { node_ids } => {
+                rocket_shared::error::DomainError::InvalidInput(format!(
+                    "flow contains a cycle through node(s): {}",
+                    node_ids.join(", ")
+                ))
+            }
             FlowGraphError::UnknownNode { node_id } => {
                 rocket_shared::error::DomainError::InvalidInput(format!(
                     "edge references unknown node: {node_id}"
@@ -133,7 +136,10 @@ mod tests {
     fn get_returns_not_found_for_missing_flow() {
         let svc = FlowService::new(Box::new(FakeFlowRepo::new()));
         let err = svc.get("demo", "missing").expect_err("expected NotFound");
-        assert!(matches!(err, rocket_shared::error::DomainError::NotFound(_)));
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::NotFound(_)
+        ));
     }
 
     #[test]
@@ -188,7 +194,9 @@ mod tests {
             Ok(Vec::new())
         }
         fn get(&self, _collection: &str, name: &str) -> DomainResult<Flow> {
-            Err(rocket_shared::error::DomainError::NotFound(name.to_string()))
+            Err(rocket_shared::error::DomainError::NotFound(
+                name.to_string(),
+            ))
         }
         fn save(&self, _collection: &str, _flow: &Flow) -> DomainResult<()> {
             panic!("save must not be called for a cyclic flow");
@@ -204,11 +212,19 @@ mod tests {
         let err = svc
             .save("demo", cyclic_flow())
             .expect_err("cyclic flow must be rejected");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::InvalidInput(_)
+        ));
+        // Parse the id list after the colon, so single letters inside the
+        // message prose cannot satisfy the check by accident.
         let message = err.to_string();
-        assert!(
-            message.contains('a') && message.contains('b'),
-            "error should name the cyclic nodes, got: {message}"
-        );
+        let (_, id_list) = message
+            .rsplit_once("node(s): ")
+            .unwrap_or_else(|| panic!("error should list the cyclic nodes, got: {message}"));
+        let mut ids: Vec<&str> = id_list.split(", ").collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["a", "b"], "got: {message}");
     }
 
     #[test]
