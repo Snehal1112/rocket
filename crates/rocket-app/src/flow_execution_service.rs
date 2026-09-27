@@ -380,9 +380,10 @@ impl FlowExecutionService {
     }
 
     /// Runs every node of `input.flow_name` in dependency order, dispatching
-    /// each by kind and publishing progress events. Node failures do not
-    /// stop the run here — see Task 3 for downstream skip-cascade, added on
-    /// top of this loop without changing its shape.
+    /// each by kind and publishing progress events. A failed node marks every
+    /// node reachable from it as `Skipped`; independent branches keep running.
+    /// Cancellation is checked before each node, so a cancelled run records
+    /// no step for the nodes it never reached.
     pub async fn run(
         &self,
         exec: &RequestExecutionService,
@@ -390,9 +391,14 @@ impl FlowExecutionService {
     ) -> DomainResult<FlowRunSummary> {
         let (flow, order) = self.load_ordered_nodes(&input.collection, &input.flow_name)?;
 
-        let _external_secrets = exec
+        // Fetch every External Secret value once for the whole run. Each
+        // Request node reuses this map, so a run of N requests makes one
+        // vault round-trip per secret instead of N.
+        let external_secrets = exec
             .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
             .await?;
+        let nodes_by_id: HashMap<&str, &FlowNode> =
+            flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
         let run_id = Ulid::new().to_string();
         if let Ok(mut set) = self.in_flight.lock() {
@@ -416,12 +422,6 @@ impl FlowExecutionService {
                 stopped_reason = "cancelled".to_string();
                 break;
             }
-            let node = flow
-                .nodes
-                .iter()
-                .find(|n| &n.id == node_id)
-                .expect("topological_sort only returns ids present in flow.nodes");
-
             if skipped.contains(node_id) {
                 let step = FlowStepResult {
                     node_id: node_id.clone(),
@@ -442,14 +442,24 @@ impl FlowExecutionService {
                 continue;
             }
 
-            let result = self
-                .execute_node(exec, &input, &flow, node, &captured)
-                .await;
+            // `topological_sort` only returns ids from `flow.nodes`, so a
+            // miss here is a bug. It fails this node instead of panicking.
+            let result = match nodes_by_id.get(node_id.as_str()) {
+                Some(node) => {
+                    self.execute_node(exec, &input, &flow, node, &captured, &external_secrets)
+                        .await
+                }
+                None => Err(DomainError::Internal(format!(
+                    "node '{node_id}' is missing from the flow"
+                ))),
+            };
 
-            if let Ok((output, _)) = &result {
-                captured.insert(node_id.clone(), output.clone());
+            let step = result_to_step(node_id, &result);
+            // Every downstream consumer reads from this map, so a node with
+            // several dependents (fan-out) is captured once for all of them.
+            if let Ok(output) = result {
+                captured.insert(node_id.clone(), output);
             }
-            let step = result_to_step(node_id, result);
             if step.status == FlowNodeStatus::Failed {
                 for downstream in rocket_flow::graph::reachable_from(&flow, node_id) {
                     skipped.insert(downstream);
@@ -471,8 +481,14 @@ impl FlowExecutionService {
             set.remove(&run_id);
         }
 
-        let failed_count = steps.iter().filter(|s| s.status == FlowNodeStatus::Failed).count();
-        let skipped_count = steps.iter().filter(|s| s.status == FlowNodeStatus::Skipped).count();
+        let failed_count = steps
+            .iter()
+            .filter(|s| s.status == FlowNodeStatus::Failed)
+            .count();
+        let skipped_count = steps
+            .iter()
+            .filter(|s| s.status == FlowNodeStatus::Skipped)
+            .count();
         self.events.publish(DomainEvent::FlowRunFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.clone(),
@@ -489,9 +505,9 @@ impl FlowExecutionService {
     }
 
     /// Dispatches one node by kind. Returns the node's captured output (for
-    /// downstream wires) alongside its `FlowStepResult` fields, or an error
-    /// if the node itself failed — the caller (`run`) turns either outcome
-    /// into a `FlowStepResult` via `result_to_step`.
+    /// downstream wires), or an error if the node itself failed. The caller
+    /// (`run`) turns either outcome into a `FlowStepResult` via
+    /// `result_to_step`.
     async fn execute_node(
         &self,
         exec: &RequestExecutionService,
@@ -499,23 +515,43 @@ impl FlowExecutionService {
         flow: &rocket_flow::Flow,
         node: &rocket_flow::FlowNode,
         captured: &HashMap<String, CapturedOutput>,
-    ) -> DomainResult<(CapturedOutput, Option<(u16, u64)>)> {
+        external_secrets: &HashMap<String, String>,
+    ) -> DomainResult<CapturedOutput> {
         match &node.kind {
             rocket_flow::FlowNodeKind::Input { value, .. } => {
                 let settings = self.collection_repo.get_settings(&input.collection)?;
                 let mut vars = HashMap::new();
                 for cv in settings.variables.iter().filter(|v| v.enabled) {
-                    let v = if cv.value.is_empty() { cv.initial_value.clone() } else { cv.value.clone() };
+                    let v = if cv.value.is_empty() {
+                        cv.initial_value.clone()
+                    } else {
+                        cv.value.clone()
+                    };
                     vars.insert(cv.key.clone(), v);
                 }
+                // An unknown `{{name}}` stays as literal text. When the value is
+                // wired into a Request field, `execute` resolves it again with
+                // the full environment scope, so environment variables still work.
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
-                Ok((CapturedOutput::Value(rocket_shared::VariableValue::simple(resolved)), None))
+                Ok(CapturedOutput::Value(rocket_shared::VariableValue::simple(
+                    resolved,
+                )))
             }
             rocket_flow::FlowNodeKind::Output { .. } => {
-                let incoming = flow.edges.iter().find(|e| e.target_node_id == node.id);
-                let Some(edge) = incoming else {
-                    return Ok((CapturedOutput::Value(rocket_shared::VariableValue::simple("")), None));
+                let mut incoming = flow.edges.iter().filter(|e| e.target_node_id == node.id);
+                let Some(edge) = incoming.next() else {
+                    return Ok(CapturedOutput::Value(rocket_shared::VariableValue::simple(
+                        "",
+                    )));
                 };
+                // An Output node shows one value. Picking one of several wires
+                // would silently drop the others, so this is an error.
+                if incoming.next().is_some() {
+                    return Err(DomainError::InvalidInput(format!(
+                        "output node '{}' has more than one incoming wire",
+                        node.id
+                    )));
+                }
                 let source_output = captured.get(&edge.source_node_id).ok_or_else(|| {
                     DomainError::Internal(format!(
                         "node '{}' depends on '{}' which has not executed yet — topological order violated",
@@ -523,9 +559,15 @@ impl FlowExecutionService {
                     ))
                 })?;
                 let value = exec
-                    .resolve_flow_wire_expression(&input.collection, source_output, &edge.expression)
+                    .resolve_flow_wire_expression(
+                        &input.collection,
+                        source_output,
+                        &edge.expression,
+                    )
                     .await?;
-                Ok((CapturedOutput::Value(rocket_shared::VariableValue::simple(value)), None))
+                Ok(CapturedOutput::Value(rocket_shared::VariableValue::simple(
+                    value,
+                )))
             }
             rocket_flow::FlowNodeKind::Request { .. } => {
                 let mut request_input = build_execute_request_input(
@@ -535,8 +577,11 @@ impl FlowExecutionService {
                     node,
                 )?;
 
-                let incoming: Vec<&rocket_flow::FlowEdge> =
-                    flow.edges.iter().filter(|e| e.target_node_id == node.id).collect();
+                let incoming: Vec<&rocket_flow::FlowEdge> = flow
+                    .edges
+                    .iter()
+                    .filter(|e| e.target_node_id == node.id)
+                    .collect();
                 let mut resolved = HashMap::new();
                 for edge in &incoming {
                     let source_output = captured.get(&edge.source_node_id).ok_or_else(|| {
@@ -546,16 +591,22 @@ impl FlowExecutionService {
                         ))
                     })?;
                     let value = exec
-                        .resolve_flow_wire_expression(&input.collection, source_output, &edge.expression)
+                        .resolve_flow_wire_expression(
+                            &input.collection,
+                            source_output,
+                            &edge.expression,
+                        )
                         .await?;
                     resolved.insert(edge.id.clone(), value);
                 }
-                let edges_owned: Vec<rocket_flow::FlowEdge> = incoming.into_iter().cloned().collect();
+                let edges_owned: Vec<rocket_flow::FlowEdge> =
+                    incoming.into_iter().cloned().collect();
                 apply_wired_overrides(&mut request_input, &resolved, &edges_owned)?;
 
-                let output = exec.execute(request_input).await?;
-                let timing = (output.response.status, output.response.duration_ms);
-                Ok((CapturedOutput::Request(Box::new(output)), Some(timing)))
+                let output = exec
+                    .execute_with_external_secrets(request_input, external_secrets)
+                    .await?;
+                Ok(CapturedOutput::Request(Box::new(output)))
             }
         }
     }
@@ -566,36 +617,30 @@ impl FlowExecutionService {
 /// `Request` response that is not 2xx (`HttpResponse::is_success`) — Flow
 /// nodes carry no test scripts in Phase 1, so there is no test-failure case
 /// to fold in here, unlike the Collection Runner's `RunStepResult::is_failure`.
-fn result_to_step(
-    node_id: &str,
-    result: DomainResult<(CapturedOutput, Option<(u16, u64)>)>,
-) -> FlowStepResult {
+fn result_to_step(node_id: &str, result: &DomainResult<CapturedOutput>) -> FlowStepResult {
     match result {
-        Ok((CapturedOutput::Request(out), Some((status, duration_ms)))) => FlowStepResult {
-            node_id: node_id.to_string(),
-            status: if out.response.is_success() {
-                FlowNodeStatus::Success
-            } else {
-                FlowNodeStatus::Failed
-            },
-            status_code: Some(status),
-            duration_ms: Some(duration_ms),
-            error: if out.response.is_success() {
-                None
-            } else {
-                Some(format!("non-2xx response: {status}"))
-            },
-        },
-        Ok((CapturedOutput::Value(_), _)) => FlowStepResult {
+        Ok(CapturedOutput::Request(out)) => {
+            let status = out.response.status;
+            let success = out.response.is_success();
+            FlowStepResult {
+                node_id: node_id.to_string(),
+                status: if success {
+                    FlowNodeStatus::Success
+                } else {
+                    FlowNodeStatus::Failed
+                },
+                status_code: Some(status),
+                duration_ms: Some(out.response.duration_ms),
+                error: (!success).then(|| format!("non-2xx response: {status}")),
+            }
+        }
+        Ok(CapturedOutput::Value(_)) => FlowStepResult {
             node_id: node_id.to_string(),
             status: FlowNodeStatus::Success,
             status_code: None,
             duration_ms: None,
             error: None,
         },
-        Ok((CapturedOutput::Request(_), None)) => unreachable!(
-            "a Request node's execute_node branch always returns Some(timing)"
-        ),
         Err(e) => FlowStepResult {
             node_id: node_id.to_string(),
             status: FlowNodeStatus::Failed,
@@ -1508,7 +1553,11 @@ mod tests {
     #[async_trait]
     impl HttpExecutor for UrlAwareExecutor {
         async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
-            let status = if request.url == self.failing_url { 500 } else { 200 };
+            let status = if request.url == self.failing_url {
+                500
+            } else {
+                200
+            };
             Ok(HttpResponse {
                 status,
                 status_text: "status".into(),
@@ -1604,7 +1653,10 @@ mod tests {
 
         assert_eq!(summary.steps.len(), 1);
         assert_eq!(summary.steps[0].node_id, "a");
-        assert_eq!(summary.steps[0].status, rocket_shared::events::FlowNodeStatus::Success);
+        assert_eq!(
+            summary.steps[0].status,
+            rocket_shared::events::FlowNodeStatus::Success
+        );
         assert_eq!(summary.steps[0].status_code, Some(200));
     }
 
@@ -1704,7 +1756,495 @@ mod tests {
         assert_eq!(status_of("a"), FlowNodeStatus::Failed);
         assert_eq!(status_of("b"), FlowNodeStatus::Skipped);
         assert_eq!(status_of("c"), FlowNodeStatus::Success);
-        assert_eq!(summary.steps.iter().filter(|s| s.status == FlowNodeStatus::Failed).count(), 1);
-        assert_eq!(summary.steps.iter().filter(|s| s.status == FlowNodeStatus::Skipped).count(), 1);
+        assert_eq!(
+            summary
+                .steps
+                .iter()
+                .filter(|s| s.status == FlowNodeStatus::Failed)
+                .count(),
+            1
+        );
+        assert_eq!(
+            summary
+                .steps
+                .iter()
+                .filter(|s| s.status == FlowNodeStatus::Skipped)
+                .count(),
+            1
+        );
+    }
+
+    // ---- Whole-plan review: cancellation, fan-out, wire failure, secrets --
+
+    use crate::test_doubles::{
+        FakeSecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher, RecordingExecutor,
+        RecordingPublisher, SharedExecutor, SharedPublisher, StaticEnvRepo,
+    };
+
+    fn wire(id: &str, from: &str, to: &str) -> FlowEdge {
+        FlowEdge {
+            id: id.to_string(),
+            source_node_id: from.to_string(),
+            target_node_id: to.to_string(),
+            target_field: "url".to_string(),
+            expression: "response.body".to_string(),
+        }
+    }
+
+    fn run_input(flow_name: &str) -> RunFlowInput {
+        RunFlowInput {
+            collection: "my-api".to_string(),
+            flow_name: flow_name.to_string(),
+            environment_name: None,
+        }
+    }
+
+    /// Builds an execution service around a shared `RecordingExecutor` and a
+    /// script engine that resolves every wire to `wire_value`.
+    fn recording_exec(
+        executor: &Arc<RecordingExecutor>,
+        engine: Box<dyn ScriptEngine>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(engine)
+    }
+
+    fn fixed_wire(value: &str) -> Box<dyn ScriptEngine> {
+        Box::new(FixedJsonqEngine {
+            value: serde_json::json!(value),
+        })
+    }
+
+    fn service_with_publisher(
+        flow: Flow,
+        publisher: &Arc<RecordingPublisher>,
+    ) -> FlowExecutionService {
+        FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(SharedPublisher(Arc::clone(publisher))),
+        )
+    }
+
+    /// Returns `(node_count, failed_count, skipped_count)` from the single
+    /// `FlowRunFinished` event.
+    fn finished_counts(publisher: &RecordingPublisher) -> (usize, usize, usize) {
+        let finished: Vec<(usize, usize, usize)> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowRunFinished {
+                    node_count,
+                    failed_count,
+                    skipped_count,
+                    ..
+                } => Some((node_count, failed_count, skipped_count)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished.len(), 1, "exactly one FlowRunFinished per run");
+        finished[0]
+    }
+
+    fn status_of(summary: &FlowRunSummary, id: &str) -> FlowNodeStatus {
+        summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == id)
+            .unwrap_or_else(|| panic!("no step recorded for node '{id}'"))
+            .status
+    }
+
+    #[tokio::test]
+    async fn empty_flow_publishes_started_then_finished_with_zero_counts() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            Flow {
+                name: "empty".to_string(),
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            },
+            &publisher,
+        );
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("empty")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "completed");
+        let events = publisher.events();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            DomainEvent::FlowRunStarted { total_nodes: 0, .. }
+        ));
+        assert_eq!(finished_counts(&publisher), (0, 0, 0));
+    }
+
+    /// Publisher that marks the run cancelled once `cancel_after` step events
+    /// have been published — simulating a `cancel()` that lands mid-run.
+    struct CancelAfterSteps {
+        cancel_after: usize,
+        seen: Mutex<usize>,
+        cancelled: Arc<Mutex<HashSet<String>>>,
+    }
+    impl EventPublisher for CancelAfterSteps {
+        fn publish(&self, event: DomainEvent) {
+            if let DomainEvent::FlowStepCompleted { run_id, .. } = event {
+                let mut seen = self.seen.lock().expect("lock seen");
+                *seen += 1;
+                if *seen == self.cancel_after {
+                    self.cancelled
+                        .lock()
+                        .expect("lock cancelled")
+                        .insert(run_id);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_mid_run_keeps_completed_steps_and_runs_nothing_further() {
+        let flow = Flow {
+            name: "three".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c"),
+            ],
+            edges: Vec::new(),
+        };
+        let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let mut service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(CancelAfterSteps {
+                cancel_after: 1,
+                seen: Mutex::new(0),
+                cancelled: Arc::clone(&cancelled),
+            }),
+        );
+        // Share one registry between the service and the canceller.
+        service.cancelled = Arc::clone(&cancelled);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("three")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert_eq!(
+            summary.steps.len(),
+            1,
+            "only the node before the cancel is recorded"
+        );
+        assert_eq!(summary.steps[0].node_id, "a");
+        assert_eq!(summary.steps[0].status, FlowNodeStatus::Success);
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/a".to_string()]
+        );
+        assert!(
+            !cancelled.lock().expect("lock").contains(&summary.run_id),
+            "a finished run must not leak its id in the cancel registry"
+        );
+        assert!(
+            service.in_flight.lock().expect("lock").is_empty(),
+            "a finished run must be deregistered from in_flight"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_is_checked_before_a_skipped_node_too() {
+        // a fails, so b is Skipped. Cancelling after a's step must stop the run
+        // before b's Skipped step is even recorded.
+        let flow = Flow {
+            name: "fail-then-cancel".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+        };
+        let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let mut service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(CancelAfterSteps {
+                cancel_after: 1,
+                seen: Mutex::new(0),
+                cancelled: Arc::clone(&cancelled),
+            }),
+        );
+        service.cancelled = Arc::clone(&cancelled);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service
+            .run(&exec, run_input("fail-then-cancel"))
+            .await
+            .expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(summary.steps[0].status, FlowNodeStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn fan_out_gives_every_dependent_the_same_captured_output() {
+        // a -> b and a -> c. Both dependents wire their URL from a's output,
+        // so both must see it, not only the first dependent in order.
+        let flow = Flow {
+            name: "fan-out".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c"),
+            ],
+            edges: vec![wire("e1", "a", "b"), wire("e2", "a", "c")],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("https://api.example.com/wired"));
+
+        let summary = service.run(&exec, run_input("fan-out")).await.expect("run");
+
+        for id in ["a", "b", "c"] {
+            assert_eq!(
+                status_of(&summary, id),
+                FlowNodeStatus::Success,
+                "node {id}"
+            );
+        }
+        assert_eq!(
+            executor.sent_urls(),
+            vec![
+                "https://api.example.com/a".to_string(),
+                "https://api.example.com/wired".to_string(),
+                "https://api.example.com/wired".to_string(),
+            ]
+        );
+        assert_eq!(finished_counts(&publisher), (3, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn failure_skips_every_transitive_dependent_with_exact_counts() {
+        // Diamond a -> {b, c} -> d, plus an unrelated node e. a fails, so
+        // b, c and d are Skipped (d only once), and e still runs.
+        let flow = Flow {
+            name: "diamond".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c"),
+                request_flow_node("d", "https://api.example.com/d"),
+                request_flow_node("e", "https://api.example.com/e"),
+            ],
+            edges: vec![
+                wire("e1", "a", "b"),
+                wire("e2", "a", "c"),
+                wire("e3", "b", "d"),
+                wire("e4", "c", "d"),
+            ],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(&executor, fixed_wire("https://api.example.com/wired"));
+
+        let summary = service.run(&exec, run_input("diamond")).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 5, "every node gets exactly one step");
+        assert_eq!(status_of(&summary, "a"), FlowNodeStatus::Failed);
+        for id in ["b", "c", "d"] {
+            assert_eq!(
+                status_of(&summary, id),
+                FlowNodeStatus::Skipped,
+                "node {id}"
+            );
+        }
+        assert_eq!(status_of(&summary, "e"), FlowNodeStatus::Success);
+        assert_eq!(
+            executor.sent_urls(),
+            vec![
+                "https://api.example.com/a".to_string(),
+                "https://api.example.com/e".to_string(),
+            ],
+            "skipped nodes must never be sent"
+        );
+        assert_eq!(finished_counts(&publisher), (5, 1, 3));
+    }
+
+    #[tokio::test]
+    async fn wire_expression_failure_fails_the_node_and_skips_its_dependents() {
+        // a -> b -> c, plus an unrelated node d. Every wire expression throws,
+        // so b fails on its own wire, c is Skipped, and a and d succeed.
+        let flow = Flow {
+            name: "wire-fail".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c"),
+                request_flow_node("d", "https://api.example.com/d"),
+            ],
+            edges: vec![wire("e1", "a", "b"), wire("e2", "b", "c")],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, Box::new(ErrorJsonqEngine));
+
+        let summary = service
+            .run(&exec, run_input("wire-fail"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "a"), FlowNodeStatus::Success);
+        assert_eq!(status_of(&summary, "b"), FlowNodeStatus::Failed);
+        assert_eq!(status_of(&summary, "c"), FlowNodeStatus::Skipped);
+        assert_eq!(status_of(&summary, "d"), FlowNodeStatus::Success);
+        let b = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "b")
+            .expect("step for b");
+        assert!(
+            b.error
+                .as_deref()
+                .is_some_and(|e| e.contains("ReferenceError")),
+            "the wire's script error must be reported, got {:?}",
+            b.error
+        );
+        assert!(
+            !executor
+                .sent_urls()
+                .contains(&"https://api.example.com/b".to_string()),
+            "a node whose wire failed must not be sent"
+        );
+        assert_eq!(finished_counts(&publisher), (4, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn output_node_with_two_incoming_wires_fails_instead_of_dropping_one() {
+        let input_node = |id: &str, v: &str| FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Input {
+                label: id.to_string(),
+                value: VariableValue::simple(v),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        };
+        let flow = Flow {
+            name: "two-into-output".to_string(),
+            nodes: vec![
+                input_node("x", "1"),
+                input_node("y", "2"),
+                FlowNode {
+                    id: "out".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Out".to_string(),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+            ],
+            edges: vec![
+                FlowEdge {
+                    target_field: "value".to_string(),
+                    ..wire("e1", "x", "out")
+                },
+                FlowEdge {
+                    target_field: "value".to_string(),
+                    ..wire("e2", "y", "out")
+                },
+            ],
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("1"));
+
+        let summary = service
+            .run(&exec, run_input("two-into-output"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn resolves_external_secrets_once_per_run_not_once_per_request_node() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(rocket_environment::ExternalSecretBinding {
+                alias: "payments".to_string(),
+                connection_id: "conn-1".to_string(),
+                vault_name: "prod-vault".to_string(),
+                secret_names: vec![rocket_environment::ExternalSecretRef {
+                    name: "apiKey".to_string(),
+                    secret_id: "sec-1".to_string(),
+                }],
+            });
+        let connection = rocket_environment::SecretManagerConnection {
+            id: "conn-1".to_string(),
+            label: "Prod RocketVault".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+        };
+        let mut values = HashMap::new();
+        values.insert("sec-1".to_string(), "sk-secret".to_string());
+        let fetcher = FakeVaultSecretFetcher::new(values);
+        let executor = RecordingExecutor::new();
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(connection)),
+            Arc::new(FakeSecretStore("client-secret".to_string())),
+            Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
+        )
+        .with_script_engine(fixed_wire("x"));
+
+        let url = |n: &str| format!("https://api.example.com/{n}?key={{{{payments.apiKey}}}}");
+        let flow = Flow {
+            name: "secrets".to_string(),
+            nodes: vec![
+                request_flow_node("a", &url("a")),
+                request_flow_node("b", &url("b")),
+                request_flow_node("c", &url("c")),
+            ],
+            edges: Vec::new(),
+        };
+        let service = service_with_flow(flow);
+        let mut input = run_input("secrets");
+        input.environment_name = Some("prod".to_string());
+
+        let summary = service.run(&exec, input).await.expect("run");
+
+        assert_eq!(fetcher.call_count(), 1, "one vault fetch for the whole run");
+        assert_eq!(summary.steps.len(), 3);
+        let sent = executor.sent_urls();
+        assert_eq!(sent.len(), 3);
+        for url in &sent {
+            assert!(
+                url.ends_with("?key=sk-secret"),
+                "secret not substituted in {url}"
+            );
+        }
     }
 }

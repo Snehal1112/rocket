@@ -1420,14 +1420,6 @@ impl RequestExecutionService {
         }
     }
 
-    #[tracing::instrument(
-        name = "http_request",
-        skip(self, input),
-        fields(
-            method = %input.method,
-            url = %input.url,
-        )
-    )]
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
         // Fetches must succeed before any variable resolution or dispatch runs —
         // a configured external secret that fails to resolve live is a hard
@@ -1441,11 +1433,30 @@ impl RequestExecutionService {
                 input.environment_name.as_deref(),
             )
             .await?;
+        self.execute_with_external_secrets(input, &external_secrets)
+            .await
+    }
 
+    /// Runs every phase of one send with External Secret values the caller
+    /// already resolved. A multi-request orchestrator (the Flow runner) calls
+    /// this so it fetches secrets once per run, not once per request.
+    #[tracing::instrument(
+        name = "http_request",
+        skip(self, input, external_secrets),
+        fields(
+            method = %input.method,
+            url = %input.url,
+        )
+    )]
+    pub(crate) async fn execute_with_external_secrets(
+        &self,
+        input: ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<ExecuteRequestOutput> {
         // Every phase runs unconditionally — this is the single-send path. The
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
-        let mut state = self.begin_phases(&input, &external_secrets)?;
+        let mut state = self.begin_phases(&input, external_secrets)?;
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         let response = self.send_request(&state).await?;
