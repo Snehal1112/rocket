@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[allow(unused_imports)]
-use rocket_flow::{Flow, FlowEdge, FlowNode, FlowNodeKind, FlowRepository, NodePosition};
+use rocket_collection::Collection;
+use rocket_flow::{Flow, FlowRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -19,23 +19,33 @@ impl FsFlowRepo {
         Self { base_dir }
     }
 
-    fn flows_dir(&self, collection: &str) -> PathBuf {
-        self.base_dir.join(collection).join("flows")
+    /// Rejects collection names that could escape `base_dir`, like `FsCollectionRepo` does.
+    fn flows_dir(&self, collection: &str) -> DomainResult<PathBuf> {
+        Collection::validate_name(collection)?;
+        Ok(self.base_dir.join(collection).join("flows"))
     }
 
-    fn file_path(&self, collection: &str, name: &str) -> PathBuf {
-        self.flows_dir(collection).join(format!("{}.yml", slugify(name)))
-    }
-
-    fn read_flow(&self, path: &Path, not_found_label: &str) -> DomainResult<Flow> {
-        if !path.exists() {
-            return Err(DomainError::NotFound(not_found_label.to_string()));
+    /// Rejects flow names whose slug is empty, since they would all map to a hidden `.yml` file.
+    fn file_path(&self, collection: &str, name: &str) -> DomainResult<PathBuf> {
+        let slug = slugify(name);
+        if slug.is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "Flow name '{name}' must contain at least one ASCII letter or digit"
+            )));
         }
+        Ok(self.flows_dir(collection)?.join(format!("{slug}.yml")))
+    }
+
+    fn read_flow(path: &Path) -> DomainResult<Flow> {
         let content = fs::read_to_string(path)
             .map_err(|e| DomainError::Io(format!("Failed to read flow file: {e}")))?;
         serde_yaml::from_str(&content)
             .map_err(|e| DomainError::InvalidInput(format!("Failed to parse flow YAML: {e}")))
     }
+}
+
+fn not_found(collection: &str, name: &str) -> DomainError {
+    DomainError::NotFound(format!("Flow '{name}' in collection '{collection}'"))
 }
 
 /// Lowercase, hyphen-separated slug for a Flow's filename. This repo has no
@@ -62,7 +72,7 @@ fn slugify(name: &str) -> String {
 
 impl FlowRepository for FsFlowRepo {
     fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
-        let dir = self.flows_dir(collection);
+        let dir = self.flows_dir(collection)?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -74,14 +84,17 @@ impl FlowRepository for FsFlowRepo {
                 continue;
             }
             // Skip files that can't be read or parsed, continue with the rest.
-            let content = match fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
+            let Ok(flow) = Self::read_flow(&path) else {
+                continue;
             };
-            let flow: Flow = match serde_yaml::from_str(&content) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
+            // Only list names that `get` can resolve back to this same file.
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if slugify(&flow.name) != stem {
+                continue;
+            }
             names.push(flow.name);
         }
         names.sort();
@@ -89,25 +102,47 @@ impl FlowRepository for FsFlowRepo {
     }
 
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
-        let path = self.file_path(collection, name);
-        self.read_flow(&path, &format!("Flow '{name}' in collection '{collection}'"))
+        let path = self.file_path(collection, name)?;
+        if !path.exists() {
+            return Err(not_found(collection, name));
+        }
+        let flow = Self::read_flow(&path)?;
+        // A different name that shares the slug is a different flow.
+        if flow.name != name {
+            return Err(not_found(collection, name));
+        }
+        Ok(flow)
     }
 
     fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()> {
-        let dir = self.flows_dir(collection);
-        fs::create_dir_all(&dir).map_err(|e| DomainError::Io(e.to_string()))?;
+        let path = self.file_path(collection, &flow.name)?;
+        // Refuse to overwrite a different flow whose name maps to the same file.
+        if path.exists() {
+            if let Ok(existing) = Self::read_flow(&path) {
+                if existing.name != flow.name {
+                    return Err(DomainError::Conflict(format!(
+                        "Flow name '{}' collides with existing flow '{}' in collection '{collection}'",
+                        flow.name, existing.name
+                    )));
+                }
+            }
+        }
         let yaml = serde_yaml::to_string(flow)
-            .map_err(|e| DomainError::InvalidInput(format!("Failed to serialize flow: {e}")))?;
-        atomic_write(&self.file_path(collection, &flow.name), yaml.as_bytes())
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize flow: {e}")))?;
+        atomic_write(&path, yaml.as_bytes())
             .map_err(|e| DomainError::Io(format!("Failed to write flow file: {e}")))
     }
 
     fn delete(&self, collection: &str, name: &str) -> DomainResult<()> {
-        let path = self.file_path(collection, name);
+        let path = self.file_path(collection, name)?;
         if !path.exists() {
-            return Err(DomainError::NotFound(format!(
-                "Flow '{name}' in collection '{collection}'"
-            )));
+            return Err(not_found(collection, name));
+        }
+        // Never delete a different flow that only shares the slug.
+        if let Ok(existing) = Self::read_flow(&path) {
+            if existing.name != name {
+                return Err(not_found(collection, name));
+            }
         }
         fs::remove_file(&path).map_err(|e| DomainError::Io(e.to_string()))
     }
@@ -116,8 +151,11 @@ impl FlowRepository for FsFlowRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_flow::{
+        FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
+        RequestSource,
+    };
     use tempfile::TempDir;
-    use rocket_flow::{InlineHeader, InlineRequestData, RequestSource};
 
     fn setup() -> (TempDir, FsFlowRepo) {
         let dir = TempDir::new().expect("create temp dir");
@@ -141,10 +179,6 @@ mod tests {
         }
     }
 
-    fn repo_pair() -> (TempDir, FsFlowRepo) {
-        setup()
-    }
-
     #[test]
     fn list_on_collection_with_no_flows_dir_returns_empty() {
         let (_dir, repo) = setup();
@@ -154,7 +188,9 @@ mod tests {
     #[test]
     fn get_on_missing_flow_returns_not_found() {
         let (_dir, repo) = setup();
-        let err = repo.get("acme", "no-such-flow").expect_err("must not find a flow that was never saved");
+        let err = repo
+            .get("acme", "no-such-flow")
+            .expect_err("must not find a flow that was never saved");
         assert!(matches!(err, DomainError::NotFound(_)));
     }
 
@@ -166,24 +202,34 @@ mod tests {
 
         let loaded = repo.get("acme", "Login Flow").expect("get");
         assert_eq!(loaded, flow);
-        assert_eq!(repo.list("acme").expect("list"), vec!["Login Flow".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Login Flow".to_string()]
+        );
     }
 
     #[test]
     fn save_under_same_name_replaces_not_duplicates() {
         let (_dir, repo) = setup();
-        repo.save("acme", &sample("Login Flow")).expect("save first");
+        repo.save("acme", &sample("Login Flow"))
+            .expect("save first");
 
         let mut updated = sample("Login Flow");
         updated.nodes.push(FlowNode {
             id: "node-2".to_string(),
-            kind: FlowNodeKind::Output { label: "Result".to_string() },
+            kind: FlowNodeKind::Output {
+                label: "Result".to_string(),
+            },
             position: NodePosition { x: 400.0, y: 200.0 },
         });
         repo.save("acme", &updated).expect("save update");
 
         let names = repo.list("acme").expect("list");
-        assert_eq!(names.len(), 1, "same flow name must replace, not append a second file");
+        assert_eq!(
+            names.len(),
+            1,
+            "same flow name must replace, not append a second file"
+        );
         assert_eq!(repo.get("acme", "Login Flow").expect("get").nodes.len(), 2);
     }
 
@@ -210,10 +256,16 @@ mod tests {
         repo.save("acme", &sample("My First Flow!")).expect("save");
 
         assert!(
-            dir.path().join("acme").join("flows").join("my-first-flow.yml").exists(),
+            dir.path()
+                .join("acme")
+                .join("flows")
+                .join("my-first-flow.yml")
+                .exists(),
             "expected slugified filename my-first-flow.yml"
         );
-        let loaded = repo.get("acme", "My First Flow!").expect("get by original name");
+        let loaded = repo
+            .get("acme", "My First Flow!")
+            .expect("get by original name");
         assert_eq!(loaded.name, "My First Flow!");
     }
 
@@ -222,9 +274,12 @@ mod tests {
         let (dir, repo) = setup();
         let flows_dir = dir.path().join("acme").join("flows");
         fs::create_dir_all(&flows_dir).expect("create flows dir");
-        fs::write(flows_dir.join("broken.yml"), b"not: valid: yaml: [").expect("write malformed file");
+        fs::write(flows_dir.join("broken.yml"), b"not: valid: yaml: [")
+            .expect("write malformed file");
 
-        let err = repo.get("acme", "broken").expect_err("malformed YAML must error, not panic");
+        let err = repo
+            .get("acme", "Broken")
+            .expect_err("malformed YAML must error, not panic");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
@@ -242,8 +297,14 @@ mod tests {
         repo.save("acme", &flow).expect("save");
         let raw = fs::read_to_string(dir.path().join("acme").join("flows").join("login-flow.yml"))
             .expect("read saved flow file");
-        assert!(raw.contains("source_node_id"), "expected snake_case field, got:\n{raw}");
-        assert!(!raw.contains("sourceNodeId"), "must not contain camelCase, got:\n{raw}");
+        assert!(
+            raw.contains("source_node_id"),
+            "expected snake_case field, got:\n{raw}"
+        );
+        assert!(
+            !raw.contains("sourceNodeId"),
+            "must not contain camelCase, got:\n{raw}"
+        );
     }
 
     #[test]
@@ -253,13 +314,17 @@ mod tests {
         fs::create_dir_all(&flows_dir).expect("create flows dir");
 
         // Create one malformed file.
-        fs::write(flows_dir.join("broken.yml"), b"not: valid: yaml: [").expect("write malformed file");
+        fs::write(flows_dir.join("broken.yml"), b"not: valid: yaml: [")
+            .expect("write malformed file");
 
         // Create one valid flow file.
-        repo.save("acme", &sample("Good Flow")).expect("save valid flow");
+        repo.save("acme", &sample("Good Flow"))
+            .expect("save valid flow");
 
         // list() should skip the malformed file and return only the valid one.
-        let names = repo.list("acme").expect("list must succeed despite malformed file");
+        let names = repo
+            .list("acme")
+            .expect("list must succeed despite malformed file");
         assert_eq!(names, vec!["Good Flow".to_string()]);
     }
 
@@ -287,7 +352,7 @@ mod tests {
 
     #[test]
     fn request_node_with_inline_source_roundtrips() {
-        let (_dir, repo) = repo_pair();
+        let (_dir, repo) = setup();
         let flow = Flow {
             name: "Inline Source Flow".to_string(),
             nodes: vec![FlowNode {
@@ -317,7 +382,7 @@ mod tests {
 
     #[test]
     fn inline_request_with_no_body_roundtrips_as_none() {
-        let (_dir, repo) = repo_pair();
+        let (_dir, repo) = setup();
         let flow = Flow {
             name: "No Body Flow".to_string(),
             nodes: vec![FlowNode {
@@ -340,7 +405,10 @@ mod tests {
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "No Body Flow").expect("get");
         match &loaded.nodes[0].kind {
-            FlowNodeKind::Request { source: RequestSource::Inline { request }, .. } => {
+            FlowNodeKind::Request {
+                source: RequestSource::Inline { request },
+                ..
+            } => {
                 assert_eq!(request.body, None);
                 assert!(request.headers.is_empty());
             }
@@ -350,24 +418,99 @@ mod tests {
 
     #[test]
     fn all_three_node_kinds_in_one_flow_roundtrip_together() {
-        let (_dir, repo) = repo_pair();
+        let (_dir, repo) = setup();
         let mut flow = sample("Mixed Kinds Flow");
         flow.nodes.push(FlowNode {
             id: "node-2".to_string(),
             kind: FlowNodeKind::Request {
                 label: "Call".to_string(),
-                source: RequestSource::Saved { request_path: "call.yml".to_string() },
+                source: RequestSource::Saved {
+                    request_path: "call.yml".to_string(),
+                },
             },
             position: NodePosition { x: 200.0, y: 0.0 },
         });
         flow.nodes.push(FlowNode {
             id: "node-3".to_string(),
-            kind: FlowNodeKind::Output { label: "Result".to_string() },
+            kind: FlowNodeKind::Output {
+                label: "Result".to_string(),
+            },
             position: NodePosition { x: 400.0, y: 0.0 },
         });
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "Mixed Kinds Flow").expect("get");
         assert_eq!(loaded.nodes.len(), 3);
         assert_eq!(loaded, flow);
+    }
+
+    #[test]
+    fn colliding_slug_does_not_overwrite_or_leak_other_flow() {
+        let (_dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow"))
+            .expect("save original");
+
+        let err = repo
+            .save("acme", &sample("login-flow"))
+            .expect_err("a different name with the same slug must not overwrite");
+        assert!(matches!(err, DomainError::Conflict(_)));
+
+        let err = repo
+            .get("acme", "login-flow")
+            .expect_err("must not return another flow");
+        assert!(matches!(err, DomainError::NotFound(_)));
+        let err = repo
+            .delete("acme", "LOGIN FLOW")
+            .expect_err("must not delete another flow");
+        assert!(matches!(err, DomainError::NotFound(_)));
+
+        assert_eq!(
+            repo.get("acme", "Login Flow").expect("get").name,
+            "Login Flow"
+        );
+    }
+
+    #[test]
+    fn name_with_empty_slug_is_rejected() {
+        let (_dir, repo) = setup();
+        for name in ["", "!!!", "日本語"] {
+            let err = repo
+                .save("acme", &sample(name))
+                .expect_err("empty slug must be rejected");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "name {name:?}");
+        }
+    }
+
+    #[test]
+    fn collection_name_that_escapes_base_dir_is_rejected() {
+        let (_dir, repo) = setup();
+        for collection in ["../escape", "a/b", ".hidden", ""] {
+            let err = repo
+                .save(collection, &sample("Login Flow"))
+                .expect_err("unsafe collection name must be rejected");
+            assert!(
+                matches!(err, DomainError::InvalidInput(_)),
+                "collection {collection:?}"
+            );
+            assert!(repo.list(collection).is_err(), "collection {collection:?}");
+        }
+    }
+
+    #[test]
+    fn list_skips_file_whose_name_does_not_match_its_filename() {
+        let (dir, repo) = setup();
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+        fs::write(
+            flows_dir.join("renamed.yml"),
+            b"name: Other\nnodes: []\nedges: []\n",
+        )
+        .expect("write mismatched file");
+        repo.save("acme", &sample("Good Flow"))
+            .expect("save valid flow");
+
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Good Flow".to_string()]
+        );
     }
 }
