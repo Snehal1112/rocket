@@ -255,6 +255,15 @@ pub fn delete_flow(
     svc.delete(&collection, &name)
 }
 
+#[tauri::command]
+pub fn save_flow(
+    collection: String,
+    flow: FlowDto,
+    svc: State<'_, FlowService>,
+) -> Result<(), DomainError> {
+    svc.save(&collection, flow.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

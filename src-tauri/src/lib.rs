@@ -484,6 +484,7 @@ pub fn run() {
             commands::flow::list_flows,
             commands::flow::get_flow,
             commands::flow::delete_flow,
+            commands::flow::save_flow,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,

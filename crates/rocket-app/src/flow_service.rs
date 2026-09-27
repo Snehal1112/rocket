@@ -1,4 +1,4 @@
-use rocket_flow::{Flow, FlowRepository};
+use rocket_flow::{topological_sort, Flow, FlowGraphError, FlowRepository};
 use rocket_shared::error::DomainResult;
 
 pub struct FlowService {
@@ -21,12 +21,31 @@ impl FlowService {
     pub fn delete(&self, collection: &str, name: &str) -> DomainResult<()> {
         self.flow_repo.delete(collection, name)
     }
+
+    pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
+        topological_sort(&flow).map_err(|e| match e {
+            FlowGraphError::Cycle { node_ids } => rocket_shared::error::DomainError::InvalidInput(
+                format!("flow contains a cycle through node(s): {}", node_ids.join(", ")),
+            ),
+            FlowGraphError::UnknownNode { node_id } => {
+                rocket_shared::error::DomainError::InvalidInput(format!(
+                    "edge references unknown node: {node_id}"
+                ))
+            }
+            FlowGraphError::DuplicateNode { node_id } => {
+                rocket_shared::error::DomainError::InvalidInput(format!(
+                    "flow has more than one node with id: {node_id}"
+                ))
+            }
+        })?;
+        self.flow_repo.save(collection, &flow)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_flow::{FlowNode, FlowNodeKind, NodePosition};
+    use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, NodePosition};
     use std::sync::Mutex;
 
     fn sample_flow() -> Flow {
@@ -123,5 +142,82 @@ mod tests {
         let svc = FlowService::new(Box::new(repo));
         svc.delete("demo", "Login Then Fetch").expect("delete");
         assert!(svc.get("demo", "Login Then Fetch").is_err());
+    }
+
+    fn cyclic_flow() -> Flow {
+        Flow {
+            name: "Cyclic".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "A".to_string(),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                FlowNode {
+                    id: "b".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "B".to_string(),
+                    },
+                    position: NodePosition { x: 100.0, y: 0.0 },
+                },
+            ],
+            edges: vec![
+                FlowEdge {
+                    id: "e1".to_string(),
+                    source_node_id: "a".to_string(),
+                    target_node_id: "b".to_string(),
+                    target_field: "body".to_string(),
+                    expression: "response.body".to_string(),
+                },
+                FlowEdge {
+                    id: "e2".to_string(),
+                    source_node_id: "b".to_string(),
+                    target_node_id: "a".to_string(),
+                    target_field: "body".to_string(),
+                    expression: "response.body".to_string(),
+                },
+            ],
+        }
+    }
+
+    struct PanicsOnSaveRepo;
+    impl FlowRepository for PanicsOnSaveRepo {
+        fn list(&self, _collection: &str) -> DomainResult<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn get(&self, _collection: &str, name: &str) -> DomainResult<Flow> {
+            Err(rocket_shared::error::DomainError::NotFound(name.to_string()))
+        }
+        fn save(&self, _collection: &str, _flow: &Flow) -> DomainResult<()> {
+            panic!("save must not be called for a cyclic flow");
+        }
+        fn delete(&self, _collection: &str, _name: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn save_rejects_cyclic_graph_and_names_the_nodes() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let err = svc
+            .save("demo", cyclic_flow())
+            .expect_err("cyclic flow must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains('a') && message.contains('b'),
+            "error should name the cyclic nodes, got: {message}"
+        );
+    }
+
+    #[test]
+    fn save_persists_an_acyclic_flow() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::new()));
+        svc.save("demo", sample_flow()).expect("save acyclic flow");
+        assert_eq!(
+            svc.list("demo").expect("list"),
+            vec!["Login Then Fetch".to_string()]
+        );
     }
 }
