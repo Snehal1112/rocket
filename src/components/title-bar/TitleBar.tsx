@@ -1,6 +1,7 @@
 import { type as osType } from '@tauri-apps/plugin-os';
-import { Settings } from 'lucide-react';
+import { Bot, Settings } from 'lucide-react';
 import { useState } from 'react';
+import { AgentConfigsDialog } from '@/components/settings/AgentConfigsDialog';
 import { SecretManagerConnectionsDialog } from '@/components/settings/SecretManagerConnectionsDialog';
 import { Button } from '@/components/ui/button';
 import { WindowControls } from './WindowControls';
@@ -9,6 +10,7 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 export function TitleBar() {
   const isMac = osType() === 'macos';
   const [showSecretManagers, setShowSecretManagers] = useState(false);
+  const [showAgentConfigs, setShowAgentConfigs] = useState(false);
 
   return (
     <div
@@ -36,6 +38,15 @@ export function TitleBar() {
         >
           <Settings className='h-4 w-4' aria-hidden='true' />
         </Button>
+        <Button
+          variant='ghost'
+          size='icon'
+          className='h-7 w-7'
+          aria-label='AI Agent configurations'
+          onClick={() => setShowAgentConfigs(true)}
+        >
+          <Bot className='h-4 w-4' aria-hidden='true' />
+        </Button>
         {!isMac && <WindowControls />}
       </div>
 
@@ -43,6 +54,7 @@ export function TitleBar() {
         open={showSecretManagers}
         onOpenChange={setShowSecretManagers}
       />
+      <AgentConfigsDialog open={showAgentConfigs} onOpenChange={setShowAgentConfigs} />
     </div>
   );
 }
