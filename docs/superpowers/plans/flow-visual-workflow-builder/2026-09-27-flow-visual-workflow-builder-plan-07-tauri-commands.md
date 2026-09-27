@@ -962,6 +962,9 @@ git commit -m "feat(flow): reject cyclic graphs in save_flow"
 ## Task 3: `run_flow` + `cancel_flow_run`
 
 **Files:**
+- Modify: `crates/rocket-app/src/flow_execution_service.rs` (add
+  `Serialize`/`Deserialize` + camelCase to `FlowStepResult`/`FlowRunSummary`
+  — see the confirmed-gap note under Step 1 below)
 - Modify: `src-tauri/src/commands/flow.rs`
 - Modify: `src-tauri/src/lib.rs`
 
@@ -1021,12 +1024,22 @@ pub fn cancel_flow_run(
 }
 ```
 
-(`FlowRunSummary` must derive `Serialize` for this command to compile as a
-Tauri return type — confirm this is present on Plan 06's definition; if not,
-add it there rather than wrapping it in a second DTO here, since it carries
-no snake_case-vs-camelCase-sensitive persistence role, only an IPC-return
-role, the same reasoning `RunSummary`/`RunStepResult` already follow for the
-Collection Runner.)
+**Confirmed gap, fix required:** `FlowStepResult`/`FlowRunSummary`
+(`crates/rocket-app/src/flow_execution_service.rs`, Plan 06) currently derive
+only `Debug, Clone` — no `Serialize` at all, so `run_flow` as written above
+will not compile yet. Fix this the same way `RunStepResult`/`RunSummary`
+(`collection_runner_service.rs:74-77, 154-157`, both explicitly commented
+`// IPC DTO`) already solve the identical problem for the Collection Runner:
+add `Serialize, Deserialize` to the derive list **and**
+`#[serde(rename_all = "camelCase")]` directly on both structs — not bare
+`Serialize` alone, which would send `run_id`/`node_id`/`status_code` etc. to
+the frontend as snake_case, inconsistent with every other field this plan's
+DTO tree renders as camelCase. `FlowStepResult`/`FlowRunSummary` are
+in-memory run results, never persisted to disk, so this is the same
+justified exception to the "no camelCase on domain/persistence types" rule
+that `RunStepResult`/`RunSummary` already are — not a new precedent. Modify
+those two struct definitions in `flow_execution_service.rs` as part of this
+task's Step 1, before writing `run_flow` itself.
 
 - [ ] **Step 2: Wire `FlowExecutionService` into `lib.rs`**
 
@@ -1074,7 +1087,7 @@ the `SharedPathCollectionRepo` wiring compile together.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src-tauri/src/commands/flow.rs src-tauri/src/lib.rs
+git add crates/rocket-app/src/flow_execution_service.rs src-tauri/src/commands/flow.rs src-tauri/src/lib.rs
 git commit -m "feat(flow): add run_flow and cancel_flow_run commands"
 ```
 
