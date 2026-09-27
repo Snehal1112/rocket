@@ -11,6 +11,8 @@ pub struct AgentConfigDto {
     pub label: String,
     pub command: String,
     pub args: Vec<String>,
+    // Omitted when unset, to match the frontend's optional `workingDir?: string`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
     pub credential_env_var: String,
     pub vault_connection_id: String,
@@ -107,9 +109,32 @@ mod tests {
     fn dto_serializes_camelcase() {
         let dto: AgentConfigDto = sample_domain().into();
         let json = serde_json::to_string(&dto).expect("serialize AgentConfigDto");
-        assert!(json.contains("\"credentialEnvVar\""), "expected camelCase, got: {json}");
-        assert!(json.contains("\"vaultConnectionId\""), "expected camelCase, got: {json}");
-        assert!(json.contains("\"workingDir\""), "expected camelCase, got: {json}");
+        assert!(
+            json.contains("\"credentialEnvVar\""),
+            "expected camelCase, got: {json}"
+        );
+        assert!(
+            json.contains("\"vaultConnectionId\""),
+            "expected camelCase, got: {json}"
+        );
+        assert!(
+            json.contains("\"workingDir\""),
+            "expected camelCase, got: {json}"
+        );
+    }
+
+    #[test]
+    fn dto_omits_working_dir_when_unset() {
+        let mut domain = sample_domain();
+        domain.working_dir = None;
+        let dto: AgentConfigDto = domain.into();
+        let json = serde_json::to_string(&dto).expect("serialize AgentConfigDto");
+        assert!(
+            !json.contains("workingDir"),
+            "expected workingDir omitted, got: {json}"
+        );
+        let back: AgentConfigDto = serde_json::from_str(&json).expect("deserialize AgentConfigDto");
+        assert_eq!(back.working_dir, None);
     }
 
     #[test]
