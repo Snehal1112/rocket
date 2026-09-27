@@ -186,8 +186,7 @@ pub enum DomainEvent {
         skipped_count: usize,
     },
 
-    // ACP AI-assist session events — mirrors the Collection Runner/Flow
-    // events above: each variant gets its own frontend channel.
+    // ACP session events
     /// Emitted once a spawned agent process completes its ACP handshake.
     AcpSessionStarted {
         session_id: String,
