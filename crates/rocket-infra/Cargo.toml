@@ -34,6 +34,18 @@ deno_error = "=0.7.1"
 thiserror.workspace = true
 url = "2"
 keyring.workspace = true
+agent-client-protocol = "2.2"
+async-process = "2"
+futures-lite = "2"
+
+[[bin]]
+name = "test_acp_agent"
+path = "src/bin/test_acp_agent.rs"
+test = false
+doc = false
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }

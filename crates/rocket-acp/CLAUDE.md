@@ -7,8 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The `rocket-acp` crate is a pure domain crate in the Rocket HTTP client
 workspace. It owns the `AgentConfig` entity (a registered ACP agent
 binary/command and a reference to where RocketVault holds its API key) and
-the `AgentConfigRepository` trait. It has no I/O — the filesystem
-implementation lives in `rocket-infra` (`FsAgentConfigRepo`).
+the `AgentConfigRepository` trait, plus the `AcpSessionClient` trait that
+drives one ACP agent session (spawn + handshake, streamed prompt, kill). It
+has no I/O — the filesystem implementation lives in `rocket-infra`
+(`FsAgentConfigRepo`), and the process/protocol implementation lives in
+`rocket-infra` (`AcpAgentClient`).
 
 ## Commands
 
@@ -27,6 +30,7 @@ cargo test -p rocket-acp -j4
 | Module | Responsibility |
 |---|---|
 | `agent_config.rs` | `AgentConfig` struct + `AgentConfigRepository` trait |
+| `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `end_session`) |
 
 ### Key Design Points
 
@@ -36,6 +40,11 @@ cargo test -p rocket-acp -j4
   RocketVault `SecretManagerService`/`VaultSecretFetcher` machinery.
 - No cross-domain-crate dependencies — other entities are referenced by plain
   `String` id, not by importing another domain crate's types.
+- `AcpSessionClient` must stay object-safe (`rocket-app` holds it as
+  `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
+  `DomainEvent`, or Tauri. `send_prompt` streams text through a plain
+  `tokio::sync::mpsc::UnboundedSender<String>` — event publishing belongs in
+  `rocket-app`'s `AcpSessionService`, not in this trait.
 - Plain (non-camelCase) field names — this struct persists to its own
   app-level `agent_configs.yml`, not the OpenCollection format.
 
@@ -43,4 +52,6 @@ cargo test -p rocket-acp -j4
 
 - `rocket-shared` — `DomainResult`
 - `serde` — serialization derives
+- `async-trait` — async methods on `AcpSessionClient`
+- `tokio` — only the `mpsc::UnboundedSender` channel type
 - `serde_json` (dev-only) — serde roundtrip tests

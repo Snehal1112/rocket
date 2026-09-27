@@ -186,6 +186,32 @@ pub enum DomainEvent {
         skipped_count: usize,
     },
 
+    // ACP session events
+    /// Emitted once a spawned agent process completes its ACP handshake.
+    AcpSessionStarted {
+        session_id: String,
+    },
+    /// Emitted per streamed text chunk while a prompt is being answered.
+    AcpSessionChunk {
+        session_id: String,
+        text: String,
+    },
+    /// Emitted once a prompt's turn ends. `stop_reason` is the raw ACP
+    /// `stopReason` string (`end_turn`, `max_tokens`, `max_turn_requests`,
+    /// `refusal`, `cancelled`, or an agent-specific custom reason) — kept as
+    /// a plain string rather than a fixed enum because ACP's own
+    /// `StopReason` type is `#[non_exhaustive]`.
+    AcpSessionFinished {
+        session_id: String,
+        stop_reason: String,
+    },
+    /// Emitted when a session ends abnormally: the agent process crashed,
+    /// a protocol-level error occurred, or `send_prompt` timed out.
+    AcpSessionFailed {
+        session_id: String,
+        error: String,
+    },
+
     // File system events
     FileChanged {
         path: String,
@@ -699,6 +725,59 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"flowRunFinished","run_id":"01J","stopped_reason":"completed","node_count":5,"failed_count":1,"skipped_count":2}"#
+        );
+    }
+
+    #[test]
+    fn acp_session_started_wire_shape() {
+        let event = DomainEvent::AcpSessionStarted {
+            session_id: "sess-1".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(json, r#"{"type":"acpSessionStarted","session_id":"sess-1"}"#);
+    }
+
+    #[test]
+    fn acp_session_chunk_wire_shape() {
+        let event = DomainEvent::AcpSessionChunk {
+            session_id: "sess-1".into(),
+            text: "Hello, ".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpSessionChunk","session_id":"sess-1","text":"Hello, "}"#
+        );
+    }
+
+    #[test]
+    fn acp_session_finished_wire_shape_carries_arbitrary_stop_reason_unchanged() {
+        // stop_reason is a plain String (not a closed Rust enum) precisely
+        // because ACP's own StopReason is #[non_exhaustive] — an
+        // agent-specific custom reason (the spec's example: an underscore-
+        // prefixed value) must round-trip unchanged, not just a known value
+        // like "end_turn".
+        let event = DomainEvent::AcpSessionFinished {
+            session_id: "sess-1".into(),
+            stop_reason: "_custom_agent_reason".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpSessionFinished","session_id":"sess-1","stop_reason":"_custom_agent_reason"}"#
+        );
+    }
+
+    #[test]
+    fn acp_session_failed_wire_shape() {
+        let event = DomainEvent::AcpSessionFailed {
+            session_id: "sess-1".into(),
+            error: "agent process exited unexpectedly".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpSessionFailed","session_id":"sess-1","error":"agent process exited unexpectedly"}"#
         );
     }
 }

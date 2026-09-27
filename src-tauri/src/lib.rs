@@ -68,6 +68,53 @@ fn network_memory_pressure_settings() -> webkit2gtk::MemoryPressureSettings {
     settings
 }
 
+/// Resolves on the next delivery of `stream`'s signal. A missing or closed
+/// stream never resolves, so it cannot trigger a spurious exit.
+#[cfg(unix)]
+async fn next_signal(stream: &mut Option<tokio::signal::unix::Signal>) {
+    if let Some(stream) = stream {
+        if stream.recv().await.is_some() {
+            return;
+        }
+    }
+    std::future::pending::<()>().await
+}
+
+/// Turns SIGINT, SIGTERM, and SIGHUP into a normal app exit.
+///
+/// Without this, those signals end Rocket without `RunEvent::Exit`, and any
+/// running ACP agent (with its API key in its environment) is orphaned. The
+/// first signal kills all agent sessions and requests a normal exit. A second
+/// signal exits at once, in case the event loop is stuck.
+#[cfg(unix)]
+fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    tauri::async_runtime::spawn(async move {
+        let mut interrupt = signal(SignalKind::interrupt()).ok();
+        let mut terminate = signal(SignalKind::terminate()).ok();
+        let mut hangup = signal(SignalKind::hangup()).ok();
+        if interrupt.is_none() && terminate.is_none() && hangup.is_none() {
+            return;
+        }
+
+        for attempt in 0.. {
+            tokio::select! {
+                _ = next_signal(&mut interrupt) => {}
+                _ = next_signal(&mut terminate) => {}
+                _ = next_signal(&mut hangup) => {}
+            }
+            if attempt > 0 {
+                std::process::exit(1);
+            }
+            if let Some(acp_session_svc) = app_handle.try_state::<rocket_app::AcpSessionService>() {
+                let _ = acp_session_svc.end_all_sessions().await;
+            }
+            app_handle.exit(0);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Work around a WebKitGTK GPU-compositing bug that renders the Scripts tab
@@ -312,6 +359,30 @@ pub fn run() {
                 agent_config_secret_manager,
             );
 
+            // A dedicated SecretManagerService + AgentConfigService pair for
+            // AcpSessionService, mirroring agent_config_svc above. It must
+            // share the same vault_connection_secret_store/vault_fetcher Arcs,
+            // so connection secrets and the vault token cache stay shared.
+            let acp_agent_config_secret_manager = Arc::new(rocket_app::SecretManagerService::new(
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
+            ));
+            let acp_agent_config_svc = Arc::new(rocket_app::AgentConfigService::new(
+                Box::new(rocket_infra::FsAgentConfigRepo::new(
+                    data_dir.join("agent_configs.yml"),
+                )),
+                acp_agent_config_secret_manager,
+            ));
+
+            let acp_session_svc = rocket_app::AcpSessionService::new(
+                Box::new(rocket_infra::AcpAgentClient::new()),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                acp_agent_config_svc,
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -405,6 +476,7 @@ pub fn run() {
             app.manage(exec_svc);
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
+            app.manage(acp_session_svc);
             app.manage(runner_svc);
             app.manage(flow_exec_svc);
             app.manage(executor);
@@ -415,6 +487,12 @@ pub fn run() {
             app.manage(audit_svc);
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
+
+            // Agent processes run in their own process groups, so a signal
+            // sent to Rocket alone never reaches them. Route those signals
+            // through the normal exit path, which kills every agent session.
+            #[cfg(unix)]
+            spawn_exit_signal_listener(app.handle().clone());
 
             // Start filesystem watcher for the collections directory.
             let watcher = NotifyFileWatcher::new();
@@ -622,9 +700,24 @@ pub fn run() {
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,
             commands::agent_configs::test_agent_config,
+            commands::acp_sessions::start_agent_session,
+            commands::acp_sessions::send_agent_prompt,
+            commands::acp_sessions::end_agent_session,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(acp_session_svc) =
+                    app_handle.try_state::<rocket_app::AcpSessionService>()
+                {
+                    // Best-effort on app exit. The process is about to tear
+                    // down regardless, so there is no caller left to report
+                    // a kill failure to.
+                    let _ = tauri::async_runtime::block_on(acp_session_svc.end_all_sessions());
+                }
+            }
+        });
 }
 
 #[cfg(all(test, target_os = "linux"))]

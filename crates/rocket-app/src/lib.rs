@@ -1,5 +1,6 @@
 // Application services — orchestration layer
 
+pub mod acp_session_service;
 pub mod agent_config_service;
 pub mod assertion_evaluator;
 pub mod collection_runner_service;
@@ -26,6 +27,7 @@ pub(crate) mod test_doubles;
 pub mod vault_secret_resolution;
 pub mod workspace_service;
 
+pub use acp_session_service::AcpSessionService;
 pub use agent_config_service::AgentConfigService;
 pub use collection_runner_service::{
     CollectionRunnerService, RunCollectionInput, RunStepResult, RunStepStatus, RunSummary,
