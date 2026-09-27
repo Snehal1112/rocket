@@ -1,3 +1,4 @@
+pub mod acp_agent_client;
 mod atomic_write;
 pub mod clone_destination_capabilities;
 pub mod contract_records;

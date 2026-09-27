@@ -34,6 +34,13 @@ deno_error = "=0.7.1"
 thiserror.workspace = true
 url = "2"
 keyring.workspace = true
+agent-client-protocol = "2.2"
+
+[[bin]]
+name = "test_acp_agent"
+path = "src/bin/test_acp_agent.rs"
+test = false
+doc = false
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
