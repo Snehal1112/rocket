@@ -5,7 +5,8 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
+    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase,
+    WebSocketRequest,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -335,5 +336,15 @@ impl CollectionRepository for FsCollectionRepo {
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
         variables::save_request_variables(self, collection, request_path, vars)
+    }
+
+    fn save_request_script(
+        &self,
+        collection: &str,
+        request_path: &str,
+        phase: RequestScriptPhase,
+        body: String,
+    ) -> DomainResult<()> {
+        variables::save_request_script(self, collection, request_path, phase, body)
     }
 }

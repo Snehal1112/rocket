@@ -12,6 +12,16 @@ use crate::settings::{CollectionSettings, CollectionVariable};
 use crate::summary::CollectionSummary;
 use crate::websocket::WebSocketRequest;
 
+/// Identifies which of a request's three script fields `save_request_script`
+/// targets. A local enum (not a reuse of `rocket-scripting::ScriptPhase`) —
+/// see this task's doc comment in the plan for why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestScriptPhase {
+    PreRequest,
+    PostResponse,
+    Tests,
+}
+
 /// Repository trait for Collection persistence.
 /// Implemented by FsCollectionRepo in rocket-infra.
 pub trait CollectionRepository: Send + Sync {
@@ -281,6 +291,20 @@ pub trait CollectionRepository: Send + Sync {
         request_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()>;
+
+    /// Overwrite one of a request's three script fields (pre-request,
+    /// post-response, or tests) in place, leaving the other two and every
+    /// other request field untouched. Deliberately not a full
+    /// read-modify-write of the whole `Request` from a caller-supplied copy —
+    /// that risks clobbering a concurrent manual edit to unrelated fields,
+    /// and `Request` has no optimistic-concurrency mechanism to detect that.
+    fn save_request_script(
+        &self,
+        collection: &str,
+        request_path: &str,
+        phase: RequestScriptPhase,
+        body: String,
+    ) -> DomainResult<()>;
 }
 
 #[cfg(test)]
@@ -435,5 +459,13 @@ mod tests {
             .get_folder_chain_settings("c", "a/b/request.yml")
             .expect("default chain is Ok");
         assert_eq!(chain, Vec::<FolderSettings>::new());
+    }
+
+    #[test]
+    fn request_script_phase_is_copy_and_comparable() {
+        let a = RequestScriptPhase::PreRequest;
+        let b = a;
+        assert_eq!(a, b);
+        assert_ne!(RequestScriptPhase::PreRequest, RequestScriptPhase::Tests);
     }
 }

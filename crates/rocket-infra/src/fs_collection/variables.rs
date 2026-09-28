@@ -1,10 +1,11 @@
 use std::fs;
 
-use rocket_collection::{Collection, CollectionVariable};
+use rocket_collection::{Collection, CollectionVariable, RequestScriptPhase};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::conversions::folder_oc_variables;
+use crate::conversions::{oc_http_request_to_request, request_to_oc_http_request};
 use crate::oc::{
     OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest, OcGrpcRequest,
     OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
@@ -188,6 +189,41 @@ pub(super) fn save_request_variables(
     let content = fs::read_to_string(&file_path)?;
     let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
     let yaml = with_runtime_variables(&content, oc_vars)?;
+    atomic_write(&file_path, yaml.as_bytes())?;
+    Ok(())
+}
+
+pub(super) fn save_request_script(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    request_path: &str,
+    phase: RequestScriptPhase,
+    body: String,
+) -> DomainResult<()> {
+    Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let collection_dir = repo.collection_path(collection);
+    let file_path = resolve_request_path(repo, &collection_dir, request_path)?;
+    let content = fs::read_to_string(&file_path)?;
+    let oc: OcHttpRequest = serde_yaml::from_str(&content)
+        .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
+
+    // Round-trip through the domain Request rather than editing
+    // runtime.scripts directly: oc_http_request_to_request/
+    // request_to_oc_http_request already implement the exact bidirectional
+    // mapping between the three Option<String> script fields and the OC
+    // YAML's Vec<OcScript> shape (see this task's doc comment for why).
+    let mut req = oc_http_request_to_request(oc);
+    match phase {
+        RequestScriptPhase::PreRequest => req.pre_request_script = Some(body),
+        RequestScriptPhase::PostResponse => req.post_response_script = Some(body),
+        RequestScriptPhase::Tests => req.tests = Some(body),
+    }
+    let oc = request_to_oc_http_request(&req);
+
+    let yaml = serde_yaml::to_string(&oc)
+        .map_err(|e| DomainError::Internal(format!("Failed to serialize request file: {e}")))?;
     atomic_write(&file_path, yaml.as_bytes())?;
     Ok(())
 }

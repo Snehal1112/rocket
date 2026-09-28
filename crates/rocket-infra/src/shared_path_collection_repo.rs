@@ -5,7 +5,8 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
+    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase,
+    WebSocketRequest,
 };
 use rocket_shared::error::DomainResult;
 
@@ -274,6 +275,17 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo()
             .save_request_variables(collection, request_path, vars)
     }
+
+    fn save_request_script(
+        &self,
+        collection: &str,
+        request_path: &str,
+        phase: RequestScriptPhase,
+        body: String,
+    ) -> DomainResult<()> {
+        self.repo()
+            .save_request_script(collection, request_path, phase, body)
+    }
 }
 
 #[cfg(test)]
@@ -439,6 +451,64 @@ mod tests {
             repo.get_folder_chain_settings("api", "users/list.yml")
                 .unwrap(),
             vec![settings]
+        );
+    }
+
+    #[test]
+    fn concurrent_save_request_script_calls_on_different_requests_both_complete_without_error() {
+        // Mirrors concurrent_saves_to_same_collection_both_complete_without_error
+        // above, for save_request_script's per-collection mutex instead of
+        // save_request's.
+        let (_dir, repo) = setup();
+        repo.create("shared-col").expect("create collection");
+        let req_a = rocket_collection::Request::new("Req A", HttpMethod::Get, "/a");
+        let req_b = rocket_collection::Request::new("Req B", HttpMethod::Post, "/b");
+        repo.save_request("shared-col", "req-a.yml", &req_a)
+            .expect("save req a");
+        repo.save_request("shared-col", "req-b.yml", &req_b)
+            .expect("save req b");
+
+        let repo = Arc::new(repo);
+        let r1 = Arc::clone(&repo);
+        let r2 = Arc::clone(&repo);
+
+        let h1 = std::thread::spawn(move || {
+            r1.save_request_script(
+                "shared-col",
+                "req-a.yml",
+                rocket_collection::RequestScriptPhase::PreRequest,
+                "console.log('a');".to_string(),
+            )
+        });
+        let h2 = std::thread::spawn(move || {
+            r2.save_request_script(
+                "shared-col",
+                "req-b.yml",
+                rocket_collection::RequestScriptPhase::PostResponse,
+                "console.log('b');".to_string(),
+            )
+        });
+
+        h1.join()
+            .expect("thread 1 should not panic")
+            .expect("first concurrent save_request_script should succeed");
+        h2.join()
+            .expect("thread 2 should not panic")
+            .expect("second concurrent save_request_script should succeed");
+
+        let loaded_a = repo
+            .get_request("shared-col", "req-a.yml")
+            .expect("load req a");
+        let loaded_b = repo
+            .get_request("shared-col", "req-b.yml")
+            .expect("load req b");
+        assert_eq!(
+            loaded_a.pre_request_script,
+            Some("console.log('a');".to_string())
+        );
+        assert_eq!(
+            loaded_b.post_response_script,
+            Some("console.log('b');".to_string())
         );
     }
 }

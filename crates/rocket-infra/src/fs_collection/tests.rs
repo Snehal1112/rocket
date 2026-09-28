@@ -763,6 +763,64 @@ fn save_request_preserves_variables_written_by_save_request_variables() {
 }
 
 #[test]
+fn save_request_script_only_touches_the_targeted_phase() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let mut req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
+    req.pre_request_script = Some("console.log('pre');".into());
+    req.post_response_script = Some("console.log('post');".into());
+    req.tests = Some("rok.test('ok', () => {});".into());
+    repo.save_request("my-api", "get-users.yml", &req)
+        .expect("initial save");
+
+    repo.save_request_script(
+        "my-api",
+        "get-users.yml",
+        rocket_collection::RequestScriptPhase::PostResponse,
+        "console.log('post-updated');".into(),
+    )
+    .expect("save_request_script");
+
+    let loaded = repo
+        .get_request("my-api", "get-users.yml")
+        .expect("load request");
+    assert_eq!(
+        loaded.pre_request_script,
+        Some("console.log('pre');".to_string()),
+        "an unrelated phase must not be touched"
+    );
+    assert_eq!(
+        loaded.post_response_script,
+        Some("console.log('post-updated');".to_string())
+    );
+    assert_eq!(
+        loaded.tests,
+        Some("rok.test('ok', () => {});".to_string()),
+        "an unrelated phase must not be touched"
+    );
+}
+
+#[test]
+fn save_request_script_errors_for_a_missing_request() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let err = repo
+        .save_request_script(
+            "my-api",
+            "does-not-exist.yml",
+            rocket_collection::RequestScriptPhase::Tests,
+            "rok.test('x', () => {});".into(),
+        )
+        .expect_err("missing request file must error, not panic");
+    // Matches save_request_variables's exact behavior for the identical
+    // missing-file case: resolve_request_path returns a canonicalized path
+    // under the (existing) collection directory even when the file itself
+    // doesn't exist, so the failure surfaces from fs::read_to_string as an
+    // io::Error, converted to DomainError::Io — not DomainError::NotFound.
+    assert!(matches!(err, DomainError::Io(_)));
+}
+
+#[test]
 fn request_variables_roundtrip() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();

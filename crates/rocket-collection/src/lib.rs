@@ -25,7 +25,7 @@ pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{
     GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript,
 };
-pub use repository::CollectionRepository;
+pub use repository::{CollectionRepository, RequestScriptPhase};
 pub use request_kind::RequestKind;
 pub use request::{
     candidate_filename, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
