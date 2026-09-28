@@ -302,6 +302,12 @@ pub struct FlowStepResult {
     pub status_code: Option<u16>,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
+    /// The node's captured output value, populated only for `Output`-kind
+    /// nodes (see `result_to_step`). `None` for a Request node (its result is
+    /// the HTTP response, not a single value), an Input node, or a node that
+    /// never produced output (Skipped/Failed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 /// The full result of one `FlowExecutionService::run` call. IPC DTO.
@@ -435,6 +441,7 @@ impl FlowExecutionService {
                     status_code: None,
                     duration_ms: None,
                     error: Some("upstream node failed".to_string()),
+                    value: None,
                 };
                 self.events.publish(DomainEvent::FlowStepCompleted {
                     run_id: run_id.clone(),
@@ -443,6 +450,7 @@ impl FlowExecutionService {
                     status_code: step.status_code,
                     duration_ms: step.duration_ms,
                     error: step.error.clone(),
+                    value: step.value.clone(),
                 });
                 steps.push(step);
                 continue;
@@ -455,7 +463,8 @@ impl FlowExecutionService {
 
             // `topological_sort` only returns ids from `flow.nodes`, so a
             // miss here is a bug. It fails this node instead of panicking.
-            let result = match nodes_by_id.get(node_id.as_str()) {
+            let node_opt = nodes_by_id.get(node_id.as_str()).copied();
+            let result = match node_opt {
                 Some(node) => {
                     self.execute_node(exec, &input, &flow, node, &captured, &external_secrets)
                         .await
@@ -465,7 +474,7 @@ impl FlowExecutionService {
                 ))),
             };
 
-            let step = result_to_step(node_id, &result);
+            let step = result_to_step(node_id, node_opt, &result);
             // Every downstream consumer reads from this map, so a node with
             // several dependents (fan-out) is captured once for all of them.
             if let Ok(output) = result {
@@ -483,6 +492,7 @@ impl FlowExecutionService {
                 status_code: step.status_code,
                 duration_ms: step.duration_ms,
                 error: step.error.clone(),
+                value: step.value.clone(),
             });
             steps.push(step);
         }
@@ -629,7 +639,11 @@ impl FlowExecutionService {
 /// `Request` response that is not 2xx (`HttpResponse::is_success`) — Flow
 /// nodes carry no test scripts in Phase 1, so there is no test-failure case
 /// to fold in here, unlike the Collection Runner's `RunStepResult::is_failure`.
-fn result_to_step(node_id: &str, result: &DomainResult<CapturedOutput>) -> FlowStepResult {
+fn result_to_step(
+    node_id: &str,
+    node: Option<&FlowNode>,
+    result: &DomainResult<CapturedOutput>,
+) -> FlowStepResult {
     match result {
         Ok(CapturedOutput::Request(out)) => {
             let status = out.response.status;
@@ -644,21 +658,27 @@ fn result_to_step(node_id: &str, result: &DomainResult<CapturedOutput>) -> FlowS
                 status_code: Some(status),
                 duration_ms: Some(out.response.duration_ms),
                 error: (!success).then(|| format!("non-2xx response: {status}")),
+                value: None,
             }
         }
-        Ok(CapturedOutput::Value(_)) => FlowStepResult {
-            node_id: node_id.to_string(),
-            status: FlowNodeStatus::Success,
-            status_code: None,
-            duration_ms: None,
-            error: None,
-        },
+        Ok(CapturedOutput::Value(v)) => {
+            let is_output = matches!(node.map(|n| &n.kind), Some(FlowNodeKind::Output { .. }));
+            FlowStepResult {
+                node_id: node_id.to_string(),
+                status: FlowNodeStatus::Success,
+                status_code: None,
+                duration_ms: None,
+                error: None,
+                value: is_output.then(|| v.data().to_string()),
+            }
+        }
         Err(e) => FlowStepResult {
             node_id: node_id.to_string(),
             status: FlowNodeStatus::Failed,
             status_code: None,
             duration_ms: None,
             error: Some(e.to_string()),
+            value: None,
         },
     }
 }
@@ -1511,6 +1531,39 @@ mod tests {
             .expect("valid flow must load and sort");
         assert_eq!(flow.name, "auth-flow");
         assert_eq!(order, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_run_reports_the_output_nodes_captured_value_but_not_the_input_nodes() {
+        let service = service_with_flow(linear_flow());
+        let exec = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("bob"),
+            }),
+        );
+
+        let summary = service
+            .run(&exec, run_input("auth-flow"))
+            .await
+            .expect("run must succeed");
+
+        let step_for = |id: &str| {
+            summary
+                .steps
+                .iter()
+                .find(|s| s.node_id == id)
+                .expect("step must be recorded")
+        };
+        assert_eq!(
+            step_for("b").value.as_deref(),
+            Some("bob"),
+            "the Output node must report its captured value"
+        );
+        assert_eq!(
+            step_for("a").value, None,
+            "an Input node must never report a value, only Output nodes do"
+        );
     }
 
     #[test]

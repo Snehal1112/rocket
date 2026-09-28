@@ -183,6 +183,9 @@ pub enum DomainEvent {
         /// meaningful duration (Input/Output nodes).
         duration_ms: Option<u64>,
         error: Option<String>,
+        /// The node's captured value, populated only for `Output`-kind
+        /// nodes. See `rocket_app::flow_execution_service::FlowStepResult`.
+        value: Option<String>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -654,11 +657,12 @@ mod tests {
             status_code: Some(200),
             duration_ms: Some(184),
             error: None,
+            value: Some("bob".into()),
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
             json,
-            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"node-1","status":"success","status_code":200,"duration_ms":184,"error":null}"#
+            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"node-1","status":"success","status_code":200,"duration_ms":184,"error":null,"value":"bob"}"#
         );
     }
 
@@ -671,12 +675,14 @@ mod tests {
             status_code: None,
             duration_ms: None,
             error: Some("upstream failed".into()),
+            value: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""status":"skipped""#));
         assert!(json.contains(r#""status_code":null"#));
         assert!(json.contains(r#""duration_ms":null"#));
         assert!(json.contains(r#""error":"upstream failed""#));
+        assert!(json.contains(r#""value":null"#));
     }
 
     #[test]
@@ -693,6 +699,7 @@ mod tests {
                 status_code,
                 duration_ms,
                 error,
+                value,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -700,6 +707,7 @@ mod tests {
                 assert_eq!(status_code, None);
                 assert_eq!(duration_ms, None);
                 assert_eq!(error, None);
+                assert_eq!(value, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
