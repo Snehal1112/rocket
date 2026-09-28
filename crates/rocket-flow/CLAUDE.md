@@ -30,7 +30,8 @@ cargo test -p rocket-flow -j4
 | `handle.rs` | Exit/input handle names (`result`, `true`, `false`, `default`, `input`, `trigger`, `case:<id>`) |
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch), `SwitchCase`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
-| `graph.rs` | `topological_sort` + `FlowGraphError` (added in Plan 02) |
+| `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
+| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V8 (spec 2026-09-28 §7) |
 
 ### Key Design Points
 

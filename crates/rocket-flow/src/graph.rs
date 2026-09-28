@@ -16,6 +16,12 @@ pub enum FlowGraphError {
     /// Two nodes in `flow.nodes` share the same id.
     #[error("duplicate node id: {node_id}")]
     DuplicateNode { node_id: String },
+    /// A node breaks a structural rule, e.g. an If node without an input wire.
+    #[error("invalid node {node_id}: {reason}")]
+    InvalidNode { node_id: String, reason: String },
+    /// An edge breaks a structural rule, e.g. it leaves an exit that does not exist.
+    #[error("invalid edge {edge_id}: {reason}")]
+    InvalidEdge { edge_id: String, reason: String },
 }
 
 /// Kahn's-algorithm topological sort. Returns node ids in an order where
