@@ -187,6 +187,46 @@ fn set_script_flow_in_extensions(
     }
 }
 
+/// Reads `agent_autonomy_enabled` out of `opencollection.yml`'s free-form `extensions` field
+/// (`extensions.rocketapi.agentAutonomyEnabled`), mirroring `sandbox_mode_from_extensions`
+/// above exactly. Missing or non-boolean values default to `false` -- a collection must opt
+/// in explicitly to agent write access; it is never autonomous by default.
+fn agent_autonomy_enabled_from_extensions(extensions: &Option<serde_yaml::Value>) -> bool {
+    extensions
+        .as_ref()
+        .and_then(|v| v.get("rocketapi"))
+        .and_then(|v| v.get("agentAutonomyEnabled"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Writes `agent_autonomy_enabled` into `extensions.rocketapi.agentAutonomyEnabled`, preserving
+/// any other keys already present under `extensions` or under `extensions.rocketapi` -- mirrors
+/// `set_sandbox_mode_in_extensions` exactly, so the two settings can be written in either order
+/// (or the same call) without clobbering each other or unrelated tooling's data.
+fn set_agent_autonomy_enabled_in_extensions(
+    extensions: Option<serde_yaml::Value>,
+    enabled: bool,
+) -> Option<serde_yaml::Value> {
+    let mut root = match extensions {
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        _ => serde_yaml::Mapping::new(),
+    };
+
+    let rocketapi_key = serde_yaml::Value::String("rocketapi".into());
+    let mut rocketapi = match root.get(&rocketapi_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    rocketapi.insert(
+        serde_yaml::Value::String("agentAutonomyEnabled".into()),
+        serde_yaml::Value::Bool(enabled),
+    );
+    root.insert(rocketapi_key, serde_yaml::Value::Mapping(rocketapi));
+
+    Some(serde_yaml::Value::Mapping(root))
+}
+
 pub(super) fn get_settings(
     repo: &FsCollectionRepo,
     name: &str,
@@ -203,6 +243,7 @@ pub(super) fn get_settings(
     let sandbox_mode = sandbox_mode_from_extensions(&oc.extensions);
     let script_context_roots = script_roots_from_extensions(&oc.extensions);
     let script_flow = script_flow_from_extensions(&oc.extensions);
+    let agent_autonomy_enabled = agent_autonomy_enabled_from_extensions(&oc.extensions);
 
     if let Some(defaults) = oc.request {
         Ok(CollectionSettings {
@@ -223,11 +264,7 @@ pub(super) fn get_settings(
             sandbox_mode,
             script_context_roots,
             script_flow,
-            // Plan 02 wires this to the extensions.rocketapi.agentAutonomyEnabled
-            // mapping (same pattern as sandbox_mode above); stubbed to the
-            // type's own default here so CollectionSettings compiles with the
-            // new field.
-            agent_autonomy_enabled: false,
+            agent_autonomy_enabled,
         })
     } else {
         Ok(CollectionSettings {
@@ -235,6 +272,7 @@ pub(super) fn get_settings(
             sandbox_mode,
             script_context_roots,
             script_flow,
+            agent_autonomy_enabled,
             ..CollectionSettings::default()
         })
     }
@@ -311,6 +349,10 @@ pub(super) fn save_settings(
     };
     oc.docs = settings.docs.clone();
     oc.extensions = set_sandbox_mode_in_extensions(oc.extensions.take(), settings.sandbox_mode);
+    oc.extensions = set_agent_autonomy_enabled_in_extensions(
+        oc.extensions.take(),
+        settings.agent_autonomy_enabled,
+    );
     oc.extensions =
         set_script_roots_in_extensions(oc.extensions.take(), &settings.script_context_roots);
     oc.extensions = set_script_flow_in_extensions(oc.extensions.take(), &settings.script_flow);
@@ -501,5 +543,49 @@ mod tests {
             set_script_flow_in_extensions(sequential.clone(), &ScriptFlow::Sequential),
             sequential
         );
+    }
+
+    #[test]
+    fn agent_autonomy_enabled_from_extensions_none_defaults_to_false() {
+        assert!(!agent_autonomy_enabled_from_extensions(&None));
+    }
+
+    #[test]
+    fn agent_autonomy_enabled_from_extensions_reads_existing_rocketapi_mapping_with_other_keys() {
+        let yaml = "rocketapi:\n  agentAutonomyEnabled: true\n  someOtherField: 1\nunrelatedTool:\n  foo: bar\n";
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse fixture yaml");
+        assert!(agent_autonomy_enabled_from_extensions(&Some(value)));
+    }
+
+    #[test]
+    fn agent_autonomy_enabled_from_extensions_non_bool_value_falls_back_to_false() {
+        let yaml = "rocketapi:\n  agentAutonomyEnabled: \"yes\"\n";
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse fixture yaml");
+        assert!(!agent_autonomy_enabled_from_extensions(&Some(value)));
+    }
+
+    #[test]
+    fn set_agent_autonomy_enabled_in_extensions_preserves_sibling_keys() {
+        let yaml = "someOtherTool:\n  foo: bar\nrocketapi:\n  unrelatedFlag: true\n";
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse fixture yaml");
+        let result = set_agent_autonomy_enabled_in_extensions(Some(value), true)
+            .expect("extensions value");
+
+        assert!(agent_autonomy_enabled_from_extensions(&Some(result.clone())));
+        let serialized = serde_yaml::to_string(&result).expect("serialize extensions");
+        assert!(serialized.contains("someOtherTool"));
+        assert!(serialized.contains("foo: bar"));
+        assert!(serialized.contains("unrelatedFlag: true"));
+    }
+
+    #[test]
+    fn set_sandbox_mode_then_agent_autonomy_enabled_both_persist_together() {
+        let extensions = set_sandbox_mode_in_extensions(None, SandboxMode::Developer);
+        let extensions = set_agent_autonomy_enabled_in_extensions(extensions, true);
+        assert_eq!(
+            sandbox_mode_from_extensions(&extensions),
+            SandboxMode::Developer
+        );
+        assert!(agent_autonomy_enabled_from_extensions(&extensions));
     }
 }

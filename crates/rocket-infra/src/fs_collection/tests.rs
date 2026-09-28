@@ -298,6 +298,52 @@ fn save_settings_preserves_unrelated_extensions_data() {
 }
 
 #[test]
+fn settings_agent_autonomy_enabled_roundtrips() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    let settings = CollectionSettings {
+        agent_autonomy_enabled: true,
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings)
+        .expect("save settings");
+
+    let loaded = repo.get_settings("my-api").expect("get settings");
+    assert!(loaded.agent_autonomy_enabled);
+}
+
+#[test]
+fn settings_agent_autonomy_enabled_defaults_to_false_without_rocketapi_extension() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    let path = dir.path().join("my-api/opencollection.yml");
+    fs::write(&path, "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\n").expect("write fixture");
+
+    let loaded = repo.get_settings("my-api").expect("get settings");
+    assert!(!loaded.agent_autonomy_enabled);
+}
+
+#[test]
+fn save_settings_sandbox_mode_and_agent_autonomy_enabled_persist_together() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+
+    let settings = CollectionSettings {
+        sandbox_mode: SandboxMode::Developer,
+        agent_autonomy_enabled: true,
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings)
+        .expect("save settings");
+
+    let loaded = repo.get_settings("my-api").expect("get settings");
+    assert_eq!(loaded.sandbox_mode, SandboxMode::Developer);
+    assert!(loaded.agent_autonomy_enabled);
+}
+
+#[test]
 fn folder_uid_and_name_are_loaded_from_single_parse() {
     use rocket_collection::CollectionItem;
 
