@@ -451,6 +451,8 @@ impl FlowExecutionService {
                     duration_ms: step.duration_ms,
                     error: step.error.clone(),
                     value: step.value.clone(),
+                    skip_reason: None,
+                    branch: None,
                 });
                 steps.push(step);
                 continue;
@@ -493,6 +495,8 @@ impl FlowExecutionService {
                 duration_ms: step.duration_ms,
                 error: step.error.clone(),
                 value: step.value.clone(),
+                skip_reason: None,
+                branch: None,
             });
             steps.push(step);
         }
@@ -516,6 +520,7 @@ impl FlowExecutionService {
             node_count: steps.len(),
             failed_count,
             skipped_count,
+            not_taken_count: 0,
         });
 
         Ok(FlowRunSummary {

@@ -9,6 +9,16 @@ pub enum FlowNodeStatus {
     Skipped,
 }
 
+/// Why a Flow node was skipped instead of executed. Reported alongside
+/// `FlowNodeStatus::Skipped` so the UI can tell a failure cascade apart
+/// from a routing branch that was simply not chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowSkipReason {
+    UpstreamFailed,
+    BranchNotTaken,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -186,6 +196,13 @@ pub enum DomainEvent {
         /// The node's captured value, populated only for `Output`-kind
         /// nodes. See `rocket_app::flow_execution_service::FlowStepResult`.
         value: Option<String>,
+        /// Set only when `status` is `Skipped`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skip_reason: Option<FlowSkipReason>,
+        /// The exit a succeeded If/Switch node took, e.g. `"true"` or
+        /// `"case:<id>"`. `None` for every other node.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -193,7 +210,11 @@ pub enum DomainEvent {
         stopped_reason: String,
         node_count: usize,
         failed_count: usize,
+        /// Every skipped node, whatever the reason.
         skipped_count: usize,
+        /// The subset of `skipped_count` skipped as `BranchNotTaken`.
+        #[serde(default)]
+        not_taken_count: usize,
     },
 
     // ACP session events
@@ -658,6 +679,8 @@ mod tests {
             duration_ms: Some(184),
             error: None,
             value: Some("bob".into()),
+            skip_reason: None,
+            branch: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -674,15 +697,19 @@ mod tests {
             status: FlowNodeStatus::Skipped,
             status_code: None,
             duration_ms: None,
-            error: Some("upstream failed".into()),
+            error: None,
             value: None,
+            skip_reason: Some(FlowSkipReason::UpstreamFailed),
+            branch: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""status":"skipped""#));
         assert!(json.contains(r#""status_code":null"#));
         assert!(json.contains(r#""duration_ms":null"#));
-        assert!(json.contains(r#""error":"upstream failed""#));
+        assert!(json.contains(r#""error":null"#));
         assert!(json.contains(r#""value":null"#));
+        assert!(json.contains(r#""skip_reason":"upstream_failed""#));
+        assert!(!json.contains("branch"));
     }
 
     #[test]
@@ -700,6 +727,8 @@ mod tests {
                 duration_ms,
                 error,
                 value,
+                skip_reason,
+                branch,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -708,6 +737,8 @@ mod tests {
                 assert_eq!(duration_ms, None);
                 assert_eq!(error, None);
                 assert_eq!(value, None);
+                assert_eq!(skip_reason, None);
+                assert_eq!(branch, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -735,12 +766,110 @@ mod tests {
             node_count: 5,
             failed_count: 1,
             skipped_count: 2,
+            not_taken_count: 1,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
             json,
-            r#"{"type":"flowRunFinished","run_id":"01J","stopped_reason":"completed","node_count":5,"failed_count":1,"skipped_count":2}"#
+            r#"{"type":"flowRunFinished","run_id":"01J","stopped_reason":"completed","node_count":5,"failed_count":1,"skipped_count":2,"not_taken_count":1}"#
         );
+    }
+
+    #[test]
+    fn flow_skip_reason_wire_shapes() {
+        assert_eq!(
+            serde_json::to_string(&FlowSkipReason::UpstreamFailed).expect("serialize"),
+            r#""upstream_failed""#
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowSkipReason::BranchNotTaken).expect("serialize"),
+            r#""branch_not_taken""#
+        );
+        for reason in [
+            FlowSkipReason::UpstreamFailed,
+            FlowSkipReason::BranchNotTaken,
+        ] {
+            let json = serde_json::to_string(&reason).expect("serialize");
+            let back: FlowSkipReason = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, reason);
+        }
+    }
+
+    #[test]
+    fn flow_step_completed_wire_shape_with_skip_reason() {
+        let event = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "node-2".into(),
+            status: FlowNodeStatus::Skipped,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: Some(FlowSkipReason::BranchNotTaken),
+            branch: None,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"node-2","status":"skipped","status_code":null,"duration_ms":null,"error":null,"value":null,"skip_reason":"branch_not_taken"}"#
+        );
+    }
+
+    #[test]
+    fn flow_step_completed_wire_shape_with_branch() {
+        let event = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "if-1".into(),
+            status: FlowNodeStatus::Success,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: Some("case:01JCASE".into()),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"if-1","status":"success","status_code":null,"duration_ms":null,"error":null,"value":null,"branch":"case:01JCASE"}"#
+        );
+    }
+
+    #[test]
+    fn flow_step_completed_deserializes_without_phase2_keys() {
+        // A pre-Phase-2 payload carries neither `skip_reason` nor `branch`.
+        let json = r#"{"type":"flowStepCompleted","run_id":"01J","node_id":"n","status":"skipped","status_code":null,"duration_ms":null,"error":"upstream node failed","value":null}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("deserialize");
+        match event {
+            DomainEvent::FlowStepCompleted {
+                skip_reason,
+                branch,
+                error,
+                ..
+            } => {
+                assert_eq!(skip_reason, None);
+                assert_eq!(branch, None);
+                assert_eq!(error.as_deref(), Some("upstream node failed"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn flow_run_finished_deserializes_without_not_taken_count() {
+        let json = r#"{"type":"flowRunFinished","run_id":"01J","stopped_reason":"completed","node_count":3,"failed_count":1,"skipped_count":1}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("deserialize");
+        match event {
+            DomainEvent::FlowRunFinished {
+                not_taken_count,
+                skipped_count,
+                ..
+            } => {
+                assert_eq!(not_taken_count, 0);
+                assert_eq!(skipped_count, 1);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 
     #[test]
