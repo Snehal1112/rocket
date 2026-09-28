@@ -136,6 +136,7 @@ describe('FlowToolbar', () => {
       status_code: 200,
       duration_ms: 5,
       error: null,
+      value: null,
     });
     expect(onPatchStatus).not.toHaveBeenCalled();
   });
@@ -147,7 +148,16 @@ describe('FlowToolbar', () => {
     started('run-123');
     resolveRun({
       runId: 'run-123',
-      steps: [{ nodeId: 'n1', status: 'success', statusCode: 200, durationMs: 184, error: null }],
+      steps: [
+        {
+          nodeId: 'n1',
+          status: 'success',
+          statusCode: 200,
+          durationMs: 184,
+          error: null,
+          value: null,
+        },
+      ],
       stoppedReason: 'completed',
     });
     await waitFor(() =>
@@ -262,6 +272,7 @@ describe('FlowToolbar', () => {
       status_code: 200,
       duration_ms: 5,
       error: null,
+      value: null,
     });
     expect(onPatchStatus).toHaveBeenCalledWith('node-a', 'success', {
       statusCode: 200,

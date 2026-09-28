@@ -1798,6 +1798,7 @@ export interface FlowStepResult {
   statusCode: number | null;
   durationMs: number | null;
   error: string | null;
+  value: string | null;
 }
 
 export interface FlowRunSummary {
@@ -1862,6 +1863,7 @@ export interface FlowStepCompletedEvent {
   status_code: number | null;
   duration_ms: number | null;
   error: string | null;
+  value: string | null;
 }
 
 export const onFlowStepCompleted = (

@@ -7,7 +7,7 @@ export interface OutputNodeData {
   status: FlowNodeStatus;
   /** Set when a save was rejected because this node is part of a cycle. */
   hasCycleError?: boolean;
-  result?: string;
+  value?: string;
 }
 
 export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNodeData }) {
@@ -27,7 +27,7 @@ export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNo
         className='!h-2 !w-2'
       />
       <div className='border-b px-2 py-1.5 font-medium'>{data.kind.label}</div>
-      <div className='truncate px-2 py-1.5 text-muted-foreground'>{data.result ?? '—'}</div>
+      <div className='truncate px-2 py-1.5 text-muted-foreground'>{data.value ?? '—'}</div>
     </div>
   );
 }

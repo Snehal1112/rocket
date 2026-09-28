@@ -41,7 +41,10 @@ export interface FlowCanvasProps {
   // would silently resolve to the wrong file (or fail to resolve at all).
   flowCollectionName?: string | null;
   // Per-node status-code/timing/error, keyed by node id. Populated by a run.
-  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>;
+  nodeDetail?: Record<
+    string,
+    { statusCode?: number; durationMs?: number; error?: string; value?: string }
+  >;
   // Node ids implicated in a stored cycle, reported by the last failed save.
   cycleNodeIds?: string[];
 }
@@ -61,7 +64,10 @@ function toRfNodes(
   nodeStatus: Record<string, FlowNodeStatus>,
   selectedIds: ReadonlySet<string>,
   measured: ReadonlyMap<string, Measured>,
-  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>,
+  nodeDetail?: Record<
+    string,
+    { statusCode?: number; durationMs?: number; error?: string; value?: string }
+  >,
   cycleNodeIds?: string[],
 ): Node[] {
   return nodes.map((n) => ({

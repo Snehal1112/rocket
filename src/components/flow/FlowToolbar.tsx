@@ -11,7 +11,7 @@ import {
   runFlow,
 } from '@/lib/tauri-api';
 
-type NodeDetail = { statusCode?: number; durationMs?: number; error?: string };
+type NodeDetail = { statusCode?: number; durationMs?: number; error?: string; value?: string };
 
 interface FlowToolbarProps {
   collection: string;
@@ -87,6 +87,7 @@ export function FlowToolbar({
         statusCode: event.status_code ?? undefined,
         durationMs: event.duration_ms ?? undefined,
         error: event.error ?? undefined,
+        value: event.value ?? undefined,
       });
     }).then((fn) => {
       if (disposed) fn();
@@ -137,6 +138,7 @@ export function FlowToolbar({
         statusCode: event.status_code ?? undefined,
         durationMs: event.duration_ms ?? undefined,
         error: event.error ?? undefined,
+        value: event.value ?? undefined,
       });
     });
     unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep];
@@ -157,6 +159,7 @@ export function FlowToolbar({
           statusCode: step.statusCode ?? undefined,
           durationMs: step.durationMs ?? undefined,
           error: step.error ?? undefined,
+          value: step.value ?? undefined,
         });
       }
       onRunStateChange('done', summary.runId);
