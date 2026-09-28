@@ -700,12 +700,48 @@ impl FlowExecutionService {
                     output,
                 ))))
             }
-            // Temporary until plan 03 implements routing execution.
-            FlowNodeKind::If { .. } | FlowNodeKind::Switch { .. } => {
-                Err(DomainError::InvalidInput(format!(
-                    "node '{}': If/Switch nodes are not executable yet",
-                    node.id
-                )))
+            FlowNodeKind::If { condition, .. } => {
+                let source = single_route_input(node, data_edges, captured)?;
+                let raw = exec
+                    .evaluate_flow_route_expression(
+                        &input.collection,
+                        source,
+                        &format!("!!({condition})"),
+                    )
+                    .await?;
+                let chosen_exit = match raw.as_str() {
+                    "true" => handle::TRUE,
+                    "false" => handle::FALSE,
+                    other => {
+                        return Err(DomainError::InvalidInput(format!(
+                            "condition of node '{}' evaluated to '{other}', expected true or false",
+                            node.id
+                        )))
+                    }
+                };
+                Ok(ExecutedNode {
+                    output: source.clone(),
+                    chosen_exit: chosen_exit.to_string(),
+                })
+            }
+            FlowNodeKind::Switch { value, cases, .. } => {
+                let source = single_route_input(node, data_edges, captured)?;
+                let raw = exec
+                    .evaluate_flow_route_expression(
+                        &input.collection,
+                        source,
+                        &format!("String({value})"),
+                    )
+                    .await?;
+                let chosen_exit = cases
+                    .iter()
+                    .find(|case| case.matches == raw)
+                    .map(|case| handle::case_handle(&case.id))
+                    .unwrap_or_else(|| handle::DEFAULT.to_string());
+                Ok(ExecutedNode {
+                    output: source.clone(),
+                    chosen_exit,
+                })
             }
         }
     }
@@ -724,6 +760,27 @@ fn captured_source<'c>(
             node.id, edge.source_node_id
         ))
     })
+}
+
+/// The captured output feeding a routing node through its single live
+/// `input` edge. `validate` (V1) and `decide_fate` guarantee exactly one;
+/// anything else is reported, never panicked on. The source may be a
+/// Request that failed with a non-2xx status (spec §6.3.1): its response
+/// was captured and is used exactly like a successful one.
+fn single_route_input<'c>(
+    node: &FlowNode,
+    data_edges: &[&FlowEdge],
+    captured: &'c HashMap<String, CapturedOutput>,
+) -> DomainResult<&'c CapturedOutput> {
+    match data_edges {
+        [edge] if edge.target_field == handle::INPUT => captured_source(node, edge, captured),
+        _ => Err(DomainError::InvalidInput(format!(
+            "routing node '{}' needs exactly one live '{}' input, found {}",
+            node.id,
+            handle::INPUT,
+            data_edges.len()
+        ))),
+    }
 }
 
 /// Turns one node's `execute_node` outcome into its `FlowStepResult`. A node
@@ -1057,7 +1114,6 @@ mod tests {
     }
 
     /// What `ScriptedJsonqEngine` answers for one rule.
-    #[allow(dead_code)]
     enum Scripted {
         /// Resolve to this JSON value.
         Value(serde_json::Value),
@@ -1071,7 +1127,6 @@ mod tests {
     /// the generated code, so route wrappers (`!!(`, `String(`) and plain
     /// wire expressions can be told apart in one run. Unmatched code
     /// resolves to `"https://api.example.com/wired"`.
-    #[allow(dead_code)]
     struct ScriptedJsonqEngine {
         rules: Vec<(&'static str, Scripted)>,
     }
@@ -1103,7 +1158,6 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
     fn scripted(rules: Vec<(&'static str, Scripted)>) -> Box<dyn ScriptEngine> {
         Box::new(ScriptedJsonqEngine { rules })
     }
@@ -2736,46 +2790,6 @@ mod tests {
         assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Failed);
     }
 
-    /// Plan 03 replaces this placeholder with real routing and deletes this test.
-    #[tokio::test]
-    async fn routing_nodes_fail_until_routing_execution_exists() {
-        let flow = Flow {
-            name: "routing-placeholder".to_string(),
-            nodes: vec![
-                request_flow_node("src", "https://api.example.com/src"),
-                FlowNode {
-                    id: "if1".to_string(),
-                    kind: FlowNodeKind::If {
-                        label: "Logged in?".to_string(),
-                        condition: "true".to_string(),
-                    },
-                    position: NodePosition { x: 0.0, y: 0.0 },
-                },
-            ],
-            // `validate` requires every If node to have one `input` wire.
-            edges: vec![edge_from(
-                "e1",
-                "src",
-                handle::RESULT,
-                "if1",
-                handle::INPUT,
-                "",
-            )],
-        };
-        let service = service_with_flow(flow);
-        let executor = RecordingExecutor::new();
-        let exec = recording_exec(&executor, fixed_wire("1"));
-
-        let summary = service
-            .run(&exec, run_input("routing-placeholder"))
-            .await
-            .expect("run");
-
-        assert_eq!(status_of(&summary, "if1"), FlowNodeStatus::Failed);
-        let error = step_of(&summary, "if1").error.as_deref().unwrap_or("");
-        assert!(error.contains("not executable yet"), "got: {error}");
-    }
-
     #[tokio::test]
     async fn resolves_external_secrets_once_per_run_not_once_per_request_node() {
         let mut env = Environment::new("prod");
@@ -3090,5 +3104,580 @@ mod tests {
             .expect_err("an invalid flow must not load for execution");
 
         assert!(matches!(err, DomainError::InvalidInput(ref m) if m.contains("not runnable")));
+    }
+
+    // ---- Phase 2: If / Switch routing -------------------------------------
+
+    use rocket_flow::SwitchCase;
+
+    fn if_node(id: &str, condition: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::If {
+                label: id.to_string(),
+                condition: condition.to_string(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    /// `cases` are `(case id, matches)`; the label equals the id.
+    fn switch_node(id: &str, value: &str, cases: &[(&str, &str)]) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Switch {
+                label: id.to_string(),
+                value: value.to_string(),
+                cases: cases
+                    .iter()
+                    .map(|(case_id, matches)| SwitchCase {
+                        id: case_id.to_string(),
+                        label: case_id.to_string(),
+                        matches: matches.to_string(),
+                    })
+                    .collect(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn input_edge(id: &str, from: &str, to: &str) -> FlowEdge {
+        edge_from(id, from, handle::RESULT, to, handle::INPUT, "")
+    }
+
+    fn trigger_edge(id: &str, from: &str, exit: &str, to: &str) -> FlowEdge {
+        edge_from(id, from, exit, to, handle::TRIGGER, "")
+    }
+
+    /// login -> if(check) -> true: yes, false: no.
+    fn if_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: vec![
+                request_flow_node("login", "https://api.example.com/login"),
+                if_node("check", "response.status === 200"),
+                request_flow_node("yes", "https://api.example.com/yes"),
+                request_flow_node("no", "https://api.example.com/no"),
+            ],
+            edges: vec![
+                input_edge("e1", "login", "check"),
+                trigger_edge("e2", "check", handle::TRUE, "yes"),
+                trigger_edge("e3", "check", handle::FALSE, "no"),
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn if_true_runs_the_true_exit_and_marks_the_false_exit_not_taken() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(if_flow("if-true"), &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service.run(&exec, run_input("if-true")).await.expect("run");
+
+        let check = step_of(&summary, "check");
+        assert_eq!(check.status, FlowNodeStatus::Success);
+        assert_eq!(check.branch.as_deref(), Some(handle::TRUE));
+        assert_eq!(check.status_code, None, "a routing node has no HTTP status");
+        assert_eq!(status_of(&summary, "yes"), FlowNodeStatus::Success);
+        let no = step_of(&summary, "no");
+        assert_eq!(no.status, FlowNodeStatus::Skipped);
+        assert_eq!(no.skip_reason, Some(FlowSkipReason::BranchNotTaken));
+        assert_eq!(
+            executor.sent_urls(),
+            vec![
+                "https://api.example.com/login".to_string(),
+                "https://api.example.com/yes".to_string(),
+            ]
+        );
+        assert_eq!(finished_counts(&publisher), (4, 0, 1));
+        assert_eq!(not_taken_count(&publisher), 1);
+        let completed_branch = publisher.events().into_iter().find_map(|e| match e {
+            DomainEvent::FlowStepCompleted { node_id, branch, .. } if node_id == "check" => branch,
+            _ => None,
+        });
+        assert_eq!(completed_branch.as_deref(), Some(handle::TRUE));
+    }
+
+    #[tokio::test]
+    async fn if_false_runs_the_false_exit_only() {
+        let service = service_with_flow(if_flow("if-false"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(false)))]),
+        );
+
+        let summary = service.run(&exec, run_input("if-false")).await.expect("run");
+
+        assert_eq!(step_of(&summary, "check").branch.as_deref(), Some(handle::FALSE));
+        assert_eq!(
+            step_of(&summary, "yes").skip_reason,
+            Some(FlowSkipReason::BranchNotTaken)
+        );
+        assert_eq!(status_of(&summary, "no"), FlowNodeStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn if_condition_error_fails_the_node_and_skips_both_exits_as_upstream_failed() {
+        let service = service_with_flow(if_flow("if-error"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Throw("ReferenceError: nope"))]),
+        );
+
+        let summary = service.run(&exec, run_input("if-error")).await.expect("run");
+
+        let check = step_of(&summary, "check");
+        assert_eq!(check.status, FlowNodeStatus::Failed);
+        assert!(check.error.as_deref().is_some_and(|m| m.contains("ReferenceError")));
+        for id in ["yes", "no"] {
+            assert_eq!(
+                step_of(&summary, id).skip_reason,
+                Some(FlowSkipReason::UpstreamFailed),
+                "node {id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn if_condition_that_is_not_a_boolean_string_fails_the_node() {
+        let service = service_with_flow(if_flow("if-weird"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!("maybe")))]),
+        );
+
+        let summary = service.run(&exec, run_input("if-weird")).await.expect("run");
+
+        assert_eq!(status_of(&summary, "check"), FlowNodeStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn if_observes_a_non_2xx_request_and_routes_on_it() {
+        // Spec §6.3.1: login gets a 401 and stays failed. The If still sees
+        // the 401 response and routes to `false`. Login's plain dependent is
+        // skipped as upstream_failed.
+        let mut flow = if_flow("if-after-401");
+        flow.nodes.push(request_flow_node("plain", "https://api.example.com/plain"));
+        flow.edges.push(wire("e4", "login", "plain"));
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/login", 401);
+        // The condition answers from the response it is given, so a `false`
+        // result proves the If saw the real 401 and not a missing capture.
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "!!(",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.map(|r| r.status == 200).unwrap_or(true))
+                }),
+            )]),
+        );
+
+        let summary = service.run(&exec, run_input("if-after-401")).await.expect("run");
+
+        let login = step_of(&summary, "login");
+        assert_eq!(login.status, FlowNodeStatus::Failed);
+        assert_eq!(login.status_code, Some(401));
+        let check = step_of(&summary, "check");
+        assert_eq!(check.status, FlowNodeStatus::Success);
+        assert_eq!(check.branch.as_deref(), Some(handle::FALSE));
+        assert_eq!(status_of(&summary, "no"), FlowNodeStatus::Success);
+        assert_eq!(
+            step_of(&summary, "yes").skip_reason,
+            Some(FlowSkipReason::BranchNotTaken)
+        );
+        assert_eq!(
+            step_of(&summary, "plain").skip_reason,
+            Some(FlowSkipReason::UpstreamFailed),
+            "only routing inputs observe a failure"
+        );
+        assert_eq!(finished_counts(&publisher), (5, 1, 2));
+        assert_eq!(not_taken_count(&publisher), 1);
+        assert!(!executor.sent_urls().iter().any(|u| u.contains("/plain")));
+    }
+
+    #[tokio::test]
+    async fn if_after_a_transport_error_is_skipped_as_upstream_failed() {
+        // A status of 0 makes `RecordingExecutor` fail with a transport error.
+        // With no response captured there is nothing to observe.
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(if_flow("if-after-transport"), &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/login", 0);
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("if-after-transport"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "login"), FlowNodeStatus::Failed);
+        for id in ["check", "yes", "no"] {
+            assert_eq!(
+                step_of(&summary, id).skip_reason,
+                Some(FlowSkipReason::UpstreamFailed),
+                "node {id}"
+            );
+        }
+        assert_eq!(finished_counts(&publisher), (4, 1, 3));
+    }
+
+    #[tokio::test]
+    async fn a_wire_leaving_an_if_exit_reads_the_ifs_input_response() {
+        // login answers 201; the wire out of `true` echoes the status it sees.
+        // A synthetic capture would report 200, so 201 proves pass-through.
+        let mut flow = if_flow("pass-through");
+        flow.edges[1] = edge_from("e2", "check", handle::TRUE, "yes", "url", "response.status");
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/login", 201);
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![
+                ("!!(", Scripted::Value(serde_json::json!(true))),
+                (
+                    "response.status",
+                    Scripted::FromResponse(|r| {
+                        let status = r.map(|r| r.status).unwrap_or_default();
+                        serde_json::json!(format!("https://api.example.com/from-{status}"))
+                    }),
+                ),
+            ]),
+        );
+
+        let summary = service.run(&exec, run_input("pass-through")).await.expect("run");
+
+        assert_eq!(status_of(&summary, "yes"), FlowNodeStatus::Success);
+        assert!(executor
+            .sent_urls()
+            .contains(&"https://api.example.com/from-201".to_string()));
+    }
+
+    #[tokio::test]
+    async fn if_fed_by_an_input_node_passes_its_value_through() {
+        let flow = Flow {
+            name: "input-if".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "in".to_string(),
+                    kind: FlowNodeKind::Input {
+                        label: "Plan".to_string(),
+                        value: VariableValue::simple("pro"),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                if_node("check", "response.body === 'pro'"),
+                FlowNode {
+                    id: "out".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Out".to_string(),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+            ],
+            edges: vec![
+                input_edge("e1", "in", "check"),
+                edge_from("e2", "check", handle::TRUE, "out", "value", "response.body"),
+            ],
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![
+                ("!!(", Scripted::Value(serde_json::json!(true))),
+                (
+                    "response.body",
+                    Scripted::FromResponse(|r| {
+                        serde_json::json!(r.map(|r| r.body.clone()).unwrap_or_default())
+                    }),
+                ),
+            ]),
+        );
+
+        let summary = service.run(&exec, run_input("input-if")).await.expect("run");
+
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
+    }
+
+    /// login -> switch(plan) -> free: f, pro: p, default: d.
+    fn switch_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: vec![
+                request_flow_node("login", "https://api.example.com/login"),
+                switch_node("plan", "response.body.plan", &[("free", "free"), ("pro", "pro")]),
+                request_flow_node("f", "https://api.example.com/f"),
+                request_flow_node("p", "https://api.example.com/p"),
+                request_flow_node("d", "https://api.example.com/d"),
+            ],
+            edges: vec![
+                input_edge("e1", "login", "plan"),
+                trigger_edge("e2", "plan", &handle::case_handle("free"), "f"),
+                trigger_edge("e3", "plan", &handle::case_handle("pro"), "p"),
+                trigger_edge("e4", "plan", handle::DEFAULT, "d"),
+            ],
+        }
+    }
+
+    async fn run_switch(name: &str, value: serde_json::Value) -> FlowRunSummary {
+        let service = service_with_flow(switch_flow(name));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, scripted(vec![("String(", Scripted::Value(value))]));
+        service.run(&exec, run_input(name)).await.expect("run")
+    }
+
+    #[tokio::test]
+    async fn switch_routes_to_the_matching_case_only() {
+        let summary = run_switch("sw-pro", serde_json::json!("pro")).await;
+
+        assert_eq!(
+            step_of(&summary, "plan").branch,
+            Some(handle::case_handle("pro"))
+        );
+        assert_eq!(status_of(&summary, "p"), FlowNodeStatus::Success);
+        for id in ["f", "d"] {
+            assert_eq!(
+                step_of(&summary, id).skip_reason,
+                Some(FlowSkipReason::BranchNotTaken),
+                "node {id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn switch_without_a_match_routes_to_default() {
+        let summary = run_switch("sw-default", serde_json::json!("enterprise")).await;
+
+        assert_eq!(step_of(&summary, "plan").branch.as_deref(), Some(handle::DEFAULT));
+        assert_eq!(status_of(&summary, "d"), FlowNodeStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn switch_null_value_routes_to_a_case_matching_null() {
+        let mut flow = switch_flow("sw-null");
+        if let FlowNodeKind::Switch { cases, .. } = &mut flow.nodes[1].kind {
+            cases[0].matches = "null".to_string();
+        }
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("String(", Scripted::Value(serde_json::Value::Null))]),
+        );
+
+        let summary = service.run(&exec, run_input("sw-null")).await.expect("run");
+
+        assert_eq!(
+            step_of(&summary, "plan").branch,
+            Some(handle::case_handle("free"))
+        );
+    }
+
+    #[tokio::test]
+    async fn switch_routes_a_numeric_value_to_its_string_case() {
+        let mut flow = switch_flow("sw-num");
+        if let FlowNodeKind::Switch { cases, .. } = &mut flow.nodes[1].kind {
+            cases[1].matches = "200".to_string();
+        }
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("String(", Scripted::Value(serde_json::json!(200)))]),
+        );
+
+        let summary = service.run(&exec, run_input("sw-num")).await.expect("run");
+
+        assert_eq!(
+            step_of(&summary, "plan").branch,
+            Some(handle::case_handle("pro"))
+        );
+    }
+
+    /// Spec §6.3 case 1 and case 2 in one graph (false taken):
+    /// login -> check; true -> profile, false -> refresh;
+    /// profile.body & refresh.body -> save (merge);
+    /// config.url + profile.header -> call (accidental join).
+    fn join_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: vec![
+                request_flow_node("login", "https://api.example.com/login"),
+                if_node("check", "response.status === 200"),
+                request_flow_node("profile", "https://api.example.com/profile"),
+                request_flow_node("refresh", "https://api.example.com/refresh"),
+                request_flow_node("save", "https://api.example.com/save"),
+                request_flow_node("config", "https://api.example.com/config"),
+                request_flow_node("call", "https://api.example.com/call"),
+            ],
+            edges: vec![
+                input_edge("e1", "login", "check"),
+                trigger_edge("e2", "check", handle::TRUE, "profile"),
+                trigger_edge("e3", "check", handle::FALSE, "refresh"),
+                edge_from("e4", "profile", handle::RESULT, "save", "body", "response.body"),
+                edge_from("e5", "refresh", handle::RESULT, "save", "body", "response.body"),
+                edge_from("e6", "config", handle::RESULT, "call", "url", "response.body"),
+                edge_from(
+                    "e7",
+                    "profile",
+                    handle::RESULT,
+                    "call",
+                    "headers[Authorization].value",
+                    "response.body",
+                ),
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn per_field_join_merges_alternatives_and_skips_a_missing_field() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(join_flow("join"), &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(false)))]),
+        );
+
+        let summary = service.run(&exec, run_input("join")).await.expect("run");
+
+        assert_eq!(status_of(&summary, "save"), FlowNodeStatus::Success, "case 1 merge");
+        assert_eq!(
+            step_of(&summary, "call").skip_reason,
+            Some(FlowSkipReason::BranchNotTaken),
+            "case 2: the Authorization field has no live input"
+        );
+        let sent = executor.sent_urls();
+        assert_eq!(
+            sent.iter().filter(|u| u.contains("/save")).count(),
+            1,
+            "the merge node runs exactly once"
+        );
+        assert!(!sent.iter().any(|u| u.contains("/call")));
+        assert_eq!(not_taken_count(&publisher), 2, "profile and call");
+    }
+
+    #[tokio::test]
+    async fn a_failed_arm_poisons_the_join_even_when_the_other_arm_was_not_taken() {
+        let service = service_with_flow(join_flow("join-fail"));
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/profile", 500);
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service.run(&exec, run_input("join-fail")).await.expect("run");
+
+        assert_eq!(status_of(&summary, "profile"), FlowNodeStatus::Failed);
+        assert_eq!(
+            step_of(&summary, "refresh").skip_reason,
+            Some(FlowSkipReason::BranchNotTaken)
+        );
+        assert_eq!(
+            step_of(&summary, "save").skip_reason,
+            Some(FlowSkipReason::UpstreamFailed)
+        );
+    }
+
+    #[tokio::test]
+    async fn dependents_of_a_not_taken_node_are_not_taken_too() {
+        let mut flow = if_flow("transitive");
+        flow.nodes.push(request_flow_node("after_no", "https://api.example.com/after"));
+        flow.edges.push(wire("e4", "no", "after_no"));
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service.run(&exec, run_input("transitive")).await.expect("run");
+
+        assert_eq!(
+            step_of(&summary, "after_no").skip_reason,
+            Some(FlowSkipReason::BranchNotTaken)
+        );
+    }
+
+    #[tokio::test]
+    async fn several_live_triggers_into_one_node_run_it_once() {
+        let mut flow = if_flow("two-triggers");
+        flow.nodes.push(request_flow_node("both", "https://api.example.com/both"));
+        flow.edges.push(trigger_edge("e4", "check", handle::TRUE, "both"));
+        flow.edges.push(trigger_edge("e5", "login", handle::RESULT, "both"));
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service.run(&exec, run_input("two-triggers")).await.expect("run");
+
+        assert_eq!(status_of(&summary, "both"), FlowNodeStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn cancelling_before_a_routing_node_records_nothing_for_it() {
+        let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let mut service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", if_flow("cancel-if"))),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(CancelAfterSteps {
+                cancel_after: 1,
+                seen: Mutex::new(0),
+                cancelled: Arc::clone(&cancelled),
+            }),
+        );
+        service.cancelled = Arc::clone(&cancelled);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service.run(&exec, run_input("cancel-if")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(summary.steps[0].node_id, "login");
+    }
+
+    #[tokio::test]
+    async fn step_started_is_never_published_for_a_not_taken_node() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(if_flow("started-if"), &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        service.run(&exec, run_input("started-if")).await.expect("run");
+
+        let started: Vec<String> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepStarted { node_id, .. } => Some(node_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(started, vec!["login".to_string(), "check".to_string(), "yes".to_string()]);
     }
 }
