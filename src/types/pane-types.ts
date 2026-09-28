@@ -152,6 +152,18 @@ export function isRunnerTab(tab: Tab): tab is RunnerTab {
   return tab.tabType === 'runner';
 }
 
+/** Per-node result of the last run. Every field is optional. */
+export interface FlowNodeDetail {
+  statusCode?: number;
+  durationMs?: number;
+  error?: string;
+  /** Captured value shown by an Output node. */
+  value?: string;
+  skipReason?: import('@/lib/tauri-api').FlowSkipReason;
+  /** Exit a routing node took. */
+  branch?: string;
+}
+
 export interface FlowTab extends BaseTab {
   tabType: 'flow';
   collectionName: string | null;
@@ -159,7 +171,7 @@ export interface FlowTab extends BaseTab {
   nodes: import('@/lib/tauri-api').FlowNode[];
   edges: import('@/lib/tauri-api').FlowEdge[];
   nodeStatus: Record<string, import('@/lib/tauri-api').FlowNodeStatus>;
-  nodeDetail?: Record<string, { statusCode?: number; durationMs?: number; error?: string }>;
+  nodeDetail?: Record<string, FlowNodeDetail>;
   runState: 'idle' | 'running' | 'done';
   runId?: string;
 }

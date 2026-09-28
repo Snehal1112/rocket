@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowNodeDetail } from '@/types/pane-types';
 import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
@@ -41,10 +42,7 @@ export interface FlowCanvasProps {
   // would silently resolve to the wrong file (or fail to resolve at all).
   flowCollectionName?: string | null;
   // Per-node status-code/timing/error, keyed by node id. Populated by a run.
-  nodeDetail?: Record<
-    string,
-    { statusCode?: number; durationMs?: number; error?: string; value?: string }
-  >;
+  nodeDetail?: Record<string, FlowNodeDetail>;
   // Node ids implicated in a stored cycle, reported by the last failed save.
   cycleNodeIds?: string[];
   // Edge ids implicated in a stored cycle, reported by the last failed save.
@@ -66,10 +64,7 @@ function toRfNodes(
   nodeStatus: Record<string, FlowNodeStatus>,
   selectedIds: ReadonlySet<string>,
   measured: ReadonlyMap<string, Measured>,
-  nodeDetail?: Record<
-    string,
-    { statusCode?: number; durationMs?: number; error?: string; value?: string }
-  >,
+  nodeDetail?: Record<string, FlowNodeDetail>,
   cycleNodeIds?: string[],
 ): Node[] {
   return nodes.map((n) => ({

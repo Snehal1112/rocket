@@ -28,6 +28,7 @@ import type {
   CollectionSection,
   CollectionTab,
   ContractTab,
+  FlowNodeDetail,
   FlowTab,
   LeafNode,
   PaneNode,
@@ -232,7 +233,7 @@ export interface PaneState {
     tabId: string,
     nodeId: string,
     status: FlowNodeStatus,
-    detail?: { statusCode?: number; durationMs?: number; error?: string },
+    detail?: FlowNodeDetail,
   ) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
 }

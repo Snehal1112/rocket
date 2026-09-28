@@ -960,6 +960,33 @@ describe('Flow tab actions', () => {
     expect(tab?.nodeDetail?.n1).toEqual({ statusCode: 200, durationMs: 184 });
   });
 
+  it('patchFlowNodeStatus keeps skip reason, branch and value in the detail', async () => {
+    await usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    usePaneStore.setState({
+      root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+        tab.tabType === 'flow'
+          ? {
+              ...tab,
+              nodes: [
+                { id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } },
+              ],
+            }
+          : tab,
+      ),
+    });
+    usePaneStore
+      .getState()
+      .patchFlowNodeStatus(tabId, 'n1', 'skipped', { skipReason: 'branch_not_taken' });
+    expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({ skipReason: 'branch_not_taken' });
+
+    usePaneStore
+      .getState()
+      .patchFlowNodeStatus(tabId, 'n1', 'success', { branch: 'true', value: '42' });
+    expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({ branch: 'true', value: '42' });
+  });
+
   it('setFlowRunState clears the last run results when a new run starts', async () => {
     await usePaneStore.getState().openFlowTab('my-collection');
     const tabId = findFirstFlowTab()?.id;

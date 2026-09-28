@@ -10,14 +10,13 @@ import {
   onFlowStepStarted,
   runFlow,
 } from '@/lib/tauri-api';
-
-type NodeDetail = { statusCode?: number; durationMs?: number; error?: string; value?: string };
+import type { FlowNodeDetail } from '@/types/pane-types';
 
 interface FlowToolbarProps {
   collection: string;
   flowName: string;
   environmentName: string | null;
-  onPatchStatus: (nodeId: string, status: string, detail?: NodeDetail) => void;
+  onPatchStatus: (nodeId: string, status: string, detail?: FlowNodeDetail) => void;
   onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
   // The tab's stored run state. The toolbar unmounts when its tab is hidden,
   // so a remounted toolbar reads an in-progress run from here.

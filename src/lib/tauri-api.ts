@@ -1750,10 +1750,19 @@ export type RequestSource =
   | { type: 'Saved'; requestPath: string }
   | { type: 'Inline'; request: InlineRequestData };
 
+/** One Switch case. Edges leave a case through the handle `case:<id>`. */
+export interface SwitchCase {
+  id: string;
+  label: string;
+  matches: string;
+}
+
 export type FlowNodeKind =
   | { kind: 'Request'; label: string; source: RequestSource }
   | { kind: 'Input'; label: string; value: unknown }
-  | { kind: 'Output'; label: string };
+  | { kind: 'Output'; label: string }
+  | { kind: 'If'; label: string; condition: string }
+  | { kind: 'Switch'; label: string; value: string; cases: SwitchCase[] };
 
 export interface FlowNode {
   id: string;
@@ -1767,6 +1776,8 @@ export interface FlowEdge {
   targetNodeId: string;
   targetField: string;
   expression: string;
+  /** Exit of the source node the edge leaves from. Absent means `result`. */
+  sourceHandle?: string;
 }
 
 export interface Flow {
@@ -1791,6 +1802,9 @@ export const deleteFlow = (collection: string, name: string) =>
 /** Backend-reported node status. `'idle'` is frontend-only. */
 export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
 
+/** Why a skipped node did not run. Only set on skipped steps. */
+export type FlowSkipReason = 'upstream_failed' | 'branch_not_taken';
+
 /** `run_flow`'s return value. Camel-cased by the Rust IPC DTO. */
 export interface FlowStepResult {
   nodeId: string;
@@ -1799,6 +1813,9 @@ export interface FlowStepResult {
   durationMs: number | null;
   error: string | null;
   value: string | null;
+  skipReason?: FlowSkipReason;
+  /** Exit a completed If/Switch node took: `true`, `false`, `case:<id>` or `default`. */
+  branch?: string;
 }
 
 export interface FlowRunSummary {
@@ -1864,6 +1881,8 @@ export interface FlowStepCompletedEvent {
   duration_ms: number | null;
   error: string | null;
   value: string | null;
+  skip_reason?: FlowSkipReason;
+  branch?: string;
 }
 
 export const onFlowStepCompleted = (
@@ -1878,6 +1897,8 @@ export interface FlowRunFinishedEvent {
   node_count: number;
   failed_count: number;
   skipped_count: number;
+  /** How many of `skipped_count` were skipped because their branch was not taken. */
+  not_taken_count?: number;
 }
 
 export const onFlowRunFinished = (
