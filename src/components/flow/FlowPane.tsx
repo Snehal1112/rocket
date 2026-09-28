@@ -65,17 +65,24 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
   // Set when a palette add opens the panel, so the Label field takes focus.
   const [labelFocusNodeId, setLabelFocusNodeId] = useState<string | null>(null);
+  // Set when a node's menu button opens the panel, so the panel takes focus.
+  const [panelFocusRequest, setPanelFocusRequest] = useState<{ nodeId: string } | null>(null);
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
   // FlowPane is reused across flow tabs, so drop the selection when the tab changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tab.id is the trigger.
   useEffect(() => {
     setSelectedNodeIds(new Set());
     setLabelFocusNodeId(null);
+    setPanelFocusRequest(null);
   }, [tab.id]);
   // The panel follows the selection. A node that no longer exists shows nothing.
   const panelNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
   // Any other selection ends the focus request, so a later open does not steal focus.
   useEffect(() => {
     setLabelFocusNodeId((current) => (current === panelNodeId ? current : null));
+  }, [panelNodeId]);
+  useEffect(() => {
+    setPanelFocusRequest((current) => (current?.nodeId === panelNodeId ? current : null));
   }, [panelNodeId]);
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
@@ -103,6 +110,24 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       const latest = latestFlowTab();
       const next = latest && removeSwitchCase(latest.nodes, latest.edges, nodeId, caseId);
       if (next) updateFlowGraph(tabId, next.nodes, next.edges);
+    },
+    [latestFlowTab, tabId, updateFlowGraph],
+  );
+
+  // Removes the node and its wires in one update. It never touches saved
+  // requests, and nothing is written until the user saves the flow.
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      const latest = latestFlowTab();
+      if (!latest) return;
+      updateFlowGraph(
+        tabId,
+        latest.nodes.filter((n) => n.id !== nodeId),
+        latest.edges.filter((e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId),
+      );
+      setSelectedNodeIds(new Set());
+      // The panel and its focused button unmount, so keep focus on the canvas.
+      canvasAreaRef.current?.querySelector<HTMLElement>('[data-testid="flow-canvas"]')?.focus();
     },
     [latestFlowTab, tabId, updateFlowGraph],
   );
@@ -295,7 +320,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   return (
     <ResizablePanelGroup className='h-full'>
       <ResizablePanel id='flow-canvas-panel' minSize='40%'>
-        <div className='relative h-full'>
+        <div ref={canvasAreaRef} className='relative h-full'>
           <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
             <FlowToolbar
               collection={collectionName}
@@ -330,6 +355,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onRemoveSwitchCase={handleRemoveSwitchCase}
             selectedNodeIds={selectedNodeIds}
             onSelectedNodeIdsChange={setSelectedNodeIds}
+            onOpenProperties={(nodeId) => setPanelFocusRequest({ nodeId })}
           />
           {pendingEdge && pendingTargetNode && (
             <WireExpressionPopover
@@ -379,6 +405,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               collection={collectionName}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
               onClose={() => setSelectedNodeIds(new Set())}
+              onDelete={() => handleDeleteNode(panelNode.id)}
+              focusRequest={panelFocusRequest}
               autoFocusLabel={panelNode.id === labelFocusNodeId}
             />
           </ResizablePanel>

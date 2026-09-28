@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
@@ -58,14 +58,19 @@ export function NodePropertiesPanel({
   collection,
   onChange,
   onClose,
+  onDelete,
   autoFocusLabel = false,
+  focusRequest = null,
 }: {
   node: FlowNode;
   edges: FlowEdge[];
   collection: string;
   onChange: (kind: FlowNodeKind) => void;
   onClose: () => void;
+  onDelete: () => void;
   autoFocusLabel?: boolean;
+  // A new object asks the panel to take focus, as when a node's menu button opens it.
+  focusRequest?: { nodeId: string } | null;
 }) {
   const asideRef = useRef<HTMLElement>(null);
   const refocusPanel = useCallback(() => asideRef.current?.focus(), []);
@@ -88,6 +93,16 @@ export function NodePropertiesPanel({
     };
   }, [autoFocusLabel, node.id]);
 
+  // Moves focus off the menu button and into the panel, which is a `nokey` area.
+  useEffect(() => {
+    if (focusRequest && focusRequest.nodeId === node.id) asideRef.current?.focus();
+  }, [focusRequest, node.id]);
+
+  const deleteTitle =
+    node.kind.kind === 'Request' && node.kind.source.type === 'Saved'
+      ? 'Removes this node from the flow. The saved request is not deleted.'
+      : 'Removes this node and its wires from the flow.';
+
   return (
     <aside
       ref={asideRef}
@@ -100,16 +115,29 @@ export function NodePropertiesPanel({
         <span className='truncate text-xs font-medium'>
           {node.kind.kind} · {node.kind.label}
         </span>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon'
-          className='h-6 w-6'
-          aria-label='Close properties'
-          onClick={onClose}
-        >
-          <X className='h-3.5 w-3.5' aria-hidden='true' />
-        </Button>
+        <div className='flex items-center gap-1'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            className='h-6 w-6'
+            aria-label='Delete node'
+            title={deleteTitle}
+            onClick={onDelete}
+          >
+            <Trash2 className='h-3.5 w-3.5' aria-hidden='true' />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            className='h-6 w-6'
+            aria-label='Close properties'
+            onClick={onClose}
+          >
+            <X className='h-3.5 w-3.5' aria-hidden='true' />
+          </Button>
+        </div>
       </div>
       <div key={node.id} className='flex-1 overflow-y-auto p-3'>
         <PanelFocusProvider value={refocusPanel}>

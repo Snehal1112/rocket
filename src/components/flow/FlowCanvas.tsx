@@ -63,6 +63,8 @@ export interface FlowCanvasProps {
   // selection, as before. FlowPane passes them to drive the properties panel.
   selectedNodeIds?: ReadonlySet<string>;
   onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
+  // Called when a node's menu button opens its properties.
+  onOpenProperties?: (nodeId: string) => void;
 }
 
 type Measured = { width: number; height: number };
@@ -195,6 +197,7 @@ function FlowCanvasInner({
   onRemoveSwitchCase,
   selectedNodeIds: selectedNodeIdsProp,
   onSelectedNodeIdsChange,
+  onOpenProperties,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [localSelection, setLocalSelection] = useState<ReadonlySet<string>>(() => new Set());
@@ -208,6 +211,8 @@ function FlowCanvasInner({
   // Node actions are memoised, so they call the latest selectNodes through a ref.
   const selectNodesRef = useRef(selectNodes);
   selectNodesRef.current = selectNodes;
+  const onOpenPropertiesRef = useRef(onOpenProperties);
+  onOpenPropertiesRef.current = onOpenProperties;
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(() => new Set());
   // A ref, not state: React Flow already holds the new size internally, so
   // recording it must not trigger a re-render.
@@ -243,7 +248,10 @@ function FlowCanvasInner({
     () => ({
       updateNodeKind: (nodeId, kind) => onNodeKindChange?.(nodeId, kind),
       removeSwitchCase: (nodeId, caseId) => onRemoveSwitchCase?.(nodeId, caseId),
-      openProperties: (nodeId) => selectNodesRef.current(new Set([nodeId])),
+      openProperties: (nodeId) => {
+        selectNodesRef.current(new Set([nodeId]));
+        onOpenPropertiesRef.current?.(nodeId);
+      },
     }),
     [onNodeKindChange, onRemoveSwitchCase],
   );
@@ -338,6 +346,7 @@ function FlowCanvasInner({
           onNodeClick={handleNodeClick}
           onEdgeClick={focusPane}
           onPaneClick={focusPane}
+          deleteKeyCode={['Backspace', 'Delete']}
           fitView
         >
           {/* The theme token keeps the dots visible on both light and dark canvases. */}

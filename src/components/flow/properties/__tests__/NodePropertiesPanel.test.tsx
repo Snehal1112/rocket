@@ -28,6 +28,7 @@ const node = (id: string, kind: FlowNodeKind): FlowNode => ({ id, kind, position
 function renderPanel(n: FlowNode) {
   const onChange = vi.fn();
   const onClose = vi.fn();
+  const onDelete = vi.fn();
   render(
     <NodePropertiesPanel
       node={n}
@@ -35,12 +36,19 @@ function renderPanel(n: FlowNode) {
       collection='demo'
       onChange={onChange}
       onClose={onClose}
+      onDelete={onDelete}
     />,
   );
-  return { onChange, onClose };
+  return { onChange, onClose, onDelete };
 }
 
 describe('NodePropertiesPanel', () => {
+  it('calls onDelete from the Delete node button', async () => {
+    const { onDelete } = renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete node' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
   it('edits the label of any node kind with one change per keystroke', async () => {
     const { onChange } = renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
     await userEvent.type(screen.getByLabelText('Label'), 'x');
