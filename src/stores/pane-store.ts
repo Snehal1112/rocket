@@ -12,6 +12,7 @@ import {
 import { executeRunnerEntry } from '@/lib/runner-execute';
 import { flattenRunnerEntries } from '@/lib/runner-flatten';
 import {
+  endAgentSession,
   type Flow,
   type FlowEdge,
   type FlowNode,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 import type {
+  ChatMessage,
   CollectionSection,
   CollectionTab,
   ContractTab,
@@ -101,6 +103,16 @@ export interface PaneState {
   setResponse: (tabId: string, response: ResponseState) => void;
   markDirty: (tabId: string) => void;
   markClean: (tabId: string) => void;
+
+  // Agent chat session actions.
+  beginAgentSession: (tabId: string, agentConfigId: string) => void;
+  activateAgentSession: (tabId: string, sessionId: string) => void;
+  appendAgentChatMessage: (tabId: string, message: ChatMessage) => void;
+  appendAgentChatChunk: (tabId: string, messageId: string, text: string) => void;
+  completeAgentChatMessage: (tabId: string, messageId: string) => void;
+  failAgentChatMessage: (tabId: string, messageId: string, error: string) => void;
+  markAgentSessionEnded: (tabId: string) => void;
+  clearAgentSession: (tabId: string) => void;
 
   // Collection-keyed tab state actions.
   setActiveCollection: (name: string) => void;
@@ -219,6 +231,17 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         found.tab.request,
       );
     }
+
+    // Best-effort session cleanup — subproject B only sweeps sessions on
+    // whole-app exit, not on a single tab closing while the app keeps
+    // running. A session still mid-handshake (no real session id yet) has
+    // nothing on the backend to end.
+    if (found && isRequestTab(found.tab) && found.tab.agentSession?.status === 'active') {
+      Promise.resolve(endAgentSession(found.tab.agentSession.sessionId)).catch((err) => {
+        console.error('[pane-store] closeTab: failed to end agent session', err);
+      });
+    }
+
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
       return result.groupId === groupId ? result : null;
@@ -369,6 +392,115 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   markClean(tabId) {
     const { root } = get();
     set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: false })) });
+  },
+
+  beginAgentSession(tabId, agentConfigId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab)) return tab;
+        return {
+          ...tab,
+          agentSession: { agentConfigId, sessionId: '', status: 'starting', messages: [] },
+        };
+      }),
+    });
+  },
+
+  activateAgentSession(tabId, sessionId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return { ...tab, agentSession: { ...tab.agentSession, sessionId, status: 'active' } };
+      }),
+    });
+  },
+
+  appendAgentChatMessage(tabId, message) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return {
+          ...tab,
+          agentSession: {
+            ...tab.agentSession,
+            messages: [...tab.agentSession.messages, message],
+          },
+        };
+      }),
+    });
+  },
+
+  appendAgentChatChunk(tabId, messageId, text) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return {
+          ...tab,
+          agentSession: {
+            ...tab.agentSession,
+            messages: tab.agentSession.messages.map((m) =>
+              m.id === messageId ? { ...m, text: m.text + text } : m,
+            ),
+          },
+        };
+      }),
+    });
+  },
+
+  completeAgentChatMessage(tabId, messageId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return {
+          ...tab,
+          agentSession: {
+            ...tab.agentSession,
+            messages: tab.agentSession.messages.map((m) =>
+              m.id === messageId ? { ...m, streaming: false } : m,
+            ),
+          },
+        };
+      }),
+    });
+  },
+
+  failAgentChatMessage(tabId, messageId, error) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return {
+          ...tab,
+          agentSession: {
+            ...tab.agentSession,
+            status: 'error',
+            error,
+            messages: tab.agentSession.messages.map((m) =>
+              m.id === messageId
+                ? { ...m, text: `${m.text}\n\nError: ${error}`, streaming: false }
+                : m,
+            ),
+          },
+        };
+      }),
+    });
+  },
+
+  markAgentSessionEnded(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        return { ...tab, agentSession: { ...tab.agentSession, status: 'ended' } };
+      }),
+    });
+  },
+
+  clearAgentSession(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRequestTab(tab)) return tab;
+        return { ...tab, agentSession: undefined };
+      }),
+    });
   },
 
   openContractTab(collectionName, collectionRoot) {

@@ -21,7 +21,7 @@ vi.mock('@/lib/auto-save', () => ({
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, getCollection: vi.fn(), getFlow: vi.fn() };
+  return { ...actual, getCollection: vi.fn(), getFlow: vi.fn(), endAgentSession: vi.fn() };
 });
 
 vi.mock('@/lib/runner-execute', () => ({
@@ -939,5 +939,152 @@ describe('Flow tab actions', () => {
     const tab = findFirstFlowTab();
     expect(tab?.nodeStatus).toEqual({});
     expect(tab?.nodeDetail).toEqual({});
+  });
+});
+
+describe('Agent chat session actions', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  function getRequestTab(): RequestTab {
+    const leaf = getLeaf();
+    const tab = leaf.tabs[0];
+    if (!isRequestTab(tab)) throw new Error('Expected a request tab');
+    return tab;
+  }
+
+  it('beginAgentSession sets status starting with an empty session id', () => {
+    const leaf = setupWithTab();
+    usePaneStore.getState().beginAgentSession(leaf.tabs[0].id, 'agent-1');
+    const tab = getRequestTab();
+    expect(tab.agentSession).toEqual({
+      agentConfigId: 'agent-1',
+      sessionId: '',
+      status: 'starting',
+      messages: [],
+    });
+  });
+
+  it('activateAgentSession sets the real session id and status active', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    const tab = getRequestTab();
+    expect(tab.agentSession?.sessionId).toBe('session-1');
+    expect(tab.agentSession?.status).toBe('active');
+  });
+
+  it('appendAgentChatMessage appends to the messages list', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore.getState().appendAgentChatMessage(tabId, { id: 'm1', role: 'user', text: 'hi' });
+    const tab = getRequestTab();
+    expect(tab.agentSession?.messages).toEqual([{ id: 'm1', role: 'user', text: 'hi' }]);
+  });
+
+  it('appendAgentChatChunk appends text onto the matching message only', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore.getState().appendAgentChatMessage(tabId, { id: 'm1', role: 'user', text: 'hi' });
+    usePaneStore
+      .getState()
+      .appendAgentChatMessage(tabId, { id: 'm2', role: 'agent', text: '', streaming: true });
+    usePaneStore.getState().appendAgentChatChunk(tabId, 'm2', 'Hello');
+    usePaneStore.getState().appendAgentChatChunk(tabId, 'm2', ' there');
+    const tab = getRequestTab();
+    expect(tab.agentSession?.messages).toEqual([
+      { id: 'm1', role: 'user', text: 'hi' },
+      { id: 'm2', role: 'agent', text: 'Hello there', streaming: true },
+    ]);
+  });
+
+  it('completeAgentChatMessage marks the message not streaming', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore
+      .getState()
+      .appendAgentChatMessage(tabId, { id: 'm2', role: 'agent', text: 'done', streaming: true });
+    usePaneStore.getState().completeAgentChatMessage(tabId, 'm2');
+    const tab = getRequestTab();
+    expect(tab.agentSession?.messages[0].streaming).toBe(false);
+  });
+
+  it('failAgentChatMessage marks status error, sets session error, and appends the error to the message', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore
+      .getState()
+      .appendAgentChatMessage(tabId, { id: 'm2', role: 'agent', text: 'partial', streaming: true });
+    usePaneStore.getState().failAgentChatMessage(tabId, 'm2', 'agent crashed');
+    const tab = getRequestTab();
+    expect(tab.agentSession?.status).toBe('error');
+    expect(tab.agentSession?.error).toBe('agent crashed');
+    expect(tab.agentSession?.messages[0]).toEqual({
+      id: 'm2',
+      role: 'agent',
+      text: 'partial\n\nError: agent crashed',
+      streaming: false,
+    });
+  });
+
+  it('markAgentSessionEnded sets status ended', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore.getState().markAgentSessionEnded(tabId);
+    expect(getRequestTab().agentSession?.status).toBe('ended');
+  });
+
+  it('clearAgentSession removes the agent session entirely', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().clearAgentSession(tabId);
+    expect(getRequestTab().agentSession).toBeUndefined();
+  });
+});
+
+describe('closeTab — ends the agent session for an active chat', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('calls endAgentSession when the closed tab has an active session', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore.getState().closeTab(tabId, leaf.groupId);
+    expect(endAgentSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('does not call endAgentSession when the session is still starting (no real session id yet)', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().closeTab(tabId, leaf.groupId);
+    expect(endAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('does not call endAgentSession when there is no agent session at all', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const leaf = setupWithTab();
+    usePaneStore.getState().closeTab(leaf.tabs[0].id, leaf.groupId);
+    expect(endAgentSession).not.toHaveBeenCalled();
   });
 });

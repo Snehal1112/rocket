@@ -25,10 +25,26 @@ interface BaseTab {
   source?: { collection: string; path: string };
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'agent';
+  text: string;
+  streaming?: boolean;
+}
+
+export interface AgentChatSession {
+  agentConfigId: string;
+  sessionId: string;
+  status: 'starting' | 'active' | 'ended' | 'error';
+  messages: ChatMessage[];
+  error?: string;
+}
+
 export interface RequestTab extends BaseTab {
   tabType: 'request' | 'history';
   request: RequestState;
   response: ResponseState | null;
+  agentSession?: AgentChatSession;
 }
 
 export type CollectionSection = 'overview' | 'auth' | 'variables' | 'documentation';
