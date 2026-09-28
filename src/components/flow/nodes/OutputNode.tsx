@@ -19,6 +19,16 @@ export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNo
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
+      {/* Data-less "Run when" input. It sits at the top so it does not overlap `value`. */}
+      <Handle
+        type='target'
+        id='trigger'
+        title='Run when'
+        position={Position.Left}
+        isConnectable={isConnectable}
+        style={{ top: 10 }}
+        className='!h-2 !w-2'
+      />
       <Handle
         type='target'
         id='value'

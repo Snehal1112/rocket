@@ -69,11 +69,22 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
         </div>
       )}
 
-      {/* Every field row is always rendered, even when empty, so each target
-          handle stays connectable. There is one `headers` handle for all
+      {/* Every field row, including the data-less "Run when" trigger row, is
+          always rendered, even when empty, so each target handle stays
+          connectable. There is one `headers` handle for all
           header slots. Plan 10's connection UI picks the header by name and
           writes a `headers[<name>].value` target field. */}
       <div className='relative space-y-1 px-2 py-1.5'>
+        <div className='relative flex items-center gap-1.5 pl-2'>
+          <Handle
+            type='target'
+            id='trigger'
+            position={Position.Left}
+            isConnectable={isConnectable}
+            className='!h-2 !w-2'
+          />
+          <span className='text-muted-foreground'>Run when</span>
+        </div>
         <div className='relative flex items-center gap-1.5 pl-2'>
           <Handle
             type='target'

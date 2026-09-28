@@ -11,7 +11,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { buildEdgeFromConnection, parseGraphErrorMessage } from '@/lib/flow-wiring';
+import {
+  buildEdgeFromConnection,
+  parseGraphErrorMessage,
+  shouldPromptForExpression,
+} from '@/lib/flow-wiring';
 import {
   type CollectionSummary,
   type FlowEdge,
@@ -226,7 +230,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         ? tab.edges.filter((e) => e.id !== pendingEdge.id)
         : tab.edges;
     updateFlowEdges(tab.id, [...base, edge]);
-    setPendingEdge(edge); // Opens the popover immediately, per spec §6.
+    // Input and trigger wires carry no value, so there is nothing to edit.
+    // Clearing the pending edge also closes a preempted popover.
+    setPendingEdge(shouldPromptForExpression(edge) ? edge : null);
   };
 
   const pendingTargetNode = pendingEdge

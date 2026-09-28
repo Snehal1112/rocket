@@ -15,6 +15,8 @@ import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
+import { RESULT_HANDLE } from '@/lib/flow-handles';
+import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { InputNode } from './nodes/InputNode';
@@ -82,10 +84,11 @@ function toRfNodes(
   }));
 }
 
-// Every node type has one source handle, `result`. The target handle is the
-// first segment of `targetField`, so "headers[Authorization].value" lands on
-// the single `headers` handle.
-function toRfEdges(
+// An edge leaves the source exit named by `sourceHandle`. It is absent for
+// the default `result` exit. The target handle is the first segment of
+// `targetField`, so "headers[Authorization].value" lands on the single
+// `headers` handle.
+export function toRfEdges(
   edges: FlowEdge[],
   selectedIds: ReadonlySet<string>,
   cycleEdgeIds?: string[],
@@ -93,7 +96,7 @@ function toRfEdges(
   return edges.map((e) => ({
     id: e.id,
     source: e.sourceNodeId,
-    sourceHandle: 'result',
+    sourceHandle: e.sourceHandle ?? RESULT_HANDLE,
     target: e.targetNodeId,
     targetHandle: e.targetField.split('[')[0],
     selected: selectedIds.has(e.id),
@@ -168,6 +171,10 @@ function FlowCanvasInner({
     () => toRfEdges(edges, selectedEdgeIds, cycleEdgeIds),
     [edges, selectedEdgeIds, cycleEdgeIds],
   );
+
+  // Refuses wires the backend would reject, while the user is still dragging.
+  const isValidConnection = (connection: ConnectionLike) =>
+    isValidFlowConnection(connection, nodes, edges);
 
   // React Flow's onNodesChange/onEdgesChange report deltas. Positions and
   // deletions are persisted into FlowTab state. Selection and measured
@@ -250,6 +257,7 @@ function FlowCanvasInner({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
         onNodeClick={focusPane}
         onEdgeClick={focusPane}
         onPaneClick={focusPane}

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
-import { FlowCanvas } from '../FlowCanvas';
+import { FlowCanvas, toRfEdges } from '../FlowCanvas';
 
 // Holds nodes/edges in state, like FlowPane does through the pane store.
 function Harness({
@@ -229,6 +229,35 @@ describe('FlowCanvas', () => {
       );
       const path = screen.getByTestId('rf__edge-e1').querySelector('path');
       expect(path).toHaveStyle({ stroke: '#ef4444' });
+    });
+  });
+
+  describe('toRfEdges', () => {
+    it('maps a missing sourceHandle to result and keeps a routing exit', () => {
+      const rf = toRfEdges(
+        [
+          {
+            id: 'e1',
+            sourceNodeId: 'a',
+            targetNodeId: 'b',
+            targetField: 'headers[Authorization].value',
+            expression: 'response.body',
+          },
+          {
+            id: 'e2',
+            sourceNodeId: 'if1',
+            targetNodeId: 'b',
+            targetField: 'trigger',
+            expression: '',
+            sourceHandle: 'true',
+          },
+        ],
+        new Set(),
+      );
+      expect(rf.map((e) => [e.id, e.sourceHandle, e.targetHandle])).toEqual([
+        ['e1', 'result', 'headers'],
+        ['e2', 'true', 'trigger'],
+      ]);
     });
   });
 });

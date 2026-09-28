@@ -55,7 +55,7 @@ describe('InputNode', () => {
 });
 
 describe('OutputNode', () => {
-  it('renders its label with only a target handle', () => {
+  it('renders its label with value and Run when target handles and no source handle', () => {
     wrap(
       <OutputNode
         id='o1'
@@ -74,8 +74,11 @@ describe('OutputNode', () => {
     );
     expect(screen.getByText('Result')).toBeInTheDocument();
     const card = screen.getByTestId('output-node-card');
-    expect(card.querySelectorAll('.react-flow__handle.target')).toHaveLength(1);
+    const targets = [...card.querySelectorAll('.react-flow__handle.target')].map((h) =>
+      h.getAttribute('data-handleid'),
+    );
+    expect(targets).toEqual(['trigger', 'value']);
     expect(card.querySelectorAll('.react-flow__handle.source')).toHaveLength(0);
-    expect(card.querySelector('[data-handleid="value"]')).toBeInTheDocument();
+    expect(card.querySelector('[data-handleid="trigger"]')?.getAttribute('title')).toBe('Run when');
   });
 });

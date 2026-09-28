@@ -77,13 +77,14 @@ describe('RequestNode', () => {
     expect(screen.getByTestId('request-node-card')).toHaveAttribute('data-status', 'running');
   });
 
-  it('exposes url, headers, and body target handles plus one result source handle', () => {
+  it('exposes trigger, url, headers, and body target handles plus one result source handle', () => {
     renderNode({ kind: baseKind, status: 'idle' });
     const card = screen.getByTestId('request-node-card');
     const targets = [...card.querySelectorAll('.react-flow__handle.target')].map((h) =>
       h.getAttribute('data-handleid'),
     );
-    expect(targets).toEqual(['url', 'headers', 'body']);
+    expect(targets).toEqual(['trigger', 'url', 'headers', 'body']);
+    expect(screen.getByText('Run when')).toBeInTheDocument();
     const sources = [...card.querySelectorAll('.react-flow__handle.source')].map((h) =>
       h.getAttribute('data-handleid'),
     );
