@@ -382,4 +382,62 @@ mod tests {
         let b = serde_json::to_value(&back).expect("to_value back");
         assert_eq!(a, b);
     }
+
+    #[test]
+    fn save_flow_then_reopening_with_a_fresh_repo_instance_returns_the_same_flow() {
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::create_dir_all(dir.path().join("acme")).expect("create collection dir");
+        let dto = sample_dto();
+
+        {
+            let svc = rocket_app::FlowService::new(Box::new(rocket_infra::FsFlowRepo::new(
+                dir.path().to_path_buf(),
+            )));
+            svc.save("acme", dto.clone().into()).expect("save flow");
+        }
+
+        // A fresh repo/service instance over the same directory simulates
+        // reopening the app, rather than reusing the instance that saved.
+        let svc2 = rocket_app::FlowService::new(Box::new(rocket_infra::FsFlowRepo::new(
+            dir.path().to_path_buf(),
+        )));
+        let loaded = svc2.get("acme", &dto.name).expect("get flow after reopen");
+        let loaded_dto: FlowDto = loaded.into();
+
+        assert_eq!(
+            serde_json::to_value(&loaded_dto).expect("serialize loaded"),
+            serde_json::to_value(&dto).expect("serialize original"),
+            "the flow saved by one instance must round-trip identically through a fresh instance"
+        );
+    }
+
+    #[test]
+    fn saving_a_flow_makes_the_file_visible_as_untracked_in_git_status() {
+        use rocket_git::{GitService, GitStatus};
+
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        std::fs::create_dir_all(dir.path().join("acme")).expect("create collection dir");
+
+        let git = rocket_git::Git2Service::new();
+        let repo_path = dir.path().to_str().expect("utf8 path");
+        git.init(repo_path).expect("init git repo");
+
+        let svc = rocket_app::FlowService::new(Box::new(rocket_infra::FsFlowRepo::new(
+            dir.path().to_path_buf(),
+        )));
+        svc.save("acme", sample_dto().into()).expect("save flow");
+
+        let status = git.status(repo_path).expect("git status");
+        let flow_file = status
+            .files
+            .iter()
+            .find(|f| f.path.ends_with("login-then-fetch.yml"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected the saved flow file to appear in git status, got: {:?}",
+                    status.files
+                )
+            });
+        assert_eq!(flow_file.status, GitStatus::Untracked);
+    }
 }
