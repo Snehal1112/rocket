@@ -1,15 +1,31 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
+import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
+import { getFlow, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, listCollections: vi.fn(), listFlows: vi.fn(), saveFlow: vi.fn() };
+  return {
+    ...actual,
+    listCollections: vi.fn(),
+    listFlows: vi.fn(),
+    saveFlow: vi.fn(),
+    getFlow: vi.fn(),
+  };
 });
+
+// `usePaneStore.setState({ openFlowTab: vi.fn(...) })` in the 'FlowPane
+// picker' tests below replaces the store's `openFlowTab` action permanently
+// (zustand `set` merges, and `reset()` does not restore actions), so later
+// tests that call `usePaneStore.getState().openFlowTab` would silently run
+// that stub instead of the real implementation. Capture the genuine action
+// here, before any test can override it, so the save/reload test below
+// exercises real store behavior regardless of test order.
+const realOpenFlowTab = usePaneStore.getState().openFlowTab;
 
 function pickerTab(collectionName: string | null): FlowTab {
   return {
@@ -116,5 +132,40 @@ describe('FlowPane save', () => {
     const { root } = usePaneStore.getState();
     const tab = root.type === 'leaf' ? root.tabs.find((t) => t.id === flowTab.id) : undefined;
     expect(tab?.isDirty).toBe(false);
+  });
+
+  it('a saved flow reloads with the same nodes and edges when reopened', async () => {
+    const store = new Map<string, { name: string; nodes: FlowNode[]; edges: FlowEdge[] }>();
+    vi.mocked(saveFlow).mockImplementation(async (collection, flow) => {
+      store.set(`${collection}/${flow.name}`, flow);
+    });
+    vi.mocked(getFlow).mockImplementation(async (collection, name) => {
+      const saved = store.get(`${collection}/${name}`);
+      if (!saved) throw new Error(`no such flow: ${collection}/${name}`);
+      return saved;
+    });
+
+    render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveFlow).toHaveBeenCalled());
+
+    // The pre-existing flowTab already carries flowName 'my-flow', so a naive
+    // find-by-flowName would match it instead of the newly reopened tab.
+    // Track which tab ids exist before reopening and require the match to be new.
+    const rootBefore = usePaneStore.getState().root;
+    const idsBefore = new Set(rootBefore.type === 'leaf' ? rootBefore.tabs.map((t) => t.id) : []);
+
+    await realOpenFlowTab('demo', 'my-flow');
+
+    const { root } = usePaneStore.getState();
+    const reopened =
+      root.type === 'leaf'
+        ? root.tabs.find(
+            (t) => t.tabType === 'flow' && t.flowName === 'my-flow' && !idsBefore.has(t.id),
+          )
+        : undefined;
+    expect(reopened).toBeDefined();
+    expect(reopened && 'nodes' in reopened ? reopened.nodes : undefined).toEqual(flowTab.nodes);
+    expect(reopened && 'edges' in reopened ? reopened.edges : undefined).toEqual(flowTab.edges);
   });
 });
