@@ -47,6 +47,10 @@ export function InlineSourceEditor({
   };
   const contentType = request.headers.find((h) => h.name.toLowerCase() === 'content-type')?.value;
   const positions = missingPositions(outOfRangeWires);
+  // A method outside the list still gets an item, so the select never shows
+  // blank. Radix rejects an empty item value, so an empty method gets none.
+  const listed = !request.method || (METHODS as readonly string[]).includes(request.method);
+  const methods: readonly string[] = listed ? METHODS : [...METHODS, request.method];
 
   return (
     <div className='space-y-3'>
@@ -56,7 +60,7 @@ export function InlineSourceEditor({
             <SelectValue />
           </SelectTrigger>
           <SelectContent className='nokey'>
-            {METHODS.map((m) => (
+            {methods.map((m) => (
               <SelectItem key={m} value={m}>
                 {m}
               </SelectItem>

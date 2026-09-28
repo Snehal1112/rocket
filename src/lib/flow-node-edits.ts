@@ -45,7 +45,7 @@ export function savedToInline(request: Request): InlineConversion {
   if (request.actions?.some((a) => !a.disabled)) dropped.push('actions');
 
   return {
-    inline: { method: request.method, url: request.url, headers, body },
+    inline: { method: request.method.toUpperCase(), url: request.url, headers, body },
     dropped,
   };
 }

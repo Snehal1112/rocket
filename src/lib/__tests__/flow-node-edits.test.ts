@@ -32,6 +32,12 @@ describe('savedToInline', () => {
     expect(dropped).toEqual(['1 disabled header']);
   });
 
+  it('uppercases the method', () => {
+    expect(
+      savedToInline({ ...saved, method: 'patch' as string as Request['method'] }).inline.method,
+    ).toBe('PATCH');
+  });
+
   it('drops a form body and names it', () => {
     const { inline, dropped } = savedToInline({
       ...saved,

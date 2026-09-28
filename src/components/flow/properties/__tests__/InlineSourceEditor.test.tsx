@@ -65,6 +65,14 @@ describe('InlineSourceEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...request, method: 'PUT' });
   });
 
+  it('keeps an unlisted method visible and selectable', async () => {
+    renderEditor({ ...request, method: 'PROPFIND' });
+    const trigger = screen.getByRole('combobox', { name: 'Method' });
+    expect(trigger).toHaveTextContent('PROPFIND');
+    await userEvent.click(trigger);
+    expect(await screen.findByRole('option', { name: 'PROPFIND' })).toBeInTheDocument();
+  });
+
   it('adds, renames and removes headers', async () => {
     const onChange = renderEditor();
     await userEvent.click(screen.getByRole('button', { name: 'Add header' }));
