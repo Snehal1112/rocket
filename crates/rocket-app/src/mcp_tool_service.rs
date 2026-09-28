@@ -188,7 +188,29 @@ impl McpToolService {
             rocket_workspace::RequestGuardPolicy::default(),
             rocket_shared::RunSource::Agent,
         );
-        let output = self.execution_svc.execute(input).await?;
+        // `execution_svc.execute` can fail with `DomainError::Http` whose
+        // `Display` text embeds the fully-resolved request URL (or, for an
+        // OAuth2 token-fetch failure, a response body) — either of which may
+        // contain a resolved `secret: true` variable's value. That text is
+        // safe for the human-facing "Send" button (see
+        // `rocket-infra/src/reqwest_executor.rs`), but here it would flow
+        // straight into the ACP agent's chat via `to_tool_result`, breaking
+        // the "secret variables never appear in chat" guarantee for the
+        // ordinary case of an unreachable host. Replace the message with
+        // fixed text before it propagates; keep the `Http` variant so
+        // callers matching on it still work. Other variants come from this
+        // service's own validation and carry no response/URL content, so
+        // they pass through unchanged.
+        let output = match self.execution_svc.execute(input).await {
+            Ok(output) => output,
+            Err(DomainError::Http(_)) => {
+                return Err(DomainError::Http(
+                    "the request failed to complete — check Rocket's request history for details"
+                        .to_string(),
+                ));
+            }
+            Err(other) => return Err(other),
+        };
 
         let test_pass_count = output
             .test_results
@@ -739,6 +761,60 @@ mod tests {
             .get_test_results("s1", "my-api", "login.yml")
             .expect_err("a failed run must not leave a stale cached test result");
         assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn run_request_sanitizes_an_http_error_instead_of_leaking_it_to_the_agent() {
+        // I-2 regression test: `reqwest_executor.rs` can fail a send with a
+        // `DomainError::Http` whose `Display` text embeds the fully-resolved
+        // request URL (or, for OAuth2 token-fetch failures, a response
+        // body) — either of which may contain a resolved `secret: true`
+        // variable's value. `run_request` must never let that text reach
+        // its caller (and, from there, the ACP agent's chat) verbatim.
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+
+        let executor = RecordingExecutor::new();
+        let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
+            Arc::new(SharedExecutor(Arc::clone(&executor)));
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(&executor_dyn),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        ));
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
+
+        const SECRET: &str = "super-secret";
+        executor.set_error(
+            "api.test",
+            &format!(
+                "error sending request for url (https://api.test/ping?api_key={SECRET}): \
+                 connection refused"
+            ),
+        );
+
+        let err = svc
+            .run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect_err("run_request must fail once the executor errors");
+
+        assert!(matches!(err, DomainError::Http(_)));
+        assert!(
+            !err.to_string().contains(SECRET),
+            "sanitized error must not contain the original error's secret-shaped content, got: {err}"
+        );
     }
 
     #[test]

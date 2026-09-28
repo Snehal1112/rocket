@@ -593,6 +593,7 @@ pub struct RecordingExecutor {
     sent_bodies: Mutex<Vec<Option<String>>>,
     statuses: Mutex<HashMap<String, u16>>,
     bodies: Mutex<HashMap<String, String>>,
+    error_messages: Mutex<HashMap<String, String>>,
 }
 
 impl RecordingExecutor {
@@ -603,6 +604,7 @@ impl RecordingExecutor {
             sent_bodies: Mutex::new(Vec::new()),
             statuses: Mutex::new(HashMap::new()),
             bodies: Mutex::new(HashMap::new()),
+            error_messages: Mutex::new(HashMap::new()),
         })
     }
     /// Registers a response body for any URL containing `url_substring`.
@@ -624,6 +626,21 @@ impl RecordingExecutor {
             .lock()
             .expect("lock")
             .insert(url_substring.to_string(), status);
+    }
+    /// Like `set_status(url_substring, 0)`, but the resulting transport
+    /// error carries `message` instead of the default "connection refused" —
+    /// lets a test build an error whose text embeds something secret-shaped
+    /// (e.g. a resolved URL with an API key in it), to verify a caller
+    /// sanitizes it before it reaches an agent.
+    pub fn set_error(&self, url_substring: &str, message: &str) {
+        self.statuses
+            .lock()
+            .expect("lock")
+            .insert(url_substring.to_string(), 0);
+        self.error_messages
+            .lock()
+            .expect("lock")
+            .insert(url_substring.to_string(), message.to_string());
     }
     pub fn sent_urls(&self) -> Vec<String> {
         self.sent.lock().expect("lock").clone()
@@ -651,7 +668,15 @@ impl HttpExecutor for RecordingExecutor {
             .map(|(_, status)| *status)
             .unwrap_or(200);
         if status == 0 {
-            return Err(DomainError::Http("connection refused".into()));
+            let message = self
+                .error_messages
+                .lock()
+                .expect("lock")
+                .iter()
+                .find(|(fragment, _)| req.url.contains(fragment.as_str()))
+                .map(|(_, message)| message.clone())
+                .unwrap_or_else(|| "connection refused".to_string());
+            return Err(DomainError::Http(message));
         }
         let body = self
             .bodies
