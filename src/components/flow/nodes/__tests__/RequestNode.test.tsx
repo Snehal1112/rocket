@@ -131,4 +131,20 @@ describe('RequestNode', () => {
     renderNode({ kind: baseKind, status: 'idle', hasCycleError: true });
     expect(screen.getByTestId('request-node-card').className).toContain('ring-red-500');
   });
+
+  it('captions an upstream-failed skip and a not-taken skip differently', () => {
+    const { rerender } = renderNode({
+      kind: baseKind,
+      status: 'skipped',
+      skipReason: 'upstream_failed',
+    });
+    expect(screen.getByTestId('node-status-caption')).toHaveTextContent(
+      'Skipped — upstream failed',
+    );
+    expect(screen.getByTestId('request-node-card')).not.toHaveClass('border-dashed');
+
+    rerender(nodeElement({ kind: baseKind, status: 'skipped', skipReason: 'branch_not_taken' }));
+    expect(screen.getByTestId('node-status-caption')).toHaveTextContent('Not taken');
+    expect(screen.getByTestId('request-node-card')).toHaveClass('border-dashed');
+  });
 });

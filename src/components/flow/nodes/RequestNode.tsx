@@ -1,12 +1,15 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { MoreVertical } from 'lucide-react';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
-import type { FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { NodeStatusCaption } from './NodeStatusCaption';
+import { nodeStatusClassName } from './nodeStatus';
 
 export interface RequestNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Request' }>;
   status: FlowNodeStatus;
+  skipReason?: FlowSkipReason;
   statusCode?: number;
   durationMs?: number;
   error?: string;
@@ -24,14 +27,6 @@ export interface RequestNodeData {
 const methodLabel = (data: RequestNodeData) =>
   data.kind.source.type === 'Inline' ? data.kind.source.request.method : (data.method ?? 'SAVED');
 
-const statusStyles: Record<FlowNodeStatus, string> = {
-  idle: 'border-border',
-  running: 'border-blue-400 shadow-[0_0_0_1px_rgba(96,165,250,0.5)] animate-pulse',
-  success: 'border-green-500 shadow-[0_0_0_1px_rgba(34,197,94,0.5)]',
-  failed: 'border-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.5)]',
-  skipped: 'border-muted-foreground/40 opacity-60',
-};
-
 export function RequestNode({ data, isConnectable }: NodeProps & { data: RequestNodeData }) {
   const { kind, status, statusCode, durationMs, error } = data;
   const method = methodLabel(data);
@@ -47,7 +42,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
       data-status={status}
       className={cn(
         'w-64 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
-        statusStyles[status],
+        nodeStatusClassName(status, data.skipReason),
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
@@ -69,6 +64,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
           ✕ {statusCode ?? 'Error'} · {error ?? `${durationMs}ms`}
         </div>
       )}
+      <NodeStatusCaption status={status} skipReason={data.skipReason} />
 
       {/* Every field row, including the data-less "Run when" trigger row, is
           always rendered, even when empty, so each target handle stays

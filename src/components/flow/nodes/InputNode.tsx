@@ -1,11 +1,14 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
-import type { FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { NodeStatusCaption } from './NodeStatusCaption';
+import { nodeStatusClassName } from './nodeStatus';
 
 export interface InputNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Input' }>;
   status: FlowNodeStatus;
+  skipReason?: FlowSkipReason;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
 }
@@ -16,12 +19,15 @@ export function InputNode({ data, isConnectable }: NodeProps & { data: InputNode
   return (
     <div
       data-testid='input-node-card'
+      data-status={data.status}
       className={cn(
         'w-48 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
+        nodeStatusClassName(data.status, data.skipReason),
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
       <div className='border-b px-2 py-1.5 font-medium'>{data.kind.label}</div>
+      <NodeStatusCaption status={data.status} skipReason={data.skipReason} />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{display}</div>
       <Handle
         type='source'
