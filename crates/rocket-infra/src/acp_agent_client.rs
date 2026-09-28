@@ -17,7 +17,7 @@ use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent as AgentRole, ByteStreams, Client, ConnectionTo,
 };
 use async_process::Child;
-use rocket_acp::AcpSessionClient;
+use rocket_acp::{AcpSessionClient, McpServerSpec};
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -186,7 +186,13 @@ impl AcpSessionClient for AcpAgentClient {
         args: &[String],
         cwd: &str,
         env: &[(String, String)],
+        mcp_servers: &[McpServerSpec],
     ) -> DomainResult<String> {
+        // Real MCP-server attachment (mapping `McpServerSpec` into
+        // `agent_client_protocol::McpServer` and threading it into
+        // `NewSessionRequest`) lands in Plan 02. Accepting-but-ignoring the
+        // parameter here keeps the workspace compiling in the meantime.
+        let _ = mcp_servers;
         // `AcpAgentConfig` is built directly (rather than using
         // `AcpAgent::from_args`) so `env` is applied through its dedicated
         // `.envs()` builder method. `from_args` instead parses leading

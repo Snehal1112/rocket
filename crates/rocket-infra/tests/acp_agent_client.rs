@@ -57,7 +57,7 @@ async fn acp_agent_client_fixture_agent_completes_initialize_handshake() {
 async fn acp_agent_client_start_session_returns_a_session_id() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session should succeed against the fixture agent");
     assert!(!session_id.is_empty());
@@ -67,7 +67,7 @@ async fn acp_agent_client_start_session_returns_a_session_id() {
 async fn acp_agent_client_start_session_fails_clearly_for_a_nonexistent_command() {
     let client = AcpAgentClient::new();
     let err = client
-        .start_session("definitely-not-a-real-binary-xyz123", &[], "/tmp", &[])
+        .start_session("definitely-not-a-real-binary-xyz123", &[], "/tmp", &[], &[])
         .await
         .expect_err("nonexistent command must fail, not panic");
     assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -85,6 +85,7 @@ async fn acp_agent_client_start_session_error_never_contains_the_credential_valu
                 "ANTHROPIC_API_KEY".to_string(),
                 "sk-super-secret-test-value".to_string(),
             )],
+            &[],
         )
         .await
         .expect_err("nonexistent command must fail");
@@ -114,6 +115,7 @@ async fn acp_agent_client_async_handshake_failure_never_contains_the_credential_
                 "ANTHROPIC_API_KEY".to_string(),
                 "sk-super-secret-async-value".to_string(),
             )],
+            &[],
         )
         .await
         .expect_err(
@@ -137,7 +139,7 @@ async fn acp_agent_client_async_handshake_failure_never_contains_the_credential_
 async fn acp_agent_client_send_prompt_streams_a_chunk_and_returns_a_stop_reason() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session");
 
@@ -155,7 +157,7 @@ async fn acp_agent_client_send_prompt_streams_a_chunk_and_returns_a_stop_reason(
 async fn acp_agent_client_send_prompt_works_twice_on_the_same_session_for_multi_turn_chat() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session");
 
@@ -185,7 +187,7 @@ async fn acp_agent_client_send_prompt_on_unknown_session_id_errors() {
 async fn acp_agent_client_end_session_kills_the_process_and_removes_the_session() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session");
 
@@ -216,7 +218,7 @@ async fn acp_agent_client_end_session_on_unknown_session_id_errors() {
 async fn acp_agent_client_a_crashed_agent_is_removed_from_the_session_map() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session");
 
@@ -244,7 +246,7 @@ async fn acp_agent_client_end_session_unblocks_an_in_flight_prompt() {
     // pending. The pending `send_prompt` must then fail promptly, not hang.
     let client = std::sync::Arc::new(AcpAgentClient::new());
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session");
 
@@ -298,7 +300,7 @@ async fn acp_agent_client_cancelled_start_session_kills_the_whole_process_group(
     let client = AcpAgentClient::new();
     let outcome = tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        client.start_session("sh", &["-c".to_string(), script], "/tmp", &[]),
+        client.start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[]),
     )
     .await;
     assert!(outcome.is_err(), "the handshake must still be pending");
@@ -337,7 +339,7 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
 
     for _ in 0..5 {
         let session_id = client
-            .start_session(&fixture_command(), &[], "/tmp", &[])
+            .start_session(&fixture_command(), &[], "/tmp", &[], &[])
             .await
             .expect("start_session");
         client
@@ -367,11 +369,11 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
 async fn acp_agent_client_end_all_sessions_kills_every_running_session() {
     let client = AcpAgentClient::new();
     let session_a = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session a");
     let session_b = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await
         .expect("start_session b");
 
@@ -419,7 +421,7 @@ async fn acp_agent_client_end_all_sessions_kills_a_session_still_in_its_handshak
         let client = std::sync::Arc::clone(&client);
         tokio::spawn(async move {
             client
-                .start_session("sh", &["-c".to_string(), script], "/tmp", &[])
+                .start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[])
                 .await
         })
     };
@@ -464,7 +466,7 @@ async fn acp_agent_client_start_session_after_end_all_sessions_is_refused() {
         .expect("end_all_sessions should succeed");
 
     let result = client
-        .start_session(&fixture_command(), &[], "/tmp", &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
         .await;
     assert!(
         result.is_err(),

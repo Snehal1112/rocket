@@ -71,7 +71,7 @@ impl AcpSessionService {
         let env = vec![(config.credential_env_var.clone(), credential)];
         let session_id = self
             .session_client
-            .start_session(&config.command, &config.args, cwd, &env)
+            .start_session(&config.command, &config.args, cwd, &env, &[])
             .await?;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
@@ -371,6 +371,7 @@ mod tests {
             _args: &[String],
             _cwd: &str,
             _env: &[(String, String)],
+            _mcp_servers: &[rocket_acp::McpServerSpec],
         ) -> DomainResult<String> {
             if self.start_should_fail {
                 Err(DomainError::InvalidInput("command not found".to_string()))

@@ -1,3 +1,4 @@
+use crate::McpServerSpec;
 use rocket_shared::error::DomainResult;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -12,12 +13,17 @@ pub trait AcpSessionClient: Send + Sync {
     /// Spawns the agent process and performs the `initialize` → `session/new`
     /// handshake. Returns the ACP-provided `sessionId`, used as-is for every
     /// later call — no separate Rocket-side id translation layer.
+    /// `mcp_servers` is passed through to the agent's `session/new` request so
+    /// it can reach the in-process MCP tool server (Plan 02 wires the mapping
+    /// into `NewSessionRequest`; an empty slice means chat-only, matching
+    /// today's behavior exactly).
     async fn start_session(
         &self,
         command: &str,
         args: &[String],
         cwd: &str,
         env: &[(String, String)],
+        mcp_servers: &[McpServerSpec],
     ) -> DomainResult<String>;
 
     /// Sends `session/prompt`. As `agent_message_chunk` updates arrive from
@@ -63,6 +69,7 @@ mod tests {
             _args: &[String],
             _cwd: &str,
             _env: &[(String, String)],
+            _mcp_servers: &[McpServerSpec],
         ) -> DomainResult<String> {
             Ok("session-1".to_string())
         }
@@ -91,7 +98,7 @@ mod tests {
         let client: Box<dyn AcpSessionClient> = Box::new(FakeSessionClient);
 
         let session_id = client
-            .start_session("echo", &[], "/tmp", &[])
+            .start_session("echo", &[], "/tmp", &[], &[])
             .await
             .expect("start_session");
         assert_eq!(session_id, "session-1");
@@ -118,6 +125,7 @@ mod tests {
                 _args: &[String],
                 _cwd: &str,
                 _env: &[(String, String)],
+                _mcp_servers: &[McpServerSpec],
             ) -> DomainResult<String> {
                 Err(DomainError::InvalidInput("command not found".to_string()))
             }
@@ -139,7 +147,7 @@ mod tests {
 
         let client: Box<dyn AcpSessionClient> = Box::new(FailingClient);
         let err = client
-            .start_session("bad-command", &[], "/tmp", &[])
+            .start_session("bad-command", &[], "/tmp", &[], &[])
             .await
             .expect_err("must propagate the error");
         assert!(matches!(err, DomainError::InvalidInput(_)));
