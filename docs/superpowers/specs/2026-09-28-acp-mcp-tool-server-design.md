@@ -49,26 +49,44 @@ Out of scope (not part of this program at all):
 
 ## Architecture
 
+**Dependency decision (locked after implementation-grounding research):** no
+MCP protocol SDK and no HTTP server crate (`axum`/`warp`/`hyper`) exist
+anywhere in this workspace today — only bare `tokio`. Hand-rolling MCP's
+JSON-RPC framing and an HTTP/1.1 listener by hand for a surface that grants
+an autonomous agent real write power is exactly the kind of place subtle
+protocol bugs turn into security bugs. This subproject therefore adds two
+new dependencies to `crates/rocket-infra/Cargo.toml`: **`rmcp`** (the
+official Rust MCP SDK from the Model Context Protocol project — correct
+JSON-RPC framing, tool schema/capability negotiation, stdio and Streamable
+HTTP transports) and **`axum`** (pulled in via `rmcp`'s HTTP-transport
+feature, also used directly for the token-auth middleware layer).
+
 Two transports, one implementation of the actual tool logic — never two
 independent tool-handling code paths, to avoid the class of bug where a fix
 or a security check lands in one transport's handler but not the other's.
 
-- **HTTP backend (primary).** An async task inside the existing Tauri
-  process, started per ACP session (not global), bound to `127.0.0.1` on a
-  randomly chosen port, guarded by a random per-session bearer token. Lives
+- **HTTP backend (primary).** An `rmcp` server (Streamable HTTP transport,
+  `rmcp`'s `axum` integration) running as an async task inside the existing
+  Tauri process, started per ACP session (not global), bound to `127.0.0.1`
+  on a randomly chosen port, guarded by a random per-session bearer token
+  checked by an `axum` middleware layer in front of `rmcp`'s router. Lives
   in `src-tauri` (new module, e.g. `src-tauri/src/mcp/tool_server.rs`) since
   it needs `AppHandle` access to already-managed services — this is Tauri
   wiring, not domain logic, and Tauri-specific code does not belong in
-  `rocket-infra`.
+  `rocket-infra`. The 6 tools (below) are implemented once, here, as an
+  `rmcp` `ServerHandler`/tool-router impl.
 - **Stdio shim (fallback).** Rocket's own executable gains a hidden startup
-  mode (`--acp-mcp-stdio-bridge`) that does nothing but proxy MCP JSON-RPC
-  frames stdio↔HTTP against the already-running HTTP backend. The *agent*
-  spawns this process per the `McpServer::Stdio` config Rocket declares; the
-  shim is given the port and token via environment variables (never argv —
-  matching subproject B's lesson that no credential/secret-bearing value may
-  appear in a process's command-line args, since those are visible via
-  `ps`). The shim has no direct access to app state; it can only do what the
-  token-gated HTTP endpoint already allows.
+  mode (`--acp-mcp-stdio-bridge`) built as an `rmcp` stdio-transport
+  *server* (talking to the agent) whose tool handlers do nothing but
+  forward each call 1:1 to an `rmcp` HTTP-transport *client* (talking to
+  the real backend above) — a generic pass-through, not a second
+  implementation of any tool's logic. The *agent* spawns this process per
+  the `McpServer::Stdio` config Rocket declares; the shim is given the port
+  and token via environment variables (never argv — matching subproject
+  B's lesson that no credential/secret-bearing value may appear in a
+  process's command-line args, since those are visible via `ps`). The shim
+  has no direct access to app state; it can only do what the token-gated
+  HTTP endpoint already allows.
 - **Capability negotiation.** `AcpAgentClient::start_session`
   (`crates/rocket-infra/src/acp_agent_client.rs`) currently awaits but
   discards `InitializeResponse.agent_capabilities.mcp_capabilities`
@@ -169,34 +187,49 @@ power — run requests, edit scripts, write env vars — with no way to opt out
 and no way to tell an agent-driven history entry from a manual one. A
 minimal version of E's safety valve is therefore built as part of D:
 
-- **Opt-in flag:** `extensions.rocketapi.agentAutonomyEnabled: bool`
-  (default `false`), stored git-shared inside `opencollection.yml`'s
-  `extensions` block — the same mechanism and precedent already used for
-  the existing Rocket-only `sandbox_mode` setting
-  (`crates/rocket-infra/src/fs_collection/settings.rs:14-62`,
-  `extensions.rocketapi.sandboxMode`). `extensions` is the OpenCollection
-  spec's own designated escape hatch for vendor-specific fields — it is not
-  a violation of the spec's `additionalProperties: false` rule, since
-  `extensions` itself is a declared, free-form field.
+- **Opt-in flag:** a new `agent_autonomy_enabled: bool` field (default
+  `false`) on the domain `CollectionSettings` struct
+  (`crates/rocket-collection/src/settings.rs:35-55`), mapped by the
+  `rocket-infra` persistence layer to
+  `extensions.rocketapi.agentAutonomyEnabled` inside `opencollection.yml`,
+  the same mapping pattern already used for the existing
+  `sandbox_mode` field (domain field ↔
+  `extensions.rocketapi.sandboxMode`, see
+  `crates/rocket-infra/src/fs_collection/settings.rs:14-62`). `extensions`
+  is the OpenCollection spec's own designated escape hatch for
+  vendor-specific fields — it is not a violation of the spec's
+  `additionalProperties: false` rule, since `extensions` itself is a
+  declared, free-form field.
   (Trade-off, explicitly accepted: because this is git-shared, cloning or
   pulling a collection with this flag already set to `true` enables
   autonomous agent writes for whoever opens it next, the same trust model
   already implied by `sandbox_mode`.)
 - **UI:** a checkbox in `AgentChatPanel`
   (`src/components/request/AgentChatPanel.tsx`), labeled to the effect of
-  "Allow this agent to run requests and edit files", off by default,
-  writing the setting above via the existing `save_settings` /
-  `CollectionSettings` plumbing.
+  "Allow this agent to run requests and edit files", off by default. This
+  is new plumbing for that component — it does not read/write
+  `CollectionSettings` today — calling the existing
+  `getCollectionSettings`/`saveCollectionSettings` Tauri commands
+  (`src/lib/tauri-api.ts:677-681`,
+  `src-tauri/src/commands/collections.rs:231-246`), with a matching new
+  optional field added to the TS `CollectionSettings` interface
+  (`src/lib/tauri-api.ts:62-68`).
 - **Audit trail:** one new generic domain event,
-  `DomainEvent::AcpToolInvoked { session_id, tool, summary, timestamp }`
-  (`rocket-shared/src/events.rs`), published by the tool dispatcher for
-  *every* tool call regardless of kind (list/run/edit/get/set) — this
-  satisfies "audit log" generically without needing bespoke handling in
-  every existing domain event type. Additionally, `HistoryEntry.run_source
-  = RunSource::Agent` (see above) makes agent-executed *requests*
-  specifically distinguishable in history, per the original program
-  decomposition's explicit ask ("every agent-executed request is tagged
-  distinctly in rocket-history").
+  `DomainEvent::AcpToolInvoked { session_id: String, tool: String, summary:
+  String }` (`rocket-shared/src/events.rs`) — no timestamp field, matching
+  every existing `DomainEvent` variant's style (none of them carry one;
+  event ordering comes from emission order, not a payload timestamp) —
+  published by the tool dispatcher for *every* tool call regardless of
+  kind (list/run/edit/get/set). This satisfies "audit log" generically
+  without needing bespoke handling in every existing domain event type.
+  Adding this variant requires a new arm in `TauriEventBus`'s exhaustive
+  `match` (`src-tauri/src/tauri_event_bus.rs:36-80`) mapping it to a new
+  frontend channel, e.g. `"agent-tool-invoked"` — the compiler enforces
+  this since the match has no wildcard arm for existing variants.
+  Additionally, `HistoryEntry.run_source = RunSource::Agent` (see above)
+  makes agent-executed *requests* specifically distinguishable in history,
+  per the original program decomposition's explicit ask ("every
+  agent-executed request is tagged distinctly in rocket-history").
 
 ## Error handling
 
