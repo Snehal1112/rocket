@@ -9,7 +9,7 @@
 use agent_client_protocol::schema::v1::InitializeRequest;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent as AgentRole, Client, ConnectionTo};
-use rocket_acp::AcpSessionClient;
+use rocket_acp::{AcpSessionClient, McpServerSpec};
 use rocket_infra::AcpAgentClient;
 use rocket_shared::error::DomainError;
 use tokio::sync::mpsc;
@@ -471,5 +471,149 @@ async fn acp_agent_client_start_session_after_end_all_sessions_is_refused() {
     assert!(
         result.is_err(),
         "no session may be stored after the app-exit sweep"
+    );
+}
+
+// Task 3 (Plan 02): McpServerSpec -> agent_client_protocol::McpServer mapping.
+
+#[tokio::test]
+async fn acp_agent_client_start_session_maps_http_mcp_server_spec_into_new_session_request() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
+    let client = AcpAgentClient::new();
+    let specs = vec![McpServerSpec::Http {
+        name: "rocket-tools".to_string(),
+        url: "http://127.0.0.1:4000/mcp".to_string(),
+        token: "secret-token".to_string(),
+    }];
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "MCP_SERVERS_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &specs,
+        )
+        .await
+        .expect("start_session should succeed against the fixture agent");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert!(dumped.contains("\"type\":\"http\""), "got: {dumped}");
+    assert!(dumped.contains("\"name\":\"rocket-tools\""), "got: {dumped}");
+    assert!(
+        dumped.contains("\"url\":\"http://127.0.0.1:4000/mcp\""),
+        "got: {dumped}"
+    );
+    assert!(dumped.contains("\"name\":\"Authorization\""), "got: {dumped}");
+    assert!(
+        dumped.contains("\"value\":\"Bearer secret-token\""),
+        "got: {dumped}"
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_maps_stdio_mcp_server_spec_into_new_session_request() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
+    let client = AcpAgentClient::new();
+    let specs = vec![McpServerSpec::Stdio {
+        name: "rocket-tools-stdio".to_string(),
+        command: "rocket".to_string(),
+        args: vec!["--acp-mcp-stdio-bridge".to_string()],
+        env: vec![("ROCKET_MCP_PORT".to_string(), "4000".to_string())],
+    }];
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "MCP_SERVERS_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &specs,
+        )
+        .await
+        .expect("start_session should succeed against the fixture agent");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert!(!dumped.contains("\"type\":\"http\""), "got: {dumped}");
+    assert!(dumped.contains("\"command\":\"rocket\""), "got: {dumped}");
+    assert!(dumped.contains("--acp-mcp-stdio-bridge"), "got: {dumped}");
+    assert!(dumped.contains("\"name\":\"ROCKET_MCP_PORT\""), "got: {dumped}");
+    assert!(dumped.contains("\"value\":\"4000\""), "got: {dumped}");
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_with_no_mcp_servers_sends_an_empty_list() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
+    let client = AcpAgentClient::new();
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "MCP_SERVERS_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &[],
+        )
+        .await
+        .expect("start_session should succeed with no mcp servers");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert_eq!(dumped.trim(), "[]");
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_still_succeeds_when_agent_lacks_http_mcp_capability() {
+    // The fixture agent's InitializeResponse never sets mcp_capabilities.http
+    // unless FIXTURE_ADVERTISE_MCP_HTTP=1 is set (see test_acp_agent.rs),
+    // which this test does not set. Deciding which McpServerSpec variant to
+    // send is rocket-app's job (Plan 03); this crate only maps and warns on
+    // a mismatch, it never blocks the session over it.
+    let client = AcpAgentClient::new();
+    let specs = vec![McpServerSpec::Http {
+        name: "rocket-tools".to_string(),
+        url: "http://127.0.0.1:4000/mcp".to_string(),
+        token: "secret-token".to_string(),
+    }];
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &specs)
+        .await
+        .expect("a capability mismatch must not fail start_session");
+    assert!(!session_id.is_empty());
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_error_never_contains_the_mcp_token_value() {
+    let client = AcpAgentClient::new();
+    let specs = vec![McpServerSpec::Http {
+        name: "rocket-tools".to_string(),
+        url: "http://127.0.0.1:4000/mcp".to_string(),
+        token: "sk-mcp-super-secret-test-value".to_string(),
+    }];
+    let err = client
+        .start_session(
+            "definitely-not-a-real-binary-xyz123",
+            &[],
+            "/tmp",
+            &[],
+            &specs,
+        )
+        .await
+        .expect_err("nonexistent command must fail, not panic");
+    let message = err.to_string();
+    assert!(
+        !message.contains("sk-mcp-super-secret-test-value"),
+        "error message must never contain the mcp token value, got: {message}"
     );
 }

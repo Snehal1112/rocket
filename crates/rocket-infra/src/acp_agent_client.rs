@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, Weak};
 
 use agent_client_protocol::schema::v1::{
-    ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation, InitializeRequest,
+    ClientCapabilities, ContentBlock, EnvVariable, FileSystemCapabilities, HttpHeader,
+    Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerStdio,
     NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
@@ -188,11 +189,6 @@ impl AcpSessionClient for AcpAgentClient {
         env: &[(String, String)],
         mcp_servers: &[McpServerSpec],
     ) -> DomainResult<String> {
-        // Real MCP-server attachment (mapping `McpServerSpec` into
-        // `agent_client_protocol::McpServer` and threading it into
-        // `NewSessionRequest`) lands in Plan 02. Accepting-but-ignoring the
-        // parameter here keeps the workspace compiling in the meantime.
-        let _ = mcp_servers;
         // `AcpAgentConfig` is built directly (rather than using
         // `AcpAgent::from_args`) so `env` is applied through its dedicated
         // `.envs()` builder method. `from_args` instead parses leading
@@ -238,6 +234,7 @@ impl AcpSessionClient for AcpAgentClient {
         let ready_tx_for_task = Arc::clone(&ready_tx);
         let cwd = cwd.to_string();
         let command_owned = command.to_string();
+        let mcp_servers_owned = mcp_servers.to_vec();
 
         let dispatch_task = tokio::spawn(async move {
             // The agent's stderr must be drained. Dropping the pipe would make
@@ -271,7 +268,7 @@ impl AcpSessionClient for AcpAgentClient {
                     let ready_tx = Arc::clone(&ready_tx_for_task);
                     async move {
                         let handshake = async {
-                            connection
+                            let init_response = connection
                                 .send_request(
                                     InitializeRequest::new(ProtocolVersion::V1)
                                         .client_capabilities(
@@ -288,8 +285,15 @@ impl AcpSessionClient for AcpAgentClient {
                                 )
                                 .block_task()
                                 .await?;
+                            warn_if_http_mcp_server_unsupported(
+                                &mcp_servers_owned,
+                                init_response.agent_capabilities.mcp_capabilities.http,
+                            );
                             connection
-                                .send_request(NewSessionRequest::new(cwd))
+                                .send_request(
+                                    NewSessionRequest::new(cwd)
+                                        .mcp_servers(mcp_server_specs_to_wire(&mcp_servers_owned)),
+                                )
                                 .block_task()
                                 .await
                         };
@@ -492,6 +496,58 @@ impl AcpAgentClient {
 
 fn shutting_down_error() -> DomainError {
     DomainError::Internal("agent sessions are shutting down".to_string())
+}
+
+/// Maps Rocket's transport-agnostic `McpServerSpec` (owned by `rocket-acp`,
+/// which must not depend on `agent-client-protocol` -- see that crate's DDD
+/// boundary) to the real `agent_client_protocol::schema::v1::McpServer` wire
+/// type. `rocket-app` (Plan 03) decides *which* variants to build for a given
+/// session; this function only translates that decision, it never chooses
+/// Http vs Stdio itself.
+fn mcp_server_specs_to_wire(specs: &[McpServerSpec]) -> Vec<McpServer> {
+    specs
+        .iter()
+        .map(|spec| match spec {
+            McpServerSpec::Http { name, url, token } => McpServer::Http(
+                McpServerHttp::new(name.clone(), url.clone()).headers(vec![HttpHeader::new(
+                    "Authorization",
+                    format!("Bearer {token}"),
+                )]),
+            ),
+            McpServerSpec::Stdio {
+                name,
+                command,
+                args,
+                env,
+            } => McpServer::Stdio(
+                McpServerStdio::new(name.clone(), command.clone())
+                    .args(args.clone())
+                    .env(
+                        env.iter()
+                            .map(|(k, v)| EnvVariable::new(k.clone(), v.clone()))
+                            .collect(),
+                    ),
+            ),
+        })
+        .collect()
+}
+
+/// Logs (but never blocks on) a negotiation mismatch: the caller asked for an
+/// HTTP MCP server but the agent's `InitializeResponse` never advertised
+/// `mcp_capabilities.http`. Choosing *which* `McpServerSpec` variant to send
+/// is `rocket-app`'s job (Plan 03) -- this only makes a mismatch visible in
+/// logs instead of letting it fail silently deep inside the agent process.
+fn warn_if_http_mcp_server_unsupported(mcp_servers: &[McpServerSpec], agent_supports_http: bool) {
+    if !agent_supports_http
+        && mcp_servers
+            .iter()
+            .any(|spec| matches!(spec, McpServerSpec::Http { .. }))
+    {
+        tracing::warn!(
+            "requested an HTTP MCP server for this ACP session, but the agent's \
+             InitializeResponse did not advertise mcp_capabilities.http; the agent may refuse it"
+        );
+    }
 }
 
 /// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-
