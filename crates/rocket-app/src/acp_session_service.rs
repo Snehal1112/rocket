@@ -217,147 +217,7 @@ mod tests {
     use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
     use tokio::sync::mpsc::UnboundedSender;
 
-    /// Collection repo double for `AcpSessionService` tests. Settings default
-    /// to `agent_autonomy_enabled: false` for any collection not explicitly
-    /// configured via `set_autonomy`, matching `get_settings`'s documented
-    /// "missing settings file" fallback in the real repositories.
-    struct FakeAcpCollectionRepo {
-        settings: Mutex<std::collections::HashMap<String, rocket_collection::CollectionSettings>>,
-        settings_error_for: Mutex<Option<String>>,
-    }
-    impl FakeAcpCollectionRepo {
-        fn new() -> Arc<Self> {
-            Arc::new(Self {
-                settings: Mutex::new(std::collections::HashMap::new()),
-                settings_error_for: Mutex::new(None),
-            })
-        }
-        fn set_autonomy(&self, collection: &str, enabled: bool) {
-            let mut settings = rocket_collection::CollectionSettings::default();
-            settings.agent_autonomy_enabled = enabled;
-            self.settings
-                .lock()
-                .expect("lock")
-                .insert(collection.to_string(), settings);
-        }
-        fn fail_settings_for(&self, collection: &str) {
-            *self.settings_error_for.lock().expect("lock") = Some(collection.to_string());
-        }
-    }
-    impl rocket_collection::CollectionRepository for FakeAcpCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<rocket_collection::CollectionSummary>> {
-            Ok(vec![])
-        }
-        fn get(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
-            Err(DomainError::NotFound(name.into()))
-        }
-        fn get_summaries(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
-            self.get(name)
-        }
-        fn create(&self, _: &str) -> DomainResult<rocket_collection::Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn delete(&self, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<rocket_collection::Request> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn save_request(
-            &self,
-            _: &str,
-            path: &str,
-            _: &rocket_collection::Request,
-        ) -> DomainResult<String> {
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
-            if self.settings_error_for.lock().expect("lock").as_deref() == Some(name) {
-                return Err(DomainError::Internal("settings read failed".into()));
-            }
-            Ok(self
-                .settings
-                .lock()
-                .expect("lock")
-                .get(name)
-                .cloned()
-                .unwrap_or_default())
-        }
-        fn save_settings(
-            &self,
-            _: &str,
-            _: &rocket_collection::CollectionSettings,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<rocket_collection::CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<rocket_collection::CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            _: &str,
-            _: &str,
-            _: rocket_collection::RequestScriptPhase,
-            _: String,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-    }
+    use crate::test_doubles::ConfigurableCollectionRepo;
 
     struct FakeAgentConfigRepo(Mutex<Vec<AgentConfig>>);
     impl AgentConfigRepository for FakeAgentConfigRepo {
@@ -621,7 +481,7 @@ mod tests {
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let session_id = service
@@ -646,7 +506,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let stop_reason = service
@@ -687,7 +547,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         service
@@ -704,7 +564,7 @@ mod tests {
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let err = service
@@ -729,7 +589,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let err = service
@@ -752,7 +612,7 @@ mod tests {
             agent_config_service_with(FakeVaultFetcher {
                 secret_value_result: Ok(None),
             }),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let err = service
@@ -777,7 +637,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let err = service
@@ -808,7 +668,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
         );
 
@@ -843,7 +703,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         service
@@ -860,7 +720,7 @@ mod tests {
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
-            FakeAcpCollectionRepo::new(),
+            ConfigurableCollectionRepo::new(),
         );
 
         let session_id = service
@@ -873,7 +733,7 @@ mod tests {
     #[tokio::test]
     async fn start_session_with_autonomy_disabled_still_succeeds_with_no_mcp_servers() {
         let publisher = Arc::new(FakeEventPublisher::new());
-        let collection_repo = FakeAcpCollectionRepo::new();
+        let collection_repo = ConfigurableCollectionRepo::new();
         collection_repo.set_autonomy("my-api", false);
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
@@ -890,11 +750,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_autonomy_enabled_still_succeeds_since_no_mcp_backend_exists_yet()
-    {
+    async fn start_session_with_autonomy_enabled_still_succeeds_since_no_mcp_backend_exists_yet() {
         let publisher = Arc::new(FakeEventPublisher::new());
-        let collection_repo = FakeAcpCollectionRepo::new();
-        collection_repo.set_autonomy("my-api", true);
+        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("my-api", true);
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
@@ -916,7 +774,7 @@ mod tests {
     #[tokio::test]
     async fn start_session_propagates_a_collection_settings_lookup_failure() {
         let publisher = Arc::new(FakeEventPublisher::new());
-        let collection_repo = FakeAcpCollectionRepo::new();
+        let collection_repo = ConfigurableCollectionRepo::new();
         collection_repo.fail_settings_for("broken-collection");
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),

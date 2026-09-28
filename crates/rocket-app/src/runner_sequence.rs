@@ -155,7 +155,7 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
 }
 
 /// On-disk directory name for a folder, falling back to its display name.
-fn folder_dir_name(folder: &Folder) -> &str {
+pub(crate) fn folder_dir_name(folder: &Folder) -> &str {
     folder.dir_name.as_deref().unwrap_or(&folder.name)
 }
 

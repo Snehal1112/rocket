@@ -8,14 +8,14 @@
 //! trail.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::execution_service::RequestExecutionService;
-use crate::runner_sequence::{build_step_input, RunItem};
+use crate::runner_sequence::{build_step_input, folder_dir_name, RunItem};
 
 /// One request entry in a `list_collection_requests` result. `path` is
 /// relative to the collection root, matching the shape `run_request` and
@@ -47,16 +47,29 @@ const VARIABLE_NOT_ACCESSIBLE: &str = "variable not accessible";
 /// Orchestrates the 6 MCP tools an ACP agent can call against a collection.
 /// Holds no process/filesystem state of its own — every method delegates to
 /// an existing domain repository or service. `test_result_cache` is the one
-/// piece of state this service owns: an in-memory, session-lifetime map from
-/// `(session_id, request_path)` to the test results of that pair's most
-/// recent `run_request` call, per the design spec's explicit choice not to
-/// persist test results into `rocket-history`.
+/// piece of state this service owns: an in-memory map from
+/// `(session_id, collection, request_path)` to the test results of that
+/// triple's most recent `run_request` call, per the design spec's explicit
+/// choice not to persist test results into `rocket-history`. The collection
+/// is part of the key because two collections can hold the same relative
+/// request path.
 pub struct McpToolService {
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     environment_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory>,
     execution_svc: Arc<RequestExecutionService>,
     event_publisher: Arc<dyn EventPublisher>,
-    test_result_cache: Mutex<HashMap<(String, String), Vec<rocket_scripting::TestResult>>>,
+    test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
+}
+
+/// `(session_id, collection, request_path)`.
+type TestResultKey = (String, String, String);
+
+fn test_result_key(session_id: &str, collection: &str, request_path: &str) -> TestResultKey {
+    (
+        session_id.to_string(),
+        collection.to_string(),
+        request_path.to_string(),
+    )
 }
 
 impl McpToolService {
@@ -150,7 +163,7 @@ impl McpToolService {
             .lock()
             .expect("lock McpToolService test_result_cache")
             .insert(
-                (session_id.to_string(), request_path.to_string()),
+                test_result_key(session_id, collection, request_path),
                 output.test_results.clone(),
             );
 
@@ -236,7 +249,9 @@ impl McpToolService {
             .find(|v| v.key == key)
             .ok_or_else(|| DomainError::InvalidInput(VARIABLE_NOT_ACCESSIBLE.to_string()))?;
         if variable.secret {
-            return Err(DomainError::InvalidInput(VARIABLE_NOT_ACCESSIBLE.to_string()));
+            return Err(DomainError::InvalidInput(
+                VARIABLE_NOT_ACCESSIBLE.to_string(),
+            ));
         }
         variable.value = value;
         repo.save(&env)?;
@@ -259,7 +274,7 @@ impl McpToolService {
             .test_result_cache
             .lock()
             .expect("lock McpToolService test_result_cache")
-            .get(&(session_id.to_string(), request_path.to_string()))
+            .get(&test_result_key(session_id, collection, request_path))
             .cloned()
             .ok_or_else(|| {
                 DomainError::NotFound(format!(
@@ -270,7 +285,10 @@ impl McpToolService {
         self.publish_tool_invoked(
             session_id,
             "get_test_results",
-            format!("read {} cached test result(s) for '{request_path}'", results.len()),
+            format!(
+                "read {} cached test result(s) for '{request_path}'",
+                results.len()
+            ),
         );
         Ok(results)
     }
@@ -281,7 +299,8 @@ impl McpToolService {
 /// `runner_sequence::collect_items`'s traversal, but over summary leaves
 /// instead of full `Request` bodies — the two item shapes are different
 /// enum variants (`Summary` vs `Request`), so this is a separate, small
-/// walk rather than a shared generic one.
+/// walk rather than a shared generic one. The folder-path rule is shared via
+/// `folder_dir_name`, so the paths listed here match the ones the runner uses.
 fn collect_request_entries(
     folder: &rocket_collection::Folder,
     prefix: &str,
@@ -301,8 +320,7 @@ fn collect_request_entries(
                 });
             }
             rocket_collection::CollectionItem::Folder(sub) => {
-                let dir_name = sub.dir_name.as_deref().unwrap_or(&sub.name);
-                let sub_prefix = format!("{prefix}{dir_name}/");
+                let sub_prefix = format!("{prefix}{}/", folder_dir_name(sub));
                 collect_request_entries(sub, &sub_prefix, out);
             }
             rocket_collection::CollectionItem::Request(_)
@@ -318,248 +336,19 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     use rocket_collection::{
-        Collection, CollectionRepository, CollectionSettings, CollectionSummary,
-        CollectionVariable, Folder, Request as CollectionRequest, RequestScriptPhase,
+        Collection, CollectionRepository, Folder, Request as CollectionRequest, RequestScriptPhase,
         RequestSummary,
     };
-    use rocket_environment::{Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable};
+    use rocket_environment::{
+        Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable,
+    };
     use rocket_shared::types::HttpMethod;
 
     use crate::test_doubles::{
-        EmptySecretManagerRepo, InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo,
-        RecordingExecutor, RecordingPublisher, SharedHistoryRepo,
-        SharedPublisher,
+        ConfigurableCollectionRepo, EmptySecretManagerRepo, InMemoryHistoryRepo, NullCookieRepo,
+        NullEnvRepo, RecordingExecutor, RecordingPublisher, SharedCollectionRepo,
+        SharedHistoryRepo, SharedPublisher,
     };
-
-    /// Collection repo double with mutable, per-collection settings (so a
-    /// test can toggle `agent_autonomy_enabled` mid-test), configurable
-    /// requests and summary trees, and a record of every
-    /// `save_request_script` call. Purpose-built for this file rather than
-    /// reusing `crate::test_doubles::InMemoryCollectionRepo`, which holds one
-    /// immutable `Collection` and cannot support the mid-session-toggle test
-    /// below.
-    struct FakeCollectionRepo {
-        settings: StdMutex<StdHashMap<String, CollectionSettings>>,
-        requests: StdMutex<StdHashMap<(String, String), CollectionRequest>>,
-        summaries: StdMutex<StdHashMap<String, Collection>>,
-        saved_scripts: StdMutex<Vec<(String, String, RequestScriptPhase, String)>>,
-    }
-
-    impl FakeCollectionRepo {
-        fn new() -> Arc<Self> {
-            Arc::new(Self {
-                settings: StdMutex::new(StdHashMap::new()),
-                requests: StdMutex::new(StdHashMap::new()),
-                summaries: StdMutex::new(StdHashMap::new()),
-                saved_scripts: StdMutex::new(Vec::new()),
-            })
-        }
-
-        fn set_autonomy(&self, collection: &str, enabled: bool) {
-            let mut settings = CollectionSettings::default();
-            settings.agent_autonomy_enabled = enabled;
-            self.settings
-                .lock()
-                .expect("lock FakeCollectionRepo settings")
-                .insert(collection.to_string(), settings);
-        }
-
-        fn with_request(&self, collection: &str, path: &str, request: CollectionRequest) {
-            self.requests
-                .lock()
-                .expect("lock FakeCollectionRepo requests")
-                .insert((collection.to_string(), path.to_string()), request);
-        }
-
-        fn with_summaries(&self, collection: &str, tree: Collection) {
-            self.summaries
-                .lock()
-                .expect("lock FakeCollectionRepo summaries")
-                .insert(collection.to_string(), tree);
-        }
-
-        fn saved_scripts(&self) -> Vec<(String, String, RequestScriptPhase, String)> {
-            self.saved_scripts
-                .lock()
-                .expect("lock FakeCollectionRepo saved_scripts")
-                .clone()
-        }
-    }
-
-    impl CollectionRepository for FakeCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            Ok(vec![])
-        }
-        fn get(&self, name: &str) -> DomainResult<Collection> {
-            self.summaries
-                .lock()
-                .expect("lock")
-                .get(name)
-                .cloned()
-                .ok_or_else(|| DomainError::NotFound(name.into()))
-        }
-        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
-            self.get(name)
-        }
-        fn create(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn delete(&self, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request(&self, collection: &str, path: &str) -> DomainResult<CollectionRequest> {
-            self.requests
-                .lock()
-                .expect("lock")
-                .get(&(collection.to_string(), path.to_string()))
-                .cloned()
-                .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
-        }
-        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
-            Ok(self
-                .settings
-                .lock()
-                .expect("lock")
-                .get(name)
-                .cloned()
-                .unwrap_or_default())
-        }
-        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(&self, _: &str, _: &str, _: Vec<CollectionVariable>) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            collection: &str,
-            request_path: &str,
-            phase: RequestScriptPhase,
-            body: String,
-        ) -> DomainResult<()> {
-            self.saved_scripts
-                .lock()
-                .expect("lock")
-                .push((collection.to_string(), request_path.to_string(), phase, body));
-            Ok(())
-        }
-    }
-
-    /// A thin `Box<dyn CollectionRepository>`-shaped wrapper around one
-    /// shared `Arc<FakeCollectionRepo>`, so the same repo instance can be
-    /// handed to both `RequestExecutionService` (which owns a `Box`) and
-    /// `McpToolService` (which owns an `Arc`) in the same test.
-    struct SharedFakeCollectionRepo(Arc<FakeCollectionRepo>);
-    impl CollectionRepository for SharedFakeCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            self.0.list()
-        }
-        fn get(&self, n: &str) -> DomainResult<Collection> {
-            self.0.get(n)
-        }
-        fn get_summaries(&self, n: &str) -> DomainResult<Collection> {
-            self.0.get_summaries(n)
-        }
-        fn create(&self, n: &str) -> DomainResult<Collection> {
-            self.0.create(n)
-        }
-        fn delete(&self, n: &str) -> DomainResult<()> {
-            self.0.delete(n)
-        }
-        fn rename(&self, a: &str, b: &str) -> DomainResult<()> {
-            self.0.rename(a, b)
-        }
-        fn get_request(&self, a: &str, b: &str) -> DomainResult<CollectionRequest> {
-            self.0.get_request(a, b)
-        }
-        fn save_request(&self, a: &str, b: &str, c: &CollectionRequest) -> DomainResult<String> {
-            self.0.save_request(a, b, c)
-        }
-        fn rename_request(&self, a: &str, b: &str, c: &str) -> DomainResult<()> {
-            self.0.rename_request(a, b, c)
-        }
-        fn delete_request(&self, a: &str, b: &str) -> DomainResult<()> {
-            self.0.delete_request(a, b)
-        }
-        fn create_folder(&self, a: &str, b: &str) -> DomainResult<()> {
-            self.0.create_folder(a, b)
-        }
-        fn delete_folder(&self, a: &str, b: &str) -> DomainResult<()> {
-            self.0.delete_folder(a, b)
-        }
-        fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> {
-            self.0.move_item(a, b, c, d)
-        }
-        fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
-            self.0.reorder_items(a, b, c)
-        }
-        fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
-            self.0.get_settings(n)
-        }
-        fn save_settings(&self, n: &str, s: &CollectionSettings) -> DomainResult<()> {
-            self.0.save_settings(n, s)
-        }
-        fn get_folder_chain_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
-            self.0.get_folder_chain_variables(a, b)
-        }
-        fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
-            self.0.get_folder_variables(a, b)
-        }
-        fn save_folder_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> {
-            self.0.save_folder_variables(a, b, c)
-        }
-        fn get_request_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
-            self.0.get_request_variables(a, b)
-        }
-        fn save_request_variables(&self, a: &str, b: &str, c: Vec<CollectionVariable>) -> DomainResult<()> {
-            self.0.save_request_variables(a, b, c)
-        }
-        fn save_request_script(
-            &self,
-            a: &str,
-            b: &str,
-            c: RequestScriptPhase,
-            d: String,
-        ) -> DomainResult<()> {
-            self.0.save_request_script(a, b, c, d)
-        }
-    }
 
     /// Environment repo factory double whose `for_collection` handles all
     /// share one underlying map, so a `set_env_var` write is visible to a
@@ -575,7 +364,10 @@ mod tests {
             })
         }
         fn with_env(&self, env: Environment) {
-            self.envs.lock().expect("lock").insert(env.name.clone(), env);
+            self.envs
+                .lock()
+                .expect("lock")
+                .insert(env.name.clone(), env);
         }
     }
     impl EnvironmentRepositoryFactory for FakeEnvRepoFactory {
@@ -597,7 +389,10 @@ mod tests {
                 .ok_or_else(|| DomainError::NotFound(name.into()))
         }
         fn save(&self, env: &Environment) -> DomainResult<()> {
-            self.0.lock().expect("lock").insert(env.name.clone(), env.clone());
+            self.0
+                .lock()
+                .expect("lock")
+                .insert(env.name.clone(), env.clone());
             Ok(())
         }
         fn delete(&self, name: &str) -> DomainResult<()> {
@@ -607,11 +402,11 @@ mod tests {
     }
 
     /// Builds an `McpToolService` plus its backing `RequestExecutionService`,
-    /// sharing one `FakeCollectionRepo` and one `RecordingPublisher` between
+    /// sharing one `ConfigurableCollectionRepo` and one `RecordingPublisher` between
     /// them so a test can both drive HTTP dispatch and inspect every
     /// `DomainEvent` (including `AcpToolInvoked`) either service published.
     fn service_with(
-        collection_repo: Arc<FakeCollectionRepo>,
+        collection_repo: Arc<ConfigurableCollectionRepo>,
         env_factory: Arc<FakeEnvRepoFactory>,
         publisher: Arc<RecordingPublisher>,
     ) -> McpToolService {
@@ -628,19 +423,14 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::clone(&executor),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedFakeCollectionRepo(Arc::clone(&collection_repo))),
+            Box::new(SharedCollectionRepo(Arc::clone(&collection_repo))),
             Box::new(NullCookieRepo),
             Box::new(SharedPublisher(Arc::clone(&publisher))),
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         ));
-        McpToolService::new(
-            collection_repo,
-            env_factory,
-            exec_svc,
-            publisher,
-        )
+        McpToolService::new(collection_repo, env_factory, exec_svc, publisher)
     }
 
     fn sample_request(name: &str) -> CollectionRequest {
@@ -651,43 +441,93 @@ mod tests {
     /// Review Focus item this plan and the index both call out.
     #[test]
     fn every_tool_is_refused_when_autonomy_is_disabled() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", false);
         repo.with_request("my-api", "login.yml", sample_request("Login"));
+        // A tree and a readable variable exist, so a missing gate would make
+        // these calls succeed rather than fail for an unrelated reason.
+        repo.with_summaries("my-api", Collection::new("my-api"));
         let env_factory = FakeEnvRepoFactory::new();
-        env_factory.with_env(Environment::new("dev"));
+        env_factory.with_env(env_with_vars());
         let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+        let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
 
-        assert!(svc.list_collection_requests("s1", "my-api").is_err());
-        assert!(svc.edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into()).is_err());
-        assert!(svc.get_env_var("s1", "my-api", "dev", "HOST").is_err());
-        assert!(svc.set_env_var("s1", "my-api", "dev", "HOST", "x".into()).is_err());
-        assert!(svc.get_test_results("s1", "my-api", "login.yml").is_err());
-        // run_request is async — checked in its own test below (Step 6) since
-        // this test function is synchronous; the assertion set above already
-        // covers every synchronous tool with the shared fixture.
+        let results: Vec<(&str, DomainResult<()>)> = vec![
+            (
+                "list_collection_requests",
+                svc.list_collection_requests("s1", "my-api").map(|_| ()),
+            ),
+            (
+                "edit_script",
+                svc.edit_script(
+                    "s1",
+                    "my-api",
+                    "login.yml",
+                    RequestScriptPhase::Tests,
+                    "// x".into(),
+                ),
+            ),
+            (
+                "get_env_var",
+                svc.get_env_var("s1", "my-api", "dev", "HOST").map(|_| ()),
+            ),
+            (
+                "set_env_var",
+                svc.set_env_var("s1", "my-api", "dev", "HOST", "x".into()),
+            ),
+            (
+                "get_test_results",
+                svc.get_test_results("s1", "my-api", "login.yml")
+                    .map(|_| ()),
+            ),
+        ];
+        for (tool, result) in results {
+            assert_refused_by_autonomy_gate(tool, result);
+        }
+        // run_request is async, so it is checked in its own test below.
+        assert!(
+            repo.saved_scripts().is_empty(),
+            "a refused edit_script must not write"
+        );
+        assert!(
+            !publisher
+                .events()
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+            "a refused call must not publish an audit event"
+        );
+    }
+
+    /// Asserts `result` is the autonomy-gate refusal, not some other error.
+    fn assert_refused_by_autonomy_gate(tool: &str, result: DomainResult<()>) {
+        match result {
+            Err(DomainError::InvalidInput(msg)) => assert!(
+                msg.contains("not allowed to act on collection"),
+                "{tool} failed, but not via the autonomy gate: {msg}"
+            ),
+            other => panic!("{tool} must be refused by the autonomy gate, got {other:?}"),
+        }
     }
 
     #[tokio::test]
     async fn run_request_is_refused_when_autonomy_is_disabled() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", false);
         repo.with_request("my-api", "login.yml", sample_request("Login"));
         let env_factory = FakeEnvRepoFactory::new();
         let publisher = RecordingPublisher::new();
         let svc = service_with(Arc::clone(&repo), env_factory, publisher);
 
-        let err = svc
+        let result = svc
             .run_request("s1", "my-api", "login.yml", None)
             .await
-            .expect_err("run_request must be refused when autonomy is disabled");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
+            .map(|_| ());
+        assert_refused_by_autonomy_gate("run_request", result);
     }
 
     #[test]
     fn list_collection_requests_walks_folders_and_publishes_audit_event() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
 
         let mut collection = Collection::new("my-api");
@@ -734,7 +574,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_request_dispatches_tags_history_agent_and_caches_test_results() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         repo.with_request("my-api", "login.yml", sample_request("Login"));
         let env_factory = FakeEnvRepoFactory::new();
@@ -750,7 +590,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::clone(&executor),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedFakeCollectionRepo(Arc::clone(&repo))),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
             Box::new(NullCookieRepo),
             Box::new(SharedPublisher(Arc::clone(&publisher))),
             Box::new(EmptySecretManagerRepo),
@@ -768,12 +608,7 @@ mod tests {
         // `Self` resolution first and then fails to match `&repo`.
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
-        let svc = McpToolService::new(
-            repo_dyn,
-            env_factory,
-            Arc::clone(&exec_svc),
-            publisher_dyn,
-        );
+        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
 
         let result = svc
             .run_request("s1", "my-api", "login.yml", None)
@@ -792,20 +627,30 @@ mod tests {
         let cached = svc
             .get_test_results("s1", "my-api", "login.yml")
             .expect("get_test_results after a run must be cached, not an error");
-        assert!(cached.is_empty(), "this fixture's request has no test script, so no results");
+        assert!(
+            cached.is_empty(),
+            "this fixture's request has no test script, so no results"
+        );
+
+        // The cache is scoped per collection: the same relative path in a
+        // different collection has no cached results.
+        repo.set_autonomy("other-api", true);
+        let other = svc
+            .get_test_results("s1", "other-api", "login.yml")
+            .expect_err("another collection's same-named request was never run");
+        assert!(matches!(other, DomainError::NotFound(_)));
 
         assert!(
-            publisher
-                .events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "run_request")),
+            publisher.events().iter().any(
+                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "run_request")
+            ),
             "expected an AcpToolInvoked event for run_request"
         );
     }
 
     #[test]
     fn edit_script_saves_via_the_repository_and_publishes_audit_event() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         let publisher = RecordingPublisher::new();
@@ -828,10 +673,9 @@ mod tests {
         assert!(saved[0].3.contains("setEnvVar"));
 
         assert!(
-            publisher
-                .events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "edit_script")),
+            publisher.events().iter().any(
+                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "edit_script")
+            ),
             "expected an AcpToolInvoked event for edit_script"
         );
     }
@@ -861,7 +705,7 @@ mod tests {
 
     #[test]
     fn get_env_var_reads_a_non_secret_variable() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
@@ -876,7 +720,7 @@ mod tests {
 
     #[test]
     fn get_env_var_not_found_and_is_secret_produce_the_identical_error_message() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
@@ -890,7 +734,11 @@ mod tests {
             .get_env_var("s1", "my-api", "dev", "API_KEY")
             .expect_err("secret key must error");
 
-        assert_eq!(not_found.to_string(), is_secret.to_string(), "the two error messages must be indistinguishable");
+        assert_eq!(
+            not_found.to_string(),
+            is_secret.to_string(),
+            "the two error messages must be indistinguishable"
+        );
 
         // Case sensitivity: a differently-cased key is also just "not found",
         // not a secret-detection bypass or a distinct error shape.
@@ -902,7 +750,7 @@ mod tests {
 
     #[test]
     fn set_env_var_writes_a_non_secret_variable_and_it_is_readable_back() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
@@ -918,17 +766,16 @@ mod tests {
         assert_eq!(value, "api2.example.com");
 
         assert!(
-            publisher
-                .events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "set_env_var")),
+            publisher.events().iter().any(
+                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "set_env_var")
+            ),
             "expected an AcpToolInvoked event for set_env_var"
         );
     }
 
     #[test]
     fn set_env_var_refuses_a_secret_variable_and_does_not_create_missing_keys() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
@@ -951,7 +798,7 @@ mod tests {
 
     #[test]
     fn get_test_results_errors_with_not_found_when_nothing_is_cached() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         let publisher = RecordingPublisher::new();
@@ -965,7 +812,7 @@ mod tests {
 
     #[test]
     fn disabling_autonomy_mid_session_blocks_the_very_next_call() {
-        let repo = FakeCollectionRepo::new();
+        let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         // An empty tree so the autonomy-enabled first call below has
         // something to list — the assertion this test cares about is the

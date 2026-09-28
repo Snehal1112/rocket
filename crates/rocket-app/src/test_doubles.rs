@@ -1,4 +1,4 @@
-//! In-memory test doubles shared by the Collection Runner tests.
+//! In-memory test doubles shared by the Collection Runner and ACP tests.
 //!
 //! `execution_service.rs` predates this module and keeps its own doubles — do
 //! not migrate those, their byte-for-byte stability is what proves the
@@ -12,7 +12,7 @@ use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall}
 use async_trait::async_trait;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, Request as CollectionRequest,
+    FolderSettings, Request as CollectionRequest, RequestScriptPhase,
 };
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
@@ -167,10 +167,11 @@ impl CollectionRepository for InMemoryCollectionRepo {
     }
 }
 
-/// Hands one `Arc<InMemoryCollectionRepo>` to a service expecting a `Box<dyn>`.
-pub struct SharedCollectionRepo(pub Arc<InMemoryCollectionRepo>);
+/// Hands one shared `Arc` collection repo to a service expecting a `Box<dyn>`.
+/// Defaults to `InMemoryCollectionRepo`, the Runner tests' original use.
+pub struct SharedCollectionRepo<T: CollectionRepository = InMemoryCollectionRepo>(pub Arc<T>);
 
-impl CollectionRepository for SharedCollectionRepo {
+impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
         self.0.list()
     }
@@ -262,6 +263,197 @@ impl CollectionRepository for SharedCollectionRepo {
         d: String,
     ) -> DomainResult<()> {
         self.0.save_request_script(a, b, c, d)
+    }
+}
+
+/// Collection repo with mutable per-collection settings, requests, and
+/// summary trees, plus a record of every `save_request_script` call. Built
+/// for the ACP tests (`McpToolService`, `AcpSessionService`), which need to
+/// toggle `agent_autonomy_enabled` mid-test. Settings default to
+/// `CollectionSettings::default()` (autonomy off) for any unconfigured
+/// collection, matching the real repos' "missing settings file" fallback.
+#[derive(Default)]
+pub struct ConfigurableCollectionRepo {
+    settings: Mutex<HashMap<String, CollectionSettings>>,
+    settings_error_for: Mutex<Option<String>>,
+    requests: Mutex<HashMap<(String, String), CollectionRequest>>,
+    summaries: Mutex<HashMap<String, Collection>>,
+    saved_scripts: Mutex<Vec<(String, String, RequestScriptPhase, String)>>,
+}
+
+impl ConfigurableCollectionRepo {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Shorthand for a repo with one collection's autonomy flag preset.
+    pub fn with_autonomy_enabled(collection: &str, enabled: bool) -> Arc<Self> {
+        let repo = Self::new();
+        repo.set_autonomy(collection, enabled);
+        repo
+    }
+
+    pub fn set_autonomy(&self, collection: &str, enabled: bool) {
+        let settings = CollectionSettings {
+            agent_autonomy_enabled: enabled,
+            ..Default::default()
+        };
+        self.settings
+            .lock()
+            .expect("lock settings")
+            .insert(collection.to_string(), settings);
+    }
+
+    /// Makes `get_settings(collection)` fail with `DomainError::Internal`.
+    pub fn fail_settings_for(&self, collection: &str) {
+        *self
+            .settings_error_for
+            .lock()
+            .expect("lock settings_error_for") = Some(collection.to_string());
+    }
+
+    pub fn with_request(&self, collection: &str, path: &str, request: CollectionRequest) {
+        self.requests
+            .lock()
+            .expect("lock requests")
+            .insert((collection.to_string(), path.to_string()), request);
+    }
+
+    pub fn with_summaries(&self, collection: &str, tree: Collection) {
+        self.summaries
+            .lock()
+            .expect("lock summaries")
+            .insert(collection.to_string(), tree);
+    }
+
+    pub fn saved_scripts(&self) -> Vec<(String, String, RequestScriptPhase, String)> {
+        self.saved_scripts
+            .lock()
+            .expect("lock saved_scripts")
+            .clone()
+    }
+}
+
+impl CollectionRepository for ConfigurableCollectionRepo {
+    fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+        Ok(vec![])
+    }
+    fn get(&self, name: &str) -> DomainResult<Collection> {
+        self.summaries
+            .lock()
+            .expect("lock summaries")
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(name.into()))
+    }
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        self.get(name)
+    }
+    fn create(&self, _: &str) -> DomainResult<Collection> {
+        Err(DomainError::NotFound("stub".into()))
+    }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn get_request(&self, collection: &str, path: &str) -> DomainResult<CollectionRequest> {
+        self.requests
+            .lock()
+            .expect("lock requests")
+            .get(&(collection.to_string(), path.to_string()))
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
+    }
+    fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
+        Ok(path.to_string())
+    }
+    fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+        Ok(())
+    }
+    fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+        let failing = self
+            .settings_error_for
+            .lock()
+            .expect("lock settings_error_for")
+            .as_deref()
+            == Some(name);
+        if failing {
+            return Err(DomainError::Internal("settings read failed".into()));
+        }
+        Ok(self
+            .settings
+            .lock()
+            .expect("lock settings")
+            .get(name)
+            .cloned()
+            .unwrap_or_default())
+    }
+    fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+        Ok(())
+    }
+    fn get_folder_chain_variables(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        Ok(vec![])
+    }
+    fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        Ok(vec![])
+    }
+    fn save_folder_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+    fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        Ok(vec![])
+    }
+    fn save_request_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+    fn save_request_script(
+        &self,
+        collection: &str,
+        request_path: &str,
+        phase: RequestScriptPhase,
+        body: String,
+    ) -> DomainResult<()> {
+        self.saved_scripts
+            .lock()
+            .expect("lock saved_scripts")
+            .push((
+                collection.to_string(),
+                request_path.to_string(),
+                phase,
+                body,
+            ));
+        Ok(())
     }
 }
 
