@@ -20,14 +20,18 @@ import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { type FlowNodeActions, FlowNodeActionsContext } from './nodes/FlowNodeActionsContext';
+import { IfNode } from './nodes/IfNode';
 import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
+import { SwitchNode } from './nodes/SwitchNode';
 
 const nodeTypes = {
   Request: RequestNode,
   Input: InputNode,
   Output: OutputNode,
+  If: IfNode,
+  Switch: SwitchNode,
 };
 
 export interface FlowCanvasProps {
