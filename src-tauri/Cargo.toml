@@ -88,6 +88,14 @@ subtle = "2"
 # CancellationToken for MCP server shutdown. Already in the lockfile via
 # rmcp, which takes the same token type in StreamableHttpServerConfig.
 tokio-util = "0.7"
+# rmcp's HTTP client (used by the stdio bridge, Plan 05) is reqwest-backed.
+# That reqwest build has rustls with no crypto provider (tauri-plugin-updater
+# enables "rustls-no-provider"), so building a client panics unless a
+# process-wide provider is installed first. Moved here from
+# [dev-dependencies] (Plan 04 only needed it in its own integration test) —
+# run_stdio_bridge needs the same provider in the production binary. "ring"
+# is already in the lockfile.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # v2_34 exposes MemoryPressureSettings; wry already enables it transitively.
@@ -98,8 +106,3 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tauri = { version = "2", features = ["test"] }
 async-trait.workspace = true
-# The MCP integration test drives rmcp's reqwest 0.13 client. That reqwest
-# build has rustls with no crypto provider (tauri-plugin-updater enables
-# "rustls-no-provider"), so building a client panics unless a process-wide
-# provider is installed first. "ring" is already in the lockfile.
-rustls = { version = "0.23", default-features = false, features = ["ring"] }

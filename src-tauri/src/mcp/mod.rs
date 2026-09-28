@@ -6,4 +6,5 @@
 //!
 pub mod auth;
 pub mod registry;
+pub mod stdio_bridge;
 pub mod tool_server;
