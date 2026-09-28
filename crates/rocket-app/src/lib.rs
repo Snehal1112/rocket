@@ -13,6 +13,7 @@ pub mod execution_service;
 pub mod export_service;
 pub mod flow_execution_service;
 pub mod flow_service;
+pub(crate) mod flow_routing;
 pub mod git_service;
 pub mod history_service;
 pub mod load_test_service;
