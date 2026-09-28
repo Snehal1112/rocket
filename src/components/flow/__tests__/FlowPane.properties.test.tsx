@@ -171,4 +171,23 @@ describe('FlowPane node properties panel', () => {
     fireEvent.click(pane);
     expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
   });
+
+  it('keeps the node when Backspace is pressed on the resize handle', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    const handle = screen.getByRole('separator');
+    act(() => handle.focus());
+    await userEvent.keyboard('{Backspace}');
+    expect(getFlowTab().nodes.map((n) => n.id)).toEqual(['in1', 'out1']);
+  });
+
+  it('closes the panel when the pane switches to another flow tab', async () => {
+    const otherTab: FlowTab = { ...baseTab, id: 'flow-props-2', flowName: 'other' };
+    const groupId = usePaneStore.getState().activeGroupId;
+    const { rerender } = render(<FlowPane tab={baseTab} groupId={groupId} />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    expect(screen.getByTestId('node-properties-panel')).toBeInTheDocument();
+    rerender(<FlowPane tab={otherTab} groupId={groupId} />);
+    expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
+  });
 });

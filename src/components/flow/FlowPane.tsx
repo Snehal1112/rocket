@@ -63,6 +63,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
   // UI state only. The panel shows while exactly one node is selected.
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  // FlowPane is reused across flow tabs, so drop the selection when the tab changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tab.id is the trigger.
+  useEffect(() => {
+    setSelectedNodeIds(new Set());
+  }, [tab.id]);
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
@@ -355,10 +360,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       </ResizablePanel>
       {panelNode && (
         <>
-          <ResizableHandle />
-          {/* minSize/maxSize take percentage strings. A plain number there
-              means pixels in this version of react-resizable-panels. */}
-          <ResizablePanel id='flow-node-properties' defaultSize={30} minSize='20%' maxSize='50%'>
+          {/* The nokey class keeps Backspace on the focused handle away from React Flow. */}
+          <ResizableHandle className='nokey' />
+          {/* All three sizes are percentage strings. A plain number means
+              pixels in this version of react-resizable-panels. */}
+          <ResizablePanel id='flow-node-properties' defaultSize='30%' minSize='20%' maxSize='50%'>
             <NodePropertiesPanel
               node={panelNode}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
