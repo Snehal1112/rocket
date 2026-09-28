@@ -21,15 +21,32 @@ pub enum CapturedOutput {
     Value(VariableValue),
 }
 
+/// Serializes `output` into the `HttpResponse` JSON a wire or route
+/// expression runs against. `Value` outputs (Input/Output nodes) become a
+/// synthetic 200 response whose `body` is the raw value, so one
+/// `response.xxx` convention works for every node kind.
+fn captured_output_response_json(output: &CapturedOutput) -> DomainResult<String> {
+    let response = match output {
+        CapturedOutput::Request(out) => out.response.clone(),
+        CapturedOutput::Value(value) => rocket_http::HttpResponse {
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            body: value.data().to_string(),
+            duration_ms: 0,
+            ttfb_ms: 0,
+            size_bytes: value.data().len(),
+        },
+    };
+    serde_json::to_string(&response)
+        .map_err(|e| DomainError::Internal(format!("failed to serialize captured output: {e}")))
+}
+
 impl RequestExecutionService {
     /// Evaluates `expression` (a jsonq/JS snippet such as `"response.body"` or
     /// `"response.body.token"`) against `output`, reusing the same
     /// script-engine mechanism `evaluate_var_expression` uses for the Vars
-    /// tab's preview — not a second sandbox invocation path. `Value` outputs
-    /// (Input/Output nodes) are normalized into a synthetic `HttpResponse`
-    /// whose `body` is that value's raw string, so a single expression
-    /// convention ("response.xxx") works uniformly regardless of which kind
-    /// of node produced the output.
+    /// tab's preview — not a second sandbox invocation path.
     ///
     /// A string result is returned as-is and other JSON values are
     /// stringified. A `null` or `undefined` result is an `InvalidInput`
@@ -40,21 +57,7 @@ impl RequestExecutionService {
         output: &CapturedOutput,
         expression: &str,
     ) -> DomainResult<String> {
-        let response = match output {
-            CapturedOutput::Request(out) => out.response.clone(),
-            CapturedOutput::Value(value) => rocket_http::HttpResponse {
-                status: 200,
-                status_text: "OK".to_string(),
-                headers: Vec::new(),
-                body: value.data().to_string(),
-                duration_ms: 0,
-                ttfb_ms: 0,
-                size_bytes: value.data().len(),
-            },
-        };
-        let response_json = serde_json::to_string(&response).map_err(|e| {
-            DomainError::Internal(format!("failed to serialize captured output: {e}"))
-        })?;
+        let response_json = captured_output_response_json(output)?;
         let result = self
             .evaluate_var_expression(collection, expression, &response_json)
             .await?;
@@ -67,6 +70,27 @@ impl RequestExecutionService {
             serde_json::Value::String(s) => Ok(s),
             other => Ok(other.to_string()),
         }
+    }
+
+    /// Evaluates an If/Switch routing expression against `output`. The caller
+    /// passes it already wrapped (`!!(…)` for If, `String(…)` for Switch), so
+    /// the result is always a string; a `null` result becomes `"null"` rather
+    /// than an error, which keeps a missing value routable by a case.
+    pub async fn evaluate_flow_route_expression(
+        &self,
+        collection: &str,
+        output: &CapturedOutput,
+        wrapped_expression: &str,
+    ) -> DomainResult<String> {
+        let response_json = captured_output_response_json(output)?;
+        let result = self
+            .evaluate_var_expression(collection, wrapped_expression, &response_json)
+            .await?;
+        Ok(match result {
+            serde_json::Value::Null => "null".to_string(),
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        })
     }
 }
 
@@ -949,6 +973,144 @@ mod tests {
                 ..Default::default()
             })
         }
+    }
+
+    /// What `ScriptedJsonqEngine` answers for one rule.
+    #[allow(dead_code)]
+    enum Scripted {
+        /// Resolve to this JSON value.
+        Value(serde_json::Value),
+        /// Report a script error with this message.
+        Throw(&'static str),
+        /// Compute the value from the response the expression runs against.
+        FromResponse(fn(Option<&rocket_http::HttpResponse>) -> serde_json::Value),
+    }
+
+    /// Script engine that answers by the first rule whose needle occurs in
+    /// the generated code, so route wrappers (`!!(`, `String(`) and plain
+    /// wire expressions can be told apart in one run. Unmatched code
+    /// resolves to `"https://api.example.com/wired"`.
+    #[allow(dead_code)]
+    struct ScriptedJsonqEngine {
+        rules: Vec<(&'static str, Scripted)>,
+    }
+    #[async_trait]
+    impl ScriptEngine for ScriptedJsonqEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            let rule = self
+                .rules
+                .iter()
+                .find(|(needle, _)| ctx.code.contains(needle))
+                .map(|(_, answer)| answer);
+            let value = match rule {
+                Some(Scripted::Value(v)) => v.clone(),
+                Some(Scripted::Throw(message)) => {
+                    return Ok(ScriptResult {
+                        error: Some((*message).to_string()),
+                        ..Default::default()
+                    })
+                }
+                Some(Scripted::FromResponse(f)) => f(ctx.response.as_ref()),
+                None => serde_json::json!("https://api.example.com/wired"),
+            };
+            let mut vars = HashMap::new();
+            vars.insert("__jsonq_result__".to_string(), value);
+            Ok(ScriptResult {
+                runtime_vars: vars,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[allow(dead_code)]
+    fn scripted(rules: Vec<(&'static str, Scripted)>) -> Box<dyn ScriptEngine> {
+        Box::new(ScriptedJsonqEngine { rules })
+    }
+
+    #[tokio::test]
+    async fn route_expression_passes_the_wrapped_expression_verbatim() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            scripted(vec![(
+                "!!(response.status === 200)",
+                Scripted::Value(serde_json::json!(true)),
+            )]),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "!!(response.status === 200)")
+            .await
+            .expect("route expression must resolve");
+
+        assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn route_expression_null_is_the_string_null_not_an_error() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::Value::Null,
+            }),
+        );
+        let output = CapturedOutput::Value(VariableValue::simple("x"));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .await
+            .expect("a null route result must not be an error");
+
+        assert_eq!(value, "null");
+    }
+
+    #[tokio::test]
+    async fn route_expression_returns_strings_unquoted() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("pro"),
+            }),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .await
+            .expect("resolve");
+
+        assert_eq!(value, "pro");
+    }
+
+    #[tokio::test]
+    async fn route_expression_stringifies_non_string_results() {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!(200),
+            }),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "String(response.status)")
+            .await
+            .expect("resolve");
+
+        assert_eq!(value, "200");
+    }
+
+    #[tokio::test]
+    async fn route_expression_script_error_is_invalid_input() {
+        let svc = service_with_engine(FakeCollectionRepo::new(), Box::new(ErrorJsonqEngine));
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let err = svc
+            .evaluate_flow_route_expression("my-api", &output, "!!(nope.nope)")
+            .await
+            .expect_err("a throwing route expression must be an Err");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
     fn service_with_engine(
