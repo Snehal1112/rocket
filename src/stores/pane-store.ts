@@ -837,6 +837,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const restoredTabs = targetState?.tabs ?? [];
     const restoredActiveTabId = targetState?.activeTabId ?? '';
 
+    // The restored snapshot is now redundant: its tabs are about to become
+    // live in `root`, so keeping it around would leave a stale duplicate
+    // that `updateTabEverywhere` could find and "activate" after the tab is
+    // closed, orphaning a credentialed backend process. Drop it.
+    delete updatedState[name];
+
     const newRoot = updateLeaf(root, activeGroupId, (leaf) => ({
       ...leaf,
       tabs: restoredTabs,

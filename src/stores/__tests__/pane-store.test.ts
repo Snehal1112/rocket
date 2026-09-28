@@ -482,6 +482,51 @@ describe('pane-store', () => {
     expect(leafBack.activeTabId).toBe(tab1.id);
   });
 
+  it('switchCollection deletes the stale collectionTabState entry after restoring it', () => {
+    const tab1 = makeTab();
+    usePaneStore.getState().openTab(tab1);
+    usePaneStore.getState().setActiveCollection('collectionA');
+
+    // Switch away — collectionA gets snapshotted.
+    usePaneStore.getState().switchCollection('collectionB');
+    expect(usePaneStore.getState().collectionTabState['collectionA']).toBeDefined();
+
+    // Switch back — the snapshot is restored into root and must not linger,
+    // since it now duplicates what is live in root.
+    usePaneStore.getState().switchCollection('collectionA');
+    expect(usePaneStore.getState().collectionTabState['collectionA']).toBeUndefined();
+  });
+
+  it('regression: a tab closed after switching away and back has no stale snapshot copy to "activate"', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const tab1 = makeTab();
+    usePaneStore.getState().openTab(tab1);
+    usePaneStore.getState().setActiveCollection('collectionA');
+    const tabId = tab1.id;
+
+    // Start an agent session (status 'starting', no real session id yet).
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+
+    // Switch away (snapshots collectionA with the 'starting' tab) and back
+    // (restores it into root). The restored snapshot must be dropped —
+    // otherwise it lingers as a stale duplicate.
+    usePaneStore.getState().switchCollection('collectionB');
+    usePaneStore.getState().switchCollection('collectionA');
+    expect(usePaneStore.getState().collectionTabState['collectionA']).toBeUndefined();
+
+    // Close the tab. Its session is still 'starting', so closeTab does not
+    // end it yet — that's correct, since the backend hasn't handed back a
+    // real session id.
+    const leaf = getLeaf();
+    usePaneStore.getState().closeTab(tabId, leaf.groupId);
+    expect(endAgentSession).not.toHaveBeenCalled();
+
+    // Simulate the session's start call resolving after the tab was closed.
+    // With the stale snapshot gone, there is nothing left to find and
+    // "activate" — the tab is genuinely gone.
+    expect(usePaneStore.getState().activateAgentSession(tabId, 'session-1')).toBe(false);
+  });
+
   it('switchCollection to never-opened collection shows empty tabs', () => {
     usePaneStore.getState().setActiveCollection('existingCol');
     usePaneStore.getState().openTab(makeTab());
