@@ -225,6 +225,7 @@ mod tests {
             target_node_id: to.to_string(),
             target_field: "value".to_string(),
             expression: "response.body".to_string(),
+            source_handle: crate::handle::RESULT.to_string(),
         }
     }
 
@@ -447,6 +448,7 @@ mod tests {
             target_node_id: target.to_string(),
             target_field: "value".to_string(),
             expression: "response.body".to_string(),
+            source_handle: crate::handle::RESULT.to_string(),
         }
     }
 

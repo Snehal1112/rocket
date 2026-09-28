@@ -293,6 +293,7 @@ mod tests {
             target_node_id: "node-2".to_string(),
             target_field: "url".to_string(),
             expression: "response.body".to_string(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
         });
         repo.save("acme", &flow).expect("save");
         let raw = fs::read_to_string(dir.path().join("acme").join("flows").join("login-flow.yml"))

@@ -27,6 +27,7 @@ cargo test -p rocket-flow -j4
 
 | Module | Responsibility |
 |---|---|
+| `handle.rs` | Exit/input handle names (`result`, `true`, `false`, `default`, `input`, `trigger`, `case:<id>`) |
 | `node.rs` | `FlowNodeKind`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort` + `FlowGraphError` (added in Plan 02) |
@@ -43,6 +44,9 @@ cargo test -p rocket-flow -j4
 - `FlowEdge.expression` is a JS/jsonq expression evaluated against the source
   node's captured output at run time (`rocket-app`, Plan 05) — this crate
   does not evaluate it, only carries it as data.
+- `FlowEdge.source_handle` names the exit an edge leaves from. It defaults
+  to "result" and is omitted on disk when "result", so Phase 1 files
+  re-save byte-identically.
 - Not part of the OpenCollection schema (`additionalProperties: false` does
   not apply) — this is a Rocket-only extension format.
 

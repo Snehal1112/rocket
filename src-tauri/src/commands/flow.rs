@@ -181,7 +181,15 @@ pub struct FlowEdgeDto {
     pub target_node_id: String,
     pub target_field: String,
     pub expression: String,
+    /// Absent in payloads from a frontend that predates routing nodes.
+    #[serde(default = "default_source_handle")]
+    pub source_handle: String,
 }
+
+fn default_source_handle() -> String {
+    rocket_flow::handle::RESULT.to_string()
+}
+
 impl From<FlowEdge> for FlowEdgeDto {
     fn from(e: FlowEdge) -> Self {
         Self {
@@ -190,6 +198,7 @@ impl From<FlowEdge> for FlowEdgeDto {
             target_node_id: e.target_node_id,
             target_field: e.target_field,
             expression: e.expression,
+            source_handle: e.source_handle,
         }
     }
 }
@@ -201,6 +210,7 @@ impl From<FlowEdgeDto> for FlowEdge {
             target_node_id: e.target_node_id,
             target_field: e.target_field,
             expression: e.expression,
+            source_handle: e.source_handle,
         }
     }
 }
@@ -344,6 +354,7 @@ mod tests {
                 target_node_id: "n2".to_string(),
                 target_field: "body".to_string(),
                 expression: "response.body".to_string(),
+                source_handle: "result".to_string(),
             }],
         }
     }
@@ -439,5 +450,24 @@ mod tests {
                 )
             });
         assert_eq!(flow_file.status, GitStatus::Untracked);
+    }
+
+    #[test]
+    fn flow_edge_dto_without_source_handle_defaults_to_result() {
+        let json = r#"{"id":"e1","sourceNodeId":"a","targetNodeId":"b","targetField":"url","expression":"response.body"}"#;
+        let dto: FlowEdgeDto = serde_json::from_str(json).expect("deserialize FlowEdgeDto");
+        assert_eq!(dto.source_handle, "result");
+        let domain: FlowEdge = dto.into();
+        assert_eq!(domain.source_handle, rocket_flow::handle::RESULT);
+    }
+
+    #[test]
+    fn flow_edge_dto_serializes_source_handle_as_camel_case() {
+        let mut dto = sample_dto();
+        dto.edges[0].source_handle = "true".to_string();
+        let json = serde_json::to_string(&dto).expect("serialize FlowDto");
+        assert!(json.contains(r#""sourceHandle":"true""#), "got: {json}");
+        let domain: Flow = dto.into();
+        assert_eq!(domain.edges[0].source_handle, "true");
     }
 }

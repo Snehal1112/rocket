@@ -177,6 +177,7 @@ mod tests {
                     target_node_id: "b".to_string(),
                     target_field: "body".to_string(),
                     expression: "response.body".to_string(),
+                    source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
                 FlowEdge {
                     id: "e2".to_string(),
@@ -184,6 +185,7 @@ mod tests {
                     target_node_id: "a".to_string(),
                     target_field: "body".to_string(),
                     expression: "response.body".to_string(),
+                    source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
             ],
         }

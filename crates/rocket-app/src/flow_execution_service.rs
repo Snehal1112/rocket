@@ -1192,6 +1192,7 @@ mod tests {
             target_node_id: target_node.to_string(),
             target_field: target_field.to_string(),
             expression: "response.body".to_string(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
         }
     }
 
@@ -1481,6 +1482,7 @@ mod tests {
                 target_node_id: "b".to_string(),
                 target_field: "value".to_string(),
                 expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
         }
     }
@@ -1511,6 +1513,7 @@ mod tests {
                     target_node_id: "b".to_string(),
                     target_field: "value".to_string(),
                     expression: "response.body".to_string(),
+                    source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
                 FlowEdge {
                     id: "e2".to_string(),
@@ -1518,6 +1521,7 @@ mod tests {
                     target_node_id: "a".to_string(),
                     target_field: "value".to_string(),
                     expression: "response.body".to_string(),
+                    source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
             ],
         }
@@ -1815,6 +1819,7 @@ mod tests {
                 target_node_id: "b".to_string(),
                 target_field: "url".to_string(),
                 expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
         };
         let service = service_with_flow(flow);
@@ -1876,6 +1881,7 @@ mod tests {
             target_node_id: to.to_string(),
             target_field: "url".to_string(),
             expression: "response.body".to_string(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
         }
     }
 

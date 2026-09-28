@@ -23,6 +23,23 @@ pub struct FlowEdge {
     /// JS expression evaluated against the source node's captured output
     /// (Plan 05). This crate only carries it as data and never evaluates it.
     pub expression: String,
+    /// Which exit of the source node this edge leaves from, e.g. "result",
+    /// "true" or "case:<id>". Phase 1 files have no such key, so it defaults
+    /// to "result", and it is left out when "result" so those files re-save
+    /// without a diff.
+    #[serde(
+        default = "default_source_handle",
+        skip_serializing_if = "is_result_handle"
+    )]
+    pub source_handle: String,
+}
+
+fn default_source_handle() -> String {
+    crate::handle::RESULT.to_string()
+}
+
+fn is_result_handle(handle: &str) -> bool {
+    handle == crate::handle::RESULT
 }
 
 /// The Flow aggregate. `name` is its identity within a collection.
@@ -78,6 +95,7 @@ mod tests {
                 target_node_id: "node-2".to_string(),
                 target_field: "value".to_string(),
                 expression: "response.body.token".to_string(),
+                source_handle: crate::handle::RESULT.to_string(),
             }],
         }
     }
@@ -220,5 +238,75 @@ mod tests {
     #[test]
     fn trait_is_object_safe() {
         fn _assert(_: Box<dyn FlowRepository>) {}
+    }
+
+    fn plain_edge_json() -> &'static str {
+        r#"{"id":"e1","source_node_id":"a","target_node_id":"b","target_field":"url","expression":"response.body"}"#
+    }
+
+    #[test]
+    fn edge_without_source_handle_defaults_to_result() {
+        let edge: FlowEdge = serde_json::from_str(plain_edge_json()).expect("deserialize edge");
+        assert_eq!(edge.source_handle, crate::handle::RESULT);
+    }
+
+    #[test]
+    fn result_source_handle_is_omitted_on_serialize() {
+        let edge: FlowEdge = serde_json::from_str(plain_edge_json()).expect("deserialize edge");
+        let json = serde_json::to_string(&edge).expect("serialize edge");
+        assert!(!json.contains("source_handle"), "got: {json}");
+    }
+
+    #[test]
+    fn non_result_source_handle_is_serialized() {
+        let mut edge: FlowEdge = serde_json::from_str(plain_edge_json()).expect("deserialize edge");
+        edge.source_handle = crate::handle::TRUE.to_string();
+        let json = serde_json::to_string(&edge).expect("serialize edge");
+        assert!(json.contains(r#""source_handle":"true""#), "got: {json}");
+        let back: FlowEdge = serde_json::from_str(&json).expect("deserialize edge");
+        assert_eq!(back, edge);
+    }
+
+    /// Mirrors the Phase 1 on-disk edge shape, which had no `source_handle`.
+    #[derive(Serialize)]
+    struct Phase1Edge {
+        id: String,
+        source_node_id: String,
+        target_node_id: String,
+        target_field: String,
+        expression: String,
+    }
+
+    /// Mirrors the Phase 1 on-disk flow shape.
+    #[derive(Serialize)]
+    struct Phase1Flow {
+        name: String,
+        nodes: Vec<FlowNode>,
+        edges: Vec<Phase1Edge>,
+    }
+
+    #[test]
+    fn phase1_yaml_reserializes_byte_identically() {
+        let phase1 = Phase1Flow {
+            name: "Login then fetch profile".to_string(),
+            nodes: sample_flow().nodes,
+            edges: vec![Phase1Edge {
+                id: "edge-1".to_string(),
+                source_node_id: "node-1".to_string(),
+                target_node_id: "node-2".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body.token".to_string(),
+            }],
+        };
+        let phase1_yaml = serde_yaml::to_string(&phase1).expect("serialize Phase 1 flow");
+
+        let loaded: Flow = serde_yaml::from_str(&phase1_yaml).expect("load Phase 1 flow");
+        assert_eq!(loaded.edges[0].source_handle, crate::handle::RESULT);
+
+        let resaved = serde_yaml::to_string(&loaded).expect("re-serialize flow");
+        assert_eq!(
+            resaved, phase1_yaml,
+            "a Phase 1 file must re-save without any diff"
+        );
     }
 }
