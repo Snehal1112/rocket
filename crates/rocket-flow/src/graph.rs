@@ -4,10 +4,13 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum FlowGraphError {
-    /// Holds the nodes that lie on a cycle (or on a path between two
-    /// cycles). Nodes that are only downstream of a cycle are left out.
-    #[error("cycle detected through node(s): {node_ids:?}")]
-    Cycle { node_ids: Vec<String> },
+    /// Holds the nodes and edges that lie on a cycle (or on a path between
+    /// two cycles). Nodes/edges only downstream of a cycle are left out.
+    #[error("cycle detected through node(s): {node_ids:?}, edge(s): {edge_ids:?}")]
+    Cycle {
+        node_ids: Vec<String>,
+        edge_ids: Vec<String>,
+    },
     #[error("edge references unknown node: {node_id}")]
     UnknownNode { node_id: String },
     /// Two nodes in `flow.nodes` share the same id.
@@ -90,19 +93,22 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     }
 
     if order.len() != flow.nodes.len() {
-        return Err(FlowGraphError::Cycle {
-            node_ids: cycle_nodes(flow, &in_degree),
-        });
+        let (node_ids, edge_ids) = cycle_nodes_and_edges(flow, &in_degree);
+        return Err(FlowGraphError::Cycle { node_ids, edge_ids });
     }
 
     Ok(order)
 }
 
-/// Picks the nodes to report after Kahn's algorithm stalls. Every node it
-/// did not emit still has a non-zero in-degree. That set also holds nodes
-/// that only sit downstream of a cycle, so this peels those off by running
-/// Kahn's algorithm backwards over the leftover subgraph.
-fn cycle_nodes(flow: &Flow, in_degree: &HashMap<&str, usize>) -> Vec<String> {
+/// Picks the nodes and edges to report after Kahn's algorithm stalls. Every
+/// node it did not emit still has a non-zero in-degree. That set also holds
+/// nodes that only sit downstream of a cycle, so this peels those off by
+/// running Kahn's algorithm backwards over the leftover subgraph. An edge is
+/// reported when both its endpoints are cycle nodes (never just downstream).
+fn cycle_nodes_and_edges(
+    flow: &Flow,
+    in_degree: &HashMap<&str, usize>,
+) -> (Vec<String>, Vec<String>) {
     let leftover: HashSet<&str> = in_degree
         .iter()
         .filter(|(_, &degree)| degree > 0)
@@ -147,13 +153,33 @@ fn cycle_nodes(flow: &Flow, in_degree: &HashMap<&str, usize>) -> Vec<String> {
         }
     }
 
+    let cycle_node_ids: HashSet<&str> = leftover
+        .iter()
+        .copied()
+        .filter(|id| !peeled.contains(id))
+        .collect();
+
     // Keep the caller's node order so the error message is stable.
-    flow.nodes
+    let node_ids = flow
+        .nodes
         .iter()
         .map(|n| n.id.as_str())
-        .filter(|id| leftover.contains(id) && !peeled.contains(id))
+        .filter(|id| cycle_node_ids.contains(id))
         .map(str::to_string)
-        .collect()
+        .collect();
+
+    // Keep the caller's edge order so the error message is stable.
+    let edge_ids = flow
+        .edges
+        .iter()
+        .filter(|e| {
+            cycle_node_ids.contains(e.source_node_id.as_str())
+                && cycle_node_ids.contains(e.target_node_id.as_str())
+        })
+        .map(|e| e.id.clone())
+        .collect();
+
+    (node_ids, edge_ids)
 }
 
 /// Every node id reachable by following edges forward from `start_node_id`
@@ -270,7 +296,10 @@ mod tests {
         };
         let err = topological_sort(&flow).expect_err("must detect cycle");
         match err {
-            FlowGraphError::Cycle { node_ids } => assert_eq!(node_ids, vec!["a".to_string()]),
+            FlowGraphError::Cycle { node_ids, edge_ids } => {
+                assert_eq!(node_ids, vec!["a".to_string()]);
+                assert_eq!(edge_ids, vec!["e1".to_string()]);
+            }
             other => panic!("expected Cycle, got {other:?}"),
         }
     }
@@ -288,11 +317,19 @@ mod tests {
         };
         let err = topological_sort(&flow).expect_err("must detect cycle");
         match err {
-            FlowGraphError::Cycle { mut node_ids } => {
+            FlowGraphError::Cycle {
+                mut node_ids,
+                mut edge_ids,
+            } => {
                 node_ids.sort();
+                edge_ids.sort();
                 assert_eq!(
                     node_ids,
                     vec!["a".to_string(), "b".to_string(), "c".to_string()]
+                );
+                assert_eq!(
+                    edge_ids,
+                    vec!["e1".to_string(), "e2".to_string(), "e3".to_string()]
                 );
             }
             other => panic!("expected Cycle, got {other:?}"),
@@ -346,7 +383,8 @@ mod tests {
         assert_eq!(
             topological_sort(&flow),
             Err(FlowGraphError::Cycle {
-                node_ids: vec!["a".to_string(), "b".to_string()]
+                node_ids: vec!["a".to_string(), "b".to_string()],
+                edge_ids: vec!["e1".to_string(), "e2".to_string()],
             })
         );
     }

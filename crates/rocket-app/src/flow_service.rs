@@ -24,10 +24,11 @@ impl FlowService {
 
     pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
         topological_sort(&flow).map_err(|e| match e {
-            FlowGraphError::Cycle { node_ids } => {
+            FlowGraphError::Cycle { node_ids, edge_ids } => {
                 rocket_shared::error::DomainError::InvalidInput(format!(
-                    "flow contains a cycle through node(s): {}",
-                    node_ids.join(", ")
+                    "flow contains a cycle through node(s): {}; edge(s): {}",
+                    node_ids.join(", "),
+                    edge_ids.join(", ")
                 ))
             }
             FlowGraphError::UnknownNode { node_id } => {
@@ -216,15 +217,27 @@ mod tests {
             err,
             rocket_shared::error::DomainError::InvalidInput(_)
         ));
-        // Parse the id list after the colon, so single letters inside the
-        // message prose cannot satisfy the check by accident.
         let message = err.to_string();
-        let (_, id_list) = message
-            .rsplit_once("node(s): ")
+
+        // Parse the node id list between "node(s): " and the "; edge(s):"
+        // separator, so single letters inside the message prose cannot
+        // satisfy the check by accident.
+        let node_segment = message
+            .split("node(s): ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
             .unwrap_or_else(|| panic!("error should list the cyclic nodes, got: {message}"));
-        let mut ids: Vec<&str> = id_list.split(", ").collect();
+        let mut ids: Vec<&str> = node_segment.split(", ").collect();
         ids.sort_unstable();
         assert_eq!(ids, vec!["a", "b"], "got: {message}");
+
+        let edge_segment = message
+            .split("edge(s): ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("error should list the cyclic edges, got: {message}"));
+        let mut edge_ids: Vec<&str> = edge_segment.split(", ").collect();
+        edge_ids.sort_unstable();
+        assert_eq!(edge_ids, vec!["e1", "e2"], "got: {message}");
     }
 
     #[test]
