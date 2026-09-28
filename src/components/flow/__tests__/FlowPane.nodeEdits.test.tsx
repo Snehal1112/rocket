@@ -5,6 +5,9 @@ import type { FlowTab } from '@/types/pane-types';
 import { isFlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
 
+// The Request editor pulls in Monaco, which jsdom cannot load.
+vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null }));
+
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return {

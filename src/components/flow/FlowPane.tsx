@@ -375,6 +375,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
           <ResizablePanel id='flow-node-properties' defaultSize='30%' minSize='20%' maxSize='50%'>
             <NodePropertiesPanel
               node={panelNode}
+              edges={tab.edges}
+              collection={collectionName}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
               onClose={() => setSelectedNodeIds(new Set())}
               autoFocusLabel={panelNode.id === labelFocusNodeId}

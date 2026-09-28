@@ -1,14 +1,33 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import type { FlowNode, FlowNodeKind } from '@/lib/tauri-api';
+import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
+import { RequestNodeEditor } from './RequestNodeEditor';
 
 // Picks the editor for the node's kind. Each editor reports a whole new kind,
 // and the caller applies it with one store update.
-function editorFor(kind: FlowNodeKind, onChange: (kind: FlowNodeKind) => void) {
+function editorFor(
+  node: FlowNode,
+  edges: FlowEdge[],
+  collection: string,
+  onChange: (kind: FlowNodeKind) => void,
+) {
+  const kind = node.kind;
   switch (kind.kind) {
+    case 'Request':
+      return (
+        <RequestNodeEditor
+          // Keyed by node, so a pending confirmation never carries over to another node.
+          key={node.id}
+          nodeId={node.id}
+          kind={kind}
+          edges={edges}
+          collection={collection}
+          onChange={onChange}
+        />
+      );
     case 'Input':
       return <InputNodeEditor kind={kind} onChange={onChange} />;
     case 'If':
@@ -28,18 +47,21 @@ function editorFor(kind: FlowNodeKind, onChange: (kind: FlowNodeKind) => void) {
         />
       );
     case 'Output':
-    case 'Request':
       return <LabelOnlyEditor kind={kind} onChange={onChange} />;
   }
 }
 
 export function NodePropertiesPanel({
   node,
+  edges,
+  collection,
   onChange,
   onClose,
   autoFocusLabel = false,
 }: {
   node: FlowNode;
+  edges: FlowEdge[];
+  collection: string;
   onChange: (kind: FlowNodeKind) => void;
   onClose: () => void;
   autoFocusLabel?: boolean;
@@ -88,7 +110,7 @@ export function NodePropertiesPanel({
         </Button>
       </div>
       <div key={node.id} className='flex-1 overflow-y-auto p-3'>
-        {editorFor(node.kind, onChange)}
+        {editorFor(node, edges, collection, onChange)}
       </div>
     </aside>
   );

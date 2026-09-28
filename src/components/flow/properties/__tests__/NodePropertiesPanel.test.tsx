@@ -20,12 +20,23 @@ vi.mock('@/components/editor', () => ({
   ),
 }));
 
+// The Request editor pulls in Monaco, which jsdom cannot load.
+vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null }));
+
 const node = (id: string, kind: FlowNodeKind): FlowNode => ({ id, kind, position: { x: 0, y: 0 } });
 
 function renderPanel(n: FlowNode) {
   const onChange = vi.fn();
   const onClose = vi.fn();
-  render(<NodePropertiesPanel node={n} onChange={onChange} onClose={onClose} />);
+  render(
+    <NodePropertiesPanel
+      node={n}
+      edges={[]}
+      collection='demo'
+      onChange={onChange}
+      onClose={onClose}
+    />,
+  );
   return { onChange, onClose };
 }
 
