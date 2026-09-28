@@ -542,6 +542,16 @@ pub enum DomainEvent {
         session_id: String,
         error: String,
     },
+    /// Emitted by the MCP tool dispatcher for every tool call it handles
+    /// (list/run/edit/get/set), regardless of outcome kind, so agent-driven
+    /// actions are auditable and distinguishable from manual ones. No
+    /// timestamp field, matching every other `DomainEvent` variant —
+    /// ordering comes from emission order, not a payload timestamp.
+    AcpToolInvoked {
+        session_id: String,
+        tool: String,
+        summary: String,
+    },
 
     // gRPC session events
     /// Emitted once a streaming gRPC call has been opened.
@@ -1847,6 +1857,20 @@ mod tests {
         assert_eq!(
             json,
             r#"{"wait":{"ignored":2,"timeoutMs":60000,"lastRejected":{"method":"POST","url":"/cb/…?x=1","headers":[],"body":"{}","reason":"Accept when returned false."}}}"#
+        );
+    }
+
+    #[test]
+    fn acp_tool_invoked_wire_shape() {
+        let event = DomainEvent::AcpToolInvoked {
+            session_id: "sess-1".into(),
+            tool: "run_request".into(),
+            summary: "Ran GET /users".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpToolInvoked","session_id":"sess-1","tool":"run_request","summary":"Ran GET /users"}"#
         );
     }
 }

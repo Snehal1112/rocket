@@ -46,6 +46,7 @@ impl EventPublisher for TauriEventBus {
             // GraphQL subscriptions: one channel for results, one for lifecycle.
             DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
             DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
+            DomainEvent::AcpToolInvoked { .. } => "agent-tool-invoked",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",

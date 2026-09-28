@@ -7,6 +7,7 @@ pub mod grpc;
 pub mod events;
 pub mod oauth2;
 pub mod proxy;
+pub mod run_source;
 pub mod types;
 pub mod variable_value;
 
@@ -14,5 +15,6 @@ pub use action::{ActionSelector, ActionSetVariable, ActionVariable};
 pub use assertion::Assertion;
 pub use description::{Description, Documentation};
 pub use oauth2::OAuth2Flow;
+pub use run_source::RunSource;
 pub use types::{Header, PathParam, QueryParam};
 pub use variable_value::{VariableValue, VariableValueVariant};
