@@ -103,6 +103,26 @@ impl McpToolService {
         Ok(())
     }
 
+    /// Rejects an environment name that could escape the collection's
+    /// `environments/` directory. Mirrors the check in
+    /// `src-tauri/src/commands/environments.rs::env_service_for`.
+    fn validate_environment_name(name: &str) -> DomainResult<()> {
+        if name.is_empty()
+            || name.contains('\0')
+            || name.starts_with('/')
+            || name.starts_with('\\')
+            || name.starts_with('.')
+            || std::path::Path::new(name)
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err(DomainError::InvalidInput(
+                "invalid environment name".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn publish_tool_invoked(&self, session_id: &str, tool: &str, summary: String) {
         self.event_publisher.publish(DomainEvent::AcpToolInvoked {
             session_id: session_id.to_string(),
@@ -136,6 +156,18 @@ impl McpToolService {
         environment_name: Option<&str>,
     ) -> DomainResult<McpRunResult> {
         self.check_autonomy_enabled(collection)?;
+        if let Some(name) = environment_name {
+            Self::validate_environment_name(name)?;
+        }
+        // Evict any stale cache entry for this key up front, before
+        // dispatching the request. That way a failed run leaves no cached
+        // result behind — `get_test_results` naturally falls back to its
+        // "run the request first" `NotFound` instead of returning a prior
+        // run's now-stale results.
+        self.test_result_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&test_result_key(session_id, collection, request_path));
         let request = self.collection_repo.get_request(collection, request_path)?;
         let item = RunItem {
             name: request.name.clone(),
@@ -161,7 +193,7 @@ impl McpToolService {
 
         self.test_result_cache
             .lock()
-            .expect("lock McpToolService test_result_cache")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(
                 test_result_key(session_id, collection, request_path),
                 output.test_results.clone(),
@@ -216,6 +248,7 @@ impl McpToolService {
         key: &str,
     ) -> DomainResult<String> {
         self.check_autonomy_enabled(collection)?;
+        Self::validate_environment_name(environment_name)?;
         let repo = self.environment_repo_factory.for_collection(collection);
         let env = repo.get(environment_name)?;
         let value = env
@@ -241,6 +274,7 @@ impl McpToolService {
         value: String,
     ) -> DomainResult<()> {
         self.check_autonomy_enabled(collection)?;
+        Self::validate_environment_name(environment_name)?;
         let repo = self.environment_repo_factory.for_collection(collection);
         let mut env = repo.get(environment_name)?;
         let variable = env
@@ -273,7 +307,7 @@ impl McpToolService {
         let results = self
             .test_result_cache
             .lock()
-            .expect("lock McpToolService test_result_cache")
+            .unwrap_or_else(|e| e.into_inner())
             .get(&test_result_key(session_id, collection, request_path))
             .cloned()
             .ok_or_else(|| {
@@ -346,7 +380,7 @@ mod tests {
 
     use crate::test_doubles::{
         ConfigurableCollectionRepo, EmptySecretManagerRepo, InMemoryHistoryRepo, NullCookieRepo,
-        NullEnvRepo, RecordingExecutor, RecordingPublisher, SharedCollectionRepo,
+        NullEnvRepo, RecordingExecutor, RecordingPublisher, SharedCollectionRepo, SharedExecutor,
         SharedHistoryRepo, SharedPublisher,
     };
 
@@ -648,6 +682,59 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_failed_run_request_clears_the_previous_run_s_cached_test_results() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+
+        // Bound with the `dyn` type up front (see the comment on the same
+        // pattern in `service_with` above); kept as the concrete
+        // `Arc<RecordingExecutor>` too, so this test can flip it to fail
+        // between the two `run_request` calls below.
+        let executor = RecordingExecutor::new();
+        let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
+            Arc::new(SharedExecutor(Arc::clone(&executor)));
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(&executor_dyn),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        ));
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
+
+        // First run succeeds and populates the cache.
+        svc.run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect("first run_request must succeed");
+        svc.get_test_results("s1", "my-api", "login.yml")
+            .expect("cache must be populated after a successful run");
+
+        // Make the same request's send fail with a genuine transport error,
+        // then run it again.
+        executor.set_status("api.test", 0);
+        svc.run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect_err("second run_request must fail once the executor errors");
+
+        // The stale first-run results must not still be served — the failed
+        // run must have evicted them, not left them cached.
+        let err = svc
+            .get_test_results("s1", "my-api", "login.yml")
+            .expect_err("a failed run must not leave a stale cached test result");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
     #[test]
     fn edit_script_saves_via_the_repository_and_publishes_audit_event() {
         let repo = ConfigurableCollectionRepo::new();
@@ -808,6 +895,56 @@ mod tests {
             .get_test_results("s1", "my-api", "login.yml")
             .expect_err("nothing has run yet in this session for this path");
         assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn get_env_var_refuses_a_traversal_shaped_environment_name() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+
+        let err = svc
+            .get_env_var("s1", "my-api", "../../other-api/environments/prod", "HOST")
+            .expect_err("a traversal-shaped environment name must be refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn set_env_var_refuses_a_traversal_shaped_environment_name() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+
+        let err = svc
+            .set_env_var(
+                "s1",
+                "my-api",
+                "../../other-api/environments/prod",
+                "HOST",
+                "evil".into(),
+            )
+            .expect_err("a traversal-shaped environment name must be refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn run_request_refuses_a_traversal_shaped_environment_name() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+
+        let err = svc
+            .run_request("s1", "my-api", "login.yml", Some("../evil"))
+            .await
+            .expect_err("a traversal-shaped environment name must be refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
     #[test]
