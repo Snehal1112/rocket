@@ -9,6 +9,9 @@ import { cn } from '@/lib/utils';
 interface MarkdownRendererProps {
   children: string;
   className?: string;
+  // When given, rendered over each fenced (language-tagged) code block —
+  // e.g. an "Insert" button in the AI Assist chat panel.
+  renderCodeActions?: (code: string, language?: string) => React.ReactNode;
 }
 
 function useIsDark() {
@@ -23,7 +26,11 @@ function useIsDark() {
   return isDark;
 }
 
-export function MarkdownRenderer({ children, className }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  children,
+  className,
+  renderCodeActions,
+}: MarkdownRendererProps) {
   const isDark = useIsDark();
 
   return (
@@ -38,20 +45,27 @@ export function MarkdownRenderer({ children, className }: MarkdownRendererProps)
 
             if (match) {
               return (
-                <SyntaxHighlighter
-                  style={(isDark ? oneDark : oneLight) as Record<string, React.CSSProperties>}
-                  language={match[1]}
-                  PreTag='div'
-                  customStyle={{
-                    margin: '0 0 1rem',
-                    borderRadius: '8px',
-                    fontSize: '0.8125rem',
-                    ...(isDark ? {} : { background: 'hsl(var(--muted))' }),
-                  }}
-                  codeTagProps={{ style: { fontFamily: 'var(--font-mono)' } }}
-                >
-                  {code}
-                </SyntaxHighlighter>
+                <div className='relative'>
+                  <SyntaxHighlighter
+                    style={(isDark ? oneDark : oneLight) as Record<string, React.CSSProperties>}
+                    language={match[1]}
+                    PreTag='div'
+                    customStyle={{
+                      margin: '0 0 1rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8125rem',
+                      ...(isDark ? {} : { background: 'hsl(var(--muted))' }),
+                    }}
+                    codeTagProps={{ style: { fontFamily: 'var(--font-mono)' } }}
+                  >
+                    {code}
+                  </SyntaxHighlighter>
+                  {renderCodeActions && (
+                    <div className='absolute right-2 top-2'>
+                      {renderCodeActions(code, match[1])}
+                    </div>
+                  )}
+                </div>
               );
             }
 
