@@ -68,8 +68,10 @@ pub struct CollectionSettings {
 
     /// Whether the ACP AI-assist agent may run requests, edit scripts, and
     /// write non-secret env vars against this collection without further
-    /// per-action confirmation. Defaults to `false` so an imported or freshly
-    /// cloned collection never silently grants agent write access.
+    /// per-action confirmation. Defaults to `false` so a newly created
+    /// collection does not grant agent write access. This field is
+    /// git-shared like `sandbox_mode`, so a collection cloned or pulled with
+    /// it already set to `true` does inherit that access.
     #[serde(default)]
     pub agent_autonomy_enabled: bool,
 }
