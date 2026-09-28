@@ -1,8 +1,8 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { MoreVertical } from 'lucide-react';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
 
@@ -27,7 +27,7 @@ export interface RequestNodeData {
 const methodLabel = (data: RequestNodeData) =>
   data.kind.source.type === 'Inline' ? data.kind.source.request.method : (data.method ?? 'SAVED');
 
-export function RequestNode({ data, isConnectable }: NodeProps & { data: RequestNodeData }) {
+export function RequestNode({ id, data, isConnectable }: NodeProps & { data: RequestNodeData }) {
   const { kind, status, statusCode, durationMs, error } = data;
   const method = methodLabel(data);
   const url = kind.source.type === 'Inline' ? kind.source.request.url : kind.source.requestPath;
@@ -51,7 +51,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
           <span className='rounded bg-muted px-1 py-0.5 font-mono text-[10px]'>{method}</span>
           <span className='truncate font-medium'>{kind.label}</span>
         </div>
-        <MoreVertical className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
+        <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 
       {status === 'success' && (

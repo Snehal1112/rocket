@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
+import { NodePropertiesPanel } from './properties/NodePropertiesPanel';
 import { WireExpressionPopover } from './WireExpressionPopover';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
@@ -59,6 +61,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
   const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
+  // UI state only. The panel shows while exactly one node is selected.
+  const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
@@ -204,8 +208,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     return null;
   }
 
+  // A new node becomes the only selection, so its properties panel opens.
   const handleAddNode = (node: FlowNode) => {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
+    setSelectedNodeIds(new Set([node.id]));
   };
 
   // Returns whether the save succeeded, so Run can stop on a failed save.
@@ -269,74 +275,98 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     ? tab.nodes.find((n) => n.id === pendingEdge.targetNodeId)
     : undefined;
 
+  // The panel follows the selection. A node that no longer exists shows nothing.
+  const panelNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
+  const panelNode = panelNodeId ? tab.nodes.find((n) => n.id === panelNodeId) : undefined;
+
   return (
-    <div className='relative h-full'>
-      <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
-        <FlowToolbar
-          collection={collectionName}
-          flowName={flowName}
-          environmentName={activeEnvironmentName}
-          onPatchStatus={(nodeId, status, detail) =>
-            patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)
-          }
-          onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
-          tabRunState={tab.runState}
-          tabRunId={tab.runId}
-          onBeforeRun={handleBeforeRun}
-        />
-        <Button size='sm' variant='outline' onClick={() => void handleSave()}>
-          Save
-        </Button>
-      </div>
-      <NodePalette onAddNode={handleAddNode} />
-      <FlowCanvas
-        nodes={tab.nodes}
-        edges={tab.edges}
-        nodeStatus={tab.nodeStatus}
-        nodeDetail={tab.nodeDetail}
-        cycleNodeIds={cycleNodeIds}
-        cycleEdgeIds={cycleEdgeIds}
-        onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
-        onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
-        onConnect={handleConnect}
-        onAddNode={handleAddNode}
-        flowCollectionName={tab.collectionName}
-        onNodeKindChange={handleNodeKindChange}
-        onRemoveSwitchCase={handleRemoveSwitchCase}
-      />
-      {pendingEdge && pendingTargetNode && (
-        <WireExpressionPopover
-          // Keyed by edge id so a second connection made before the first
-          // popover is committed/dismissed remounts this component instead
-          // of reusing it — otherwise its internal `expression`/`headerName`
-          // state (initialized once via useState) would leak from the
-          // previous edge onto the new one.
-          key={pendingEdge.id}
-          edge={pendingEdge}
-          targetNode={pendingTargetNode}
-          open={pendingEdge !== null}
-          onOpenChange={(open) => {
-            if (open) return;
-            if (isUncommittedHeadersEdge(pendingEdge)) {
-              updateFlowEdges(
-                tab.id,
-                tab.edges.filter((e) => e.id !== pendingEdge.id),
-              );
-            }
-            setPendingEdge(null);
-          }}
-          onCommit={(updated) => {
-            committedEdgeIdRef.current = updated.id;
-            updateFlowEdges(
-              tab.id,
-              tab.edges.map((e) => (e.id === updated.id ? updated : e)),
-            );
-          }}
-        >
-          {/* Plan 09's edge/handle DOM node the popover anchors to. */}
-          <span />
-        </WireExpressionPopover>
+    <ResizablePanelGroup className='h-full'>
+      <ResizablePanel id='flow-canvas-panel' minSize='40%'>
+        <div className='relative h-full'>
+          <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
+            <FlowToolbar
+              collection={collectionName}
+              flowName={flowName}
+              environmentName={activeEnvironmentName}
+              onPatchStatus={(nodeId, status, detail) =>
+                patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)
+              }
+              onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
+              tabRunState={tab.runState}
+              tabRunId={tab.runId}
+              onBeforeRun={handleBeforeRun}
+            />
+            <Button size='sm' variant='outline' onClick={() => void handleSave()}>
+              Save
+            </Button>
+          </div>
+          <NodePalette onAddNode={handleAddNode} />
+          <FlowCanvas
+            nodes={tab.nodes}
+            edges={tab.edges}
+            nodeStatus={tab.nodeStatus}
+            nodeDetail={tab.nodeDetail}
+            cycleNodeIds={cycleNodeIds}
+            cycleEdgeIds={cycleEdgeIds}
+            onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
+            onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
+            onConnect={handleConnect}
+            onAddNode={handleAddNode}
+            flowCollectionName={tab.collectionName}
+            onNodeKindChange={handleNodeKindChange}
+            onRemoveSwitchCase={handleRemoveSwitchCase}
+            selectedNodeIds={selectedNodeIds}
+            onSelectedNodeIdsChange={setSelectedNodeIds}
+          />
+          {pendingEdge && pendingTargetNode && (
+            <WireExpressionPopover
+              // Keyed by edge id so a second connection made before the first
+              // popover is committed/dismissed remounts this component instead
+              // of reusing it — otherwise its internal `expression`/`headerName`
+              // state (initialized once via useState) would leak from the
+              // previous edge onto the new one.
+              key={pendingEdge.id}
+              edge={pendingEdge}
+              targetNode={pendingTargetNode}
+              open={pendingEdge !== null}
+              onOpenChange={(open) => {
+                if (open) return;
+                if (isUncommittedHeadersEdge(pendingEdge)) {
+                  updateFlowEdges(
+                    tab.id,
+                    tab.edges.filter((e) => e.id !== pendingEdge.id),
+                  );
+                }
+                setPendingEdge(null);
+              }}
+              onCommit={(updated) => {
+                committedEdgeIdRef.current = updated.id;
+                updateFlowEdges(
+                  tab.id,
+                  tab.edges.map((e) => (e.id === updated.id ? updated : e)),
+                );
+              }}
+            >
+              {/* Plan 09's edge/handle DOM node the popover anchors to. */}
+              <span />
+            </WireExpressionPopover>
+          )}
+        </div>
+      </ResizablePanel>
+      {panelNode && (
+        <>
+          <ResizableHandle />
+          {/* minSize/maxSize take percentage strings. A plain number there
+              means pixels in this version of react-resizable-panels. */}
+          <ResizablePanel id='flow-node-properties' defaultSize={30} minSize='20%' maxSize='50%'>
+            <NodePropertiesPanel
+              node={panelNode}
+              onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
+              onClose={() => setSelectedNodeIds(new Set())}
+            />
+          </ResizablePanel>
+        </>
       )}
-    </div>
+    </ResizablePanelGroup>
   );
 }

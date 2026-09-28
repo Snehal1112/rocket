@@ -23,7 +23,7 @@ vi.mock('@/components/editor', () => ({
 const kind = { kind: 'If' as const, label: 'Logged in?', condition: 'response.status === 200' };
 
 function renderIf(data: IfNodeData) {
-  const actions = { updateNodeKind: vi.fn(), removeSwitchCase: vi.fn() };
+  const actions = { updateNodeKind: vi.fn(), removeSwitchCase: vi.fn(), openProperties: vi.fn() };
   render(
     <ReactFlowProvider>
       <FlowNodeActionsContext.Provider value={actions}>

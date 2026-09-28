@@ -10,6 +10,7 @@ import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason, SwitchCase } from '@
 import { cn } from '@/lib/utils';
 import { caseDisplayLabel, exitLabel } from '../flowExits';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
+import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
 
@@ -94,6 +95,7 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
         <Split className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='font-mono text-[10px] text-muted-foreground'>Switch</span>
         <span className='truncate font-medium'>{kind.label}</span>
+        <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 
       {status === 'success' && data.branch && (

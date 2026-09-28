@@ -2,6 +2,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
 
@@ -14,7 +15,7 @@ export interface OutputNodeData {
   value?: string;
 }
 
-export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNodeData }) {
+export function OutputNode({ id, data, isConnectable }: NodeProps & { data: OutputNodeData }) {
   return (
     <div
       data-testid='output-node-card'
@@ -42,7 +43,10 @@ export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNo
         isConnectable={isConnectable}
         className='!h-2 !w-2'
       />
-      <div className='border-b px-2 py-1.5 font-medium'>{data.kind.label}</div>
+      <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
+        <span className='truncate'>{data.kind.label}</span>
+        <NodeMenuButton nodeId={id} label={data.kind.label} />
+      </div>
       <NodeStatusCaption status={data.status} skipReason={data.skipReason} />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{data.value ?? '—'}</div>
     </div>

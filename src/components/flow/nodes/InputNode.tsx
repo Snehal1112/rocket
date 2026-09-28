@@ -2,6 +2,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
 
@@ -13,7 +14,7 @@ export interface InputNodeData {
   hasCycleError?: boolean;
 }
 
-export function InputNode({ data, isConnectable }: NodeProps & { data: InputNodeData }) {
+export function InputNode({ id, data, isConnectable }: NodeProps & { data: InputNodeData }) {
   const value = data.kind.value;
   const display = value === undefined || value === null ? '—' : String(value);
   return (
@@ -26,7 +27,10 @@ export function InputNode({ data, isConnectable }: NodeProps & { data: InputNode
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
-      <div className='border-b px-2 py-1.5 font-medium'>{data.kind.label}</div>
+      <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
+        <span className='truncate'>{data.kind.label}</span>
+        <NodeMenuButton nodeId={id} label={data.kind.label} />
+      </div>
       <NodeStatusCaption status={data.status} skipReason={data.skipReason} />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{display}</div>
       <Handle

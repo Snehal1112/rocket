@@ -59,7 +59,7 @@ function element(data: SwitchNodeData, actions: ReturnType<typeof makeActions>) 
 }
 
 function makeActions() {
-  return { updateNodeKind: vi.fn(), removeSwitchCase: vi.fn() };
+  return { updateNodeKind: vi.fn(), removeSwitchCase: vi.fn(), openProperties: vi.fn() };
 }
 
 describe('SwitchNode', () => {

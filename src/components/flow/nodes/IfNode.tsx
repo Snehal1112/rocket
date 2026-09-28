@@ -7,6 +7,7 @@ import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-a
 import { cn } from '@/lib/utils';
 import { exitLabel } from '../flowExits';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
+import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
 
@@ -46,6 +47,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
         <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='font-mono text-[10px] text-muted-foreground'>If</span>
         <span className='truncate font-medium'>{kind.label}</span>
+        <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 
       {status === 'success' && data.branch && (

@@ -59,6 +59,10 @@ export interface FlowCanvasProps {
   onNodeKindChange?: (nodeId: string, kind: FlowNodeKind) => void;
   // Removes a Switch case together with the edges leaving its exit.
   onRemoveSwitchCase?: (nodeId: string, caseId: string) => void;
+  // Controlled node selection. Without these props the canvas keeps its own
+  // selection, as before. FlowPane passes them to drive the properties panel.
+  selectedNodeIds?: ReadonlySet<string>;
+  onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
 }
 
 type Measured = { width: number; height: number };
@@ -189,9 +193,21 @@ function FlowCanvasInner({
   cycleEdgeIds,
   onNodeKindChange,
   onRemoveSwitchCase,
+  selectedNodeIds: selectedNodeIdsProp,
+  onSelectedNodeIdsChange,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
-  const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [localSelection, setLocalSelection] = useState<ReadonlySet<string>>(() => new Set());
+  const selectedNodeIds = selectedNodeIdsProp ?? localSelection;
+  // Reports a new selection to the owner, or keeps it locally when uncontrolled.
+  const selectNodes = (next: ReadonlySet<string>) => {
+    if (next === selectedNodeIds) return;
+    if (onSelectedNodeIdsChange) onSelectedNodeIdsChange(next);
+    else setLocalSelection(next);
+  };
+  // Node actions are memoised, so they call the latest selectNodes through a ref.
+  const selectNodesRef = useRef(selectNodes);
+  selectNodesRef.current = selectNodes;
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<ReadonlySet<string>>(() => new Set());
   // A ref, not state: React Flow already holds the new size internally, so
   // recording it must not trigger a re-render.
@@ -227,6 +243,7 @@ function FlowCanvasInner({
     () => ({
       updateNodeKind: (nodeId, kind) => onNodeKindChange?.(nodeId, kind),
       removeSwitchCase: (nodeId, caseId) => onRemoveSwitchCase?.(nodeId, caseId),
+      openProperties: (nodeId) => selectNodesRef.current(new Set([nodeId])),
     }),
     [onNodeKindChange, onRemoveSwitchCase],
   );
@@ -252,7 +269,7 @@ function FlowCanvasInner({
         next = next.filter((n) => n.id !== change.id);
       }
     }
-    setSelectedNodeIds((prev) => nextSelection(prev, changes));
+    selectNodes(nextSelection(selectedNodeIds, changes));
     if (next !== nodes) onNodesChange(next);
   };
 
