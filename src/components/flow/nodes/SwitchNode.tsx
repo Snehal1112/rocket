@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { caseHandle, DEFAULT_HANDLE, INPUT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason, SwitchCase } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
-import { exitLabel } from '../flowExits';
+import { caseDisplayLabel, exitLabel } from '../flowExits';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -36,12 +36,12 @@ function duplicateMatches(cases: SwitchCase[]): Set<string> {
   return dupes;
 }
 
-// New cases get a unique placeholder match so adding several cases never
-// trips rule V7 before the user has typed real values.
+// Number for a new case's "Case N" label. It skips numbers an existing
+// label already uses, so two cases never share a default name.
 function nextCaseNumber(cases: SwitchCase[]): number {
-  const used = new Set(cases.map((c) => c.matches));
+  const used = new Set(cases.map((c) => c.label));
   let n = cases.length + 1;
-  while (used.has(`case-${n}`)) n += 1;
+  while (used.has(`Case ${n}`)) n += 1;
   return n;
 }
 
@@ -69,7 +69,7 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
     const n = nextCaseNumber(kind.cases);
     updateNodeKind(id, {
       ...kind,
-      cases: [...kind.cases, { id: crypto.randomUUID(), label: `Case ${n}`, matches: `case-${n}` }],
+      cases: [...kind.cases, { id: crypto.randomUUID(), label: `Case ${n}`, matches: '' }],
     });
   };
 
@@ -137,18 +137,20 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
             <Button
               variant='ghost'
               size='icon'
-              aria-label={`Remove case ${c.label}`}
+              aria-label={`Remove case ${caseDisplayLabel(c, i)}`}
               className='h-6 w-6 shrink-0'
               onClick={() => removeSwitchCase(id, c.id)}
             >
               <X className='h-3 w-3' aria-hidden='true' />
             </Button>
+            {/* The row sits inside the px-2 wrapper, so the handle shifts
+                right by that padding to line up with the default exit. */}
             <Handle
               type='source'
               id={caseHandle(c.id)}
               position={Position.Right}
               isConnectable={isConnectable}
-              className='!h-2 !w-2'
+              className='!-right-2 !h-2 !w-2'
             />
           </div>
         ))}

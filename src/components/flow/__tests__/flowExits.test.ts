@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
-import { edgeRunState, exitLabel } from '../flowExits';
+import { caseDisplayLabel, edgeRunState, exitLabel } from '../flowExits';
 
 const ifKind = { kind: 'If' as const, label: 'Ok?', condition: 'response.status === 200' };
 const switchKind = {
@@ -9,6 +9,14 @@ const switchKind = {
   value: 'response.body.plan',
   cases: [{ id: 'c1', label: 'Pro plan', matches: 'pro' }],
 };
+
+describe('caseDisplayLabel', () => {
+  it('uses the label, or the case number when the label is blank', () => {
+    expect(caseDisplayLabel({ id: 'c1', label: 'Pro', matches: 'pro' }, 0)).toBe('Pro');
+    expect(caseDisplayLabel({ id: 'c1', label: '', matches: 'pro' }, 0)).toBe('Case 1');
+    expect(caseDisplayLabel({ id: 'c1', label: '  ', matches: 'pro' }, 2)).toBe('Case 3');
+  });
+});
 
 describe('exitLabel', () => {
   it('labels If exits', () => {
@@ -21,6 +29,14 @@ describe('exitLabel', () => {
     expect(exitLabel(switchKind, 'case:c1')).toBe('Pro plan');
     expect(exitLabel(switchKind, 'default')).toBe('default');
     expect(exitLabel(switchKind, 'case:gone')).toBeUndefined();
+  });
+
+  it('falls back to the case number when a case label is empty', () => {
+    const unnamed = {
+      ...switchKind,
+      cases: [switchKind.cases[0], { id: 'c2', label: ' ', matches: 'free' }],
+    };
+    expect(exitLabel(unnamed, 'case:c2')).toBe('Case 2');
   });
 
   it('has no label for plain node exits', () => {

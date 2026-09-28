@@ -33,6 +33,6 @@ describe('NodePalette routing entries', () => {
       value: 'response.body.type',
     });
     expect(node.kind.cases).toHaveLength(1);
-    expect(node.kind.cases[0]).toMatchObject({ label: 'Case 1', matches: 'case-1' });
+    expect(node.kind.cases[0]).toMatchObject({ label: 'Case 1', matches: '' });
   });
 });

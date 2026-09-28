@@ -90,7 +90,7 @@ export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void
                   kind: 'Switch',
                   label: 'New Switch',
                   value: 'response.body.type',
-                  cases: [{ id: crypto.randomUUID(), label: 'Case 1', matches: 'case-1' }],
+                  cases: [{ id: crypto.randomUUID(), label: 'Case 1', matches: '' }],
                 },
                 position: defaultPosition,
               })

@@ -94,6 +94,10 @@ function toRfNodes(
   }));
 }
 
+// Targets inside a node that own their focus: `.nokey` wrappers around
+// inline fields and buttons, plus any plain editable element.
+const EDITABLE_TARGET = '.nokey, input, textarea, [contenteditable]';
+
 const CYCLE_EDGE_STYLE = { stroke: '#ef4444', strokeWidth: 2 };
 const TAKEN_EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 2 };
 const NOT_TAKEN_EDGE_STYLE = { opacity: 0.35, strokeDasharray: '4 4' };
@@ -201,6 +205,14 @@ function FlowCanvasInner({
   // text field was last active and silently breaking Backspace/Delete.
   const paneRef = useRef<HTMLDivElement>(null);
   const focusPane = () => paneRef.current?.focus();
+  // React Flow reports every click inside a node, including clicks on its
+  // inline fields and buttons. Moving focus there would pull it out of the
+  // field, so editable targets keep their focus. The selector matches the
+  // one React Flow uses to ignore key presses.
+  const handleNodeClick = (e: React.MouseEvent) => {
+    if (e.target instanceof Element && e.target.closest(EDITABLE_TARGET)) return;
+    focusPane();
+  };
 
   const rfNodes = useMemo(
     () =>
@@ -306,7 +318,7 @@ function FlowCanvasInner({
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
           isValidConnection={isValidConnection}
-          onNodeClick={focusPane}
+          onNodeClick={handleNodeClick}
           onEdgeClick={focusPane}
           onPaneClick={focusPane}
           fitView

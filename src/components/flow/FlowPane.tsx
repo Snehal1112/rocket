@@ -1,6 +1,6 @@
 import type { Connection } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,7 @@ import {
   parseGraphErrorMessage,
   shouldPromptForExpression,
 } from '@/lib/flow-wiring';
+import { findTabInTree } from '@/lib/pane-utils';
 import {
   type CollectionSummary,
   type FlowEdge,
@@ -29,7 +30,7 @@ import {
 } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
-import type { FlowTab } from '@/types/pane-types';
+import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
@@ -61,6 +62,32 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
+
+  // Inline node edits read the latest graph from the store, not from this
+  // render. Two edits before the next render then both land. Stable
+  // callbacks also keep FlowCanvas's node actions from changing each render.
+  const tabId = tab.id;
+  const latestFlowTab = useCallback((): FlowTab | null => {
+    const found = findTabInTree(usePaneStore.getState().root, tabId);
+    return found && isFlowTab(found.tab) ? found.tab : null;
+  }, [tabId]);
+
+  const handleNodeKindChange = useCallback(
+    (nodeId: string, kind: FlowNodeKind) => {
+      const latest = latestFlowTab();
+      if (latest) updateFlowNodes(tabId, replaceNodeKind(latest.nodes, nodeId, kind));
+    },
+    [latestFlowTab, tabId, updateFlowNodes],
+  );
+
+  const handleRemoveSwitchCase = useCallback(
+    (nodeId: string, caseId: string) => {
+      const latest = latestFlowTab();
+      const next = latest && removeSwitchCase(latest.nodes, latest.edges, nodeId, caseId);
+      if (next) updateFlowGraph(tabId, next.nodes, next.edges);
+    },
+    [latestFlowTab, tabId, updateFlowGraph],
+  );
 
   useEffect(() => {
     if (tab.flowName === null) {
@@ -179,15 +206,6 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
 
   const handleAddNode = (node: FlowNode) => {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
-  };
-
-  const handleNodeKindChange = (nodeId: string, kind: FlowNodeKind) => {
-    updateFlowNodes(tab.id, replaceNodeKind(tab.nodes, nodeId, kind));
-  };
-
-  const handleRemoveSwitchCase = (nodeId: string, caseId: string) => {
-    const next = removeSwitchCase(tab.nodes, tab.edges, nodeId, caseId);
-    if (next) updateFlowGraph(tab.id, next.nodes, next.edges);
   };
 
   // Returns whether the save succeeded, so Run can stop on a failed save.

@@ -90,24 +90,31 @@ describe('SwitchNode', () => {
     });
   });
 
-  it('adds a case with the next number and a unique placeholder match', () => {
+  it('adds a case with the next number and an empty match', () => {
     const actions = makeActions();
     render(element({ kind, status: 'idle' }, actions));
     fireEvent.click(screen.getByRole('button', { name: 'Add case' }));
     const next = actions.updateNodeKind.mock.calls[0][1];
     expect(next.cases).toHaveLength(3);
-    expect(next.cases[2]).toMatchObject({ label: 'Case 3', matches: 'case-3' });
+    expect(next.cases[2]).toMatchObject({ label: 'Case 3', matches: '' });
     expect(next.cases[2].id).toEqual(expect.any(String));
     expect(new Set(next.cases.map((c: { id: string }) => c.id)).size).toBe(3);
   });
 
-  it('skips a placeholder match that is already taken', () => {
+  it('skips a case number whose label is already taken', () => {
     const actions = makeActions();
-    const taken = { ...kind, cases: [kind.cases[0], { ...kind.cases[1], matches: 'case-3' }] };
+    const taken = { ...kind, cases: [kind.cases[0], { ...kind.cases[1], label: 'Case 3' }] };
     render(element({ kind: taken, status: 'idle' }, actions));
     fireEvent.click(screen.getByRole('button', { name: 'Add case' }));
     const next = actions.updateNodeKind.mock.calls[0][1];
-    expect(next.cases[2]).toMatchObject({ label: 'Case 4', matches: 'case-4' });
+    expect(next.cases[2]).toMatchObject({ label: 'Case 4', matches: '' });
+  });
+
+  it('falls back to the case number when a label is empty', () => {
+    const unnamed = { ...kind, cases: [kind.cases[0], { ...kind.cases[1], label: '' }] };
+    render(element({ kind: unnamed, status: 'success', branch: 'case:c2' }, makeActions()));
+    expect(screen.getByRole('button', { name: 'Remove case Case 2' })).toBeInTheDocument();
+    expect(screen.getByTestId('branch-badge')).toHaveTextContent('→ Case 2');
   });
 
   it('removes a case through removeSwitchCase, not a plain kind update', () => {

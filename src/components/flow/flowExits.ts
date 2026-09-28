@@ -5,7 +5,13 @@ import {
   RESULT_HANDLE,
   TRUE_HANDLE,
 } from '@/lib/flow-handles';
-import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus, SwitchCase } from '@/lib/tauri-api';
+
+// Name shown for a Switch case. A blank label falls back to its position,
+// so badges, edge labels and buttons never show an empty name.
+export function caseDisplayLabel(c: SwitchCase, index: number): string {
+  return c.label.trim() ? c.label : `Case ${index + 1}`;
+}
 
 // Display label of a routing node's exit. A case is looked up by id, so
 // renaming a case relabels its edges and badge without rewiring anything.
@@ -19,7 +25,8 @@ export function exitLabel(kind: FlowNodeKind, handle: string): string | undefine
     if (handle === DEFAULT_HANDLE) return 'default';
     const caseId = caseIdFromHandle(handle);
     if (!caseId) return undefined;
-    return kind.cases.find((c) => c.id === caseId)?.label;
+    const index = kind.cases.findIndex((c) => c.id === caseId);
+    return index < 0 ? undefined : caseDisplayLabel(kind.cases[index], index);
   }
   return undefined;
 }
