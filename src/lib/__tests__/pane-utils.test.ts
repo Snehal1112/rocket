@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LeafNode, PaneNode, RequestTab } from '@/types/pane-types';
 import {
+  collectAllTabs,
   collectLeafGroupIds,
   createDefaultLeaf,
   createDefaultRequest,
@@ -84,6 +85,23 @@ describe('pane-utils', () => {
 
   it('collectLeafGroupIds returns a single-element array for a lone leaf', () => {
     expect(collectLeafGroupIds(leaf1)).toEqual(['g1']);
+  });
+
+  // --- collectAllTabs ---
+
+  it('collectAllTabs returns every tab from every leaf in a split tree', () => {
+    const tree: PaneNode = {
+      type: 'split',
+      id: 's-all',
+      direction: 'horizontal',
+      children: [leafWithTab, leaf2],
+      sizes: [50, 50],
+    };
+    expect(collectAllTabs(tree)).toEqual([tab]);
+  });
+
+  it('collectAllTabs returns an empty array for an empty leaf', () => {
+    expect(collectAllTabs(leaf1)).toEqual([]);
   });
 
   // --- updateLeaf ---

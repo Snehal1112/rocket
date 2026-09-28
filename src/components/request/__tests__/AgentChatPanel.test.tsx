@@ -20,8 +20,6 @@ const mockActions = vi.hoisted(() => ({
   beginAgentSession: vi.fn(),
   activateAgentSession: vi.fn(),
   appendAgentChatMessage: vi.fn(),
-  appendAgentChatChunk: vi.fn(),
-  completeAgentChatMessage: vi.fn(),
   failAgentChatMessage: vi.fn(),
   markAgentSessionEnded: vi.fn(),
   clearAgentSession: vi.fn(),
@@ -44,30 +42,10 @@ vi.mock('@/lib/queries/agent-config-queries', () => ({
   }),
 }));
 
-type ChunkHandler = (e: { session_id: string; text: string }) => void;
-type FinishedHandler = (e: { session_id: string; stop_reason: string }) => void;
-type FailedHandler = (e: { session_id: string; error: string }) => void;
-
-let chunkHandler: ChunkHandler | undefined;
-let finishedHandler: FinishedHandler | undefined;
-let failedHandler: FailedHandler | undefined;
-
 vi.mock('@/lib/tauri-api', () => ({
   startAgentSession: vi.fn(),
   sendAgentPrompt: vi.fn(),
   endAgentSession: vi.fn(),
-  onAgentSessionChunk: vi.fn((h: ChunkHandler) => {
-    chunkHandler = h;
-    return Promise.resolve(() => undefined);
-  }),
-  onAgentSessionFinished: vi.fn((h: FinishedHandler) => {
-    finishedHandler = h;
-    return Promise.resolve(() => undefined);
-  }),
-  onAgentSessionFailed: vi.fn((h: FailedHandler) => {
-    failedHandler = h;
-    return Promise.resolve(() => undefined);
-  }),
 }));
 
 import * as tauriApi from '@/lib/tauri-api';
@@ -85,9 +63,7 @@ function activeSession(overrides: Partial<AgentChatSession> = {}): AgentChatSess
 describe('AgentChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    chunkHandler = undefined;
-    finishedHandler = undefined;
-    failedHandler = undefined;
+    mockActions.activateAgentSession.mockReturnValue(true);
   });
 
   it('shows the agent picker and a disabled Start button with no session', () => {
@@ -116,31 +92,34 @@ describe('AgentChatPanel', () => {
     );
   });
 
-  it('ends an orphaned session if the panel unmounts before start resolves', async () => {
-    let resolveStart: (sessionId: string) => void = () => undefined;
-    vi.mocked(tauriApi.startAgentSession).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveStart = resolve;
-        }),
-    );
+  it('ends the new session when the store refuses to activate it (tab was removed)', async () => {
+    vi.mocked(tauriApi.startAgentSession).mockResolvedValue('session-orphan');
     vi.mocked(tauriApi.endAgentSession).mockResolvedValue(undefined);
-
-    const { unmount } = render(
-      <AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />,
-    );
+    mockActions.activateAgentSession.mockReturnValue(false);
+    render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('combobox'));
     await userEvent.click(await screen.findByText('Claude'));
     await userEvent.click(screen.getByRole('button', { name: 'Start' }));
 
-    // The tab (and this panel) closes while start_agent_session is still
-    // mid-handshake, before it has resolved to a session id.
-    unmount();
-    resolveStart('session-orphan');
-
     await waitFor(() => expect(tauriApi.endAgentSession).toHaveBeenCalledWith('session-orphan'));
-    expect(mockActions.activateAgentSession).not.toHaveBeenCalled();
+    expect(mockActions.activateAgentSession).toHaveBeenCalledWith('tab-1', 'session-orphan');
+    expect(mockActions.clearAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('does not end the new session when the store activates it', async () => {
+    vi.mocked(tauriApi.startAgentSession).mockResolvedValue('session-1');
+    mockActions.activateAgentSession.mockReturnValue(true);
+    render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole('combobox'));
+    await userEvent.click(await screen.findByText('Claude'));
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    await waitFor(() =>
+      expect(mockActions.activateAgentSession).toHaveBeenCalledWith('tab-1', 'session-1'),
+    );
+    expect(tauriApi.endAgentSession).not.toHaveBeenCalled();
   });
 
   it('a start failure shows an inline error and clears the session', async () => {
@@ -224,80 +203,6 @@ describe('AgentChatPanel', () => {
 
     // The second attempt must not have reached sendAgentPrompt at all.
     expect(tauriApi.sendAgentPrompt).toHaveBeenCalledTimes(1);
-  });
-
-  it('a chunk event for the current session appends to the streaming message', async () => {
-    const { rerender } = render(
-      <AgentChatPanel
-        tabId='tab-1'
-        collectionName='my-collection'
-        agentSession={activeSession({
-          messages: [{ id: 'm1', role: 'agent', text: '', streaming: true }],
-        })}
-        onInsertCode={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(chunkHandler).toBeDefined());
-    chunkHandler?.({ session_id: 'session-1', text: 'Hello' });
-    expect(mockActions.appendAgentChatChunk).toHaveBeenCalledWith('tab-1', 'm1', 'Hello');
-    rerender(
-      <AgentChatPanel
-        tabId='tab-1'
-        collectionName='my-collection'
-        agentSession={activeSession({
-          messages: [{ id: 'm1', role: 'agent', text: '', streaming: true }],
-        })}
-        onInsertCode={vi.fn()}
-      />,
-    );
-  });
-
-  it('ignores a chunk event for a different session id', async () => {
-    render(
-      <AgentChatPanel
-        tabId='tab-1'
-        collectionName='my-collection'
-        agentSession={activeSession({
-          messages: [{ id: 'm1', role: 'agent', text: '', streaming: true }],
-        })}
-        onInsertCode={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(chunkHandler).toBeDefined());
-    chunkHandler?.({ session_id: 'some-other-session', text: 'Hello' });
-    expect(mockActions.appendAgentChatChunk).not.toHaveBeenCalled();
-  });
-
-  it('a finished event completes the streaming message', async () => {
-    render(
-      <AgentChatPanel
-        tabId='tab-1'
-        collectionName='my-collection'
-        agentSession={activeSession({
-          messages: [{ id: 'm1', role: 'agent', text: 'done', streaming: true }],
-        })}
-        onInsertCode={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(finishedHandler).toBeDefined());
-    finishedHandler?.({ session_id: 'session-1', stop_reason: 'end_turn' });
-    expect(mockActions.completeAgentChatMessage).toHaveBeenCalledWith('tab-1', 'm1');
-  });
-
-  it('a failed event fails the streaming message', async () => {
-    render(
-      <AgentChatPanel
-        tabId='tab-1'
-        collectionName='my-collection'
-        agentSession={activeSession({
-          messages: [{ id: 'm1', role: 'agent', text: 'partial', streaming: true }],
-        })}
-        onInsertCode={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(failedHandler).toBeDefined());
-    failedHandler?.({ session_id: 'session-1', error: 'crashed' });
-    expect(mockActions.failAgentChatMessage).toHaveBeenCalledWith('tab-1', 'm1', 'crashed');
   });
 
   it('clicking Insert on a rendered code block calls onInsertCode with the code', async () => {

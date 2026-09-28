@@ -971,10 +971,75 @@ describe('Agent chat session actions', () => {
     const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
     usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
-    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    expect(usePaneStore.getState().activateAgentSession(tabId, 'session-1')).toBe(true);
     const tab = getRequestTab();
     expect(tab.agentSession?.sessionId).toBe('session-1');
     expect(tab.agentSession?.status).toBe('active');
+  });
+
+  it('activateAgentSession returns false and changes nothing when the session is not starting', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    const before = usePaneStore.getState().root;
+
+    expect(usePaneStore.getState().activateAgentSession(tabId, 'session-2')).toBe(false);
+    expect(usePaneStore.getState().root).toBe(before);
+    expect(getRequestTab().agentSession?.sessionId).toBe('session-1');
+  });
+
+  it('activateAgentSession returns false and changes nothing when the tab has no session', () => {
+    const leaf = setupWithTab();
+    const before = usePaneStore.getState().root;
+
+    expect(usePaneStore.getState().activateAgentSession(leaf.tabs[0].id, 'session-1')).toBe(false);
+    expect(usePaneStore.getState().root).toBe(before);
+    expect(getRequestTab().agentSession).toBeUndefined();
+  });
+
+  it('activateAgentSession returns false and changes nothing for an unknown tab id', () => {
+    setupWithTab();
+    const before = usePaneStore.getState();
+
+    expect(usePaneStore.getState().activateAgentSession('no-such-tab', 'session-1')).toBe(false);
+    expect(usePaneStore.getState().root).toBe(before.root);
+    expect(usePaneStore.getState().collectionTabState).toBe(before.collectionTabState);
+  });
+
+  it('activateAgentSession activates a starting session parked in a collection snapshot', () => {
+    const tab = makeTab();
+    tab.agentSession = {
+      agentConfigId: 'agent-1',
+      sessionId: '',
+      status: 'starting',
+      messages: [],
+    };
+    usePaneStore.setState({
+      collectionTabState: { 'col-a': { tabs: [tab], activeTabId: tab.id } },
+    });
+
+    expect(usePaneStore.getState().activateAgentSession(tab.id, 'session-1')).toBe(true);
+    const parked = usePaneStore.getState().collectionTabState['col-a'].tabs[0];
+    expect(isRequestTab(parked) && parked.agentSession?.status).toBe('active');
+    expect(isRequestTab(parked) && parked.agentSession?.sessionId).toBe('session-1');
+  });
+
+  it('appendAgentChatChunk reaches a tab parked in a collection snapshot', () => {
+    const tab = makeTab();
+    tab.agentSession = {
+      agentConfigId: 'agent-1',
+      sessionId: 'session-1',
+      status: 'active',
+      messages: [{ id: 'm1', role: 'agent', text: 'a', streaming: true }],
+    };
+    usePaneStore.setState({
+      collectionTabState: { 'col-a': { tabs: [tab], activeTabId: tab.id } },
+    });
+
+    usePaneStore.getState().appendAgentChatChunk(tab.id, 'm1', 'b');
+    const parked = usePaneStore.getState().collectionTabState['col-a'].tabs[0];
+    expect(isRequestTab(parked) && parked.agentSession?.messages[0].text).toBe('ab');
   });
 
   it('appendAgentChatMessage appends to the messages list', () => {
@@ -1086,5 +1151,72 @@ describe('closeTab — ends the agent session for an active chat', () => {
     const leaf = setupWithTab();
     usePaneStore.getState().closeTab(leaf.tabs[0].id, leaf.groupId);
     expect(endAgentSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('closeAll/openWorkspaceTabs — end agent sessions of dropped tabs', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  function tabWithActiveSession(sessionId: string): RequestTab {
+    return {
+      ...makeTab(),
+      agentSession: { agentConfigId: 'agent-1', sessionId, status: 'active', messages: [] },
+    };
+  }
+
+  it('closeAll ends an active session found in the pane tree', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const leaf = getLeaf();
+    usePaneStore.getState().splitGroup(leaf.groupId, 'horizontal');
+    const second = getSplit().children[1] as LeafNode;
+    usePaneStore.getState().openTab(tabWithActiveSession('session-split'), second.groupId);
+
+    usePaneStore.getState().closeAll();
+
+    expect(endAgentSession).toHaveBeenCalledWith('session-split');
+  });
+
+  it('closeAll ends an active session found in a collection snapshot', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const parked = tabWithActiveSession('session-parked');
+    usePaneStore.setState({
+      collectionTabState: { 'col-b': { tabs: [parked], activeTabId: parked.id } },
+    });
+
+    usePaneStore.getState().closeAll();
+
+    expect(endAgentSession).toHaveBeenCalledWith('session-parked');
+  });
+
+  it('closeAll does not end a session that is still starting', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    const leaf = setupWithTab();
+    usePaneStore.getState().beginAgentSession(leaf.tabs[0].id, 'agent-1');
+
+    usePaneStore.getState().closeAll();
+
+    expect(endAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('openWorkspaceTabs ends an active session in a dropped non-active pane tab', async () => {
+    const { endAgentSession } = await import('@/lib/tauri-api');
+    usePaneStore.getState().setActiveCollection('col-a');
+    const kept = tabWithActiveSession('session-kept');
+    usePaneStore.getState().openTab(kept);
+    const firstGroupId = getLeaf().groupId;
+    usePaneStore.getState().splitGroup(firstGroupId, 'horizontal');
+    const second = getSplit().children[1] as LeafNode;
+    usePaneStore.getState().openTab(tabWithActiveSession('session-dropped'), second.groupId);
+    usePaneStore.getState().setActiveGroup(firstGroupId);
+
+    usePaneStore.getState().openWorkspaceTabs('ws-1');
+
+    expect(endAgentSession).toHaveBeenCalledWith('session-dropped');
+    expect(endAgentSession).not.toHaveBeenCalledWith('session-kept');
+    const snapshot = usePaneStore.getState().collectionTabState['col-a'];
+    expect(snapshot.tabs.map((t) => t.id)).toEqual([kept.id]);
   });
 });

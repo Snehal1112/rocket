@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import {
+  collectAllTabs,
   createDefaultLeaf,
   createDefaultRequest,
   findActiveLeaf,
@@ -57,6 +58,79 @@ function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => T
   return { ...node, children: [left, right] } satisfies SplitNode;
 }
 
+type CollectionTabState = Record<string, { tabs: Tab[]; activeTabId: string }>;
+
+// Applies an updater to one tab by id inside every collection snapshot.
+// Returns the same object when no snapshot holds that tab.
+function updateTabInSnapshots(
+  state: CollectionTabState,
+  tabId: string,
+  updater: (tab: Tab) => Tab,
+): CollectionTabState {
+  let changed = false;
+  const next: CollectionTabState = {};
+  for (const [key, entry] of Object.entries(state)) {
+    const idx = entry.tabs.findIndex((t) => t.id === tabId);
+    if (idx === -1) {
+      next[key] = entry;
+      continue;
+    }
+    const tabs = entry.tabs.slice();
+    tabs[idx] = updater(tabs[idx]);
+    next[key] = { ...entry, tabs };
+    changed = true;
+  }
+  return changed ? next : state;
+}
+
+// Finds a tab by id inside the collection snapshots.
+function findTabInSnapshots(state: CollectionTabState, tabId: string): Tab | undefined {
+  for (const entry of Object.values(state)) {
+    const tab = entry.tabs.find((t) => t.id === tabId);
+    if (tab) return tab;
+  }
+  return undefined;
+}
+
+// Applies an updater to one tab by id in the live pane tree and in every
+// collection snapshot. Agent session events can arrive while the owning tab
+// is parked in a snapshot after a collection switch, so the agent session
+// actions must reach it there too.
+function updateTabEverywhere(
+  state: Pick<PaneState, 'root' | 'collectionTabState'>,
+  tabId: string,
+  updater: (tab: Tab) => Tab,
+): Pick<PaneState, 'root' | 'collectionTabState'> {
+  return {
+    root: updateTabInTree(state.root, tabId, updater),
+    collectionTabState: updateTabInSnapshots(state.collectionTabState, tabId, updater),
+  };
+}
+
+// Best-effort backend cleanup for a tab that is about to be discarded.
+// Subproject B only sweeps sessions on whole-app exit. A session still
+// mid-handshake has no real session id yet, so there is nothing to end.
+function endSessionIfActive(tab: Tab): void {
+  if (isRequestTab(tab) && tab.agentSession?.status === 'active') {
+    Promise.resolve(endAgentSession(tab.agentSession.sessionId)).catch((err) => {
+      console.error('[pane-store] failed to end agent session', err);
+    });
+  }
+}
+
+// Ends every active agent session among tabs that are about to be discarded.
+// The same session can appear twice (a live tab plus a stale snapshot copy),
+// so each session id is ended only once.
+function endActiveSessions(tabs: Tab[]): void {
+  const seen = new Set<string>();
+  for (const tab of tabs) {
+    if (!isRequestTab(tab) || tab.agentSession?.status !== 'active') continue;
+    if (seen.has(tab.agentSession.sessionId)) continue;
+    seen.add(tab.agentSession.sessionId);
+    endSessionIfActive(tab);
+  }
+}
+
 // Recursively finds a split node by id and updates its sizes.
 function updateSplitSizes(node: PaneNode, splitId: string, sizes: [number, number]): PaneNode {
   if (node.type === 'leaf') return node;
@@ -85,7 +159,7 @@ export interface PaneState {
   root: PaneNode;
   activeGroupId: string;
   activeCollection: string | null;
-  collectionTabState: Record<string, { tabs: Tab[]; activeTabId: string }>;
+  collectionTabState: CollectionTabState;
 
   // Tab actions.
   openTab: (tab: Tab, groupId?: string) => void;
@@ -106,7 +180,10 @@ export interface PaneState {
 
   // Agent chat session actions.
   beginAgentSession: (tabId: string, agentConfigId: string) => void;
-  activateAgentSession: (tabId: string, sessionId: string) => void;
+  /** Moves a 'starting' session to 'active'. Returns false without changing
+   *  state when the tab is gone or its session is no longer 'starting', so the
+   *  caller knows it must end the backend session itself. */
+  activateAgentSession: (tabId: string, sessionId: string) => boolean;
   appendAgentChatMessage: (tabId: string, message: ChatMessage) => void;
   appendAgentChatChunk: (tabId: string, messageId: string, text: string) => void;
   completeAgentChatMessage: (tabId: string, messageId: string) => void;
@@ -232,15 +309,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       );
     }
 
-    // Best-effort session cleanup — subproject B only sweeps sessions on
-    // whole-app exit, not on a single tab closing while the app keeps
-    // running. A session still mid-handshake (no real session id yet) has
-    // nothing on the backend to end.
-    if (found && isRequestTab(found.tab) && found.tab.agentSession?.status === 'active') {
-      Promise.resolve(endAgentSession(found.tab.agentSession.sessionId)).catch((err) => {
-        console.error('[pane-store] closeTab: failed to end agent session', err);
-      });
-    }
+    // Best-effort session cleanup for the tab being closed.
+    if (found) endSessionIfActive(found.tab);
 
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
@@ -395,29 +465,34 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   beginAgentSession(tabId, agentConfigId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab)) return tab;
         return {
           ...tab,
           agentSession: { agentConfigId, sessionId: '', status: 'starting', messages: [] },
         };
       }),
-    });
+    );
   },
 
   activateAgentSession(tabId, sessionId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        return { ...tab, agentSession: { ...tab.agentSession, sessionId, status: 'active' } };
+    const state = get();
+    const tab =
+      findTabInTree(state.root, tabId)?.tab ?? findTabInSnapshots(state.collectionTabState, tabId);
+    if (!tab || !isRequestTab(tab) || tab.agentSession?.status !== 'starting') return false;
+    set(
+      updateTabEverywhere(state, tabId, (t) => {
+        if (!isRequestTab(t) || t.agentSession?.status !== 'starting') return t;
+        return { ...t, agentSession: { ...t.agentSession, sessionId, status: 'active' } };
       }),
-    });
+    );
+    return true;
   },
 
   appendAgentChatMessage(tabId, message) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
         return {
           ...tab,
@@ -427,12 +502,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           },
         };
       }),
-    });
+    );
   },
 
   appendAgentChatChunk(tabId, messageId, text) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
         return {
           ...tab,
@@ -444,12 +519,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           },
         };
       }),
-    });
+    );
   },
 
   completeAgentChatMessage(tabId, messageId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
         return {
           ...tab,
@@ -461,12 +536,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           },
         };
       }),
-    });
+    );
   },
 
   failAgentChatMessage(tabId, messageId, error) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
         return {
           ...tab,
@@ -482,25 +557,25 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           },
         };
       }),
-    });
+    );
   },
 
   markAgentSessionEnded(tabId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
         return { ...tab, agentSession: { ...tab.agentSession, status: 'ended' } };
       }),
-    });
+    );
   },
 
   clearAgentSession(tabId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab)) return tab;
         return { ...tab, agentSession: undefined };
       }),
-    });
+    );
   },
 
   openContractTab(collectionName, collectionRoot) {
@@ -751,6 +826,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         tabs: activeLeaf.tabs,
         activeTabId: activeLeaf.activeTabId,
       };
+    } else {
+      // With no active collection there is no snapshot to keep the active
+      // leaf's tabs, so they are dropped. End their agent sessions first.
+      endActiveSessions(activeLeaf.tabs);
     }
 
     // Restore target collection's tabs (or empty if never visited).
@@ -792,13 +871,19 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Snapshot the current collection's tabs so they survive the switch.
     const updatedState = { ...collectionTabState };
+    const preservedTabIds = new Set<string>();
     if (activeCollection) {
       const activeLeaf = findActiveLeaf(root, activeGroupId);
       updatedState[activeCollection] = {
         tabs: activeLeaf.tabs,
         activeTabId: activeLeaf.activeTabId,
       };
+      for (const tab of activeLeaf.tabs) preservedTabIds.add(tab.id);
     }
+
+    // Every other tab in the pane tree is dropped below. End its agent
+    // session so no credentialed backend process is left orphaned.
+    endActiveSessions(collectAllTabs(root).filter((tab) => !preservedTabIds.has(tab.id)));
 
     // Flush dirty tabs before resetting the pane tree.
     const flush = (node: PaneNode): void => {
@@ -866,6 +951,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   reset() {
+    // Every tab in the pane tree and in the collection snapshots is dropped.
+    // The snapshot for the active collection is skipped because it is a
+    // stale copy: its live tabs are the ones in the pane tree.
+    const { root, activeCollection, collectionTabState } = get();
+    const snapshotTabs = Object.entries(collectionTabState)
+      .filter(([key]) => key !== activeCollection)
+      .flatMap(([, entry]) => entry.tabs);
+    endActiveSessions([...collectAllTabs(root), ...snapshotTabs]);
     set(buildInitialState());
   },
 

@@ -11,6 +11,7 @@ import { SplashScreen } from '@/components/SplashScreen';
 import { TitleBar } from '@/components/title-bar';
 import { Toaster } from '@/components/ui/sonner';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useAgentSessionEventBridge } from '@/lib/agent-session-event-bridge';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
@@ -34,6 +35,7 @@ function App() {
   const setConsoleHeight = useLayoutStore((s) => s.setConsoleHeight);
 
   useKeyboardShortcuts();
+  useAgentSessionEventBridge();
 
   useEffect(() => {
     const init = async () => {

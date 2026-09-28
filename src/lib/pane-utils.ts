@@ -138,6 +138,12 @@ export function collectLeafGroupIds(node: PaneNode): string[] {
   return [...collectLeafGroupIds(node.children[0]), ...collectLeafGroupIds(node.children[1])];
 }
 
+// Collects every tab from every leaf in the pane tree, in depth-first order.
+export function collectAllTabs(node: PaneNode): Tab[] {
+  if (node.type === 'leaf') return node.tabs;
+  return [...collectAllTabs(node.children[0]), ...collectAllTabs(node.children[1])];
+}
+
 // Returns the leaf matching activeGroupId, falling back to the first leaf.
 export function findActiveLeaf(node: PaneNode, activeGroupId: string): LeafNode {
   return findLeaf(node, activeGroupId) ?? findFirstLeaf(node);

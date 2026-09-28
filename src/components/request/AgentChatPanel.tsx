@@ -1,6 +1,5 @@
-import type { UnlistenFn } from '@tauri-apps/api/event';
 import { Loader2, Send } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,14 +13,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useCollectionPath } from '@/lib/collection-path';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
-import {
-  endAgentSession,
-  onAgentSessionChunk,
-  onAgentSessionFailed,
-  onAgentSessionFinished,
-  sendAgentPrompt,
-  startAgentSession,
-} from '@/lib/tauri-api';
+import { endAgentSession, sendAgentPrompt, startAgentSession } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { AgentChatSession } from '@/types/pane-types';
 
@@ -44,8 +36,6 @@ export function AgentChatPanel({
   const beginAgentSession = usePaneStore((s) => s.beginAgentSession);
   const activateAgentSession = usePaneStore((s) => s.activateAgentSession);
   const appendAgentChatMessage = usePaneStore((s) => s.appendAgentChatMessage);
-  const appendAgentChatChunk = usePaneStore((s) => s.appendAgentChatChunk);
-  const completeAgentChatMessage = usePaneStore((s) => s.completeAgentChatMessage);
   const failAgentChatMessage = usePaneStore((s) => s.failAgentChatMessage);
   const markAgentSessionEnded = usePaneStore((s) => s.markAgentSessionEnded);
   const clearAgentSession = usePaneStore((s) => s.clearAgentSession);
@@ -54,65 +44,9 @@ export function AgentChatPanel({
   const [promptText, setPromptText] = useState('');
   const [startError, setStartError] = useState<string | null>(null);
 
-  // Kept in sync every render so the event handlers below (subscribed only
-  // when the session id/status actually changes) always read the latest
-  // message list without needing to resubscribe on every chunk.
-  const agentSessionRef = useRef(agentSession);
-  agentSessionRef.current = agentSession;
-
-  const sessionId = agentSession?.status === 'active' ? agentSession.sessionId : undefined;
-
-  // Tracks whether this component instance is still mounted. Used by
-  // handleStart's continuation below: if the tab (and this panel) is
-  // closed while startAgentSession is still in flight, activating the
-  // resulting session in the store would be a silent no-op (no tab left
-  // to own it) and the backend agent process would leak. See the
-  // isMountedRef check in handleStart.
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!sessionId) return;
-    let disposed = false;
-    const unlistens: UnlistenFn[] = [];
-
-    const findStreamingMessageId = () =>
-      agentSessionRef.current?.messages.find((m) => m.streaming)?.id;
-
-    Promise.all([
-      onAgentSessionChunk((e) => {
-        if (e.session_id !== sessionId) return;
-        const messageId = findStreamingMessageId();
-        if (messageId) appendAgentChatChunk(tabId, messageId, e.text);
-      }),
-      onAgentSessionFinished((e) => {
-        if (e.session_id !== sessionId) return;
-        const messageId = findStreamingMessageId();
-        if (messageId) completeAgentChatMessage(tabId, messageId);
-      }),
-      onAgentSessionFailed((e) => {
-        if (e.session_id !== sessionId) return;
-        const messageId = findStreamingMessageId();
-        if (messageId) failAgentChatMessage(tabId, messageId, e.error);
-      }),
-    ]).then((fns) => {
-      if (disposed) {
-        for (const fn of fns) fn();
-      } else {
-        unlistens.push(...fns);
-      }
-    });
-
-    return () => {
-      disposed = true;
-      for (const fn of unlistens) fn();
-    };
-  }, [sessionId, tabId, appendAgentChatChunk, completeAgentChatMessage, failAgentChatMessage]);
+  // Streaming events (chunk/finished/failed) are routed into the store by
+  // the app-lifetime bridge in agent-session-event-bridge.ts, not here, so
+  // replies keep landing while this panel is unmounted or showing another tab.
 
   const handleStart = async () => {
     if (!selectedAgentConfigId || !cwd) return;
@@ -120,18 +54,16 @@ export function AgentChatPanel({
     beginAgentSession(tabId, selectedAgentConfigId);
     try {
       const newSessionId = await startAgentSession(selectedAgentConfigId, cwd);
-      if (!isMountedRef.current) {
-        // The tab closed mid-handshake: there's no tab left to own this
-        // session, so end it instead of leaving an orphaned, credentialed
-        // agent process running with nothing to ever call endAgentSession.
+      // The store decides whether this session still has an owner. It
+      // refuses when the tab was closed or dropped mid-handshake, and then
+      // nothing else would ever end this credentialed agent process.
+      const applied = activateAgentSession(tabId, newSessionId);
+      if (!applied) {
         endAgentSession(newSessionId).catch((err) => {
           console.error('[AgentChatPanel] failed to end orphaned session', err);
         });
-        return;
       }
-      activateAgentSession(tabId, newSessionId);
     } catch (err) {
-      if (!isMountedRef.current) return;
       clearAgentSession(tabId);
       setStartError(String(err));
     }
