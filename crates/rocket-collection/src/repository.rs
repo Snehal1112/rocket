@@ -13,8 +13,8 @@ use crate::summary::CollectionSummary;
 use crate::websocket::WebSocketRequest;
 
 /// Identifies which of a request's three script fields `save_request_script`
-/// targets. A local enum (not a reuse of `rocket-scripting::ScriptPhase`) —
-/// see this task's doc comment in the plan for why.
+/// targets. It is a local enum because `rocket-collection` must not depend on
+/// `rocket-scripting`, so `ScriptPhase` cannot be reused here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestScriptPhase {
     PreRequest,

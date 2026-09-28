@@ -801,6 +801,39 @@ fn save_request_script_only_touches_the_targeted_phase() {
 }
 
 #[test]
+fn save_request_script_on_uid_less_file_persists_a_real_uid() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let file_path = dir.path().join("my-api/no-uid.yml");
+    fs::write(
+        &file_path,
+        "info:\n  name: No Uid\n  type: http\nhttp:\n  method: GET\n  url: https://example.com\n",
+    )
+    .expect("write no-uid.yml");
+
+    repo.save_request_script(
+        "my-api",
+        "no-uid.yml",
+        rocket_collection::RequestScriptPhase::Tests,
+        "rok.test('x', () => {});".into(),
+    )
+    .expect("save_request_script");
+
+    // An empty uid must never be written to disk.
+    let written: crate::oc::OcHttpRequest =
+        serde_yaml::from_str(&fs::read_to_string(&file_path).expect("re-read no-uid.yml"))
+            .expect("parse no-uid.yml");
+    let uid = written.uid.expect("uid should be persisted");
+    assert!(!uid.is_empty(), "persisted uid must not be empty");
+
+    // The persisted uid is stable across reads.
+    let first = repo.get_request("my-api", "no-uid.yml").expect("load 1");
+    let second = repo.get_request("my-api", "no-uid.yml").expect("load 2");
+    assert_eq!(first.uid, uid);
+    assert_eq!(second.uid, uid);
+}
+
+#[test]
 fn save_request_script_errors_for_a_missing_request() {
     let (_dir, repo) = setup();
     repo.create("my-api").expect("create collection");

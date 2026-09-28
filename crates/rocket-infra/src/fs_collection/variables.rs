@@ -1,6 +1,6 @@
 use std::fs;
 
-use rocket_collection::{Collection, CollectionVariable, RequestScriptPhase};
+use rocket_collection::{generate_uid, Collection, CollectionVariable, RequestScriptPhase};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -210,11 +210,15 @@ pub(super) fn save_request_script(
         .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
 
     // Round-trip through the domain Request rather than editing
-    // runtime.scripts directly: oc_http_request_to_request/
-    // request_to_oc_http_request already implement the exact bidirectional
-    // mapping between the three Option<String> script fields and the OC
-    // YAML's Vec<OcScript> shape (see this task's doc comment for why).
+    // runtime.scripts directly. The shared conversions already map the three
+    // script fields to and from the OC YAML script list, so this avoids a
+    // second copy of that mapping.
     let mut req = oc_http_request_to_request(oc);
+    // A uid-less file would otherwise be written back with an empty uid.
+    // Persist a real one instead, as save_request does.
+    if req.uid.is_empty() {
+        req.uid = generate_uid();
+    }
     match phase {
         RequestScriptPhase::PreRequest => req.pre_request_script = Some(body),
         RequestScriptPhase::PostResponse => req.post_response_script = Some(body),
