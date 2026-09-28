@@ -1057,6 +1057,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <div className='flex-1 min-h-0 overflow-hidden'>
           <Suspense fallback={<EditorSkeleton />}>
             <ScriptsTab
+              tabId={tab.id}
+              collectionName={tab.source?.collection}
+              agentSession={tab.agentSession}
               preRequestScript={request.preRequestScript ?? ''}
               postResponseScript={request.postResponseScript ?? ''}
               testsScript={request.testsScript ?? ''}

@@ -1,4 +1,4 @@
-import { PanelRight } from 'lucide-react';
+import { MessageSquare, PanelRight } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
@@ -9,6 +9,8 @@ import {
 } from '@/components/editor/rok-types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { AgentChatSession } from '@/types/pane-types';
+import { AgentChatPanel } from './AgentChatPanel';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
 
 const MonacoWrapper = lazy(() =>
@@ -19,6 +21,9 @@ const MIN_SIDEBAR_WIDTH = 160;
 const MIN_EDITOR_WIDTH = 320;
 
 interface ScriptsTabProps {
+  tabId: string;
+  collectionName?: string;
+  agentSession?: AgentChatSession;
   preRequestScript: string;
   postResponseScript: string;
   testsScript: string;
@@ -57,6 +62,9 @@ function insertSnippet(editor: monacoNs.editor.IStandaloneCodeEditor | undefined
 }
 
 export function ScriptsTab({
+  tabId,
+  collectionName,
+  agentSession,
   preRequestScript,
   postResponseScript,
   testsScript,
@@ -77,6 +85,7 @@ export function ScriptsTab({
     'post-response': false,
     tests: false,
   });
+  const [showAgentChat, setShowAgentChat] = useState(false);
   const scriptsContainerRef = useRef<HTMLDivElement>(null);
   const [scriptsContainerWidth, setScriptsContainerWidth] = useState(0);
   const sidebarMaxWidth = Math.max(
@@ -118,113 +127,135 @@ export function ScriptsTab({
   };
 
   return (
-    <Tabs
-      ref={scriptsContainerRef}
-      value={activeTab}
-      onValueChange={(v) => setActiveTab(v as ScriptPhase)}
-      className='flex h-full min-h-0 flex-col'
-    >
-      <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
-        <TabsTrigger value='pre-request' className='text-xs'>
-          Pre Request
-        </TabsTrigger>
-        <TabsTrigger value='post-response' className='text-xs'>
-          Post Response
-        </TabsTrigger>
-        <TabsTrigger value='tests' className='text-xs'>
-          Tests
-        </TabsTrigger>
-        <Button
-          variant='ghost'
-          size='sm'
-          className='ml-auto h-7 gap-1 text-xs'
-          onClick={toggleSidebar}
-          disabled={!canShowSidebar}
-          aria-pressed={showSidebar}
-          aria-controls='script-snippet-sidebar'
-          title={
-            canShowSidebar
-              ? showSidebar
-                ? 'Hide snippets'
-                : 'Show snippets'
-              : 'Not enough space to show snippets'
-          }
-        >
-          <PanelRight className='h-3.5 w-3.5' />
-          {showSidebar ? 'Hide snippets' : 'Snippets'}
-        </Button>
-      </TabsList>
+    <div className='flex h-full min-h-0'>
+      <Tabs
+        ref={scriptsContainerRef}
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as ScriptPhase)}
+        className='flex h-full min-h-0 min-w-0 flex-1 flex-col'
+      >
+        <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
+          <TabsTrigger value='pre-request' className='text-xs'>
+            Pre Request
+          </TabsTrigger>
+          <TabsTrigger value='post-response' className='text-xs'>
+            Post Response
+          </TabsTrigger>
+          <TabsTrigger value='tests' className='text-xs'>
+            Tests
+          </TabsTrigger>
+          <Button
+            variant='ghost'
+            size='sm'
+            className='ml-auto h-7 gap-1 text-xs'
+            onClick={() => setShowAgentChat((v) => !v)}
+            aria-pressed={showAgentChat}
+            aria-controls='agent-chat-panel'
+            title={showAgentChat ? 'Hide AI assist' : 'Show AI assist'}
+          >
+            <MessageSquare className='h-3.5 w-3.5' />
+            AI Assist
+          </Button>
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-7 gap-1 text-xs'
+            onClick={toggleSidebar}
+            disabled={!canShowSidebar}
+            aria-pressed={showSidebar}
+            aria-controls='script-snippet-sidebar'
+            title={
+              canShowSidebar
+                ? showSidebar
+                  ? 'Hide snippets'
+                  : 'Show snippets'
+                : 'Not enough space to show snippets'
+            }
+          >
+            <PanelRight className='h-3.5 w-3.5' />
+            {showSidebar ? 'Hide snippets' : 'Snippets'}
+          </Button>
+        </TabsList>
 
-      <TabsContent value='pre-request' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
-        <div className='min-h-0 min-w-0 flex-1'>
-          <Suspense fallback={<EditorSkeleton />}>
-            <MonacoWrapper
-              language='javascript'
-              value={preRequestScript}
-              onChange={onChangePreRequest}
-              height='100%'
-              phase='pre-request'
-              onEditorReady={(editor) => {
-                editorRefs.current['pre-request'] = editor;
-              }}
+        <TabsContent value='pre-request' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+          <div className='min-h-0 min-w-0 flex-1'>
+            <Suspense fallback={<EditorSkeleton />}>
+              <MonacoWrapper
+                language='javascript'
+                value={preRequestScript}
+                onChange={onChangePreRequest}
+                height='100%'
+                phase='pre-request'
+                onEditorReady={(editor) => {
+                  editorRefs.current['pre-request'] = editor;
+                }}
+              />
+            </Suspense>
+          </div>
+          {showSidebar && (
+            <ScriptSnippetSidebar
+              maxWidth={sidebarMaxWidth}
+              snippets={PRE_REQUEST_SNIPPETS}
+              onInsert={(code) => insertSnippet(editorRefs.current['pre-request'], code)}
             />
-          </Suspense>
-        </div>
-        {showSidebar && (
-          <ScriptSnippetSidebar
-            maxWidth={sidebarMaxWidth}
-            snippets={PRE_REQUEST_SNIPPETS}
-            onInsert={(code) => insertSnippet(editorRefs.current['pre-request'], code)}
-          />
-        )}
-      </TabsContent>
+          )}
+        </TabsContent>
 
-      <TabsContent value='post-response' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
-        <div className='min-h-0 min-w-0 flex-1'>
-          <Suspense fallback={<EditorSkeleton />}>
-            <MonacoWrapper
-              language='javascript'
-              value={postResponseScript}
-              onChange={onChangePostResponse}
-              height='100%'
-              phase='post-response'
-              onEditorReady={(editor) => {
-                editorRefs.current['post-response'] = editor;
-              }}
+        <TabsContent value='post-response' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+          <div className='min-h-0 min-w-0 flex-1'>
+            <Suspense fallback={<EditorSkeleton />}>
+              <MonacoWrapper
+                language='javascript'
+                value={postResponseScript}
+                onChange={onChangePostResponse}
+                height='100%'
+                phase='post-response'
+                onEditorReady={(editor) => {
+                  editorRefs.current['post-response'] = editor;
+                }}
+              />
+            </Suspense>
+          </div>
+          {showSidebar && (
+            <ScriptSnippetSidebar
+              maxWidth={sidebarMaxWidth}
+              snippets={POST_RESPONSE_SNIPPETS}
+              onInsert={(code) => insertSnippet(editorRefs.current['post-response'], code)}
             />
-          </Suspense>
-        </div>
-        {showSidebar && (
-          <ScriptSnippetSidebar
-            maxWidth={sidebarMaxWidth}
-            snippets={POST_RESPONSE_SNIPPETS}
-            onInsert={(code) => insertSnippet(editorRefs.current['post-response'], code)}
-          />
-        )}
-      </TabsContent>
+          )}
+        </TabsContent>
 
-      <TabsContent value='tests' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
-        <div className='min-h-0 min-w-0 flex-1'>
-          <Suspense fallback={<EditorSkeleton />}>
-            <MonacoWrapper
-              language='javascript'
-              value={testsScript}
-              onChange={onChangeTests}
-              height='100%'
-              phase='tests'
-              onEditorReady={(editor) => {
-                editorRefs.current.tests = editor;
-              }}
+        <TabsContent value='tests' className='flex min-h-0 flex-1 m-0 overflow-hidden p-0'>
+          <div className='min-h-0 min-w-0 flex-1'>
+            <Suspense fallback={<EditorSkeleton />}>
+              <MonacoWrapper
+                language='javascript'
+                value={testsScript}
+                onChange={onChangeTests}
+                height='100%'
+                phase='tests'
+                onEditorReady={(editor) => {
+                  editorRefs.current.tests = editor;
+                }}
+              />
+            </Suspense>
+          </div>
+          {showSidebar && (
+            <ScriptSnippetSidebar
+              maxWidth={sidebarMaxWidth}
+              onInsert={(code) => insertSnippet(editorRefs.current.tests, code)}
             />
-          </Suspense>
-        </div>
-        {showSidebar && (
-          <ScriptSnippetSidebar
-            maxWidth={sidebarMaxWidth}
-            onInsert={(code) => insertSnippet(editorRefs.current.tests, code)}
-          />
-        )}
-      </TabsContent>
-    </Tabs>
+          )}
+        </TabsContent>
+      </Tabs>
+      {showAgentChat && (
+        <AgentChatPanel
+          tabId={tabId}
+          collectionName={collectionName}
+          agentSession={agentSession}
+          onInsertCode={(code) => insertSnippet(editorRefs.current[activeTab], code)}
+        />
+      )}
+    </div>
   );
 }
