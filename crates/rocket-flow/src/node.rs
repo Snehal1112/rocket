@@ -10,7 +10,8 @@ pub struct NodePosition {
 /// One node on a Flow canvas. `Request` nodes call an HTTP request when the
 /// flow runs; `Input` nodes hold a constant/variable-backed value with no
 /// incoming wires; `Output` nodes display whatever their single incoming
-/// wire resolves to.
+/// wire resolves to. `If` and `Switch` nodes route execution to one of their
+/// named exits.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
@@ -25,6 +26,28 @@ pub enum FlowNodeKind {
     Output {
         label: String,
     },
+    /// Routes to the "true" exit when `!!(condition)` is truthy, otherwise to
+    /// "false". Its output is its input, passed through unchanged.
+    If {
+        label: String,
+        condition: String,
+    },
+    /// Routes to the first case whose `matches` equals `String(value)`,
+    /// otherwise to "default". Its output is its input, passed through.
+    Switch {
+        label: String,
+        value: String,
+        cases: Vec<SwitchCase>,
+    },
+}
+
+/// One named case of a `Switch` node. Edges address a case by `id`, so
+/// renaming its `label` never breaks a wire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SwitchCase {
+    pub id: String,
+    pub label: String,
+    pub matches: String,
 }
 
 /// Where a `Request` node's method/url/headers/body/auth come from.
@@ -169,5 +192,53 @@ mod tests {
             serde_json::from_str(json).expect("deserialize minimal InlineRequestData");
         assert!(data.headers.is_empty());
         assert_eq!(data.body, None);
+    }
+
+    #[test]
+    fn flow_node_kind_if_tagged_roundtrip() {
+        let kind = FlowNodeKind::If {
+            label: "Logged in?".to_string(),
+            condition: "response.status === 200".to_string(),
+        };
+        let json = serde_json::to_string(&kind).expect("serialize FlowNodeKind");
+        assert!(json.contains("\"kind\":\"If\""), "got: {json}");
+        assert!(json.contains("\"condition\""), "got: {json}");
+        let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn flow_node_kind_switch_tagged_roundtrip_keeps_case_order() {
+        let kind = FlowNodeKind::Switch {
+            label: "Plan router".to_string(),
+            value: "response.body.plan".to_string(),
+            cases: vec![
+                SwitchCase {
+                    id: "c1".to_string(),
+                    label: "Free".to_string(),
+                    matches: "free".to_string(),
+                },
+                SwitchCase {
+                    id: "c2".to_string(),
+                    label: "Pro plan".to_string(),
+                    matches: "pro".to_string(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&kind).expect("serialize FlowNodeKind");
+        assert!(json.contains("\"kind\":\"Switch\""), "got: {json}");
+        let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn switch_case_fields_are_snake_case_on_disk() {
+        let case = SwitchCase {
+            id: "c1".to_string(),
+            label: "Free".to_string(),
+            matches: "free".to_string(),
+        };
+        let json = serde_json::to_string(&case).expect("serialize SwitchCase");
+        assert_eq!(json, r#"{"id":"c1","label":"Free","matches":"free"}"#);
     }
 }

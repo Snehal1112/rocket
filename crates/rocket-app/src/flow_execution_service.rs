@@ -630,6 +630,13 @@ impl FlowExecutionService {
                     .await?;
                 Ok(CapturedOutput::Request(Box::new(output)))
             }
+            // Temporary until plan 03 implements routing execution.
+            rocket_flow::FlowNodeKind::If { .. } | rocket_flow::FlowNodeKind::Switch { .. } => {
+                Err(DomainError::InvalidInput(format!(
+                    "node '{}': If/Switch nodes are not executable yet",
+                    node.id
+                )))
+            }
         }
     }
 }
@@ -2312,6 +2319,35 @@ mod tests {
             .expect("run");
 
         assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Failed);
+    }
+
+    /// Plan 03 replaces this placeholder with real routing and deletes this test.
+    #[tokio::test]
+    async fn routing_nodes_fail_until_routing_execution_exists() {
+        let flow = Flow {
+            name: "routing-placeholder".to_string(),
+            nodes: vec![FlowNode {
+                id: "if1".to_string(),
+                kind: FlowNodeKind::If {
+                    label: "Logged in?".to_string(),
+                    condition: "true".to_string(),
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("1"));
+
+        let summary = service
+            .run(&exec, run_input("routing-placeholder"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "if1"), FlowNodeStatus::Failed);
+        let error = summary.steps[0].error.as_deref().unwrap_or("");
+        assert!(error.contains("not executable yet"), "got: {error}");
     }
 
     #[tokio::test]

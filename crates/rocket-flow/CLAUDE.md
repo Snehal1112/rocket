@@ -28,7 +28,7 @@ cargo test -p rocket-flow -j4
 | Module | Responsibility |
 |---|---|
 | `handle.rs` | Exit/input handle names (`result`, `true`, `false`, `default`, `input`, `trigger`, `case:<id>`) |
-| `node.rs` | `FlowNodeKind`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
+| `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch), `SwitchCase`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort` + `FlowGraphError` (added in Plan 02) |
 

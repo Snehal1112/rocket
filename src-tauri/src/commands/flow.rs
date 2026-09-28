@@ -3,7 +3,7 @@ use rocket_app::{
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
-    RequestSource,
+    RequestSource, SwitchCase,
 };
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
@@ -121,6 +121,15 @@ pub enum FlowNodeKindDto {
     Output {
         label: String,
     },
+    If {
+        label: String,
+        condition: String,
+    },
+    Switch {
+        label: String,
+        value: String,
+        cases: Vec<SwitchCaseDto>,
+    },
 }
 impl From<FlowNodeKind> for FlowNodeKindDto {
     fn from(k: FlowNodeKind) -> Self {
@@ -131,6 +140,16 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
             },
             FlowNodeKind::Input { label, value } => FlowNodeKindDto::Input { label, value },
             FlowNodeKind::Output { label } => FlowNodeKindDto::Output { label },
+            FlowNodeKind::If { label, condition } => FlowNodeKindDto::If { label, condition },
+            FlowNodeKind::Switch {
+                label,
+                value,
+                cases,
+            } => FlowNodeKindDto::Switch {
+                label,
+                value,
+                cases: cases.into_iter().map(Into::into).collect(),
+            },
         }
     }
 }
@@ -143,6 +162,42 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
             },
             FlowNodeKindDto::Input { label, value } => FlowNodeKind::Input { label, value },
             FlowNodeKindDto::Output { label } => FlowNodeKind::Output { label },
+            FlowNodeKindDto::If { label, condition } => FlowNodeKind::If { label, condition },
+            FlowNodeKindDto::Switch {
+                label,
+                value,
+                cases,
+            } => FlowNodeKind::Switch {
+                label,
+                value,
+                cases: cases.into_iter().map(Into::into).collect(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchCaseDto {
+    pub id: String,
+    pub label: String,
+    pub matches: String,
+}
+impl From<SwitchCase> for SwitchCaseDto {
+    fn from(c: SwitchCase) -> Self {
+        Self {
+            id: c.id,
+            label: c.label,
+            matches: c.matches,
+        }
+    }
+}
+impl From<SwitchCaseDto> for SwitchCase {
+    fn from(c: SwitchCaseDto) -> Self {
+        Self {
+            id: c.id,
+            label: c.label,
+            matches: c.matches,
         }
     }
 }
@@ -450,6 +505,73 @@ mod tests {
                 )
             });
         assert_eq!(flow_file.status, GitStatus::Untracked);
+    }
+
+    fn routing_dto() -> FlowDto {
+        FlowDto {
+            name: "Routing".to_string(),
+            nodes: vec![
+                FlowNodeDto {
+                    id: "if1".to_string(),
+                    kind: FlowNodeKindDto::If {
+                        label: "Logged in?".to_string(),
+                        condition: "response.status === 200".to_string(),
+                    },
+                    position: NodePositionDto { x: 0.0, y: 0.0 },
+                },
+                FlowNodeDto {
+                    id: "sw1".to_string(),
+                    kind: FlowNodeKindDto::Switch {
+                        label: "Plan router".to_string(),
+                        value: "response.body.plan".to_string(),
+                        cases: vec![SwitchCaseDto {
+                            id: "c1".to_string(),
+                            label: "Pro plan".to_string(),
+                            matches: "pro".to_string(),
+                        }],
+                    },
+                    position: NodePositionDto { x: 200.0, y: 0.0 },
+                },
+            ],
+            edges: vec![FlowEdgeDto {
+                id: "e1".to_string(),
+                source_node_id: "if1".to_string(),
+                target_node_id: "sw1".to_string(),
+                target_field: "input".to_string(),
+                expression: String::new(),
+                source_handle: "true".to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn routing_node_dtos_keep_tag_values_and_camel_case_fields() {
+        let json = serde_json::to_string(&routing_dto()).expect("serialize FlowDto");
+        assert!(json.contains(r#""kind":"If""#), "got: {json}");
+        assert!(json.contains(r#""kind":"Switch""#), "got: {json}");
+        assert!(
+            json.contains(r#""condition":"response.status === 200""#),
+            "got: {json}"
+        );
+        assert!(
+            json.contains(r#""cases":[{"id":"c1","label":"Pro plan","matches":"pro"}]"#),
+            "got: {json}"
+        );
+    }
+
+    #[test]
+    fn routing_node_dtos_roundtrip_through_domain_type() {
+        let dto = routing_dto();
+        let domain: Flow = dto.clone().into();
+        assert!(matches!(domain.nodes[0].kind, FlowNodeKind::If { .. }));
+        match &domain.nodes[1].kind {
+            FlowNodeKind::Switch { cases, .. } => assert_eq!(cases[0].matches, "pro"),
+            other => panic!("expected a Switch node, got {other:?}"),
+        }
+        let back: FlowDto = domain.into();
+        let a = serde_json::to_value(&dto).expect("to_value dto");
+        let b = serde_json::to_value(&back).expect("to_value back");
+        assert_eq!(a, b);
     }
 
     #[test]

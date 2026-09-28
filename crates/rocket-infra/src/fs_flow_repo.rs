@@ -153,7 +153,7 @@ mod tests {
     use super::*;
     use rocket_flow::{
         FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
-        RequestSource,
+        RequestSource, SwitchCase,
     };
     use tempfile::TempDir;
 
@@ -512,6 +512,107 @@ mod tests {
         assert_eq!(
             repo.list("acme").expect("list"),
             vec!["Good Flow".to_string()]
+        );
+    }
+
+    #[test]
+    fn if_and_switch_nodes_with_routed_edges_roundtrip() {
+        let (_dir, repo) = setup();
+        let mut flow = sample("Routing Flow");
+        flow.nodes.push(FlowNode {
+            id: "if1".to_string(),
+            kind: FlowNodeKind::If {
+                label: "Logged in?".to_string(),
+                condition: "response.status === 200".to_string(),
+            },
+            position: NodePosition { x: 200.0, y: 0.0 },
+        });
+        flow.nodes.push(FlowNode {
+            id: "sw1".to_string(),
+            kind: FlowNodeKind::Switch {
+                label: "Plan router".to_string(),
+                value: "response.body.plan".to_string(),
+                cases: vec![SwitchCase {
+                    id: "c1".to_string(),
+                    label: "Pro plan".to_string(),
+                    matches: "pro".to_string(),
+                }],
+            },
+            position: NodePosition { x: 400.0, y: 0.0 },
+        });
+        flow.edges.push(FlowEdge {
+            id: "e1".to_string(),
+            source_node_id: "node-1".to_string(),
+            target_node_id: "if1".to_string(),
+            target_field: rocket_flow::handle::INPUT.to_string(),
+            expression: String::new(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
+        });
+        flow.edges.push(FlowEdge {
+            id: "e2".to_string(),
+            source_node_id: "if1".to_string(),
+            target_node_id: "sw1".to_string(),
+            target_field: rocket_flow::handle::INPUT.to_string(),
+            expression: String::new(),
+            source_handle: rocket_flow::handle::TRUE.to_string(),
+        });
+        repo.save("acme", &flow).expect("save");
+        assert_eq!(repo.get("acme", "Routing Flow").expect("get"), flow);
+    }
+
+    /// Mirrors the Phase 1 on-disk edge shape, which had no `source_handle`.
+    #[derive(serde::Serialize)]
+    struct Phase1Edge {
+        id: String,
+        source_node_id: String,
+        target_node_id: String,
+        target_field: String,
+        expression: String,
+    }
+
+    /// Mirrors the Phase 1 on-disk flow shape.
+    #[derive(serde::Serialize)]
+    struct Phase1Flow {
+        name: String,
+        nodes: Vec<FlowNode>,
+        edges: Vec<Phase1Edge>,
+    }
+
+    #[test]
+    fn fs_repo_resaves_phase1_file_byte_identically() {
+        let (dir, repo) = setup();
+        let mut nodes = sample("Phase One").nodes;
+        nodes.push(FlowNode {
+            id: "node-2".to_string(),
+            kind: FlowNodeKind::Output {
+                label: "Result".to_string(),
+            },
+            position: NodePosition { x: 400.0, y: 0.0 },
+        });
+        let phase1 = Phase1Flow {
+            name: "Phase One".to_string(),
+            nodes,
+            edges: vec![Phase1Edge {
+                id: "edge-1".to_string(),
+                source_node_id: "node-1".to_string(),
+                target_node_id: "node-2".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body".to_string(),
+            }],
+        };
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+        let path = flows_dir.join("phase-one.yml");
+        let original = serde_yaml::to_string(&phase1).expect("serialize Phase 1 flow");
+        fs::write(&path, &original).expect("write Phase 1 file");
+
+        let loaded = repo.get("acme", "Phase One").expect("load Phase 1 file");
+        repo.save("acme", &loaded).expect("re-save");
+
+        let resaved = fs::read_to_string(&path).expect("read re-saved file");
+        assert_eq!(
+            resaved, original,
+            "re-saving a Phase 1 file must not change it"
         );
     }
 }
