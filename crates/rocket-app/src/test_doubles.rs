@@ -156,6 +156,15 @@ impl CollectionRepository for InMemoryCollectionRepo {
     ) -> DomainResult<()> {
         Ok(())
     }
+    fn save_request_script(
+        &self,
+        _: &str,
+        _: &str,
+        _: rocket_collection::RequestScriptPhase,
+        _: String,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
 }
 
 /// Hands one `Arc<InMemoryCollectionRepo>` to a service expecting a `Box<dyn>`.
@@ -244,6 +253,15 @@ impl CollectionRepository for SharedCollectionRepo {
         c: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
         self.0.save_request_variables(a, b, c)
+    }
+    fn save_request_script(
+        &self,
+        a: &str,
+        b: &str,
+        c: rocket_collection::RequestScriptPhase,
+        d: String,
+    ) -> DomainResult<()> {
+        self.0.save_request_script(a, b, c, d)
     }
 }
 

@@ -754,6 +754,15 @@ pub(crate) mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
+        fn save_request_script(
+            &self,
+            _: &str,
+            _: &str,
+            _: rocket_collection::RequestScriptPhase,
+            _: String,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     /// A service over empty stub repos. Also used by the Flow Auth real-fetch

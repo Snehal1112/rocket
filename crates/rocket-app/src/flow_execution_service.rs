@@ -2256,6 +2256,15 @@ mod tests {
         ) -> DomainResult<()> {
             unimplemented!()
         }
+        fn save_request_script(
+            &self,
+            _c: &str,
+            _p: &str,
+            _phase: rocket_collection::RequestScriptPhase,
+            _body: String,
+        ) -> DomainResult<()> {
+            unimplemented!()
+        }
     }
 
     struct NullEnvRepo;

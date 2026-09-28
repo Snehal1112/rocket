@@ -2875,6 +2875,15 @@ mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
+        fn save_request_script(
+            &self,
+            _: &str,
+            _: &str,
+            _: rocket_collection::RequestScriptPhase,
+            _: String,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     fn sample_input(url: &str, env_name: Option<&str>) -> ExecuteRequestInput {
@@ -5760,6 +5769,15 @@ mod tests {
                 .push(("request".into(), v));
             Ok(())
         }
+        fn save_request_script(
+            &self,
+            _: &str,
+            _: &str,
+            _: rocket_collection::RequestScriptPhase,
+            _: String,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     struct SharedCollectionRepo(Arc<RecordingCollectionRepo>);
@@ -5840,6 +5858,15 @@ mod tests {
             c: Vec<CollectionVariable>,
         ) -> DomainResult<()> {
             self.0.save_request_variables(a, b, c)
+        }
+        fn save_request_script(
+            &self,
+            a: &str,
+            b: &str,
+            c: rocket_collection::RequestScriptPhase,
+            d: String,
+        ) -> DomainResult<()> {
+            self.0.save_request_script(a, b, c, d)
         }
     }
 

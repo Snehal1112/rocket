@@ -1227,6 +1227,15 @@ mod tests {
         ) -> DomainResult<()> {
             Ok(())
         }
+        fn save_request_script(
+            &self,
+            _: &str,
+            _: &str,
+            _: rocket_collection::RequestScriptPhase,
+            _: String,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     const COLLECTION_NAME: &str = "demo";
