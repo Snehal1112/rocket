@@ -1,5 +1,5 @@
-use rocket_flow::{topological_sort, Flow, FlowGraphError, FlowRepository};
-use rocket_shared::error::DomainResult;
+use rocket_flow::{validate, Flow, FlowGraphError, FlowRepository};
+use rocket_shared::error::{DomainError, DomainResult};
 
 pub struct FlowService {
     flow_repo: Box<dyn FlowRepository>,
@@ -23,26 +23,33 @@ impl FlowService {
     }
 
     pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
-        topological_sort(&flow).map_err(|e| match e {
-            FlowGraphError::Cycle { node_ids, edge_ids } => {
-                rocket_shared::error::DomainError::InvalidInput(format!(
-                    "flow contains a cycle through node(s): {}; edge(s): {}",
-                    node_ids.join(", "),
-                    edge_ids.join(", ")
-                ))
-            }
-            FlowGraphError::UnknownNode { node_id } => {
-                rocket_shared::error::DomainError::InvalidInput(format!(
-                    "edge references unknown node: {node_id}"
-                ))
-            }
-            FlowGraphError::DuplicateNode { node_id } => {
-                rocket_shared::error::DomainError::InvalidInput(format!(
-                    "flow has more than one node with id: {node_id}"
-                ))
-            }
-        })?;
+        validate(&flow).map_err(|e| DomainError::InvalidInput(graph_error_message(e)))?;
         self.flow_repo.save(collection, &flow)
+    }
+}
+
+/// Builds the save-error text. Every message that names graph elements ends
+/// with "node(s): <ids>; edge(s): <ids>", which the canvas parses to
+/// highlight them in red.
+fn graph_error_message(error: FlowGraphError) -> String {
+    match error {
+        FlowGraphError::Cycle { node_ids, edge_ids } => format!(
+            "flow contains a cycle through node(s): {}; edge(s): {}",
+            node_ids.join(", "),
+            edge_ids.join(", ")
+        ),
+        FlowGraphError::UnknownNode { node_id } => {
+            format!("edge references unknown node: {node_id}")
+        }
+        FlowGraphError::DuplicateNode { node_id } => {
+            format!("flow has more than one node with id: {node_id}")
+        }
+        FlowGraphError::InvalidNode { node_id, reason } => {
+            format!("flow is invalid: {reason} — node(s): {node_id}; edge(s): ")
+        }
+        FlowGraphError::InvalidEdge { edge_id, reason } => {
+            format!("flow is invalid: {reason} — node(s): ; edge(s): {edge_id}")
+        }
     }
 }
 
@@ -249,6 +256,76 @@ mod tests {
         assert_eq!(
             svc.list("demo").expect("list"),
             vec!["Login Then Fetch".to_string()]
+        );
+    }
+
+    fn node_of(id: &str, kind: FlowNodeKind) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind,
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    #[test]
+    fn save_rejects_an_if_node_without_input_and_names_it_in_the_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let flow = Flow {
+            name: "Routing".to_string(),
+            nodes: vec![node_of(
+                "if1",
+                FlowNodeKind::If {
+                    label: "Logged in?".to_string(),
+                    condition: "response.status === 200".to_string(),
+                },
+            )],
+            edges: vec![],
+        };
+        let err = svc
+            .save("demo", flow)
+            .expect_err("invalid flow must be rejected");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::InvalidInput(_)
+        ));
+        let message = err.to_string();
+        assert!(message.contains("flow is invalid: "), "got: {message}");
+        assert!(
+            message.ends_with("node(s): if1; edge(s): "),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn save_rejects_a_bad_edge_and_names_it_in_the_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let output = |id: &str| {
+            node_of(
+                id,
+                FlowNodeKind::Output {
+                    label: id.to_string(),
+                },
+            )
+        };
+        let flow = Flow {
+            name: "Bad Edge".to_string(),
+            nodes: vec![output("a"), output("b")],
+            edges: vec![FlowEdge {
+                id: "e9".to_string(),
+                source_node_id: "a".to_string(),
+                target_node_id: "b".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
+            }],
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("an edge out of an Output node must be rejected")
+            .to_string();
+        assert!(
+            message.ends_with("node(s): ; edge(s): e9"),
+            "got: {message}"
         );
     }
 }
