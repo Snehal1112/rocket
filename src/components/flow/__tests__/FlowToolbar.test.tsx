@@ -169,6 +169,88 @@ describe('FlowToolbar', () => {
     );
   });
 
+  it('forwards skip_reason and branch from flow-step-completed', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'if1',
+      status: 'success',
+      status_code: null,
+      duration_ms: null,
+      error: null,
+      value: null,
+      branch: 'false',
+    });
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'n2',
+      status: 'skipped',
+      status_code: null,
+      duration_ms: null,
+      error: null,
+      value: null,
+      skip_reason: 'branch_not_taken',
+    });
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'if1',
+      'success',
+      expect.objectContaining({ branch: 'false', skipReason: undefined }),
+    );
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'n2',
+      'skipped',
+      expect.objectContaining({ skipReason: 'branch_not_taken', branch: undefined }),
+    );
+  });
+
+  it('applies skipReason and branch from the returned summary', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-123');
+    resolveRun({
+      runId: 'run-123',
+      steps: [
+        {
+          nodeId: 'sw1',
+          status: 'success',
+          statusCode: null,
+          durationMs: null,
+          error: null,
+          value: null,
+          branch: 'case:c1',
+        },
+        {
+          nodeId: 'n3',
+          status: 'skipped',
+          statusCode: null,
+          durationMs: null,
+          error: null,
+          value: null,
+          skipReason: 'upstream_failed',
+        },
+      ],
+      stoppedReason: 'completed',
+    });
+    await waitFor(() =>
+      expect(onPatchStatus).toHaveBeenCalledWith(
+        'n3',
+        'skipped',
+        expect.objectContaining({ skipReason: 'upstream_failed' }),
+      ),
+    );
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'sw1',
+      'success',
+      expect.objectContaining({ branch: 'case:c1' }),
+    );
+  });
+
   it('forwards the active global environment name to runFlow when set', async () => {
     vi.mocked(getActiveGlobalEnvName).mockReturnValue('shared-global');
     renderToolbar();

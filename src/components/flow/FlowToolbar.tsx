@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import {
   cancelFlowRun,
+  type FlowStepCompletedEvent,
+  type FlowStepResult,
   onFlowRunStarted,
   onFlowStepCompleted,
   onFlowStepStarted,
@@ -25,6 +27,30 @@ interface FlowToolbarProps {
   // Runs before a new run starts. `run_flow` runs the flow saved on disk, so
   // this saves unsaved canvas edits first. Returning false aborts the run.
   onBeforeRun?: () => Promise<boolean>;
+}
+
+// Maps a streamed step event (snake_case) to the per-node detail the tab stores.
+function detailFromEvent(event: FlowStepCompletedEvent): FlowNodeDetail {
+  return {
+    statusCode: event.status_code ?? undefined,
+    durationMs: event.duration_ms ?? undefined,
+    error: event.error ?? undefined,
+    value: event.value ?? undefined,
+    skipReason: event.skip_reason ?? undefined,
+    branch: event.branch ?? undefined,
+  };
+}
+
+// Maps a run_flow summary step (camelCase) to the same detail shape.
+function detailFromStep(step: FlowStepResult): FlowNodeDetail {
+  return {
+    statusCode: step.statusCode ?? undefined,
+    durationMs: step.durationMs ?? undefined,
+    error: step.error ?? undefined,
+    value: step.value ?? undefined,
+    skipReason: step.skipReason ?? undefined,
+    branch: step.branch ?? undefined,
+  };
 }
 
 export function FlowToolbar({
@@ -82,12 +108,7 @@ export function FlowToolbar({
     });
     void onFlowStepCompleted((event) => {
       if (event.run_id !== resumedRunId) return;
-      onPatchStatusRef.current(event.node_id, event.status, {
-        statusCode: event.status_code ?? undefined,
-        durationMs: event.duration_ms ?? undefined,
-        error: event.error ?? undefined,
-        value: event.value ?? undefined,
-      });
+      onPatchStatusRef.current(event.node_id, event.status, detailFromEvent(event));
     }).then((fn) => {
       if (disposed) fn();
       else unlistenStep = fn;
@@ -133,12 +154,7 @@ export function FlowToolbar({
     });
     const unlistenStep = await onFlowStepCompleted((event) => {
       if (runId === null || event.run_id !== runId) return;
-      onPatchStatus(event.node_id, event.status, {
-        statusCode: event.status_code ?? undefined,
-        durationMs: event.duration_ms ?? undefined,
-        error: event.error ?? undefined,
-        value: event.value ?? undefined,
-      });
+      onPatchStatus(event.node_id, event.status, detailFromEvent(event));
     });
     unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep];
 
@@ -154,12 +170,7 @@ export function FlowToolbar({
       // The summary is the authoritative final state. Event delivery is not
       // guaranteed to finish before the command response arrives.
       for (const step of summary.steps) {
-        onPatchStatus(step.nodeId, step.status, {
-          statusCode: step.statusCode ?? undefined,
-          durationMs: step.durationMs ?? undefined,
-          error: step.error ?? undefined,
-          value: step.value ?? undefined,
-        });
+        onPatchStatus(step.nodeId, step.status, detailFromStep(step));
       }
       onRunStateChange('done', summary.runId);
     } catch (err) {
