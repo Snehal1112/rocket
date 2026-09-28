@@ -501,9 +501,9 @@ fn shutting_down_error() -> DomainError {
 /// Maps Rocket's transport-agnostic `McpServerSpec` (owned by `rocket-acp`,
 /// which must not depend on `agent-client-protocol` -- see that crate's DDD
 /// boundary) to the real `agent_client_protocol::schema::v1::McpServer` wire
-/// type. `rocket-app` (Plan 03) decides *which* variants to build for a given
-/// session; this function only translates that decision, it never chooses
-/// Http vs Stdio itself.
+/// type. `select_mcp_servers_for_agent` (below, in this file) decides *which*
+/// variants to keep for a given agent; this function only translates that
+/// already-selected list, it never chooses Http vs Stdio itself.
 fn mcp_server_specs_to_wire(specs: &[McpServerSpec]) -> Vec<McpServer> {
     specs
         .iter()
