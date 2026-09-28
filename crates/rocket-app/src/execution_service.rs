@@ -355,20 +355,31 @@ impl RequestExecutionService {
     }
 
     /// Builds a scope-separated `VariableContext` from all backend-accessible
-    /// scopes (collection, environment, folder-chain, request-level). Does NOT
-    /// populate `global_env` — callers that need it (script execution) load it
-    /// separately via `global_env_name`, since it's a different named environment.
+    /// scopes (global env, collection, environment, folder-chain,
+    /// request-level).
     ///
     /// Reused by `build_variable_context()` and `execute()`.
     fn build_variable_scopes(
         &self,
+        global_env_name: Option<&str>,
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> VariableContext {
-        // Precedence (lowest → highest): collection < env < folder < request.
+        // Precedence (lowest → highest): global_env < collection < env < folder < request.
         let mut ctx = VariableContext::default();
+
+        if let Some(name) = global_env_name {
+            if let Ok(global_env) = self.env_repo.get(name) {
+                for var in global_env.variables.iter().filter(|v| v.enabled) {
+                    ctx.global_env.insert(var.key.clone(), var.value.clone());
+                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
+                        ctx.secret_values.insert(var.value.clone());
+                    }
+                }
+            }
+        }
 
         let effective_val = |cv: &rocket_collection::CollectionVariable| -> String {
             if cv.value.is_empty() {
@@ -427,18 +438,25 @@ impl RequestExecutionService {
     }
 
     /// Builds a flattened variable map from all backend-accessible scopes
-    /// (collection, environment, folder-chain, request-level).
+    /// (global env, collection, environment, folder-chain, request-level).
     ///
     /// Reused by `resolve_request()`, `run_load_test()`, and OAuth2 commands.
     pub fn build_variable_context(
         &self,
+        global_env_name: Option<&str>,
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> std::collections::HashMap<String, String> {
-        self.build_variable_scopes(collection, environment_name, request_path, external_secrets)
-            .flatten()
+        self.build_variable_scopes(
+            global_env_name,
+            collection,
+            environment_name,
+            request_path,
+            external_secrets,
+        )
+        .flatten()
     }
 
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
@@ -449,8 +467,9 @@ impl RequestExecutionService {
         input: &ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> DomainResult<HttpRequest> {
-        // Build variable map: collection < env < folder < request.
+        // Build variable map: global_env < collection < env < folder < request.
         let vars = self.build_variable_context(
+            input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
@@ -993,24 +1012,13 @@ impl RequestExecutionService {
         // Build scope-separated variable context for script phases. Scripts read
         // individual scopes via rok.getCollectionVar/getEnvVar/getGlobalEnvVar, so
         // each scope must stay distinct rather than being pre-flattened into one.
-        let mut var_ctx = self.build_variable_scopes(
+        let var_ctx = self.build_variable_scopes(
+            input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
-        if let Some(name) = input.global_env_name.as_deref() {
-            if let Ok(global_env) = self.env_repo.get(name) {
-                for var in global_env.variables.iter().filter(|v| v.enabled) {
-                    var_ctx
-                        .global_env
-                        .insert(var.key.clone(), var.value.clone());
-                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
-                        var_ctx.secret_values.insert(var.value.clone());
-                    }
-                }
-            }
-        }
 
         let sandbox_mode = match input.collection.as_deref() {
             Some(col) => match self
@@ -5296,6 +5304,40 @@ mod tests {
         assert!(
             !captured.env.contains_key("API_KEY"),
             "env scope must not contain the collection variable (would indicate the old flattening bug)"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_request_populates_global_env_scope_for_url_resolution() {
+        let mut global_env = Environment::new("shared-global");
+        global_env.set_variable(Variable::new("ORG_ID", "acme"));
+        let env_repo = MultiEnvRepo::new(vec![global_env]);
+
+        let executor = Arc::new(MockExecutor::new(200));
+        let executor_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://example.com/{{ORG_ID}}", None);
+        input.global_env_name = Some("shared-global".into());
+
+        svc.execute(input).await.expect("execute should succeed");
+
+        let last_url = executor_arc.last_url.lock().expect("lock").clone();
+        assert_eq!(
+            last_url,
+            Some("https://example.com/acme".to_string()),
+            "a global env var must resolve in the sent request URL, not just script scope"
         );
     }
 
