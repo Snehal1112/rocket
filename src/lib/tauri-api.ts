@@ -1843,6 +1843,17 @@ export const onFlowRunStarted = (
 ): Promise<UnlistenFn> =>
   listen<FlowRunStartedEvent>('flow-run-started', (e) => handler(e.payload));
 
+export interface FlowStepStartedEvent {
+  type: 'flowStepStarted';
+  run_id: string;
+  node_id: string;
+}
+
+export const onFlowStepStarted = (
+  handler: (event: FlowStepStartedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowStepStartedEvent>('flow-step-started', (e) => handler(e.payload));
+
 export interface FlowStepCompletedEvent {
   type: 'flowStepCompleted';
   run_id: string;

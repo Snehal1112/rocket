@@ -3,7 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
-import { cancelFlowRun, onFlowRunStarted, onFlowStepCompleted, runFlow } from '@/lib/tauri-api';
+import {
+  cancelFlowRun,
+  onFlowRunStarted,
+  onFlowStepCompleted,
+  onFlowStepStarted,
+  runFlow,
+} from '@/lib/tauri-api';
 
 type NodeDetail = { statusCode?: number; durationMs?: number; error?: string };
 
@@ -65,8 +71,16 @@ export function FlowToolbar({
   // mount that started it still applies the final summary when it ends.
   useEffect(() => {
     if (!resumedRunId) return;
-    let unlisten: UnlistenFn | undefined;
+    let unlistenStep: UnlistenFn | undefined;
+    let unlistenStarted: UnlistenFn | undefined;
     let disposed = false;
+    void onFlowStepStarted((event) => {
+      if (event.run_id !== resumedRunId) return;
+      onPatchStatusRef.current(event.node_id, 'running');
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlistenStarted = fn;
+    });
     void onFlowStepCompleted((event) => {
       if (event.run_id !== resumedRunId) return;
       onPatchStatusRef.current(event.node_id, event.status, {
@@ -76,11 +90,12 @@ export function FlowToolbar({
       });
     }).then((fn) => {
       if (disposed) fn();
-      else unlisten = fn;
+      else unlistenStep = fn;
     });
     return () => {
       disposed = true;
-      unlisten?.();
+      unlistenStarted?.();
+      unlistenStep?.();
     };
   }, [resumedRunId]);
 
@@ -112,6 +127,10 @@ export function FlowToolbar({
       setActiveRunId(event.run_id);
       onRunStateChange('running', event.run_id);
     });
+    const unlistenStepStarted = await onFlowStepStarted((event) => {
+      if (runId === null || event.run_id !== runId) return;
+      onPatchStatus(event.node_id, 'running');
+    });
     const unlistenStep = await onFlowStepCompleted((event) => {
       if (runId === null || event.run_id !== runId) return;
       onPatchStatus(event.node_id, event.status, {
@@ -120,7 +139,7 @@ export function FlowToolbar({
         error: event.error ?? undefined,
       });
     });
-    unlistenRefs.current = [unlistenStarted, unlistenStep];
+    unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep];
 
     try {
       // Read fresh at click-time, not from a prop snapshotted at an earlier

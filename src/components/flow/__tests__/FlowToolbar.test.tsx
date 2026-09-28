@@ -13,6 +13,7 @@ vi.mock('@/lib/tauri-api', async () => {
     cancelFlowRun: vi.fn(),
     saveFlow: vi.fn(),
     onFlowRunStarted: vi.fn(),
+    onFlowStepStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
   };
 });
@@ -31,6 +32,7 @@ type StepHandler = Parameters<typeof tauriApi.onFlowStepCompleted>[0];
 
 let startedHandler: StartedHandler | undefined;
 let stepHandler: StepHandler | undefined;
+let startedStepHandler: Parameters<typeof tauriApi.onFlowStepStarted>[0] | undefined;
 let resolveRun: (summary: tauriApi.FlowRunSummary) => void = () => {
   // Reassigned by beforeEach's mock implementation before use.
 };
@@ -59,8 +61,15 @@ describe('FlowToolbar', () => {
   beforeEach(() => {
     startedHandler = undefined;
     stepHandler = undefined;
+    startedStepHandler = undefined;
     vi.mocked(tauriApi.onFlowRunStarted).mockImplementation(async (h) => {
       startedHandler = h;
+      return () => {
+        // Fake unlisten — no real Tauri listener to tear down in tests.
+      };
+    });
+    vi.mocked(tauriApi.onFlowStepStarted).mockImplementation(async (h) => {
+      startedStepHandler = h;
       return () => {
         // Fake unlisten — no real Tauri listener to tear down in tests.
       };
@@ -85,6 +94,7 @@ describe('FlowToolbar', () => {
     onRunStateChange.mockClear();
     vi.mocked(tauriApi.cancelFlowRun).mockClear();
     vi.mocked(tauriApi.onFlowRunStarted).mockClear();
+    vi.mocked(tauriApi.onFlowStepStarted).mockClear();
     vi.mocked(tauriApi.onFlowStepCompleted).mockClear();
     vi.mocked(tauriApi.runFlow).mockClear();
   });
@@ -260,5 +270,14 @@ describe('FlowToolbar', () => {
     });
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-9');
+  });
+
+  it('shows a node as running when flow-step-started fires', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedStepHandler).toBeDefined());
+    started('run-123');
+    startedStepHandler?.({ type: 'flowStepStarted', run_id: 'run-123', node_id: 'node-a' });
+    expect(onPatchStatus).toHaveBeenCalledWith('node-a', 'running');
   });
 });
