@@ -390,7 +390,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
       <div class="layer-content">
         <div class="two-col">
           <div class="service-container">
-            <div class="service-container-label">rocket-app — Application Services (14)</div>
+            <div class="service-container-label">rocket-app — Application Services (19)</div>
 
             <!-- Row 1 (3) -->
             <div class="service-grid service-grid-3">
@@ -422,12 +422,21 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
             <!-- Row 5 (2) -->
             <div class="service-grid service-grid-2 mt8">
               <div class="svc svc-new clickable" tabindex="0" role="button" data-id="ContractService"><span class="click-hint">↗</span><div class="svc-title">ContractService <span class="new-badge">NEW</span></div><div class="svc-sub">drift · state machine · OpenAPI</div><button class="csm-btn" onclick="event.stopPropagation();openCSM()">⬡ View State Machine</button></div>
-              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="IdentityService"><span class="click-hint">↗</span><div class="svc-title">IdentityService <span class="new-badge">NEW</span></div><div class="svc-sub">OIDC · groups · governance</div></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="SecurityAuditService"><span class="click-hint">↗</span><div class="svc-title">SecurityAuditService <span class="new-badge">NEW</span></div><div class="svc-sub">tamper-evident audit log · SHA-256 hash chain · SOC 2 / ISO 27001 / HIPAA compliance enforcement</div></div>
             </div>
 
-            <!-- Row 6 (1) — full-width -->
-            <div class="service-grid mt8" style="grid-template-columns:1fr">
-              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="SecurityAuditService"><span class="click-hint">↗</span><div class="svc-title">SecurityAuditService <span class="new-badge">NEW</span></div><div class="svc-sub">tamper-evident audit log · SHA-256 hash chain · SOC 2 / ISO 27001 / HIPAA compliance enforcement</div></div>
+            <!-- Row 6 (3) — AI-assist chat panel + collection runner -->
+            <div class="service-grid service-grid-3 mt8">
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="AgentConfigService"><span class="click-hint">↗</span><div class="svc-title">AgentConfigService <span class="new-badge">NEW</span></div><div class="svc-sub">CRUD · RocketVault credential resolve</div></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="AcpSessionService"><span class="click-hint">↗</span><div class="svc-title">AcpSessionService <span class="new-badge">NEW</span></div><div class="svc-sub">agent process lifecycle · streamed chat</div></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="CollectionRunnerService"><span class="click-hint">↗</span><div class="svc-title">CollectionRunnerService <span class="new-badge">NEW</span></div><div class="svc-sub">sequential tree run · cancellation</div></div>
+            </div>
+
+            <!-- Row 7 (3) — visual flow builder + secret hardening -->
+            <div class="service-grid service-grid-3 mt8">
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="FlowService"><span class="click-hint">↗</span><div class="svc-title">FlowService <span class="new-badge">NEW</span></div><div class="svc-sub">CRUD · cycle validation</div></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="FlowExecutionService"><span class="click-hint">↗</span><div class="svc-title">FlowExecutionService <span class="new-badge">NEW</span></div><div class="svc-sub">topological run · wire expressions</div></div>
+              <div class="svc svc-new clickable" tabindex="0" role="button" data-id="SecretManagerService"><span class="click-hint">↗</span><div class="svc-title">SecretManagerService <span class="new-badge">NEW</span></div><div class="svc-sub">RocketVault connections · keychain</div></div>
             </div>
           </div>
 
@@ -501,6 +510,22 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
                 <div class="ir-name">FsContractRepo</div>
                 <div class="ir-desc">list · get · save · delete</div>
               </div>
+              <div class="ir">
+                <div class="ir-name">FsFlowRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">one YAML per flow · &lt;collection&gt;/flows/&lt;slug&gt;.yml</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">SharedPathFlowRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">Arc&lt;RwLock&lt;PathBuf&gt;&gt; hot-swap, mirrors SharedPathCollectionRepo</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsSecretManagerRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">RocketVault connection records — client_secret excluded, resolved via SecretStore</div>
+              </div>
+              <div class="ir">
+                <div class="ir-name">FsAgentConfigRepo <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">list · get · save · delete — AI-assist agent configs</div>
+              </div>
             </div>
 
             <!-- Security pane -->
@@ -530,8 +555,16 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
                 <div class="ir-desc">Warn (log only) | Block (reject op)</div>
               </div>
               <div class="ir">
-                <div class="ir-name">keyring-rs <span class="ir-badge">NEW</span></div>
-                <div class="ir-desc">OS keychain — tokens + git creds</div>
+                <div class="ir-name">KeyringSecretStore <span class="ir-badge">NEW</span></div>
+                <div class="ir-desc">implements SecretStore (rocket-environment) via the keyring crate</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Namespacing</div>
+                <div class="ir-desc">new_env_secrets() vs new_vault_connections() — separate keychain service labels, one impl</div>
+              </div>
+              <div class="ir ir-sub">
+                <div class="ir-name">Scope</div>
+                <div class="ir-desc">environment-variable secrets + RocketVault connection client secrets only — not git credentials or OAuth2 tokens</div>
               </div>
               <div class="ir ir-sub">
                 <div class="ir-name">Stores</div>
@@ -646,13 +679,18 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
           <!-- Row 3 (2) -->
           <div class="service-grid service-grid-2 mt8">
             <div class="crate crate-default clickable" tabindex="0" role="button" data-id="rocket-import"><span class="click-hint">↗</span><div class="crate-title">rocket-import</div><div class="crate-sub">Bruno .bru / .yml → OpenCollection</div></div>
-            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-identity"><span class="click-hint">↗</span><div class="crate-title">rocket-identity <span class="new-badge">NEW</span></div><div class="crate-sub">OIDC · PKCE · opaque group IDs</div></div>
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-scripting"><span class="click-hint">↗</span><div class="crate-title">rocket-scripting <span class="new-badge">NEW</span></div><div class="crate-sub">ScriptEngine · ScriptContext · ScriptResult</div></div>
           </div>
 
           <!-- Row 4 (2) -->
           <div class="service-grid service-grid-2 mt8">
-            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-scripting"><span class="click-hint">↗</span><div class="crate-title">rocket-scripting <span class="new-badge">NEW</span></div><div class="crate-sub">ScriptEngine · ScriptContext · ScriptResult</div></div>
             <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-audit"><span class="click-hint">↗</span><div class="crate-title">rocket-audit <span class="new-badge">NEW</span></div><div class="crate-sub">AuditLogRepository · SecurityAuditEvent · AuditEventKind (9 variants)</div></div>
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-acp"><span class="click-hint">↗</span><div class="crate-title">rocket-acp <span class="new-badge">NEW</span></div><div class="crate-sub">AgentConfig · AgentConfigRepository · AcpSessionClient</div></div>
+          </div>
+
+          <!-- Row 5 (1) — full-width -->
+          <div class="service-grid mt8" style="grid-template-columns:1fr">
+            <div class="crate crate-new clickable" tabindex="0" role="button" data-id="rocket-flow"><span class="click-hint">↗</span><div class="crate-title">rocket-flow <span class="new-badge">NEW</span></div><div class="crate-sub">Flow · FlowNode · FlowEdge · FlowRepository · topological_sort (cycle detection)</div></div>
           </div>
           <div class="crate-module-note">
 
@@ -719,6 +757,28 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
               </div>
             </div>
 
+            <div class="cmn-row">
+              <span class="cmn-label">rocket-acp</span>
+              <div class="cmn-tokens">
+                <span class="cmn-token key">AgentConfig</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key trait">AgentConfigRepository</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key trait">AcpSessionClient</span><span class="cmn-sep">·</span>
+                <span class="cmn-token note">no dependency on Tauri, DomainEvent, or agent-client-protocol</span>
+              </div>
+            </div>
+
+            <div class="cmn-row">
+              <span class="cmn-label">rocket-flow</span>
+              <div class="cmn-tokens">
+                <span class="cmn-token key">Flow</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key">FlowNode</span><span class="cmn-sep">·</span><span class="cmn-token">FlowEdge</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">FlowNodeKind</span><span class="cmn-sep">·</span><span class="cmn-token">RequestSource</span><span class="cmn-sep">·</span>
+                <span class="cmn-token key trait">FlowRepository</span><span class="cmn-sep">·</span>
+                <span class="cmn-token">topological_sort</span><span class="cmn-sep">·</span>
+                <span class="cmn-token note">not part of the OpenCollection spec — Rocket-only extension format</span>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -753,8 +813,9 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary)
           <div class="block-title">Filesystem — OpenCollection v1.0.0</div>
           <div class="fs-rows">
             <div class="fs-row">workspace.yml · workspaces.yml · collections/ · environments/ · history/ · cookies/</div>
-            <div class="fs-row">.rocket/contracts/ &nbsp;·&nbsp; .rocket/identity/groups.yml <span class="new-badge">NEW</span></div>
-            <div class="fs-row">app_data_dir/notifications.enc (AES-256-GCM, keychain-derived key) <span class="new-badge">NEW</span></div>
+            <div class="fs-row">.rocket/contracts/</div>
+            <div class="fs-row">&lt;collection&gt;/flows/&lt;slug&gt;.yml — one file per flow, Rocket-only extension, outside opencollection.yml <span class="new-badge">NEW</span></div>
+            <div class="fs-row">OS keychain (not on disk): env-var secrets · RocketVault connection secrets — via KeyringSecretStore <span class="new-badge">NEW</span></div>
           </div>
         </div>
       </div>
@@ -896,6 +957,11 @@ const DATA = {
         'No invoke() calls directly from components — always through tauri-api.ts',
         'No any types without an explanatory comment',
       ]},
+      { title:'New in v4 — key UI surfaces', type:'kv', rows:[
+        ['AgentChatPanel (ScriptsTab)','AI-assist chat — streams via agent-session-event-bridge; "Insert" action per code block into the active Monaco editor'],
+        ['FlowPane / FlowCanvas','@xyflow/react node-graph editor for the visual Flow builder'],
+        ['RunnerPane / RunnerRequestList / RunnerResultsList','Collection Runner UI — state lives in the existing pane-store, no separate store'],
+      ]},
     ]
   },
 
@@ -996,7 +1062,7 @@ const DATA = {
     badge:'Application Service', badgeColor:'#6B5ED4',
     title:'GitAppService',
     layer:'rocket-app · Application layer',
-    desc:'Full Git integration using the git2 crate (libgit2 bindings). Never shells out to the git CLI. Credentials stored in OS keychain via keyring-rs — never written to disk.',
+    desc:'Full Git integration using the git2 crate (libgit2 bindings, >=0.21.0). Never shells out to the git CLI. GitCredentials are supplied per-call from the frontend — rocket-git itself does not persist them.',
     sections:[
       { title:'Capabilities', type:'list', items:[
         'Stage, unstage, commit with message and author',
@@ -1009,11 +1075,17 @@ const DATA = {
         'Commit log with pagination',
         'Remote management: add, remove, set-url',
       ]},
-      { title:'Credential handling', type:'kv', rows:[
-        ['Storage','OS keychain via keyring-rs'],
-        ['SSH','Key path auto-detected from ~/.ssh/; passphrase in keychain'],
-        ['HTTPS','Username + token stored encrypted in keychain'],
-        ['Rule','Never persisted to any file on disk'],
+      { title:'GitCredentials (enum)', type:'kv', rows:[
+        ['SshKey { private_key_path, passphrase }','explicit key path'],
+        ['SshAgent','delegates to a running ssh-agent'],
+        ['UserPass { username, password }','HTTPS basic'],
+        ['Token { token }','HTTPS token'],
+      ]},
+      { title:'SSH host / TLS certificate verification', type:'list', items:[
+        'build_callbacks registers one certificate_check callback, branching on SSH hostkey vs HTTPS x509',
+        'Diagnostic-only — the accept/reject decision is always delegated back to libgit2/libssh2/OpenSSL; no trust-on-first-use is ever written to disk',
+        'SshTrustStore is injectable — SystemSshTrustStore (~/.ssh/known_hosts) in prod, fixtures in tests',
+        'Push uses --force-with-lease semantics, never a blind force',
       ]},
       { title:'UI', type:'list', items:[
         'Two-panel Bruno-style layout with back-navigation breadcrumb',
@@ -1132,30 +1204,116 @@ const DATA = {
     ]
   },
 
-  IdentityService: {
-    badge:'Application Service · New in v3', badgeColor:'#16A34A',
-    title:'IdentityService',
+  AgentConfigService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'AgentConfigService',
     layer:'rocket-app · Application layer',
-    desc:'Handles SSO/OIDC authentication and runtime group membership resolution. Enforces contract governance by matching OIDC token claims against opaque group identifiers stored in groups.yml.',
+    desc:'CRUD over saved AI-assist agent configurations (command, args, working dir) and credential resolution. Never holds a credential value itself — only a pointer into RocketVault, resolved on demand via SecretManagerService.',
     sections:[
-      { title:'Auth flow', type:'list', items:[
-        'Initiates PKCE authorization code flow via system browser',
-        'TCP callback server receives authorization code',
-        'Exchanges code for tokens at OIDC token endpoint',
-        'Stores access + refresh tokens exclusively in OS keychain via keyring-rs',
-        'Tokens never written to disk in any form',
+      { title:'Responsibilities', type:'list', items:[
+        'list / get / save / delete AgentConfig records via FsAgentConfigRepo',
+        'resolve_credential — looks up the config\'s vault pointer and fetches the live secret value',
+        'test_agent_config — validates a config can actually resolve its credential before saving',
       ]},
-      { title:'Group resolution', type:'list', items:[
-        'groups.yml stores opaque SSO group identifiers — no emails or PII',
-        'At runtime: decode ID token → extract group claims → match against groups.yml',
-        'Result: Set<GroupId> for the authenticated user',
-        'ContractService uses this set to evaluate can_mutate on IPC projections',
+      { title:'AgentConfig fields', type:'kv', rows:[
+        ['id, label, command, args, working_dir','process launch spec for the agent'],
+        ['credential_env_var','which env var the resolved secret is injected as'],
+        ['vault_connection_id / vault_name / vault_secret_id / vault_secret_name','pointer into RocketVault — never the secret value'],
       ]},
-      { title:'Security rules', type:'kv', rows:[
-        ['Token storage','OS keychain only (keyring-rs)'],
-        ['PII in git files','Never — opaque group IDs only'],
-        ['SSO config','issuer URL + client ID in .rocket/identity/config.yml (non-sensitive per RFC 8252)'],
-        ['Force re-auth','prompt=login appended on Clear Cache for OIDC providers'],
+      { title:'Dependency', type:'list', items:[
+        'Depends on Arc<SecretManagerService> for credential resolution — shares the RocketVault subsystem, not env-var secret hardening',
+      ]},
+    ]
+  },
+
+  AcpSessionService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'AcpSessionService',
+    layer:'rocket-app · Application layer',
+    desc:'Owns the lifecycle of one AI-assist agent chat session: starting the agent process, streaming its replies back as domain events, and tearing it down. Built on the rocket-acp AcpSessionClient trait, so it never talks to Tauri or a process directly.',
+    sections:[
+      { title:'Session lifecycle', type:'list', items:[
+        'start_session — resolves AgentConfig + credential via AgentConfigService, then calls AcpSessionClient::start_session',
+        'send_prompt — streams reply chunks over an unbounded mpsc channel as AcpSessionChunk events, ending in exactly one AcpSessionFinished or AcpSessionFailed',
+        'end_session / end_all_sessions — force-kills the agent process',
+        'fixed 120s prompt_timeout — on timeout, force-kills via end_session',
+      ]},
+      { title:'Streaming', type:'list', items:[
+        'DomainEvent::AcpSessionChunk → TauriEventBus → frontend agent-session-event-bridge → Zustand pane store',
+        'the event bridge is mounted app-lifetime, outside AgentChatPanel, so replies land even while the panel is unmounted',
+      ]},
+    ]
+  },
+
+  FlowService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'FlowService',
+    layer:'rocket-app · Application layer',
+    desc:'Thin CRUD wrapper over FlowRepository for the visual workflow builder. The only business rule it enforces is graph validity.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'list / get / delete — delegate straight to FlowRepository',
+        'save — runs topological_sort first and rejects a cyclic node graph before persisting',
+      ]},
+    ]
+  },
+
+  FlowExecutionService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'FlowExecutionService',
+    layer:'rocket-app · Application layer',
+    desc:'Runs a saved Flow: walks its node graph in topological order, evaluates each edge\'s wire expression against the upstream node\'s output, and dispatches HTTP requests through RequestExecutionService — it has no HTTP dispatch of its own.',
+    sections:[
+      { title:'Run pipeline', type:'list', items:[
+        'topologically order nodes (rocket-flow::topological_sort)',
+        'resolve_flow_wire_expression — evaluate each incoming edge\'s JS/jsonq expression against the upstream node\'s captured output',
+        'build_execute_request_input — reuses runner_sequence::build_step_input, the same saved-request→ExecuteRequestInput mapping the Collection Runner uses',
+        'run() takes &RequestExecutionService to actually send the request',
+      ]},
+      { title:'Cancellation', type:'kv', rows:[
+        ['cancelled / in_flight','Arc<Mutex<HashSet<String>>> run-id tracking'],
+        ['cancel_flow_run IPC','marks a run cancelled; checked between node executions'],
+      ]},
+    ]
+  },
+
+  CollectionRunnerService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'CollectionRunnerService',
+    layer:'rocket-app · Application layer',
+    desc:'Orchestration layer, not a second execution engine — flattens a collection or folder subtree into an ordered request sequence and drives RequestExecutionService\'s existing phase-by-phase pipeline one step at a time, the same way LoadTestService::run does.',
+    sections:[
+      { title:'Responsibilities', type:'list', items:[
+        'flatten_run_set (runner_sequence.rs) — depth-first walk of the collection tree, skipping folders/non-HTTP items, honoring _order.yml',
+        'per step: resolves external secrets once up front, drives RequestExecutionService\'s phase methods, evaluates assertions (assertion_evaluator.rs), honors setNextRequest/skipRequest',
+        'request_guard.rs — pure SSRF host-blocking predicate, threaded through as request_guard_policy, not runner-specific logic',
+        'cancel(run_id) — cooperative cancellation checked between steps',
+      ]},
+      { title:'Safety limit', type:'kv', rows:[
+        ['MAX_RUN_STEPS','1,000 — caps setNextRequest cycles'],
+      ]},
+      { title:'Events', type:'list', items:[
+        'RunnerStarted → RunnerStepCompleted (per step) → RunnerFinished',
+      ]},
+    ]
+  },
+
+  SecretManagerService: {
+    badge:'Application Service · New in v4', badgeColor:'#16A34A',
+    title:'SecretManagerService',
+    layer:'rocket-app · Application layer',
+    desc:'Owns RocketVault connection records and their client secrets — not a thin wrapper. Orders writes so a keychain failure can never leave a broken connection persisted, and is a distinct concern from environment-variable secret hardening (same KeyringSecretStore, different namespace).',
+    sections:[
+      { title:'save()', type:'list', items:[
+        'secret provided → overwrite the keychain entry, then persist the connection record',
+        'secret omitted → only allowed if a keychain entry already exists for this connection, else rejected (would create a permanently broken connection)',
+      ]},
+      { title:'delete()', type:'list', items:[
+        'deletes the connection record first, then best-effort deletes the keychain entry — logs rather than fails on keychain-delete error',
+      ]},
+      { title:'Read path', type:'kv', rows:[
+        ['vault_secret_resolution::resolve_vault_secret_value','lighter-weight resolver for per-request {{alias.secretName}} binding — same SecretManagerRepository + SecretStore + VaultSecretFetcher lookup, intended for reuse by RequestExecutionService'],
+        ['SecretManagerService::resolve_secret_value','same three-step lookup, used by AgentConfigService'],
       ]},
     ]
   },
@@ -1435,6 +1593,12 @@ const DATA = {
         'TypeScript side: @faker-js/faker for browser/Tauri webview context',
         'Rust side: fake crate for server-side generation',
       ]},
+      { title:'SecretStore trait — New', type:'kv', rows:[
+        ['trait SecretStore','get / set / delete a secret variable\'s real value — never touches YAML'],
+        ['NullSecretStore','no-op impl for tests/headless CI'],
+        ['Concrete impl','KeyringSecretStore in rocket-infra (OS keychain)'],
+        ['Persistence split','OcEnvVariableEntry untagged enum — Secret(OcSecretVariable) vs Plain(OcVariable), same environments/*.yml file'],
+      ]},
     ]
   },
 
@@ -1539,36 +1703,48 @@ const DATA = {
     ]
   },
 
-  'rocket-identity': {
-    badge:'Domain Crate · New in v3', badgeColor:'#16A34A',
-    title:'rocket-identity',
-    layer:'Domain layer — pure Rust, zero I/O',
-    desc:'OIDC/SSO identity domain. Defines the identity types, PKCE flow, and group management model. Works with any OIDC-compliant provider: Azure AD, Google, Keycloak, Auth0, Okta.',
+  'rocket-acp': {
+    badge:'Domain Crate · New in v4', badgeColor:'#16A34A',
+    title:'rocket-acp',
+    layer:'Domain layer — pure Rust, zero I/O · New crate',
+    desc:'Owns the AI-assist agent-config entity and the ACP session-client contract. Deliberately has no knowledge of Tauri, DomainEvent, or agent-client-protocol — it defines only the traits that rocket-app orchestrates and rocket-infra implements.',
     sections:[
-      { title:'Key types', type:'chips',
-        chips:[{l:'OidcConfig',h:true},{l:'OidcTokens',h:true},{l:'GroupAssignment',h:true},{l:'GroupId (opaque)',h:false},{l:'IdentityRepository (trait)',h:true}]},
-      { title:'PKCE flow', type:'list', items:[
-        'Generates code_verifier and code_challenge (S256)',
-        'Opens system browser to authorization URL with challenge',
-        'TCP localhost callback server receives authorization code',
-        'Exchanges code + verifier for access/refresh/ID tokens',
-        'Stores tokens in OS keychain — never on disk',
+      { title:'Public API (lib.rs)', type:'code',
+        code:'pub mod agent_config; // AgentConfig, AgentConfigRepository\npub mod session;      // AcpSessionClient\n\npub use agent_config::{AgentConfig, AgentConfigRepository};\npub use session::AcpSessionClient;' },
+      { title:'AgentConfig fields', type:'kv', rows:[
+        ['id, label, command, args, working_dir','process launch spec'],
+        ['credential_env_var','env var name the resolved secret is injected as'],
+        ['vault_connection_id / vault_name / vault_secret_id / vault_secret_name','RocketVault pointer — never the secret value itself'],
       ]},
-      { title:'Group management', type:'list', items:[
-        'groups.yml stores opaque SSO group identifiers only — no emails, no PII',
-        'Group IDs matched against ID token claims at runtime',
-        'Contract governance: provider group membership checked before allowing mutations',
-        'SSO config (issuer URL, client ID) is non-sensitive per RFC 8252 for native PKCE apps',
-      ]},
-      { title:'Security properties', type:'kv', rows:[
-        ['Tokens','OS keychain only — survives app restart'],
-        ['PII in git','Zero — opaque group identifiers only'],
-        ['Force re-auth','prompt=login on Clear Cache (OIDC providers)'],
-        ['Webview re-auth','Session data cleared before opening for non-OIDC providers'],
+      { title:'AcpSessionClient (trait)', type:'list', items:[
+        'start_session(command, args, cwd, env) -> session_id',
+        'send_prompt(session_id, prompt, chunk_tx: UnboundedSender<String>) -> stop_reason',
+        'end_session / end_all_sessions',
+        'object-safe (Box<dyn AcpSessionClient>) — streams over a plain tokio::mpsc channel',
       ]},
     ]
   },
 
+  'rocket-flow': {
+    badge:'Domain Crate · New in v4', badgeColor:'#16A34A',
+    title:'rocket-flow',
+    layer:'Domain layer — pure Rust, zero I/O · New crate',
+    desc:'Owns the node-canvas API-workflow definition for the visual Flow builder — a Rocket-only extension, deliberately not part of the OpenCollection spec. Deliberately has no cross-crate types, to stay dependency-free.',
+    sections:[
+      { title:'Public API (lib.rs)', type:'code',
+        code:'pub mod node;  // FlowNodeKind, RequestSource, InlineRequestData\npub mod flow;  // Flow, FlowNode, FlowEdge, FlowRepository\npub mod graph; // topological_sort, FlowGraphError' },
+      { title:'FlowNodeKind', type:'list', items:[
+        'Request { label, source } — source is RequestSource::Saved { request_path } or ::Inline { request }',
+        'Input { label, value }',
+        'Output { label }',
+      ]},
+      { title:'Flow aggregate', type:'kv', rows:[
+        ['Flow { name, nodes, edges }','keyed by (collection, name)'],
+        ['FlowRepository (trait)','list / get / save / delete'],
+        ['topological_sort','Kahn\'s-algorithm cycle detection — used at both save-time and run-time'],
+      ]},
+    ]
+  },
 
   'rocket-scripting': {
     badge:'Domain Crate · New', badgeColor:'#16A34A',
@@ -1692,7 +1868,7 @@ const DATA = {
     desc:'All on-disk state. The OpenCollection v1.0.0 format uses .yml files exclusively — never .json, never .yaml. The directory structure is designed to be git-friendly: each request is a separate file, environments are separate files, and the whole collection can be committed and diffed meaningfully.',
     sections:[
       { title:'Directory structure', type:'code',
-        code:'~/Documents/RocketAPI/\n├── .rocket/\n│   ├── workspaces.yml          # workspace registry\n│   ├── contracts/\n│   │   └── <contract-id>.yml   # per-contract (v3)\n│   └── identity/\n│       ├── config.yml          # OIDC issuer + client ID (v3)\n│       └── groups.yml          # opaque group IDs (v3)\n├── <collection-name>/\n│   ├── opencollection.yml      # collection root\n│   ├── environments/\n│   │   └── <env>.yml\n│   ├── <folder>/\n│   │   ├── folder.yml\n│   │   └── <request>.yml\n│   └── <request>.yml\napp_data_dir/\n└── notifications.enc           # AES-256-GCM (v3)' },
+        code:'~/Documents/RocketAPI/\n├── .rocket/\n│   ├── workspaces.yml          # workspace registry\n│   └── contracts/\n│       └── <contract-id>.yml   # per-contract (v3)\n├── <collection-name>/\n│   ├── opencollection.yml      # collection root\n│   ├── environments/\n│   │   └── <env>.yml           # secret vars: Secret(OcSecretVariable) — no value field, real value in OS keychain\n│   ├── flows/\n│   │   └── <flow-name>.yml     # Flow builder — Rocket-only extension, outside opencollection.yml (v4)\n│   ├── <folder>/\n│   │   ├── folder.yml\n│   │   └── <request>.yml\n│   └── <request>.yml' },
       { title:'File format rules', type:'list', items:[
         '.yml extension only — never .yaml or .json',
         'opencollection.yml header: opencollection: "1.0.0"',
@@ -1700,11 +1876,15 @@ const DATA = {
         'Optional fields use #[serde(default, skip_serializing_if = "Option::is_none")]',
         'IPC camelCase DTOs and on-disk structs are always separate types',
       ]},
-      { title:'New in v3', type:'list', items:[
-        '.rocket/contracts/ — one .yml per contract, stores ContractStatus (not computed)',
-        '.rocket/identity/groups.yml — opaque SSO group IDs, safe to commit',
-        '.rocket/identity/config.yml — OIDC issuer URL + client ID (non-sensitive)',
-        'app_data_dir/notifications.enc — encrypted, never committed to git',
+      { title:'Secrets are never written to YAML', type:'list', items:[
+        'environments/*.yml — a secret variable serializes as Secret(OcSecretVariable): {secret: true, name, description, disabled, type}, no value field',
+        'the real value lives only in the OS keychain, via KeyringSecretStore (rocket-infra) — new_env_secrets() namespace',
+        'RocketVault connection client secrets use the same KeyringSecretStore, under the separate new_vault_connections() namespace',
+        'OcEnvVariableEntry is #[serde(untagged)] with Secret listed first — reordering it would silently deserialize secret entries as Plain and drop the secret flag',
+      ]},
+      { title:'New in v4', type:'list', items:[
+        '<collection>/flows/<slug>.yml — one file per Flow, a Rocket-only extension not part of the OpenCollection spec',
+        'environments/*.yml secret-variable entries no longer carry a value field — see above',
       ]},
     ]
   },
@@ -2294,13 +2474,23 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(
     { id: 't_reject',        from: 'InReview', to: 'Draft',    event: 'Reject',          trigger: 'user', desc: 'Consumer rejects — contract drops back to Draft.' },
     { id: 't_expiring',      from: 'Active',   to: 'ExpiringIn30Days', event: 'ExpiringSoon', trigger: 'schedule', desc: 'expiresAt within 30 days — system flags the contract.' },
     { id: 't_expired',       from: 'ExpiringIn30Days', to: 'Expired', event: 'ExpiryLapsed', trigger: 'schedule', desc: 'expiresAt elapsed.' },
+    { id: 't_drift_expiring',from: 'ExpiringIn30Days', to: 'Drift',  event: 'DriftDetected',   trigger: 'auto', desc: 'Non-breaking change detected while the contract was already flagged as expiring soon.' },
+    { id: 't_breach_expiring',from:'ExpiringIn30Days', to: 'Breach', event: 'BreachDetected',  trigger: 'auto', desc: 'Breaking change detected while the contract was already flagged as expiring soon.' },
+    { id: 't_pause_expiring',from: 'ExpiringIn30Days', to: 'Paused', event: 'Pause',           trigger: 'user', desc: 'Provider suspends monitoring on a contract that is expiring soon.' },
+    { id: 't_expired_active',from: 'Active',   to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'expiresAt elapsed directly from Active — the 30-day warning is best-effort, not a required hop.' },
     { id: 't_expired_drift', from: 'Drift',    to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Drifted contract reached expiry.' },
     { id: 't_expired_breach',from: 'Breach',   to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Breaching contract reached expiry.' },
+    { id: 't_expired_draft', from: 'Draft',    to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Draft contract\'s expiresAt elapsed before it was ever published.' },
+    { id: 't_expired_paused',from: 'Paused',   to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'Paused contract\'s expiresAt elapsed while monitoring was suspended.' },
+    { id: 't_expired_review',from: 'InReview', to: 'Expired',  event: 'ExpiryLapsed',    trigger: 'schedule', desc: 'In-review contract\'s expiresAt elapsed before sign-off completed.' },
     { id: 't_renew',         from: 'Expired',  to: 'Active',   event: 'Renew',           trigger: 'user', desc: 'Provider extends expiresAt — contract resumes.' },
     { id: 't_archive_exp',   from: 'Expired',  to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete an expired contract.' },
     { id: 't_archive_paused',from: 'Paused',   to: 'Archived', event: 'Archive',         trigger: 'user', desc: 'Soft-delete a paused contract.' },
     { id: 't_unarchive',     from: 'Archived', to: 'Draft',    event: 'Unarchive',       trigger: 'user', desc: 'Restore an archived contract as a fresh Draft.' },
   ];
+  // Note: every status except Archived can reach Expired via the ExpiryLapsed catch-all
+  // (state_machine.rs:80); ExpiringIn30Days additionally accepts DriftDetected/BreachDetected/Pause
+  // (state_machine.rs:46-48) the same as Active does — verified against crates/rocket-collection/src/contract/state_machine.rs.
 
   // ─── SVG render ─────────────────────────────────────────────
   const NODE_W = 132, NODE_H = 56;
