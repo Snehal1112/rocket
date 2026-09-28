@@ -4,11 +4,6 @@
 //! by `registry` so the app's exit-sweep machinery can shut every live
 //! instance down.
 //!
-//! `registry` (Task 4) does not exist yet as of Task 3 — only
-//! `tool_server`'s skeleton and `auth`'s middleware are wired in here.
-//! Declaring `pub mod registry;` before that file exists would break
-//! `cargo check --workspace`, so that line is added by the task that
-//! creates it.
-
 pub mod auth;
+pub mod registry;
 pub mod tool_server;

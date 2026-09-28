@@ -121,6 +121,11 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
                 grpc_svc.end_all();
             }
+            if let Some(mcp_registry) =
+                app_handle.try_state::<Arc<mcp::registry::McpServerRegistry>>()
+            {
+                mcp_registry.shutdown_all();
+            }
             app_handle.exit(0);
         }
     });
@@ -565,6 +570,15 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
+            // Tracks every live per-session MCP HTTP server so it can be
+            // swept on app exit and on individual session end. Bound as a
+            // local `Arc` before the managed-state block (rather than built
+            // inline in `app.manage(...)`) so the same `Arc` can also be
+            // cloned into Plan 05's `TauriMcpServerSweeper`, which holds it
+            // for the lifetime of `AcpSessionService` instead of fetching it
+            // per-call via `AppHandle`.
+            let mcp_server_registry = Arc::new(mcp::registry::McpServerRegistry::new());
+
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
             app.manage(contract_svc);
@@ -590,6 +604,7 @@ pub fn run() {
             app.manage(audit_svc);
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
+            app.manage(Arc::clone(&mcp_server_registry));
 
             // Agent processes run in their own process groups, so a signal
             // sent to Rocket alone never reaches them. Route those signals
@@ -863,6 +878,11 @@ pub fn run() {
                 if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
                     // Best-effort, like the ACP cleanup: the process is about to end.
                     grpc_svc.end_all();
+                }
+                if let Some(mcp_registry) =
+                    app_handle.try_state::<Arc<mcp::registry::McpServerRegistry>>()
+                {
+                    mcp_registry.shutdown_all();
                 }
             }
         });

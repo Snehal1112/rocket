@@ -71,9 +71,12 @@ use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::StreamableHttpService;
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use std::sync::Arc;
 use tauri::Manager;
+use tokio::sync::Notify;
 
 use rocket_app::McpToolService;
 
@@ -341,6 +344,90 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
                  non-secret environment variables for one active session.",
             )
     }
+}
+
+/// Handle to one running per-session MCP HTTP server. `port`/`token` are
+/// what Plan 05's `McpServerSpec::Http` is built from; `shutdown()` stops the
+/// server's `axum::serve` task. `Clone` so the same handle can be both
+/// returned to `spawn_mcp_http_server`'s caller and stored in
+/// `McpServerRegistry` — `Arc<Notify>` makes that safe: both clones
+/// ultimately notify the same underlying `Notify`, and notifying it twice is
+/// harmless (a second `notify_one` with no waiter left just stores an
+/// unconsumed permit).
+#[derive(Clone)]
+pub struct McpHttpServerHandle {
+    pub port: u16,
+    pub token: String,
+    pub(crate) shutdown: Arc<Notify>,
+}
+
+impl McpHttpServerHandle {
+    /// Signals the server's `axum::serve(...).with_graceful_shutdown(...)`
+    /// future to stop accepting new connections and return, which drops the
+    /// listening socket and frees the port. Fire-and-forget: callers on the
+    /// app-exit path (`McpServerRegistry::shutdown_all`) have no one left to
+    /// report a failure to, and there is nothing to fail here besides "no one
+    /// is listening yet", which is harmless.
+    pub fn shutdown(&self) {
+        self.shutdown.notify_one();
+    }
+}
+
+/// Binds a fresh localhost MCP HTTP server for one ACP session, registers it
+/// with `McpServerRegistry` (Tauri-managed state — must already be present;
+/// see `src-tauri/src/lib.rs`'s `app.manage(Arc::clone(&mcp_server_registry))`
+/// call) so it is swept on app exit, and returns a handle carrying the port
+/// and bearer token the caller advertises to the agent.
+///
+/// `session_id` is a parameter (not generated here) because tool calls need
+/// it up front for their `DomainEvent::AcpToolInvoked` audit events, and
+/// because one HTTP server instance serves exactly one ACP session for its
+/// whole lifetime. See this task's header note on where that identifier
+/// comes from — resolving that call-site question is Plan 05's job.
+pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
+    app_handle: tauri::AppHandle<R>,
+    session_id: String,
+) -> std::io::Result<McpHttpServerHandle> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    // A v4 UUID is 36 random-enough characters and is already this
+    // workspace's established pattern for one-shot random tokens (see
+    // `src-tauri/src/commands/oauth2.rs`'s OAuth `state` parameter) --
+    // reusing it avoids adding a `rand` dependency for what `uuid` (already
+    // a workspace dependency) already does well.
+    let token = uuid::Uuid::new_v4().to_string();
+    let shutdown = Arc::new(Notify::new());
+
+    let tool_server = RocketMcpToolServer::new(app_handle.clone(), session_id.clone());
+    let service = StreamableHttpService::new(
+        move || Ok(tool_server.clone()),
+        LocalSessionManager::default().into(),
+        Default::default(),
+    );
+    let router = axum::Router::new().nest_service("/mcp", service).layer(
+        axum::middleware::from_fn_with_state(token.clone(), crate::mcp::auth::require_bearer_token),
+    );
+
+    let handle = McpHttpServerHandle {
+        port,
+        token,
+        shutdown: Arc::clone(&shutdown),
+    };
+
+    if let Some(registry) = app_handle.try_state::<Arc<crate::mcp::registry::McpServerRegistry>>() {
+        registry.register(session_id, handle.clone());
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let shutdown_signal = async move { shutdown.notified().await };
+        // Best-effort: this task runs on its own once spawned, so there is
+        // no caller left to report a bind/serve failure to.
+        let _ = axum::serve(listener, router.into_make_service())
+            .with_graceful_shutdown(shutdown_signal)
+            .await;
+    });
+
+    Ok(handle)
 }
 
 #[cfg(test)]
