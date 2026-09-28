@@ -126,4 +126,48 @@ describe('run status on Input/Output nodes', () => {
     expect(card).toHaveClass('border-dashed');
     expect(screen.getByTestId('node-status-caption')).toHaveTextContent('Not taken');
   });
+
+  it('shows the error of a failed Output node', () => {
+    wrap(
+      <OutputNode
+        {...props}
+        id='o1'
+        type='Output'
+        data={{
+          kind: { kind: 'Output', label: 'Result' },
+          status: 'failed',
+          error: "field 'value' has 2 live inputs",
+        }}
+      />,
+    );
+    expect(screen.getByTestId('node-error')).toHaveTextContent("field 'value' has 2 live inputs");
+  });
+
+  it('shows the error of a failed Input node', () => {
+    wrap(
+      <InputNode
+        {...props}
+        id='i1'
+        type='Input'
+        data={{
+          kind: { kind: 'Input', label: 'Key', value: 'k' },
+          status: 'failed',
+          error: 'bad input',
+        }}
+      />,
+    );
+    expect(screen.getByTestId('node-error')).toHaveTextContent('bad input');
+  });
+
+  it('falls back to a generic message when a failed node has no error', () => {
+    wrap(
+      <OutputNode
+        {...props}
+        id='o1'
+        type='Output'
+        data={{ kind: { kind: 'Output', label: 'Result' }, status: 'failed' }}
+      />,
+    );
+    expect(screen.getByTestId('node-error')).toHaveTextContent('Error');
+  });
 });

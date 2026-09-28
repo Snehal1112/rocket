@@ -57,10 +57,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
           </Badge>
         </div>
       )}
-      {status === 'failed' && (
-        <div className='px-2 pt-1 text-red-600'>✕ {data.error ?? 'Error'}</div>
-      )}
-      <NodeStatusCaption status={status} skipReason={data.skipReason} />
+      <NodeStatusCaption status={status} skipReason={data.skipReason} error={data.error} />
 
       {/* nodrag/nowheel/nokey keep typing, selecting text and scrolling in
           the editor from dragging the node or deleting it on Backspace. */}

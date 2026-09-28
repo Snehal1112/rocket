@@ -107,6 +107,14 @@ export function isValidFlowConnection(
   if (!targetAccepts(targetNode, targetHandle)) return false;
   // A routing node evaluates exactly one input.
   if (isRoutingKind(targetNode.kind) && edges.some((e) => e.targetNodeId === target)) return false;
+  // An Output has one `value` input. Run-when triggers stay unlimited.
+  if (
+    targetNode.kind.kind === 'Output' &&
+    targetHandle === 'value' &&
+    edges.some((e) => e.targetNodeId === target && e.targetField === 'value')
+  ) {
+    return false;
+  }
   return true;
 }
 

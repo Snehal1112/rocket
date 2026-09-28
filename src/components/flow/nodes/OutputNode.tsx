@@ -10,6 +10,7 @@ export interface OutputNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Output' }>;
   status: FlowNodeStatus;
   skipReason?: FlowSkipReason;
+  error?: string;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
   value?: string;
@@ -47,7 +48,7 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         <span className='truncate'>{data.kind.label}</span>
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
-      <NodeStatusCaption status={data.status} skipReason={data.skipReason} />
+      <NodeStatusCaption status={data.status} skipReason={data.skipReason} error={data.error} />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{data.value ?? '—'}</div>
     </div>
   );

@@ -217,6 +217,23 @@ describe('isValidFlowConnection', () => {
     );
   });
 
+  it('allows only one wire into an Output value, but unlimited Run when wires', () => {
+    const edge = (id: string, field: string): FlowEdge => ({
+      id,
+      sourceNodeId: 'inp',
+      targetNodeId: 'out',
+      targetField: field,
+      expression: '',
+    });
+    const value = conn('req', 'result', 'out', 'value');
+    expect(isValidFlowConnection(value, nodes, [])).toBe(true);
+    expect(isValidFlowConnection(value, nodes, [edge('e1', 'value')])).toBe(false);
+    const trigger = conn('req', 'result', 'out', 'trigger');
+    expect(isValidFlowConnection(trigger, nodes, [edge('e1', 'value')])).toBe(true);
+    expect(isValidFlowConnection(trigger, nodes, [edge('e1', 'trigger')])).toBe(true);
+    expect(isValidFlowConnection(value, nodes, [edge('e1', 'trigger')])).toBe(true);
+  });
+
   it('rejects a connection with a missing endpoint or unknown node', () => {
     expect(
       isValidFlowConnection(
