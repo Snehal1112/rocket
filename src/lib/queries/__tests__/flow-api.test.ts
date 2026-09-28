@@ -48,23 +48,29 @@ describe('flow tauri-api bindings', () => {
     const summary = { runId: 'run-1', steps: [], stoppedReason: 'completed' };
     vi.mocked(invoke).mockResolvedValue(summary);
     const { runFlow } = await import('@/lib/tauri-api');
-    const result = await runFlow('my-collection', 'My Flow', 'staging');
+    const result = await runFlow('my-collection', 'My Flow', 'staging', 'shared-global');
     expect(invoke).toHaveBeenCalledWith('run_flow', {
       input: {
         collection: 'my-collection',
         flowName: 'My Flow',
         environmentName: 'staging',
+        globalEnvName: 'shared-global',
       },
     });
     expect(result).toEqual(summary);
   });
 
-  it('runFlow sends a null environmentName when none is given', async () => {
+  it('runFlow sends a null environmentName and globalEnvName when none is given', async () => {
     vi.mocked(invoke).mockResolvedValue({ runId: 'run-1', steps: [], stoppedReason: 'completed' });
     const { runFlow } = await import('@/lib/tauri-api');
     await runFlow('my-collection', 'My Flow');
     expect(invoke).toHaveBeenCalledWith('run_flow', {
-      input: { collection: 'my-collection', flowName: 'My Flow', environmentName: null },
+      input: {
+        collection: 'my-collection',
+        flowName: 'My Flow',
+        environmentName: null,
+        globalEnvName: null,
+      },
     });
   });
 

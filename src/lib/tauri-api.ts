@@ -1811,9 +1811,19 @@ export interface FlowRunSummary {
  * the flow-run-* events before calling this; the run id arrives first on
  * `flow-run-started`.
  */
-export const runFlow = (collection: string, flowName: string, environmentName?: string | null) =>
+export const runFlow = (
+  collection: string,
+  flowName: string,
+  environmentName?: string | null,
+  globalEnvName?: string | null,
+) =>
   invoke<FlowRunSummary>('run_flow', {
-    input: { collection, flowName, environmentName: environmentName ?? null },
+    input: {
+      collection,
+      flowName,
+      environmentName: environmentName ?? null,
+      globalEnvName: globalEnvName ?? null,
+    },
   });
 
 export const cancelFlowRun = (runId: string) => invoke<void>('cancel_flow_run', { runId });

@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import * as tauriApi from '@/lib/tauri-api';
 import { FlowToolbar } from '../FlowToolbar';
 
@@ -15,6 +16,12 @@ vi.mock('@/lib/tauri-api', async () => {
     onFlowStepCompleted: vi.fn(),
   };
 });
+
+// FlowToolbar reads the active global environment itself, at click-time, so
+// mock the query-cache read the same way FlowPane's own tests do.
+vi.mock('@/lib/execute-request', () => ({
+  getActiveGlobalEnvName: vi.fn(),
+}));
 
 const onPatchStatus = vi.fn();
 const onRunStateChange = vi.fn();
@@ -73,6 +80,7 @@ describe('FlowToolbar', () => {
     );
     vi.mocked(tauriApi.saveFlow).mockResolvedValue(undefined);
     vi.mocked(tauriApi.cancelFlowRun).mockResolvedValue(undefined);
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue(undefined);
     onPatchStatus.mockClear();
     onRunStateChange.mockClear();
     vi.mocked(tauriApi.cancelFlowRun).mockClear();
@@ -85,7 +93,7 @@ describe('FlowToolbar', () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() =>
-      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null),
+      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null),
     );
     expect(startedHandler).toBeDefined();
     expect(stepHandler).toBeDefined();
@@ -138,6 +146,39 @@ describe('FlowToolbar', () => {
         durationMs: 184,
         error: undefined,
       }),
+    );
+  });
+
+  it('forwards the active global environment name to runFlow when set', async () => {
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue('shared-global');
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() =>
+      expect(tauriApi.runFlow).toHaveBeenCalledWith(
+        'my-collection',
+        'my-flow',
+        null,
+        'shared-global',
+      ),
+    );
+  });
+
+  it('reads the global environment name fresh at click-time, not from an earlier render', async () => {
+    // Simulates the user switching the active global environment (via the
+    // environment switcher) while this toolbar sits mounted but idle, before
+    // ever clicking Run — the exact staleness gap a snapshot-in-props would
+    // have missed.
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue('stale-global');
+    renderToolbar();
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue('fresh-global');
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() =>
+      expect(tauriApi.runFlow).toHaveBeenCalledWith(
+        'my-collection',
+        'my-flow',
+        null,
+        'fresh-global',
+      ),
     );
   });
 

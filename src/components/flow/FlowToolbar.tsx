@@ -2,6 +2,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { cancelFlowRun, onFlowRunStarted, onFlowStepCompleted, runFlow } from '@/lib/tauri-api';
 
 type NodeDetail = { statusCode?: number; durationMs?: number; error?: string };
@@ -122,7 +123,14 @@ export function FlowToolbar({
     unlistenRefs.current = [unlistenStarted, unlistenStep];
 
     try {
-      const summary = await runFlow(collection, flowName, environmentName);
+      // Read fresh at click-time, not from a prop snapshotted at an earlier
+      // render — the active global environment can change (via the
+      // environment switcher's Global tab) while this tab sits mounted but
+      // idle, and a stale value here would silently resolve the run against
+      // the wrong global environment. Mirrors how runner-execute.ts reads
+      // this at execution time rather than caching it.
+      const globalEnvName = getActiveGlobalEnvName();
+      const summary = await runFlow(collection, flowName, environmentName, globalEnvName ?? null);
       // The summary is the authoritative final state. Event delivery is not
       // guaranteed to finish before the command response arrives.
       for (const step of summary.steps) {
