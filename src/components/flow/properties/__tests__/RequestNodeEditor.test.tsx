@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -189,5 +189,37 @@ describe('RequestNodeEditor', () => {
         request: { method: 'POST', url: 'https://x/yz', headers: [], body: null },
       },
     });
+  });
+
+  const otherSaved: RequestKind = {
+    ...savedKind,
+    source: { type: 'Saved', requestPath: 'other.yml' },
+  };
+
+  it('drops a pending confirmation when the source changes', async () => {
+    vi.mocked(getRequest).mockResolvedValue(withAuth);
+    const onChange = vi.fn();
+    const props = { nodeId: 'r1', edges: [], collection: 'demo', onChange };
+    const { rerender } = render(<RequestNodeEditor {...props} kind={savedKind} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Convert to inline' }));
+    expect(await screen.findByRole('button', { name: 'Convert' })).toBeInTheDocument();
+
+    rerender(<RequestNodeEditor {...props} kind={otherSaved} />);
+    expect(screen.queryByRole('button', { name: 'Convert' })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('ignores a load that finishes after the source changed', async () => {
+    let resolve: ((r: Request) => void) | undefined;
+    vi.mocked(getRequest).mockReturnValue(new Promise<Request>((r) => (resolve = r)));
+    const onChange = vi.fn();
+    const props = { nodeId: 'r1', edges: [], collection: 'demo', onChange };
+    const { rerender } = render(<RequestNodeEditor {...props} kind={savedKind} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Convert to inline' }));
+
+    rerender(<RequestNodeEditor {...props} kind={otherSaved} />);
+    await act(async () => resolve?.(withAuth));
+    expect(screen.queryByRole('button', { name: 'Convert' })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

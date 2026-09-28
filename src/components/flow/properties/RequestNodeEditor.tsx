@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   indexWiresOutOfRange,
@@ -42,6 +42,16 @@ export function RequestNodeEditor({
   const [converting, setConverting] = useState(false);
   const source = kind.source;
 
+  // Identifies the current source. A pending confirmation or load error only
+  // makes sense for the source it was computed from.
+  const sourceKey = source.type === 'Saved' ? `saved:${source.requestPath}` : 'inline';
+  const sourceKeyRef = useRef(sourceKey);
+  useEffect(() => {
+    sourceKeyRef.current = sourceKey;
+    setPending(null);
+    setLoadError(null);
+  }, [sourceKey]);
+
   const applySaved = (entry: SavedRequestEntry) =>
     onChange({ ...kind, source: { type: 'Saved', requestPath: entry.path } });
 
@@ -49,14 +59,18 @@ export function RequestNodeEditor({
   // changes until the user confirms.
   const startConvert = async () => {
     if (source.type !== 'Saved') return;
+    const requestPath = source.requestPath;
+    // A late result is dropped when the node has moved to another source.
+    const isCurrent = () => sourceKeyRef.current === `saved:${requestPath}`;
     setLoadError(null);
     setConverting(true);
     try {
-      const request = await getRequest(collection, source.requestPath);
+      const request = await getRequest(collection, requestPath);
+      if (!isCurrent()) return;
       const { inline, dropped } = savedToInline(request);
       setPending({ type: 'convert', inline, dropped });
     } catch (err) {
-      setLoadError(`Could not load "${source.requestPath}": ${String(err)}`);
+      if (isCurrent()) setLoadError(`Could not load "${requestPath}": ${String(err)}`);
     } finally {
       setConverting(false);
     }
@@ -80,6 +94,7 @@ export function RequestNodeEditor({
       applySaved(pending.entry);
     }
     setPending(null);
+    setLoadError(null);
   };
 
   return (
@@ -119,7 +134,10 @@ export function RequestNodeEditor({
       )}
 
       {pending && (
-        <fieldset aria-label='Confirm source change' className='space-y-2 rounded border p-2'>
+        <fieldset
+          aria-label='Confirm source change'
+          className='min-w-0 space-y-2 rounded border p-2'
+        >
           <p className='text-xs'>
             {pending.type === 'convert'
               ? pending.dropped.length > 0
@@ -133,7 +151,10 @@ export function RequestNodeEditor({
               variant='outline'
               size='sm'
               className='h-7 text-xs'
-              onClick={() => setPending(null)}
+              onClick={() => {
+                setPending(null);
+                setLoadError(null);
+              }}
             >
               Cancel
             </Button>
