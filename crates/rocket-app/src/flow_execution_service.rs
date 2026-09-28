@@ -448,6 +448,11 @@ impl FlowExecutionService {
                 continue;
             }
 
+            self.events.publish(DomainEvent::FlowStepStarted {
+                run_id: run_id.clone(),
+                node_id: node_id.clone(),
+            });
+
             // `topological_sort` only returns ids from `flow.nodes`, so a
             // miss here is a bug. It fails this node instead of panicking.
             let result = match nodes_by_id.get(node_id.as_str()) {
@@ -2314,5 +2319,56 @@ mod tests {
                 "secret not substituted in {url}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn step_started_is_published_before_step_completed_and_never_for_a_skipped_node() {
+        let flow = Flow {
+            name: "two-nodes".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+        );
+        let exec = exec_failing_for_url("https://api.example.com/a");
+
+        service
+            .run(&exec, run_input("two-nodes"))
+            .await
+            .expect("run must complete even with a failed node");
+
+        let events = publisher.events();
+        let started_ids: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepStarted { node_id, .. } => Some(node_id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            started_ids,
+            vec!["a".to_string()],
+            "node b is Skipped (its dependency a failed) and must never get a started event"
+        );
+
+        let started_idx = events
+            .iter()
+            .position(|e| matches!(e, DomainEvent::FlowStepStarted { node_id, .. } if node_id == "a"))
+            .expect("started event for a must exist");
+        let completed_idx = events
+            .iter()
+            .position(|e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "a"))
+            .expect("completed event for a must exist");
+        assert!(
+            started_idx < completed_idx,
+            "started must publish strictly before completed"
+        );
     }
 }

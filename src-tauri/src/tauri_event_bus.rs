@@ -25,6 +25,7 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::RunnerFinished { .. } => "runner-finished",
             // Flow events — mirrors the Collection Runner events above.
             DomainEvent::FlowRunStarted { .. } => "flow-run-started",
+            DomainEvent::FlowStepStarted { .. } => "flow-step-started",
             DomainEvent::FlowStepCompleted { .. } => "flow-step-completed",
             DomainEvent::FlowRunFinished { .. } => "flow-run-finished",
             // ACP AI-assist session events — mirrors the Flow/Collection

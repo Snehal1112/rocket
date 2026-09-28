@@ -164,6 +164,13 @@ pub enum DomainEvent {
         collection: String,
         total_nodes: usize,
     },
+    /// Emitted immediately before a node is dispatched — once per node that
+    /// is actually attempted, never for a node marked `Skipped` (those never
+    /// reach dispatch).
+    FlowStepStarted {
+        run_id: String,
+        node_id: String,
+    },
     /// Emitted after every node of a run, in topological execution order.
     FlowStepCompleted {
         run_id: String,
