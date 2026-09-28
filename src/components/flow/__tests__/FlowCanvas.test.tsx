@@ -196,5 +196,39 @@ describe('FlowCanvas', () => {
       expect(node()?.style.visibility).toBe('visible');
       expect(observed.length).toBe(observeCalls);
     });
+
+    it('gives a cycle edge a distinct stroke style', () => {
+      // Edge paths only render once React Flow has measured both endpoint
+      // handles, hence the layout stub (same requirement as the node
+      // measurement test above). An Output node has no source ("result")
+      // handle, so the source side must be a node type that has one.
+      stubLayout();
+      const graph: FlowNode[] = [
+        { id: 'a', kind: { kind: 'Input', label: 'A', value: 'x' }, position: { x: 0, y: 0 } },
+        { id: 'b', kind: { kind: 'Output', label: 'B' }, position: { x: 200, y: 0 } },
+      ];
+      const graphEdges: FlowEdge[] = [
+        {
+          id: 'e1',
+          sourceNodeId: 'a',
+          targetNodeId: 'b',
+          targetField: 'value',
+          expression: 'response.body',
+        },
+      ];
+      render(
+        <FlowCanvas
+          nodes={graph}
+          edges={graphEdges}
+          nodeStatus={{}}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+          cycleEdgeIds={['e1']}
+        />,
+      );
+      const path = screen.getByTestId('rf__edge-e1').querySelector('path');
+      expect(path).toHaveStyle({ stroke: '#ef4444' });
+    });
   });
 });

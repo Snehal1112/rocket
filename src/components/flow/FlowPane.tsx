@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { buildEdgeFromConnection } from '@/lib/flow-wiring';
+import { buildEdgeFromConnection, parseCycleErrorMessage } from '@/lib/flow-wiring';
 import {
   type CollectionSummary,
   type FlowEdge,
@@ -50,6 +50,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [isCreating, setIsCreating] = useState(false);
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
   const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
+  const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
@@ -182,19 +183,20 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         edges: tab.edges,
       });
       setCycleNodeIds([]);
+      setCycleEdgeIds([]);
       markClean(tab.id);
       if (!quiet) toast.success('Flow saved.');
       return true;
     } catch (err) {
       // Plan 07's save_flow rejects with the plain string
-      // "Invalid input: flow contains a cycle through node(s): a, b"
-      // (ids joined by ", ", no brackets or quotes — verified in the Plan 07
-      // review). Parse and flag them rather than showing only a generic
-      // toast, per this plan's Review Focus.
+      // "Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1, e2"
+      // (ids joined by ", ", node/edge segments joined by "; "). Parse and
+      // flag both, rather than showing only a generic toast.
       const message = String(err);
-      const match = message.match(/flow contains a cycle through node\(s\): (.*)$/);
-      if (match) {
-        setCycleNodeIds(match[1].split(', ').map((s) => s.trim()));
+      const parsed = parseCycleErrorMessage(message);
+      if (parsed) {
+        setCycleNodeIds(parsed.nodeIds);
+        setCycleEdgeIds(parsed.edgeIds);
       }
       toast.error(`Could not save flow: ${message}`);
       return false;
@@ -259,6 +261,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         nodeStatus={tab.nodeStatus}
         nodeDetail={tab.nodeDetail}
         cycleNodeIds={cycleNodeIds}
+        cycleEdgeIds={cycleEdgeIds}
         onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
         onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
         onConnect={handleConnect}

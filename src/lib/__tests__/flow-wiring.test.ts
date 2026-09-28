@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowNode } from '@/lib/tauri-api';
-import { buildEdgeFromConnection, defaultExpressionFor } from '../flow-wiring';
+import {
+  buildEdgeFromConnection,
+  defaultExpressionFor,
+  parseCycleErrorMessage,
+} from '../flow-wiring';
 
 const requestSource: FlowNode = {
   id: 'node-a',
@@ -64,5 +68,24 @@ describe('buildEdgeFromConnection', () => {
       requestSource,
     );
     expect(edge).toBeNull();
+  });
+});
+
+describe('parseCycleErrorMessage', () => {
+  it('extracts node ids and edge ids from the backend cycle-rejection message', () => {
+    const message = 'Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1, e2';
+    expect(parseCycleErrorMessage(message)).toEqual({
+      nodeIds: ['a', 'b'],
+      edgeIds: ['e1', 'e2'],
+    });
+  });
+
+  it('returns an empty edge list when no edge segment is present', () => {
+    const message = 'Invalid input: flow contains a cycle through node(s): a, b';
+    expect(parseCycleErrorMessage(message)).toEqual({ nodeIds: ['a', 'b'], edgeIds: [] });
+  });
+
+  it('returns null for an unrelated error message', () => {
+    expect(parseCycleErrorMessage('Invalid input: flow name is empty')).toBeNull();
   });
 });

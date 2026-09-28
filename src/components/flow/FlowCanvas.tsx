@@ -47,6 +47,8 @@ export interface FlowCanvasProps {
   >;
   // Node ids implicated in a stored cycle, reported by the last failed save.
   cycleNodeIds?: string[];
+  // Edge ids implicated in a stored cycle, reported by the last failed save.
+  cycleEdgeIds?: string[];
 }
 
 type Measured = { width: number; height: number };
@@ -88,7 +90,11 @@ function toRfNodes(
 // Every node type has one source handle, `result`. The target handle is the
 // first segment of `targetField`, so "headers[Authorization].value" lands on
 // the single `headers` handle.
-function toRfEdges(edges: FlowEdge[], selectedIds: ReadonlySet<string>): Edge[] {
+function toRfEdges(
+  edges: FlowEdge[],
+  selectedIds: ReadonlySet<string>,
+  cycleEdgeIds?: string[],
+): Edge[] {
   return edges.map((e) => ({
     id: e.id,
     source: e.sourceNodeId,
@@ -96,6 +102,7 @@ function toRfEdges(edges: FlowEdge[], selectedIds: ReadonlySet<string>): Edge[] 
     target: e.targetNodeId,
     targetHandle: e.targetField.split('[')[0],
     selected: selectedIds.has(e.id),
+    style: cycleEdgeIds?.includes(e.id) ? { stroke: '#ef4444', strokeWidth: 2 } : undefined,
   }));
 }
 
@@ -139,6 +146,7 @@ function FlowCanvasInner({
   flowCollectionName,
   nodeDetail,
   cycleNodeIds,
+  cycleEdgeIds,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -161,7 +169,10 @@ function FlowCanvasInner({
       toRfNodes(nodes, nodeStatus, selectedNodeIds, measuredRef.current, nodeDetail, cycleNodeIds),
     [nodes, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
   );
-  const rfEdges = useMemo(() => toRfEdges(edges, selectedEdgeIds), [edges, selectedEdgeIds]);
+  const rfEdges = useMemo(
+    () => toRfEdges(edges, selectedEdgeIds, cycleEdgeIds),
+    [edges, selectedEdgeIds, cycleEdgeIds],
+  );
 
   // React Flow's onNodesChange/onEdgesChange report deltas. Positions and
   // deletions are persisted into FlowTab state. Selection and measured

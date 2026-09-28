@@ -21,3 +21,24 @@ export function buildEdgeFromConnection(
     expression: defaultExpressionFor(sourceNode),
   };
 }
+
+export interface CycleError {
+  nodeIds: string[];
+  edgeIds: string[];
+}
+
+// Backend's FlowService::save rejects a cyclic flow with the plain string
+// "Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1, e2"
+// (ids joined by ", ", node/edge segments joined by "; " — see
+// flow_service.rs's save()). The edge segment is optional so an older-format
+// message without it still parses.
+export function parseCycleErrorMessage(message: string): CycleError | null {
+  const match = message.match(
+    /flow contains a cycle through node\(s\): ([^;]*)(?:; edge\(s\): (.*))?$/,
+  );
+  if (!match) return null;
+  return {
+    nodeIds: match[1].split(', ').map((s) => s.trim()),
+    edgeIds: match[2] ? match[2].split(', ').map((s) => s.trim()) : [],
+  };
+}

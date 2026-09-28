@@ -95,7 +95,7 @@ describe('FlowPane save', () => {
 
   it('flags the node ids named in a cycle rejection', async () => {
     vi.mocked(saveFlow).mockRejectedValue(
-      'Invalid input: flow contains a cycle through node(s): a, b',
+      'Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1, e2',
     );
     render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
