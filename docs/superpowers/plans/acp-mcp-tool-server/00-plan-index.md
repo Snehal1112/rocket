@@ -367,7 +367,28 @@ pub struct McpHttpServerHandle {
 // session_id, and RocketMcpToolServer fixes its own copy at construction, so
 // there is nowhere else to attach one after this function returns.
 // `McpHttpServerHandle::shutdown` is synchronous (`pub fn shutdown(&self)`,
-// fire-and-forget via `Notify::notify_one`) — not `async`, not by-value.
+// fire-and-forget via `CancellationToken::cancel` — Plan 04's own
+// Post-Implementation Review replaced an earlier `Notify::notify_one`
+// because that never terminated a live MCP session's open SSE stream,
+// so graceful shutdown could hang forever) — not `async`, not by-value.
+// CORRECTED (Plan 04's Final Review — wire-contract facts this index and
+// Plan 05's text originally got wrong, discovered only once real code
+// existed): (a) the server answers ONLY at `MCP_HTTP_PATH` ("/mcp",
+// exported as a `pub const` from `tool_server.rs`) — `http://127.0.0.1:
+// <port>` with no path 404s; (b) `rmcp`'s HTTP client config's
+// `auth_header` field takes the BARE token — `rmcp` itself prepends
+// "Bearer " when it sends the request, so pre-formatting it as
+// `format!("Bearer {token}")` sends `Bearer Bearer <token>` and gets
+// 401; (c) that config type (`StreamableHttpClientTransportConfig`) is
+// `#[non_exhaustive]`, so it cannot be built with `..Self::with_uri(..)`
+// struct-update syntax from outside its own crate — use `with_uri(..)`
+// then `.auth_header(token)` as a builder chain instead; (d) `rmcp`'s
+// reqwest-backed HTTP client needs a process-wide rustls crypto provider
+// installed before the first connection (this workspace's `rustls` has
+// none by default, via `tauri-plugin-updater`'s "rustls-no-provider"),
+// or it panics with "No provider set" — this must be a real
+// `[dependencies]` entry and an `install_default()` call reachable in
+// production, not only inside a test.
 pub async fn spawn_mcp_http_server(app_handle: tauri::AppHandle, session_id: String) -> std::io::Result<McpHttpServerHandle>;
 
 // Plan 04 also defines the one and only McpServerRegistry this subproject

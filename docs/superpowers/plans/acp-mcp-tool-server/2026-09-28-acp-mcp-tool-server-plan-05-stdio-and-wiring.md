@@ -37,7 +37,8 @@ This plan is written against the plan index's locked contracts, before Plans 01�
 - `crates/rocket-acp/src/mcp_server_spec.rs` (Plan 01): `McpServerSpec::Http { name, url, token }` / `McpServerSpec::Stdio { name, command, args, env }`, both `String`/`Vec<String>`/`Vec<(String, String)>` fields, no `agent_client_protocol` dependency.
 - `AcpSessionClient::start_session` (Plan 01, `crates/rocket-acp/src/session.rs`) takes a trailing `mcp_servers: &[McpServerSpec]` parameter; `AcpAgentClient` (Plan 02, `crates/rocket-infra/src/acp_agent_client.rs`) maps it to real `agent_client_protocol::McpServer` values and already reads `InitializeResponse.agent_capabilities.mcp_capabilities.http` to choose which of the two specs it hands the agent.
 - `crates/rocket-app/src/acp_session_service.rs` (Plan 03): `AcpSessionService::start_session` actually takes `collection: Option<&str>` (not a bare `&str` — a session with no target collection stays chat-only, matching subproject C's existing behavior) and, when the flag is on, currently builds an empty `Vec<McpServerSpec>` via a private `mcp_server_specs_for` helper as a compiling placeholder. **This plan (Task 3) replaces both**: `collection` becomes a required `&str` (by this point every session-start call site always has a real collection — Plan 06's UI and `AgentChatPanel`'s existing per-collection scoping guarantee it), the empty-vec placeholder and its `mcp_server_specs_for` helper are removed, and a new `mcp_http: Option<McpHttpServerCredentials>` trailing parameter carries the already-spawned HTTP server's port/token in. `AcpSessionService::new`/`with_prompt_timeout` already take a `collection_repo: Arc<dyn CollectionRepository>` 4th parameter as of Plan 03 — reuse that field, do not add a second one.
-- `src-tauri/src/mcp/tool_server.rs` (Plan 04): `pub struct McpHttpServerHandle { pub port: u16, pub token: String, /* shutdown handle */ }` with a **synchronous** `pub fn shutdown(&self)` (fire-and-forget `Notify::notify_one`, not `async`, not by-value) and `pub async fn spawn_mcp_http_server(app_handle: tauri::AppHandle, session_id: String) -> std::io::Result<McpHttpServerHandle>` — Plan 04 added a `session_id: String` second parameter (every `McpToolService` call needs one, and `RocketMcpToolServer` fixes it at construction), explicitly leaving to this plan the question of which identifier to pass before the ACP handshake completes. **This plan does not assume `shutdown` is `async` — every call site below calls it synchronously.** `src-tauri/src/mcp/registry.rs` (Plan 04) already defines the one and only `McpServerRegistry` this subproject uses — synchronous methods `new() -> Self`, `register(&self, session_id: String, handle: McpHttpServerHandle)`, `end_session(&self, session_id: &str)`, `shutdown_all(&self)` — managed as `Arc<McpServerRegistry>` Tauri state. **This plan reuses that type as-is; it does not define a second `McpServerRegistry`.**
+- `src-tauri/src/mcp/tool_server.rs` (Plan 04): `pub struct McpHttpServerHandle { pub port: u16, pub token: String, /* shutdown handle */ }` with a **synchronous** `pub fn shutdown(&self)` (fire-and-forget via `CancellationToken::cancel` — not `Notify::notify_one` as an earlier draft of this plan assumed; Plan 04's own Post-Implementation Review replaced it because a bare `Notify` never terminated a live MCP session's open SSE stream, so graceful shutdown could hang forever with an agent connected — not `async`, not by-value) and `pub async fn spawn_mcp_http_server(app_handle: tauri::AppHandle, session_id: String) -> std::io::Result<McpHttpServerHandle>` — Plan 04 added a `session_id: String` second parameter (every `McpToolService` call needs one, and `RocketMcpToolServer` fixes it at construction), explicitly leaving to this plan the question of which identifier to pass before the ACP handshake completes. **This plan does not assume `shutdown` is `async` — every call site below calls it synchronously.** `src-tauri/src/mcp/registry.rs` (Plan 04) already defines the one and only `McpServerRegistry` this subproject uses — synchronous methods `new() -> Self`, `register(&self, session_id: String, handle: McpHttpServerHandle)`, `end_session(&self, session_id: &str)`, `shutdown_all(&self)` — managed as `Arc<McpServerRegistry>` Tauri state. **This plan reuses that type as-is; it does not define a second `McpServerRegistry`.** `spawn_mcp_http_server` no longer self-registers its handle (also a Post-Implementation Review fix) — **whoever calls it in this plan (Task 3) must call `registry.register(session_id, handle)` itself**, under the id it will later end the session by.
+- **Plan 04's Final Review found three wire-contract facts this plan must get right, none of which this plan's earlier draft did** (see Task 1 Step 3 and Task 3 below, both already corrected for this): (a) the server answers only at `src_tauri::mcp::tool_server::MCP_HTTP_PATH` (`"/mcp"`) — `http://127.0.0.1:<port>` with no path 404s; (b) `StreamableHttpClientTransportConfig::auth_header` takes the **bare** token — `rmcp` prepends `"Bearer "` itself when it sends the request, so passing `format!("Bearer {token}")` sends a doubled `Bearer Bearer <token>` header and gets 401; (c) that config type is `#[non_exhaustive]`, so it cannot be built with `..Self::with_uri(..)` struct-update syntax from this crate (a compile error, not a silent bug) — build it with `with_uri(..)` then a separate `.auth_header(token)` call instead; (d) `rmcp`'s reqwest-backed HTTP client needs a process-wide rustls crypto provider installed before its first connection, or it panics with `"No provider set"` (this workspace's `rustls`, pulled in transitively via `tauri-plugin-updater`, has none selected by default) — `rustls` must be a real `[dependencies]` entry (not `[dev-dependencies]`, where Plan 04 only needed it for its own tests) with the `"ring"` feature, and `rustls::crypto::ring::default_provider().install_default()` must run before `run_stdio_bridge` connects.
 - `src-tauri/src/mcp/mod.rs` (Plan 04) already exists with `pub mod tool_server;` and `pub mod registry;` inside it, and `src-tauri/src/lib.rs` already has a `pub mod mcp;` declaration plus a local `let mcp_server_registry = Arc::new(mcp::registry::McpServerRegistry::new());` binding right before the managed-state block, `Arc::clone`d into `app.manage(...)` there.
 - `rmcp` is already a dependency of **`src-tauri/Cargo.toml`** (Plan 04 Task 1, not `crates/rocket-infra/Cargo.toml` — Plan 02's addition of `rmcp`/`axum` to `rocket-infra/Cargo.toml` turned out to be unnecessary, since no code in `rocket-infra` ends up using either crate; see Plan 02's Task 2 note), with feature set `["server", "macros", "transport-streamable-http-server", "transport-io", "client", "transport-streamable-http-client-reqwest"]` at whatever exact version `cargo add` resolved there (Plan 02 separately confirmed `3.5.0` is the real current version via `cargo add --dry-run` against crates.io — reuse that version number, do not re-resolve it independently). This plan's stdio bridge needs `transport-io`/`client`/`transport-streamable-http-client-reqwest`, which Plan 04's own feature list did not include for its HTTP-server-only needs — Task 1, Step 2 below adds only those missing features to the *existing* `rmcp` line in `src-tauri/Cargo.toml`, it does not add a second `rmcp` dependency line.
 
@@ -76,6 +77,8 @@ This step's deliverable is confirmation (or a short list of renames to carry int
 - [ ] **Step 2: Confirm `rmcp`'s features in `src-tauri/Cargo.toml` already cover this plan's needs (no new dependency line)**
 
 Plan 04, Task 1 already added `rmcp` as a direct dependency of `src-tauri/Cargo.toml`, with its feature list written as the union of what Plan 04's HTTP server needs and what this plan's stdio bridge needs (`server`, `macros`, `transport-streamable-http-server`, `transport-io`, `client`, `transport-streamable-http-client-reqwest`), at version `3.5` (the real version Plan 02 grounded via a dry-run `cargo add` against crates.io — see Plan 02, Task 2). **Do not add a second `rmcp = { ... }` line to `src-tauri/Cargo.toml`** — Cargo rejects a duplicate dependency key in the same table, and the existing line already has every feature this task's `stdio_bridge.rs` uses (`transport-io`, `client`, `transport-streamable-http-client-reqwest`).
+
+Plan 04 also added `rustls = { version = "0.23", default-features = false, features = ["ring"] }`, but only under `[dev-dependencies]` — it only needed the crypto provider inside its own integration test. `run_stdio_bridge` (Step 3 below) needs the same provider installed in the real production binary, so **move that `rustls` line from `[dev-dependencies]` to `[dependencies]`** in this same step (same version/feature set — do not re-pin or change features, just relocate the line).
 
 Confirm this by reading `src-tauri/Cargo.toml` before writing any code in Step 3 below. If, by the time this plan executes, Plan 04's line is somehow missing one of those three features (e.g. an earlier hand-edit dropped one), add only the missing feature name(s) to the existing line — never a new, separate `rmcp` entry.
 
@@ -136,7 +139,23 @@ impl ServerHandler for ForwardingHandler {
 /// Reads the HTTP backend's port and bearer token from the environment
 /// (never argv, per this plan's Global Constraints) and runs a stdio MCP
 /// server that forwards every call to it until stdin closes.
+///
+/// Three wire-contract facts Plan 04's Final Review found the hard way, all
+/// load-bearing here: the URL must include `MCP_HTTP_PATH` (`"/mcp"` — the
+/// bare origin 404s); `auth_header` takes the *bare* token, since `rmcp`
+/// itself sends `Bearer <value>` (pre-formatting it here would double the
+/// prefix and get 401); and `StreamableHttpClientTransportConfig` is
+/// `#[non_exhaustive]`, so it is built via `with_uri(..).auth_header(..)`,
+/// never `..Self::with_uri(..)` struct-update syntax (which does not
+/// compile from outside `rmcp`'s own crate).
 pub async fn run_stdio_bridge() -> io::Result<()> {
+    // rmcp's HTTP client is reqwest-backed; this workspace's rustls has no
+    // default crypto provider (tauri-plugin-updater pulls in
+    // "rustls-no-provider"), so the first real connection below panics with
+    // "No provider set" unless one is installed first. Harmless to call more
+    // than once within a process — fails silently if already installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let port: u16 = std::env::var("ROCKET_MCP_PORT")
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ROCKET_MCP_PORT is not set"))?
         .parse()
@@ -146,10 +165,11 @@ pub async fn run_stdio_bridge() -> io::Result<()> {
     let token = std::env::var("ROCKET_MCP_TOKEN")
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ROCKET_MCP_TOKEN is not set"))?;
 
-    let config = StreamableHttpClientTransportConfig {
-        auth_header: Some(format!("Bearer {token}")),
-        ..StreamableHttpClientTransportConfig::with_uri(format!("http://127.0.0.1:{port}"))
-    };
+    let config = StreamableHttpClientTransportConfig::with_uri(format!(
+        "http://127.0.0.1:{port}{}",
+        crate::mcp::tool_server::MCP_HTTP_PATH
+    ))
+    .auth_header(token);
     let transport = StreamableHttpClientTransport::from_config(config);
     let upstream = ()
         .serve(transport)
@@ -578,7 +598,16 @@ Delete Plan 03's private `mcp_server_specs_for` helper entirely — its logic is
                 vec![
                     rocket_acp::McpServerSpec::Http {
                         name: "rocket".to_string(),
-                        url: format!("http://127.0.0.1:{}", creds.port),
+                        // The path literal ("/mcp") must match
+                        // `src_tauri::mcp::tool_server::MCP_HTTP_PATH`
+                        // exactly — the bare origin 404s (Plan 04's Final
+                        // Review). This crate cannot import that constant
+                        // (`rocket-app` never depends on `src-tauri` —
+                        // this repo's DDD boundary runs the other way), so
+                        // it is duplicated here as a literal; if that
+                        // constant's value ever changes, this literal must
+                        // change with it.
+                        url: format!("http://127.0.0.1:{}/mcp", creds.port),
                         token: creds.token.clone(),
                     },
                     rocket_acp::McpServerSpec::Stdio {
