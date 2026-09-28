@@ -21,10 +21,14 @@ export function SavedSourceEditor({
   converting: boolean;
 }) {
   const [openError, setOpenError] = useState<string | null>(null);
+  const [otherCollection, setOtherCollection] = useState(false);
 
   const open = () => {
     setOpenError(null);
-    openSavedRequestTab(collection, requestPath).catch((err) => setOpenError(String(err)));
+    setOtherCollection(false);
+    openSavedRequestTab(collection, requestPath)
+      .then((result) => setOtherCollection(result === 'other-collection'))
+      .catch((err) => setOpenError(String(err)));
   };
 
   return (
@@ -61,6 +65,11 @@ export function SavedSourceEditor({
           Convert to inline
         </Button>
       </div>
+      {otherCollection && (
+        <p role='status' className='text-xs text-muted-foreground'>
+          This request is in collection "{collection}". Switch to that collection to open it.
+        </p>
+      )}
       {openError && (
         <p role='alert' className='text-xs text-red-600'>
           Could not open the request: {openError}

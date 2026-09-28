@@ -121,6 +121,32 @@ describe('SavedSourceEditor', () => {
     expect(getRequest).toHaveBeenCalledWith('demo', 'login.yml');
   });
 
+  it('asks to switch collections instead of hiding the flow tab', async () => {
+    vi.mocked(getRequest).mockResolvedValue(fullRequest);
+    usePaneStore.getState().switchCollection('other');
+    usePaneStore.getState().openTab({
+      id: 'flow-1',
+      tabType: 'flow',
+      title: 'Flow: f',
+      isDirty: true,
+      collectionName: 'demo',
+      flowName: 'f',
+      nodes: [],
+      edges: [],
+      nodeStatus: {},
+      runState: 'idle',
+    });
+    renderEditor();
+    await userEvent.click(screen.getByRole('button', { name: 'Open request' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'This request is in collection "demo". Switch to that collection to open it.',
+    );
+    const state = usePaneStore.getState();
+    expect(state.activeCollection).toBe('other');
+    if (state.root.type !== 'leaf') throw new Error('Expected a leaf');
+    expect(state.root.tabs.map((t) => t.id)).toEqual(['flow-1']);
+  });
+
   it('reports a request that cannot be opened', async () => {
     vi.mocked(getRequest).mockRejectedValue('file not found');
     renderEditor();
