@@ -774,7 +774,7 @@ fn single_route_input<'c>(
 ) -> DomainResult<&'c CapturedOutput> {
     match data_edges {
         [edge] if edge.target_field == handle::INPUT => captured_source(node, edge, captured),
-        _ => Err(DomainError::InvalidInput(format!(
+        _ => Err(DomainError::Internal(format!(
             "routing node '{}' needs exactly one live '{}' input, found {}",
             node.id,
             handle::INPUT,
@@ -2791,6 +2791,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn output_node_ignores_a_trigger_edge_when_counting_wires() {
+        let flow = Flow {
+            name: "output-trigger".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                FlowNode {
+                    id: "out".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Out".to_string(),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+            ],
+            edges: vec![
+                edge_from("e1", "a", handle::RESULT, "out", "value", "response.body"),
+                edge_from("e2", "b", handle::RESULT, "out", handle::TRIGGER, ""),
+            ],
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("wired"));
+
+        let summary = service
+            .run(&exec, run_input("output-trigger"))
+            .await
+            .expect("run");
+
+        let out = step_of(&summary, "out");
+        assert_eq!(out.status, FlowNodeStatus::Success);
+        assert_eq!(out.value.as_deref(), Some("wired"));
+    }
+
+    #[tokio::test]
     async fn resolves_external_secrets_once_per_run_not_once_per_request_node() {
         let mut env = Environment::new("prod");
         env.external_secrets
@@ -3197,7 +3231,9 @@ mod tests {
         assert_eq!(finished_counts(&publisher), (4, 0, 1));
         assert_eq!(not_taken_count(&publisher), 1);
         let completed_branch = publisher.events().into_iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted { node_id, branch, .. } if node_id == "check" => branch,
+            DomainEvent::FlowStepCompleted {
+                node_id, branch, ..
+            } if node_id == "check" => branch,
             _ => None,
         });
         assert_eq!(completed_branch.as_deref(), Some(handle::TRUE));
@@ -3212,9 +3248,15 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(false)))]),
         );
 
-        let summary = service.run(&exec, run_input("if-false")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("if-false"))
+            .await
+            .expect("run");
 
-        assert_eq!(step_of(&summary, "check").branch.as_deref(), Some(handle::FALSE));
+        assert_eq!(
+            step_of(&summary, "check").branch.as_deref(),
+            Some(handle::FALSE)
+        );
         assert_eq!(
             step_of(&summary, "yes").skip_reason,
             Some(FlowSkipReason::BranchNotTaken)
@@ -3231,11 +3273,17 @@ mod tests {
             scripted(vec![("!!(", Scripted::Throw("ReferenceError: nope"))]),
         );
 
-        let summary = service.run(&exec, run_input("if-error")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("if-error"))
+            .await
+            .expect("run");
 
         let check = step_of(&summary, "check");
         assert_eq!(check.status, FlowNodeStatus::Failed);
-        assert!(check.error.as_deref().is_some_and(|m| m.contains("ReferenceError")));
+        assert!(check
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("ReferenceError")));
         for id in ["yes", "no"] {
             assert_eq!(
                 step_of(&summary, id).skip_reason,
@@ -3254,7 +3302,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!("maybe")))]),
         );
 
-        let summary = service.run(&exec, run_input("if-weird")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("if-weird"))
+            .await
+            .expect("run");
 
         assert_eq!(status_of(&summary, "check"), FlowNodeStatus::Failed);
     }
@@ -3265,7 +3316,8 @@ mod tests {
         // the 401 response and routes to `false`. Login's plain dependent is
         // skipped as upstream_failed.
         let mut flow = if_flow("if-after-401");
-        flow.nodes.push(request_flow_node("plain", "https://api.example.com/plain"));
+        flow.nodes
+            .push(request_flow_node("plain", "https://api.example.com/plain"));
         flow.edges.push(wire("e4", "login", "plain"));
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3283,7 +3335,10 @@ mod tests {
             )]),
         );
 
-        let summary = service.run(&exec, run_input("if-after-401")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("if-after-401"))
+            .await
+            .expect("run");
 
         let login = step_of(&summary, "login");
         assert_eq!(login.status, FlowNodeStatus::Failed);
@@ -3358,7 +3413,10 @@ mod tests {
             ]),
         );
 
-        let summary = service.run(&exec, run_input("pass-through")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("pass-through"))
+            .await
+            .expect("run");
 
         assert_eq!(status_of(&summary, "yes"), FlowNodeStatus::Success);
         assert!(executor
@@ -3408,7 +3466,10 @@ mod tests {
             ]),
         );
 
-        let summary = service.run(&exec, run_input("input-if")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("input-if"))
+            .await
+            .expect("run");
 
         assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
     }
@@ -3419,7 +3480,11 @@ mod tests {
             name: name.to_string(),
             nodes: vec![
                 request_flow_node("login", "https://api.example.com/login"),
-                switch_node("plan", "response.body.plan", &[("free", "free"), ("pro", "pro")]),
+                switch_node(
+                    "plan",
+                    "response.body.plan",
+                    &[("free", "free"), ("pro", "pro")],
+                ),
                 request_flow_node("f", "https://api.example.com/f"),
                 request_flow_node("p", "https://api.example.com/p"),
                 request_flow_node("d", "https://api.example.com/d"),
@@ -3436,7 +3501,10 @@ mod tests {
     async fn run_switch(name: &str, value: serde_json::Value) -> FlowRunSummary {
         let service = service_with_flow(switch_flow(name));
         let executor = RecordingExecutor::new();
-        let exec = recording_exec(&executor, scripted(vec![("String(", Scripted::Value(value))]));
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("String(", Scripted::Value(value))]),
+        );
         service.run(&exec, run_input(name)).await.expect("run")
     }
 
@@ -3462,7 +3530,10 @@ mod tests {
     async fn switch_without_a_match_routes_to_default() {
         let summary = run_switch("sw-default", serde_json::json!("enterprise")).await;
 
-        assert_eq!(step_of(&summary, "plan").branch.as_deref(), Some(handle::DEFAULT));
+        assert_eq!(
+            step_of(&summary, "plan").branch.as_deref(),
+            Some(handle::DEFAULT)
+        );
         assert_eq!(status_of(&summary, "d"), FlowNodeStatus::Success);
     }
 
@@ -3508,6 +3579,36 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn switch_observes_a_non_2xx_response_and_routes_on_it() {
+        let mut flow = switch_flow("sw-401");
+        if let FlowNodeKind::Switch { cases, .. } = &mut flow.nodes[1].kind {
+            cases[1].matches = "401".to_string();
+        }
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/login", 401);
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "String(",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.map(|r| r.status).unwrap_or_default())
+                }),
+            )]),
+        );
+
+        let summary = service.run(&exec, run_input("sw-401")).await.expect("run");
+
+        let login = step_of(&summary, "login");
+        assert_eq!(login.status, FlowNodeStatus::Failed);
+        assert_eq!(login.status_code, Some(401));
+        let plan = step_of(&summary, "plan");
+        assert_eq!(plan.status, FlowNodeStatus::Success);
+        assert_eq!(plan.branch, Some(handle::case_handle("pro")));
+        assert_eq!(status_of(&summary, "p"), FlowNodeStatus::Success);
+    }
+
     /// Spec §6.3 case 1 and case 2 in one graph (false taken):
     /// login -> check; true -> profile, false -> refresh;
     /// profile.body & refresh.body -> save (merge);
@@ -3528,9 +3629,30 @@ mod tests {
                 input_edge("e1", "login", "check"),
                 trigger_edge("e2", "check", handle::TRUE, "profile"),
                 trigger_edge("e3", "check", handle::FALSE, "refresh"),
-                edge_from("e4", "profile", handle::RESULT, "save", "body", "response.body"),
-                edge_from("e5", "refresh", handle::RESULT, "save", "body", "response.body"),
-                edge_from("e6", "config", handle::RESULT, "call", "url", "response.body"),
+                edge_from(
+                    "e4",
+                    "profile",
+                    handle::RESULT,
+                    "save",
+                    "body",
+                    "response.body",
+                ),
+                edge_from(
+                    "e5",
+                    "refresh",
+                    handle::RESULT,
+                    "save",
+                    "body",
+                    "response.body",
+                ),
+                edge_from(
+                    "e6",
+                    "config",
+                    handle::RESULT,
+                    "call",
+                    "url",
+                    "response.body",
+                ),
                 edge_from(
                     "e7",
                     "profile",
@@ -3555,7 +3677,11 @@ mod tests {
 
         let summary = service.run(&exec, run_input("join")).await.expect("run");
 
-        assert_eq!(status_of(&summary, "save"), FlowNodeStatus::Success, "case 1 merge");
+        assert_eq!(
+            status_of(&summary, "save"),
+            FlowNodeStatus::Success,
+            "case 1 merge"
+        );
         assert_eq!(
             step_of(&summary, "call").skip_reason,
             Some(FlowSkipReason::BranchNotTaken),
@@ -3581,7 +3707,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
         );
 
-        let summary = service.run(&exec, run_input("join-fail")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("join-fail"))
+            .await
+            .expect("run");
 
         assert_eq!(status_of(&summary, "profile"), FlowNodeStatus::Failed);
         assert_eq!(
@@ -3597,7 +3726,10 @@ mod tests {
     #[tokio::test]
     async fn dependents_of_a_not_taken_node_are_not_taken_too() {
         let mut flow = if_flow("transitive");
-        flow.nodes.push(request_flow_node("after_no", "https://api.example.com/after"));
+        flow.nodes.push(request_flow_node(
+            "after_no",
+            "https://api.example.com/after",
+        ));
         flow.edges.push(wire("e4", "no", "after_no"));
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -3606,7 +3738,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
         );
 
-        let summary = service.run(&exec, run_input("transitive")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("transitive"))
+            .await
+            .expect("run");
 
         assert_eq!(
             step_of(&summary, "after_no").skip_reason,
@@ -3617,9 +3752,12 @@ mod tests {
     #[tokio::test]
     async fn several_live_triggers_into_one_node_run_it_once() {
         let mut flow = if_flow("two-triggers");
-        flow.nodes.push(request_flow_node("both", "https://api.example.com/both"));
-        flow.edges.push(trigger_edge("e4", "check", handle::TRUE, "both"));
-        flow.edges.push(trigger_edge("e5", "login", handle::RESULT, "both"));
+        flow.nodes
+            .push(request_flow_node("both", "https://api.example.com/both"));
+        flow.edges
+            .push(trigger_edge("e4", "check", handle::TRUE, "both"));
+        flow.edges
+            .push(trigger_edge("e5", "login", handle::RESULT, "both"));
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
         let exec = recording_exec(
@@ -3627,7 +3765,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
         );
 
-        let summary = service.run(&exec, run_input("two-triggers")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("two-triggers"))
+            .await
+            .expect("run");
 
         assert_eq!(status_of(&summary, "both"), FlowNodeStatus::Success);
     }
@@ -3651,7 +3792,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
         );
 
-        let summary = service.run(&exec, run_input("cancel-if")).await.expect("run");
+        let summary = service
+            .run(&exec, run_input("cancel-if"))
+            .await
+            .expect("run");
 
         assert_eq!(summary.stopped_reason, "cancelled");
         assert_eq!(summary.steps.len(), 1);
@@ -3668,7 +3812,10 @@ mod tests {
             scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
         );
 
-        service.run(&exec, run_input("started-if")).await.expect("run");
+        service
+            .run(&exec, run_input("started-if"))
+            .await
+            .expect("run");
 
         let started: Vec<String> = publisher
             .events()
@@ -3678,6 +3825,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(started, vec!["login".to_string(), "check".to_string(), "yes".to_string()]);
+        assert_eq!(
+            started,
+            vec!["login".to_string(), "check".to_string(), "yes".to_string()]
+        );
     }
 }

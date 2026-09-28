@@ -12,11 +12,15 @@ use rocket_shared::events::FlowSkipReason;
 pub(crate) enum NodeOutcome {
     /// The node ran successfully and left through `chosen_exit`
     /// (`handle::RESULT` for plain nodes).
-    Succeeded { chosen_exit: String },
+    Succeeded {
+        chosen_exit: String,
+    },
     /// `responded` is true only for a Request that failed because of a
     /// non-2xx status. Its response is captured, so a routing node may
     /// observe it (spec §6.3.1).
-    Failed { responded: bool },
+    Failed {
+        responded: bool,
+    },
     Skipped(FlowSkipReason),
 }
 
@@ -24,7 +28,9 @@ pub(crate) enum NodeOutcome {
 #[derive(Debug, PartialEq)]
 pub(crate) enum NodeFate<'a> {
     /// Run it, feeding only these live, non-trigger edges.
-    Run { data_edges: Vec<&'a FlowEdge> },
+    Run {
+        data_edges: Vec<&'a FlowEdge>,
+    },
     Skip(FlowSkipReason),
     /// Fail it without executing, with this error message.
     Fail(String),
@@ -79,7 +85,10 @@ pub(crate) fn decide_fate<'a>(
     // Group by target field, keeping first-seen order so messages are stable.
     let mut groups: Vec<(&'a str, Vec<&'a FlowEdge>)> = Vec::new();
     for &e in incoming {
-        match groups.iter_mut().find(|(field, _)| *field == e.target_field) {
+        match groups
+            .iter_mut()
+            .find(|(field, _)| *field == e.target_field)
+        {
             Some((_, edges)) => edges.push(e),
             None => groups.push((e.target_field.as_str(), vec![e])),
         }
@@ -161,17 +170,34 @@ mod tests {
             ("if", ok(handle::TRUE)),
             ("bad", failed(false)),
         ]);
-        assert!(is_live(&edge("e1", "plain", handle::RESULT, "url"), &o, false));
+        assert!(is_live(
+            &edge("e1", "plain", handle::RESULT, "url"),
+            &o,
+            false
+        ));
         assert!(is_live(&edge("e2", "if", handle::TRUE, "url"), &o, false));
         assert!(!is_live(&edge("e3", "if", handle::FALSE, "url"), &o, false));
-        assert!(!is_live(&edge("e4", "bad", handle::RESULT, "url"), &o, false));
-        assert!(!is_live(&edge("e5", "unknown", handle::RESULT, "url"), &o, false));
+        assert!(!is_live(
+            &edge("e4", "bad", handle::RESULT, "url"),
+            &o,
+            false
+        ));
+        assert!(!is_live(
+            &edge("e5", "unknown", handle::RESULT, "url"),
+            &o,
+            false
+        ));
     }
 
     #[test]
     fn a_node_without_incoming_edges_runs() {
         let fate = decide_fate(&[], &HashMap::new(), false);
-        assert_eq!(fate, NodeFate::Run { data_edges: Vec::new() });
+        assert_eq!(
+            fate,
+            NodeFate::Run {
+                data_edges: Vec::new()
+            }
+        );
     }
 
     #[test]
@@ -219,7 +245,10 @@ mod tests {
         let e = edge("e1", "login", handle::RESULT, handle::INPUT);
         let o = outcomes(&[("login", failed(true))]);
         assert!(is_live(&e, &o, true));
-        assert_eq!(data_ids(&decide_fate(&[&e], &o, true)), vec!["e1".to_string()]);
+        assert_eq!(
+            data_ids(&decide_fate(&[&e], &o, true)),
+            vec!["e1".to_string()]
+        );
     }
 
     #[test]
@@ -277,7 +306,10 @@ mod tests {
         let from_true_arm = edge("e1", "profile", handle::RESULT, "body");
         let from_false_arm = edge("e2", "refresh", handle::RESULT, "body");
         let o = outcomes(&[
-            ("profile", NodeOutcome::Skipped(FlowSkipReason::BranchNotTaken)),
+            (
+                "profile",
+                NodeOutcome::Skipped(FlowSkipReason::BranchNotTaken),
+            ),
             ("refresh", ok(handle::RESULT)),
         ]);
         let fate = decide_fate(&[&from_true_arm, &from_false_arm], &o, false);
@@ -288,10 +320,18 @@ mod tests {
     fn a_different_field_without_a_live_edge_skips_the_node() {
         // Case 2: url is live, the token header only comes from a not-taken arm.
         let url = edge("e1", "config", handle::RESULT, "url");
-        let token = edge("e2", "get_token", handle::RESULT, "headers[Authorization].value");
+        let token = edge(
+            "e2",
+            "get_token",
+            handle::RESULT,
+            "headers[Authorization].value",
+        );
         let o = outcomes(&[
             ("config", ok(handle::RESULT)),
-            ("get_token", NodeOutcome::Skipped(FlowSkipReason::BranchNotTaken)),
+            (
+                "get_token",
+                NodeOutcome::Skipped(FlowSkipReason::BranchNotTaken),
+            ),
         ]);
         assert_eq!(
             decide_fate(&[&url, &token], &o, false),
