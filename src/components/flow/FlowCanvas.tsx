@@ -263,7 +263,13 @@ function FlowCanvasInner({
         onPaneClick={focusPane}
         fitView
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        {/* The theme token keeps the dots visible on both light and dark canvases. */}
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={16}
+          size={1.5}
+          color='hsl(var(--muted-foreground))'
+        />
         <Controls />
       </ReactFlow>
     </div>
