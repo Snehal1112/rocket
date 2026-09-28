@@ -229,6 +229,8 @@ export interface PaneState {
   openFlowTab: (collectionName: string | null, flowName?: string) => Promise<void>;
   updateFlowNodes: (tabId: string, nodes: FlowNode[]) => void;
   updateFlowEdges: (tabId: string, edges: FlowEdge[]) => void;
+  /** Replaces nodes and edges together, so dependent edits land in one update. */
+  updateFlowGraph: (tabId: string, nodes: FlowNode[], edges: FlowEdge[]) => void;
   patchFlowNodeStatus: (
     tabId: string,
     nodeId: string,
@@ -775,6 +777,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
         isFlowTab(tab) ? { ...tab, edges, isDirty: true } : tab,
+      ),
+    });
+  },
+
+  updateFlowGraph(tabId, nodes, edges) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, nodes, edges, isDirty: true } : tab,
       ),
     });
   },

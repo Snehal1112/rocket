@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleAutoSave } from '@/lib/auto-save';
 import { createDefaultRequest } from '@/lib/pane-utils';
-import { getFlow } from '@/lib/tauri-api';
+import { type FlowNode, getFlow } from '@/lib/tauri-api';
 import type {
   CollectionTab,
   FlowTab,
@@ -1011,6 +1011,28 @@ describe('Flow tab actions', () => {
     const tab = findFirstFlowTab();
     expect(tab?.nodeStatus).toEqual({});
     expect(tab?.nodeDetail).toEqual({});
+  });
+
+  it('updateFlowGraph replaces nodes and edges in a single store update', () => {
+    usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    const node: FlowNode = {
+      id: 'n1',
+      kind: { kind: 'Output', label: 'Out' },
+      position: { x: 0, y: 0 },
+    };
+    const listener = vi.fn();
+    const unsubscribe = usePaneStore.subscribe(listener);
+
+    usePaneStore.getState().updateFlowGraph(tabId, [node], []);
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    const tab = findFirstFlowTab();
+    expect(tab?.nodes).toEqual([node]);
+    expect(tab?.edges).toEqual([]);
+    expect(tab?.isDirty).toBe(true);
   });
 });
 

@@ -17,8 +17,9 @@ import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
-import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { type FlowNodeActions, FlowNodeActionsContext } from './nodes/FlowNodeActionsContext';
 import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
@@ -49,6 +50,10 @@ export interface FlowCanvasProps {
   cycleNodeIds?: string[];
   // Edge ids named in a save validation error, such as a cycle.
   cycleEdgeIds?: string[];
+  // Inline edits from routing nodes (If condition, Switch value and cases).
+  onNodeKindChange?: (nodeId: string, kind: FlowNodeKind) => void;
+  // Removes a Switch case together with the edges leaving its exit.
+  onRemoveSwitchCase?: (nodeId: string, caseId: string) => void;
 }
 
 type Measured = { width: number; height: number };
@@ -145,6 +150,8 @@ function FlowCanvasInner({
   nodeDetail,
   cycleNodeIds,
   cycleEdgeIds,
+  onNodeKindChange,
+  onRemoveSwitchCase,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -170,6 +177,13 @@ function FlowCanvasInner({
   const rfEdges = useMemo(
     () => toRfEdges(edges, selectedEdgeIds, cycleEdgeIds),
     [edges, selectedEdgeIds, cycleEdgeIds],
+  );
+  const nodeActions = useMemo<FlowNodeActions>(
+    () => ({
+      updateNodeKind: (nodeId, kind) => onNodeKindChange?.(nodeId, kind),
+      removeSwitchCase: (nodeId, caseId) => onRemoveSwitchCase?.(nodeId, caseId),
+    }),
+    [onNodeKindChange, onRemoveSwitchCase],
   );
 
   // Refuses wires the backend would reject, while the user is still dragging.
@@ -250,28 +264,30 @@ function FlowCanvasInner({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <ReactFlow
-        nodes={rfNodes}
-        edges={rfEdges}
-        nodeTypes={nodeTypes}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={onConnect}
-        isValidConnection={isValidConnection}
-        onNodeClick={focusPane}
-        onEdgeClick={focusPane}
-        onPaneClick={focusPane}
-        fitView
-      >
-        {/* The theme token keeps the dots visible on both light and dark canvases. */}
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={16}
-          size={1.5}
-          color='hsl(var(--muted-foreground))'
-        />
-        <Controls />
-      </ReactFlow>
+      <FlowNodeActionsContext.Provider value={nodeActions}>
+        <ReactFlow
+          nodes={rfNodes}
+          edges={rfEdges}
+          nodeTypes={nodeTypes}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          onNodeClick={focusPane}
+          onEdgeClick={focusPane}
+          onPaneClick={focusPane}
+          fitView
+        >
+          {/* The theme token keeps the dots visible on both light and dark canvases. */}
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1.5}
+            color='hsl(var(--muted-foreground))'
+          />
+          <Controls />
+        </ReactFlow>
+      </FlowNodeActionsContext.Provider>
     </div>
   );
 }

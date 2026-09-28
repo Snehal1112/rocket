@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import {
   buildEdgeFromConnection,
   parseGraphErrorMessage,
@@ -20,6 +21,7 @@ import {
   type CollectionSummary,
   type FlowEdge,
   type FlowNode,
+  type FlowNodeKind,
   type FlowNodeStatus,
   listCollections,
   listFlows,
@@ -37,6 +39,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
   const closeTab = usePaneStore((s) => s.closeTab);
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
+  const updateFlowGraph = usePaneStore((s) => s.updateFlowGraph);
   const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
@@ -178,6 +181,15 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
   };
 
+  const handleNodeKindChange = (nodeId: string, kind: FlowNodeKind) => {
+    updateFlowNodes(tab.id, replaceNodeKind(tab.nodes, nodeId, kind));
+  };
+
+  const handleRemoveSwitchCase = (nodeId: string, caseId: string) => {
+    const next = removeSwitchCase(tab.nodes, tab.edges, nodeId, caseId);
+    if (next) updateFlowGraph(tab.id, next.nodes, next.edges);
+  };
+
   // Returns whether the save succeeded, so Run can stop on a failed save.
   const handleSave = async (quiet = false): Promise<boolean> => {
     try {
@@ -271,6 +283,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         onConnect={handleConnect}
         onAddNode={handleAddNode}
         flowCollectionName={tab.collectionName}
+        onNodeKindChange={handleNodeKindChange}
+        onRemoveSwitchCase={handleRemoveSwitchCase}
       />
       {pendingEdge && pendingTargetNode && (
         <WireExpressionPopover
