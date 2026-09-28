@@ -1776,7 +1776,7 @@ export interface FlowEdge {
   targetNodeId: string;
   targetField: string;
   expression: string;
-  /** Exit of the source node the edge leaves from. Absent means `result`. */
+  /** Exit of the source node the edge leaves from. Absent or `result` means the default exit. */
   sourceHandle?: string;
 }
 

@@ -125,7 +125,7 @@ describe('FlowPane save', () => {
 
   it('flags the node named in a non-cycle validation error', async () => {
     vi.mocked(saveFlow).mockRejectedValue(
-      "Invalid input: If node 'b' must have exactly one incoming edge — node(s): b; edge(s): ",
+      'Invalid input: flow is invalid: the If node needs exactly one input wire, found 0 — node(s): b; edge(s): ',
     );
     render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));

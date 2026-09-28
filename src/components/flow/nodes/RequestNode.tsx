@@ -1,5 +1,6 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { MoreVertical } from 'lucide-react';
+import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +14,7 @@ export interface RequestNodeData {
   bodyPreview?: string;
   /** Method of a Saved request, when the caller has looked it up. */
   method?: string;
-  /** Set when a save was rejected because this node is part of a cycle. */
+  /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
 }
 
@@ -78,7 +79,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
         <div className='relative flex items-center gap-1.5 pl-2'>
           <Handle
             type='target'
-            id='trigger'
+            id={TRIGGER_HANDLE}
             position={Position.Left}
             isConnectable={isConnectable}
             className='!h-2 !w-2'
@@ -125,7 +126,7 @@ export function RequestNode({ data, isConnectable }: NodeProps & { data: Request
 
       <Handle
         type='source'
-        id='result'
+        id={RESULT_HANDLE}
         position={Position.Right}
         isConnectable={isConnectable}
         className='!h-2 !w-2'

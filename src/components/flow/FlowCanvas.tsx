@@ -45,9 +45,9 @@ export interface FlowCanvasProps {
   flowCollectionName?: string | null;
   // Per-node status-code/timing/error, keyed by node id. Populated by a run.
   nodeDetail?: Record<string, FlowNodeDetail>;
-  // Node ids implicated in a stored cycle, reported by the last failed save.
+  // Node ids named in a save validation error, such as a cycle.
   cycleNodeIds?: string[];
-  // Edge ids implicated in a stored cycle, reported by the last failed save.
+  // Edge ids named in a save validation error, such as a cycle.
   cycleEdgeIds?: string[];
 }
 

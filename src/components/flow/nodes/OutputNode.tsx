@@ -1,11 +1,12 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 
 export interface OutputNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Output' }>;
   status: FlowNodeStatus;
-  /** Set when a save was rejected because this node is part of a cycle. */
+  /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
   value?: string;
 }
@@ -22,7 +23,7 @@ export function OutputNode({ data, isConnectable }: NodeProps & { data: OutputNo
       {/* Data-less "Run when" input. It sits at the top so it does not overlap `value`. */}
       <Handle
         type='target'
-        id='trigger'
+        id={TRIGGER_HANDLE}
         title='Run when'
         position={Position.Left}
         isConnectable={isConnectable}

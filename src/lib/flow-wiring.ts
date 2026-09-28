@@ -40,8 +40,8 @@ export function buildEdgeFromConnection(
     targetField: connection.targetHandle,
     expression: isDataLessTarget(connection.targetHandle) ? '' : defaultExpressionFor(sourceNode),
   };
-  // The backend omits `result` on disk, so leave it out here too. That keeps
-  // re-saved Phase 1 flows byte-identical.
+  // Absent or `result` means the default exit. New plain wires leave the key
+  // out to match what the backend writes.
   if (connection.sourceHandle && connection.sourceHandle !== RESULT_HANDLE) {
     edge.sourceHandle = connection.sourceHandle;
   }
