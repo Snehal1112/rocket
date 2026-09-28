@@ -1861,3 +1861,58 @@ export const onFlowRunFinished = (
   handler: (event: FlowRunFinishedEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<FlowRunFinishedEvent>('flow-run-finished', (e) => handler(e.payload));
+
+// ==== AI Assist (ACP chat sessions) ====
+export const startAgentSession = (agentConfigId: string, cwd: string) =>
+  invoke<string>('start_agent_session', { agentConfigId, cwd });
+
+export const sendAgentPrompt = (sessionId: string, prompt: string) =>
+  invoke<string>('send_agent_prompt', { sessionId, prompt });
+
+export const endAgentSession = (sessionId: string) =>
+  invoke<void>('end_agent_session', { sessionId });
+
+// Event payloads are DomainEvent JSON. Their fields are snake_case, like
+// every other DomainEvent. Do not camelCase them here.
+export interface AgentSessionStartedEvent {
+  type: 'acpSessionStarted';
+  session_id: string;
+}
+
+export const onAgentSessionStarted = (
+  handler: (event: AgentSessionStartedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentSessionStartedEvent>('agent-session-started', (e) => handler(e.payload));
+
+export interface AgentSessionChunkEvent {
+  type: 'acpSessionChunk';
+  session_id: string;
+  text: string;
+}
+
+export const onAgentSessionChunk = (
+  handler: (event: AgentSessionChunkEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentSessionChunkEvent>('agent-session-chunk', (e) => handler(e.payload));
+
+export interface AgentSessionFinishedEvent {
+  type: 'acpSessionFinished';
+  session_id: string;
+  stop_reason: string;
+}
+
+export const onAgentSessionFinished = (
+  handler: (event: AgentSessionFinishedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentSessionFinishedEvent>('agent-session-finished', (e) => handler(e.payload));
+
+export interface AgentSessionFailedEvent {
+  type: 'acpSessionFailed';
+  session_id: string;
+  error: string;
+}
+
+export const onAgentSessionFailed = (
+  handler: (event: AgentSessionFailedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentSessionFailedEvent>('agent-session-failed', (e) => handler(e.payload));
