@@ -204,6 +204,21 @@ minimal version of E's safety valve is therefore built as part of D:
   pulling a collection with this flag already set to `true` enables
   autonomous agent writes for whoever opens it next, the same trust model
   already implied by `sandbox_mode`.)
+  (Trade-off, explicitly accepted, flagged by Plan 03's final review as
+  S-1: `secret: true` refusal in `get_env_var` stops a value from
+  appearing directly in the agent's chat context, but it is not an
+  exfiltration boundary once `edit_script` and `run_request` both exist —
+  an agent (including one following a prompt-injected instruction from a
+  response body) can write a pre-request script that reads a resolved
+  secret and sends it to a host of its choosing via `req.setUrl(...)`,
+  then call `run_request`. `RequestGuardPolicy` (see Plan 05 note (d) on
+  `McpToolService::run_request`) only blocks internal/private-range
+  hosts, not arbitrary external ones, so it does not close this either.
+  Subproject E is the natural home for a real mitigation — e.g. redacting
+  secret values from any string an agent-authored script can read, or an
+  explicit allowlist of hosts the agent may dispatch requests against —
+  and should treat this checkbox's UI copy as describing "keeps casual
+  disclosure out of chat", not "keeps secrets safe from this agent".)
 - **UI:** a checkbox in `AgentChatPanel`
   (`src/components/request/AgentChatPanel.tsx`), labeled to the effect of
   "Allow this agent to run requests and edit files", off by default. This
