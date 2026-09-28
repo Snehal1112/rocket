@@ -1,9 +1,10 @@
 import { X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
+import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
 
 // Picks the editor for the node's kind. Each editor reports a whole new kind,
@@ -67,6 +68,7 @@ export function NodePropertiesPanel({
   autoFocusLabel?: boolean;
 }) {
   const asideRef = useRef<HTMLElement>(null);
+  const refocusPanel = useCallback(() => asideRef.current?.focus(), []);
   // A menu returns focus to its trigger as it closes, so wait a frame and a tick
   // before moving focus to the Label field.
   // biome-ignore lint/correctness/useExhaustiveDependencies: node.id is the trigger.
@@ -110,7 +112,9 @@ export function NodePropertiesPanel({
         </Button>
       </div>
       <div key={node.id} className='flex-1 overflow-y-auto p-3'>
-        {editorFor(node, edges, collection, onChange)}
+        <PanelFocusProvider value={refocusPanel}>
+          {editorFor(node, edges, collection, onChange)}
+        </PanelFocusProvider>
       </div>
     </aside>
   );

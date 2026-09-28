@@ -14,6 +14,7 @@ import {
 } from '@/lib/tauri-api';
 import { InlineSourceEditor } from './InlineSourceEditor';
 import { LabelField } from './LabelField';
+import { focusIsLost, usePanelRefocus } from './panelFocus';
 import { RequestPicker } from './RequestPicker';
 import { SavedSourceEditor } from './SavedSourceEditor';
 
@@ -41,16 +42,20 @@ export function RequestNodeEditor({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const source = kind.source;
+  const refocusPanel = usePanelRefocus();
 
   // Identifies the current source. A pending confirmation or load error only
   // makes sense for the source it was computed from.
   const sourceKey = source.type === 'Saved' ? `saved:${source.requestPath}` : 'inline';
   const sourceKeyRef = useRef(sourceKey);
   useEffect(() => {
+    // A source switch swaps the whole editor branch. When that removed the
+    // focused element, keep focus in the panel.
+    if (sourceKeyRef.current !== sourceKey && focusIsLost()) refocusPanel();
     sourceKeyRef.current = sourceKey;
     setPending(null);
     setLoadError(null);
-  }, [sourceKey]);
+  }, [sourceKey, refocusPanel]);
 
   const applySaved = (entry: SavedRequestEntry) =>
     onChange({ ...kind, source: { type: 'Saved', requestPath: entry.path } });
@@ -86,8 +91,17 @@ export function RequestNodeEditor({
     applySaved(entry);
   };
 
+  // The confirmation buttons unmount with their fieldset, so focus moves to
+  // the panel first.
+  const dismissPending = () => {
+    refocusPanel();
+    setPending(null);
+    setLoadError(null);
+  };
+
   const confirm = () => {
     if (!pending) return;
+    refocusPanel();
     if (pending.type === 'convert') {
       onChange({ ...kind, source: { type: 'Inline', request: pending.inline } });
     } else {
@@ -151,10 +165,7 @@ export function RequestNodeEditor({
               variant='outline'
               size='sm'
               className='h-7 text-xs'
-              onClick={() => {
-                setPending(null);
-                setLoadError(null);
-              }}
+              onClick={dismissPending}
             >
               Cancel
             </Button>

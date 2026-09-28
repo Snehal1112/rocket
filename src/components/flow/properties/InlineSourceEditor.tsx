@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { FlowEdge, InlineHeader, InlineRequestData } from '@/lib/tauri-api';
+import { usePanelRefocus } from './panelFocus';
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 
@@ -32,11 +33,18 @@ export function InlineSourceEditor({
   onChange: (request: InlineRequestData) => void;
   outOfRangeWires: FlowEdge[];
 }) {
+  const refocusPanel = usePanelRefocus();
   const setHeader = (index: number, patch: Partial<InlineHeader>) =>
     onChange({
       ...request,
       headers: request.headers.map((h, i) => (i === index ? { ...h, ...patch } : h)),
     });
+  // Rows are keyed by index, so only the last row unmounts. Its remove button
+  // held focus, so focus moves to the panel first.
+  const removeHeader = (index: number) => {
+    if (index === request.headers.length - 1) refocusPanel();
+    onChange({ ...request, headers: request.headers.filter((_, j) => j !== index) });
+  };
   const contentType = request.headers.find((h) => h.name.toLowerCase() === 'content-type')?.value;
   const positions = missingPositions(outOfRangeWires);
 
@@ -103,9 +111,7 @@ export function InlineSourceEditor({
               size='icon'
               className='h-6 w-6 shrink-0'
               aria-label={`Remove header ${i + 1}`}
-              onClick={() =>
-                onChange({ ...request, headers: request.headers.filter((_, j) => j !== i) })
-              }
+              onClick={() => removeHeader(i)}
             >
               <X className='h-3 w-3' aria-hidden='true' />
             </Button>

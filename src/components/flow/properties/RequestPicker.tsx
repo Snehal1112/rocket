@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { requestEntriesOf, type SavedRequestEntry } from '@/lib/flow-node-edits';
 import { getCollection } from '@/lib/tauri-api';
+import { usePanelRefocus } from './panelFocus';
 
 // A searchable list of this collection's requests. The tree is fetched each
 // time the popover opens, so it never shows a stale list.
@@ -20,6 +21,8 @@ export function RequestPicker({
   const [entries, setEntries] = useState<SavedRequestEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const refocusPanel = usePanelRefocus();
 
   const load = useCallback(() => {
     setError(null);
@@ -41,11 +44,21 @@ export function RequestPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type='button' variant='outline' size='sm' className='h-7 text-xs'>
+        <Button ref={triggerRef} type='button' variant='outline' size='sm' className='h-7 text-xs'>
           {triggerLabel}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align='start' className='nokey w-72 p-2'>
+      <PopoverContent
+        align='start'
+        className='nokey w-72 p-2'
+        // A pick can switch the node's source and unmount the trigger. Focus
+        // then goes to the panel instead of falling to the body.
+        onCloseAutoFocus={(e) => {
+          if (triggerRef.current?.isConnected) return;
+          e.preventDefault();
+          refocusPanel();
+        }}
+      >
         <Input
           aria-label='Filter requests'
           placeholder='Filter requests'
