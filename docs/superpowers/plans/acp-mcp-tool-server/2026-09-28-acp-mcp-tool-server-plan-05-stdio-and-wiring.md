@@ -621,6 +621,8 @@ pub use acp_session_service::{AcpSessionService, McpHttpServerCredentials};
 
 - [ ] **Step 4: Write the unit test proving the token never lands in argv**
 
+> **Post-Plan-03 review note:** do NOT add the `FakeCollectionRepo` struct shown below. Plan 03's review moved the settings-configurable collection double into `crate::test_doubles::ConfigurableCollectionRepo`, already imported by this test module. Its `ConfigurableCollectionRepo::with_autonomy_enabled(name, enabled)` already returns an `Arc<Self>`, so write `ConfigurableCollectionRepo::with_autonomy_enabled("demo", true)` (no extra `Arc::new(...)`) wherever this plan (and Plan 06 Task 3) writes `Arc::new(FakeCollectionRepo::with_autonomy_enabled(...))`. Existing tests already pass `ConfigurableCollectionRepo::new()` to `AcpSessionService::new`.
+
 ```rust
 // crates/rocket-app/src/acp_session_service.rs, in #[cfg(test)] mod tests
 #[tokio::test]
@@ -857,6 +859,10 @@ grep -rn "start_agent_session\|startAgentSession" src/lib/tauri-api.ts src/compo
 Add a `collection: string` parameter to the TS wrapper in `src/lib/tauri-api.ts` (matching whatever pattern that file already uses for passing a collection name to other `invoke` calls) and pass the active collection name from `AgentChatPanel.tsx`'s existing call site. This is IPC-boundary plumbing only, no new UI in this plan (Plan 06 owns the actual UI checkbox) — the collection name a session is already scoped to is already available wherever `AgentChatPanel` currently calls `startAgentSession`, since Plan 03/subproject C already renders this panel per-collection.
 
 - [ ] **Step 8: Update `src-tauri/src/lib.rs` construction**
+
+> **Post-Plan-03 review notes:**
+> 1. `acp_collection_repo` (a `SharedPathCollectionRepo` behind `Arc<dyn CollectionRepository>`) and the `Arc::clone(&acp_collection_repo)` argument to `AcpSessionService::new` already exist — Plan 03's review replaced the original path-pinned `FsCollectionRepo::new_standalone` there, which read the startup workspace's settings after a workspace switch. Do not add a second binding.
+> 2. **No plan currently constructs and `app.manage`s the production `Arc<McpToolService>`.** Plan 04 defers it to this plan (Plan 04 "Next Plan"), and without it every tool call fails in `mcp_tool_service()`'s `try_state` lookup. Add it in this step. Caveats: (a) `exec_svc` is `app.manage`d by value today (`State<'_, RequestExecutionService>` in about six commands), but `McpToolService::new` needs `Arc<RequestExecutionService>` — either switch that managed state to `Arc` and update those commands, or build a dedicated instance; (b) use a `SharedPathCollectionRepo` for its `collection_repo` (reuse `acp_collection_repo`) and `SharedCollectionEnvironmentRepo` for its env factory, never a path-pinned repo, for the same workspace-switch reason; (c) per-collection write locks live in each `SharedPathCollectionRepo` instance's own lock map, so the agent's `edit_script` and a manual UI save (via `collection_svc`'s separate instance) are not serialized against each other unless they share a lock map. `atomic_write` still prevents torn files, but a lost update is possible. Plan 06's concurrency test should be judged with this in mind.
 
 `mcp_server_registry` and its `app.manage(Arc::clone(&mcp_server_registry))` registration already exist by this point (Plan 04, Task 4, Step 3) — do not create a second `let mcp_server_registry = ...` binding or a second `app.manage(...)` call for it here. This step only needs `acp_collection_repo` (new) and the `AcpSessionService::new(...)` call site update:
 
