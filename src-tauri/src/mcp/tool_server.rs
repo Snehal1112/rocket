@@ -72,11 +72,17 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use rmcp::transport::streamable_http_server::StreamableHttpService;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
+
+/// The path the MCP Streamable HTTP endpoint is mounted at. Every client
+/// (the agent's own HTTP MCP client via `McpServerSpec::Http`, and Plan 05's
+/// stdio bridge) must target `http://127.0.0.1:<port>/mcp`, not the bare
+/// origin — the router below has no route at `/`.
+pub const MCP_HTTP_PATH: &str = "/mcp";
 
 use rocket_app::McpToolService;
 
@@ -217,14 +223,16 @@ fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResul
 /// value is a malformed-input case, so it is handled the same way as any
 /// other tool-level refusal: an agent-visible `CallToolResult::error`, not a
 /// protocol failure and not a call into `McpToolService` at all.
-fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, CallToolResult> {
+/// The error is the message text only, so `Result` stays small (clippy's
+/// `result_large_err`); the caller wraps it into the tool error.
+fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, String> {
     match phase {
         "pre_request" => Ok(rocket_collection::RequestScriptPhase::PreRequest),
         "post_response" => Ok(rocket_collection::RequestScriptPhase::PostResponse),
         "tests" => Ok(rocket_collection::RequestScriptPhase::Tests),
-        other => Err(CallToolResult::error(vec![ContentBlock::text(format!(
+        other => Err(format!(
             "unknown script phase '{other}': expected pre_request, post_response, or tests"
-        ))])),
+        )),
     }
 }
 
@@ -268,7 +276,9 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let phase = match parse_phase(&params.phase) {
             Ok(phase) => phase,
-            Err(tool_error) => return Ok(tool_error),
+            Err(message) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+            }
         };
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.edit_script(
@@ -326,12 +336,13 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 }
 
-// `router = self.tool_router.clone()`: without this, `#[tool_handler]`
-// defaults to `router = Self::tool_router()`, which rebuilds a fresh
-// `ToolRouter` on every call and never reads the `tool_router` field this
-// struct stores — leaving that field permanently dead code. Reusing the
-// stored instance is the point of keeping it on the struct at all.
-#[tool_handler(router = self.tool_router.clone())]
+// `router = self.tool_router`: without this, `#[tool_handler]` defaults to
+// `router = Self::tool_router()`, which rebuilds a fresh `ToolRouter` on
+// every call and never reads the `tool_router` field this struct stores.
+// The macro only calls `&self` methods on the expression (`call`,
+// `list_all`, `get`), so the stored router is borrowed, not cloned. This
+// matches the form `rmcp`'s own tests use.
+#[tool_handler(router = self.tool_router)]
 impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
@@ -348,42 +359,52 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
 
 /// Handle to one running per-session MCP HTTP server. `port`/`token` are
 /// what Plan 05's `McpServerSpec::Http` is built from; `shutdown()` stops the
-/// server's `axum::serve` task. `Clone` so the same handle can be both
-/// returned to `spawn_mcp_http_server`'s caller and stored in
-/// `McpServerRegistry` — `Arc<Notify>` makes that safe: both clones
-/// ultimately notify the same underlying `Notify`, and notifying it twice is
-/// harmless (a second `notify_one` with no waiter left just stores an
-/// unconsumed permit).
+/// server. `Clone` so the same handle can be both kept by the caller and
+/// stored in `McpServerRegistry`. All clones share one `CancellationToken`,
+/// and cancelling it more than once is harmless.
+///
+/// Deliberately not `Debug`: `token` is the bearer credential, and a stray
+/// `{:?}` on this type in a log line must not be able to print it.
 #[derive(Clone)]
 pub struct McpHttpServerHandle {
     pub port: u16,
     pub token: String,
-    pub(crate) shutdown: Arc<Notify>,
+    pub(crate) shutdown: CancellationToken,
 }
 
 impl McpHttpServerHandle {
-    /// Signals the server's `axum::serve(...).with_graceful_shutdown(...)`
-    /// future to stop accepting new connections and return, which drops the
-    /// listening socket and frees the port. Fire-and-forget: callers on the
-    /// app-exit path (`McpServerRegistry::shutdown_all`) have no one left to
-    /// report a failure to, and there is nothing to fail here besides "no one
-    /// is listening yet", which is harmless.
+    /// Stops the server. The same token drives two things, and both are
+    /// needed. First, `axum::serve`'s graceful shutdown stops accepting and
+    /// drops the listening socket, which frees the port. Second, `rmcp`'s
+    /// `StreamableHttpServerConfig::cancellation_token` terminates every
+    /// live MCP session and ends its open SSE streams. Without the second,
+    /// an agent's long-lived `GET /mcp` SSE stream keeps its connection
+    /// open, and graceful shutdown waits on it forever. That would leave the
+    /// serve task, the session worker and its `AppHandle` alive.
+    ///
+    /// Fire-and-forget: callers on the app-exit path
+    /// (`McpServerRegistry::shutdown_all`) have no one left to report a
+    /// failure to, and cancelling cannot fail.
     pub fn shutdown(&self) {
-        self.shutdown.notify_one();
+        self.shutdown.cancel();
     }
 }
 
-/// Binds a fresh localhost MCP HTTP server for one ACP session, registers it
-/// with `McpServerRegistry` (Tauri-managed state — must already be present;
-/// see `src-tauri/src/lib.rs`'s `app.manage(Arc::clone(&mcp_server_registry))`
-/// call) so it is swept on app exit, and returns a handle carrying the port
-/// and bearer token the caller advertises to the agent.
+/// Binds a fresh localhost MCP HTTP server for one ACP session and returns a
+/// handle carrying the port and bearer token the caller advertises to the
+/// agent. The endpoint is served at [`MCP_HTTP_PATH`].
+///
+/// This function does **not** register the handle in `McpServerRegistry`.
+/// The caller must do that, under the id it will later end the session by.
+/// Plan 05 passes a pre-handshake UUID as `session_id` here, but ends
+/// sessions by the real post-handshake ACP session id. If this function
+/// registered under `session_id` itself, every session would leave a stale
+/// second registry entry behind that `end_session` never removes.
 ///
 /// `session_id` is a parameter (not generated here) because tool calls need
 /// it up front for their `DomainEvent::AcpToolInvoked` audit events, and
 /// because one HTTP server instance serves exactly one ACP session for its
-/// whole lifetime. See this task's header note on where that identifier
-/// comes from — resolving that call-site question is Plan 05's job.
+/// whole lifetime.
 pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     app_handle: tauri::AppHandle<R>,
     session_id: String,
@@ -396,34 +417,36 @@ pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     // reusing it avoids adding a `rand` dependency for what `uuid` (already
     // a workspace dependency) already does well.
     let token = uuid::Uuid::new_v4().to_string();
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
 
-    let tool_server = RocketMcpToolServer::new(app_handle.clone(), session_id.clone());
+    let tool_server = RocketMcpToolServer::new(app_handle, session_id);
+    // The default config keeps `rmcp`'s loopback-only `Host` allowlist, which
+    // guards against DNS rebinding. Only the cancellation token is replaced,
+    // so `shutdown()` also ends live MCP sessions (see its doc comment).
+    let config = StreamableHttpServerConfig::default().with_cancellation_token(shutdown.clone());
     let service = StreamableHttpService::new(
         move || Ok(tool_server.clone()),
         LocalSessionManager::default().into(),
-        Default::default(),
+        config,
     );
-    let router = axum::Router::new().nest_service("/mcp", service).layer(
-        axum::middleware::from_fn_with_state(token.clone(), crate::mcp::auth::require_bearer_token),
-    );
+    let router = axum::Router::new()
+        .nest_service(MCP_HTTP_PATH, service)
+        .layer(axum::middleware::from_fn_with_state(
+            token.clone(),
+            crate::mcp::auth::require_bearer_token,
+        ));
 
     let handle = McpHttpServerHandle {
         port,
         token,
-        shutdown: Arc::clone(&shutdown),
+        shutdown: shutdown.clone(),
     };
 
-    if let Some(registry) = app_handle.try_state::<Arc<crate::mcp::registry::McpServerRegistry>>() {
-        registry.register(session_id, handle.clone());
-    }
-
     tauri::async_runtime::spawn(async move {
-        let shutdown_signal = async move { shutdown.notified().await };
         // Best-effort: this task runs on its own once spawned, so there is
-        // no caller left to report a bind/serve failure to.
+        // no caller left to report a serve failure to.
         let _ = axum::serve(listener, router.into_make_service())
-            .with_graceful_shutdown(shutdown_signal)
+            .with_graceful_shutdown(shutdown.cancelled_owned())
             .await;
     });
 

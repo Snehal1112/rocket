@@ -66,10 +66,8 @@ tauri-plugin-clipboard-manager = "2"
 # MCP tool server (Plan 04) — official MCP SDK + the HTTP server crate it
 # integrates with. Not workspace-shared: no other crate in this workspace
 # needs either of these (rocket-infra maps McpServerSpec to the
-# agent-client-protocol crate's own McpServer type, never to rmcp; Plan 02's
-# own rmcp/axum addition to rocket-infra/Cargo.toml went unused there for the
-# same reason and should be treated as dead weight, not a second source of
-# truth for this feature set).
+# agent-client-protocol crate's own McpServer type, never to rmcp, so
+# rocket-infra/Cargo.toml deliberately has no rmcp/axum entry).
 #
 # Feature list is the union of what this plan's HTTP server needs (server,
 # macros, transport-streamable-http-server) and what Plan 05's stdio bridge
@@ -87,6 +85,9 @@ rmcp = { version = "3.5.0", features = [
 axum = "0.8"
 schemars = "1"
 subtle = "2"
+# CancellationToken for MCP server shutdown. Already in the lockfile via
+# rmcp, which takes the same token type in StreamableHttpServerConfig.
+tokio-util = "0.7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # v2_34 exposes MemoryPressureSettings; wry already enables it transitively.
@@ -97,3 +98,8 @@ tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tauri = { version = "2", features = ["test"] }
 async-trait.workspace = true
+# The MCP integration test drives rmcp's reqwest 0.13 client. That reqwest
+# build has rustls with no crypto provider (tauri-plugin-updater enables
+# "rustls-no-provider"), so building a client panics unless a process-wide
+# provider is installed first. "ring" is already in the lockfile.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
