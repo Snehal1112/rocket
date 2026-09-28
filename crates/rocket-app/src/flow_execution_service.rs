@@ -280,7 +280,7 @@ fn apply_header_override(
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rocket_shared::events::{DomainEvent, FlowNodeStatus};
+use rocket_shared::events::{DomainEvent, FlowNodeStatus, FlowSkipReason};
 use ulid::Ulid;
 
 /// Input DTO for `FlowExecutionService::run`.
@@ -308,6 +308,28 @@ pub struct FlowStepResult {
     /// never produced output (Skipped/Failed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Set only when `status` is `Skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<FlowSkipReason>,
+    /// The exit a succeeded If/Switch node took. `None` for every other node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+/// Builds the `FlowStepCompleted` event for one recorded step, so the live
+/// event and the returned summary can never disagree.
+fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
+    DomainEvent::FlowStepCompleted {
+        run_id: run_id.to_string(),
+        node_id: step.node_id.clone(),
+        status: step.status,
+        status_code: step.status_code,
+        duration_ms: step.duration_ms,
+        error: step.error.clone(),
+        value: step.value.clone(),
+        skip_reason: step.skip_reason,
+        branch: step.branch.clone(),
+    }
 }
 
 /// The full result of one `FlowExecutionService::run` call. IPC DTO.
@@ -440,20 +462,12 @@ impl FlowExecutionService {
                     status: FlowNodeStatus::Skipped,
                     status_code: None,
                     duration_ms: None,
-                    error: Some("upstream node failed".to_string()),
+                    error: None,
                     value: None,
-                };
-                self.events.publish(DomainEvent::FlowStepCompleted {
-                    run_id: run_id.clone(),
-                    node_id: step.node_id.clone(),
-                    status: step.status,
-                    status_code: step.status_code,
-                    duration_ms: step.duration_ms,
-                    error: step.error.clone(),
-                    value: step.value.clone(),
-                    skip_reason: None,
+                    skip_reason: Some(FlowSkipReason::UpstreamFailed),
                     branch: None,
-                });
+                };
+                self.events.publish(step_completed_event(&run_id, &step));
                 steps.push(step);
                 continue;
             }
@@ -487,17 +501,7 @@ impl FlowExecutionService {
                     skipped.insert(downstream);
                 }
             }
-            self.events.publish(DomainEvent::FlowStepCompleted {
-                run_id: run_id.clone(),
-                node_id: step.node_id.clone(),
-                status: step.status,
-                status_code: step.status_code,
-                duration_ms: step.duration_ms,
-                error: step.error.clone(),
-                value: step.value.clone(),
-                skip_reason: None,
-                branch: None,
-            });
+            self.events.publish(step_completed_event(&run_id, &step));
             steps.push(step);
         }
 
@@ -514,13 +518,17 @@ impl FlowExecutionService {
             .iter()
             .filter(|s| s.status == FlowNodeStatus::Skipped)
             .count();
+        let not_taken_count = steps
+            .iter()
+            .filter(|s| s.skip_reason == Some(FlowSkipReason::BranchNotTaken))
+            .count();
         self.events.publish(DomainEvent::FlowRunFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.clone(),
             node_count: steps.len(),
             failed_count,
             skipped_count,
-            not_taken_count: 0,
+            not_taken_count,
         });
 
         Ok(FlowRunSummary {
@@ -671,6 +679,8 @@ fn result_to_step(
                 duration_ms: Some(out.response.duration_ms),
                 error: (!success).then(|| format!("non-2xx response: {status}")),
                 value: None,
+                skip_reason: None,
+                branch: None,
             }
         }
         Ok(CapturedOutput::Value(v)) => {
@@ -682,6 +692,8 @@ fn result_to_step(
                 duration_ms: None,
                 error: None,
                 value: is_output.then(|| v.data().to_string()),
+                skip_reason: None,
+                branch: None,
             }
         }
         Err(e) => FlowStepResult {
@@ -691,6 +703,8 @@ fn result_to_step(
             duration_ms: None,
             error: Some(e.to_string()),
             value: None,
+            skip_reason: None,
+            branch: None,
         },
     }
 }
@@ -2229,6 +2243,159 @@ mod tests {
             "skipped nodes must never be sent"
         );
         assert_eq!(finished_counts(&publisher), (5, 1, 3));
+    }
+
+    #[tokio::test]
+    async fn skipped_step_reports_upstream_failed_in_summary_and_event() {
+        // a -> b; a fails (500), so b is skipped because upstream failed.
+        let flow = Flow {
+            name: "chain".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(&executor, fixed_wire("https://api.example.com/wired"));
+
+        let summary = service.run(&exec, run_input("chain")).await.expect("run");
+
+        let b = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "b")
+            .expect("step for b");
+        assert_eq!(b.status, FlowNodeStatus::Skipped);
+        assert_eq!(b.skip_reason, Some(FlowSkipReason::UpstreamFailed));
+        assert_eq!(b.error, None, "skip_reason replaces the old error text");
+        assert_eq!(b.branch, None);
+
+        let b_event = publisher
+            .events()
+            .into_iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowStepCompleted {
+                    node_id,
+                    status,
+                    error,
+                    skip_reason,
+                    branch,
+                    ..
+                } if node_id == "b" => Some((status, error, skip_reason, branch)),
+                _ => None,
+            })
+            .expect("FlowStepCompleted for b");
+        assert_eq!(
+            b_event,
+            (
+                FlowNodeStatus::Skipped,
+                None,
+                Some(FlowSkipReason::UpstreamFailed),
+                None
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_and_successful_steps_have_no_skip_reason_or_branch() {
+        // a fails, c is independent and succeeds.
+        let flow = Flow {
+            name: "mixed".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("c", "https://api.example.com/c"),
+            ],
+            edges: vec![],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(&executor, fixed_wire("https://api.example.com/wired"));
+
+        let summary = service.run(&exec, run_input("mixed")).await.expect("run");
+
+        for step in &summary.steps {
+            assert_eq!(step.skip_reason, None, "node {}", step.node_id);
+            assert_eq!(step.branch, None, "node {}", step.node_id);
+        }
+        assert_eq!(status_of(&summary, "a"), FlowNodeStatus::Failed);
+        assert_eq!(status_of(&summary, "c"), FlowNodeStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn run_finished_reports_zero_not_taken_for_failure_skips() {
+        let flow = Flow {
+            name: "chain".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(&executor, fixed_wire("https://api.example.com/wired"));
+
+        service.run(&exec, run_input("chain")).await.expect("run");
+
+        let not_taken: Vec<usize> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowRunFinished {
+                    not_taken_count, ..
+                } => Some(not_taken_count),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(not_taken, vec![0]);
+        assert_eq!(finished_counts(&publisher), (2, 1, 1));
+    }
+
+    #[test]
+    fn flow_step_result_serializes_skip_reason_camel_key_snake_value() {
+        let step = FlowStepResult {
+            node_id: "b".into(),
+            status: FlowNodeStatus::Skipped,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: Some(FlowSkipReason::BranchNotTaken),
+            branch: None,
+        };
+        let json = serde_json::to_value(&step).expect("serialize");
+        assert_eq!(json["skipReason"], "branch_not_taken");
+        assert!(json.get("skip_reason").is_none());
+        assert!(json.get("branch").is_none(), "None branch is omitted");
+
+        let routed = FlowStepResult {
+            skip_reason: None,
+            branch: Some("true".into()),
+            status: FlowNodeStatus::Success,
+            ..step
+        };
+        let json = serde_json::to_value(&routed).expect("serialize");
+        assert_eq!(json["branch"], "true");
+        assert!(
+            json.get("skipReason").is_none(),
+            "None skipReason is omitted"
+        );
+
+        let back: FlowStepResult = serde_json::from_value(serde_json::json!({
+            "nodeId": "x", "status": "success", "statusCode": null,
+            "durationMs": null, "error": null
+        }))
+        .expect("deserialize pre-Phase-2 summary step");
+        assert_eq!(back.skip_reason, None);
+        assert_eq!(back.branch, None);
     }
 
     #[tokio::test]
