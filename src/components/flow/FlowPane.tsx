@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { buildEdgeFromConnection, parseCycleErrorMessage } from '@/lib/flow-wiring';
+import { buildEdgeFromConnection, parseGraphErrorMessage } from '@/lib/flow-wiring';
 import {
   type CollectionSummary,
   type FlowEdge,
@@ -188,12 +188,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       if (!quiet) toast.success('Flow saved.');
       return true;
     } catch (err) {
-      // Plan 07's save_flow rejects with the plain string
-      // "Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1, e2"
-      // (ids joined by ", ", node/edge segments joined by "; "). Parse and
-      // flag both, rather than showing only a generic toast.
+      // Any validation error names the offending node(s) and edge(s) at the
+      // end of the message. Flag them on the canvas as well as toasting.
       const message = String(err);
-      const parsed = parseCycleErrorMessage(message);
+      const parsed = parseGraphErrorMessage(message);
       if (parsed) {
         setCycleNodeIds(parsed.nodeIds);
         setCycleEdgeIds(parsed.edgeIds);

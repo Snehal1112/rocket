@@ -123,6 +123,20 @@ describe('FlowPane save', () => {
     });
   });
 
+  it('flags the node named in a non-cycle validation error', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(
+      "Invalid input: If node 'b' must have exactly one incoming edge — node(s): b; edge(s): ",
+    );
+    render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('output-node-card');
+      const flagged = cards.filter((c) => c.className.includes('ring-red-500'));
+      expect(flagged.map((c) => c.textContent)).toEqual(['Out b—']);
+    });
+  });
+
   it('marks the tab clean after a successful save', async () => {
     vi.mocked(saveFlow).mockResolvedValue(undefined);
     render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
