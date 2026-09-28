@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePaneStore } from '@/stores/pane-store';
@@ -59,6 +59,30 @@ const baseTab: FlowTab = {
   nodes: [
     { id: 'in1', position: { x: 0, y: 0 }, kind: { kind: 'Input', label: 'User', value: 'alice' } },
     { id: 'out1', position: { x: 300, y: 0 }, kind: { kind: 'Output', label: 'Result' } },
+    {
+      id: 'req1',
+      position: { x: 0, y: 200 },
+      kind: {
+        kind: 'Request',
+        label: 'Fetch',
+        source: { type: 'Inline', request: { method: 'GET', url: '', headers: [] } },
+      },
+    },
+    {
+      id: 'if1',
+      position: { x: 300, y: 200 },
+      kind: { kind: 'If', label: 'Check', condition: 'true' },
+    },
+    {
+      id: 'sw1',
+      position: { x: 600, y: 200 },
+      kind: {
+        kind: 'Switch',
+        label: 'Route',
+        value: 'x',
+        cases: [{ id: 'c1', label: 'Case 1', matches: '' }],
+      },
+    },
   ],
   edges: [
     {
@@ -140,7 +164,7 @@ describe('FlowPane node properties panel', () => {
     await userEvent.keyboard('{Backspace}');
     expect(document.activeElement).toBe(field);
     const tab = getFlowTab();
-    expect(tab.nodes.map((n) => n.id)).toEqual(['in1', 'out1']);
+    expect(tab.nodes).toHaveLength(baseTab.nodes.length);
     expect(tab.nodes.find((n) => n.id === 'out1')?.kind.label).toBe('Resul');
   });
 
@@ -178,7 +202,7 @@ describe('FlowPane node properties panel', () => {
     const handle = screen.getByRole('separator');
     act(() => handle.focus());
     await userEvent.keyboard('{Backspace}');
-    expect(getFlowTab().nodes.map((n) => n.id)).toEqual(['in1', 'out1']);
+    expect(getFlowTab().nodes).toHaveLength(baseTab.nodes.length);
   });
 
   it('closes the panel when the pane switches to another flow tab', async () => {
@@ -189,5 +213,46 @@ describe('FlowPane node properties panel', () => {
     expect(screen.getByTestId('node-properties-panel')).toBeInTheDocument();
     rerender(<FlowPane tab={otherTab} groupId={groupId} />);
     expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
+  });
+
+  it('keeps the node when Backspace is pressed on a panel button', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    const close = screen.getByRole('button', { name: 'Close properties' });
+    act(() => close.focus());
+    await userEvent.keyboard('{Backspace}');
+    expect(getFlowTab().nodes.map((n) => n.id)).toContain('out1');
+  });
+
+  it('keeps a palette-added node on Backspace and edits the selected label', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole('button', { name: 'Add node' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Output' }));
+    const field = screen.getByLabelText('Label');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    await user.keyboard('{Backspace}');
+    expect(getFlowTab().nodes).toHaveLength(baseTab.nodes.length + 1);
+    expect(document.activeElement).toBe(field);
+    // The whole label was selected, so Backspace cleared it.
+    expect(field).toHaveValue('');
+  });
+
+  it('does not steal focus when a node is opened from its menu later', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByLabelText('Edit Result'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.activeElement).not.toBe(screen.getByLabelText('Label'));
+  });
+
+  it.each([
+    ['Fetch', 'Request · Fetch'],
+    ['Check', 'If · Check'],
+    ['Route', 'Switch · Route'],
+  ])('opens for the %s node from its menu button', async (label, header) => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText(`Edit ${label}`));
+    expect(screen.getByTestId('node-properties-panel')).toHaveTextContent(header);
   });
 });

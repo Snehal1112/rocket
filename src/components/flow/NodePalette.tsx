@@ -18,7 +18,7 @@ export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void
   const defaultPosition = { x: 100, y: 100 };
 
   return (
-    <div className='absolute left-3 top-3 z-10'>
+    <div className='nokey absolute left-3 top-3 z-10'>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant='outline' size='sm' className='gap-1.5'>

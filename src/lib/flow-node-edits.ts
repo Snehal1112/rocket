@@ -42,6 +42,7 @@ export function savedToInline(request: Request): InlineConversion {
   if (hasText(request.postResponseScript)) dropped.push('post-response script');
   if (hasText(request.tests)) dropped.push('tests');
   if ((request.assertions?.length ?? 0) > 0) dropped.push('assertions');
+  if (request.actions?.some((a) => !a.disabled)) dropped.push('actions');
 
   return {
     inline: { method: request.method, url: request.url, headers, body },

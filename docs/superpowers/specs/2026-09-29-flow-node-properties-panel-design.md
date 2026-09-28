@@ -61,7 +61,7 @@ Each field change calls the existing Phase 2 path `updateNodeKind(nodeId, kind)`
 Editors take `(node, onChange)` props and never touch the store directly, so each one can be tested on its own.
 
 ### 3.6 Keyboard and focus
-The panel sits outside the React Flow viewport, so keystrokes in its fields never reach React Flow's delete-key handler. A regression test guards this (§8).
+React Flow listens for its delete key on `document`, not on the canvas, and skips it only for input, select and textarea targets, contenteditable elements and anything inside a `nokey` element. The panel always has a node selected, so its root carries `nokey` and `tabIndex={-1}`. Any portalled popover or select content the panel opens carries `nokey` too, because portals escape the panel root. When a palette add opens the panel, focus moves to the Label field, so the next Backspace edits text. Regression tests guard this (§8).
 
 ## 4. Editor contents
 

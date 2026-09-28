@@ -31,6 +31,7 @@ All edits go through the panel's `onChange(kind)`, the same single-update path p
 - **Inline headers** are `{ name, value }` with no enabled flag. An empty body is stored as `body: null`.
 - **Methods:** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS.
 - **Zustand:** narrow selectors only.
+- Every portalled `PopoverContent` and `SelectContent` rendered from the panel gets `className` including `nokey`, because portals escape the panel's `nokey` root.
 - **Packages:** use `yarn`, and do not run `yarn install`.
 - **Biome style:** 2 spaces, single quotes (JSX too), trailing commas, 100-column lines. Comments are short full sentences ending with a period.
 - **Checks for every task:** the task's own `yarn test --run <patterns>`, then `yarn tsc --noEmit` and `yarn check`. Do not run the whole Vitest suite or any cargo command.
@@ -235,7 +236,7 @@ export function InlineSourceEditor({
           <SelectTrigger aria-label='Method' className='h-8 w-28 text-xs'>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className='nokey'>
             {METHODS.map((m) => (
               <SelectItem key={m} value={m}>
                 {m}
@@ -545,7 +546,7 @@ export function RequestPicker({
           {triggerLabel}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align='start' className='w-72 p-2'>
+      <PopoverContent align='start' className='nokey w-72 p-2'>
         <Input
           aria-label='Filter requests'
           placeholder='Filter requests'

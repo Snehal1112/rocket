@@ -70,6 +70,19 @@ describe('savedToInline', () => {
     expect(dropped).toEqual(['bearer auth', 'pre-request script', 'tests', 'assertions']);
   });
 
+  it('names enabled actions and ignores disabled ones', () => {
+    const action = {
+      phase: 'after-response' as const,
+      selector: { expression: 'body.id', method: 'jsonq' as const },
+      variable: { name: 'id', scope: 'runtime' as const },
+    };
+    const base = { ...saved, headers: [], body: undefined };
+    expect(savedToInline({ ...base, actions: [action] }).dropped).toEqual(['actions']);
+    expect(savedToInline({ ...base, actions: [{ ...action, disabled: true }] }).dropped).toEqual(
+      [],
+    );
+  });
+
   it('keeps nothing for none or inherit auth', () => {
     expect(savedToInline({ ...saved, headers: [], auth: { authType: 'none' } }).dropped).toEqual(
       [],

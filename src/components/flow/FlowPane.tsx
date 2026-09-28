@@ -63,11 +63,20 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
   // UI state only. The panel shows while exactly one node is selected.
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Set when a palette add opens the panel, so the Label field takes focus.
+  const [labelFocusNodeId, setLabelFocusNodeId] = useState<string | null>(null);
   // FlowPane is reused across flow tabs, so drop the selection when the tab changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tab.id is the trigger.
   useEffect(() => {
     setSelectedNodeIds(new Set());
+    setLabelFocusNodeId(null);
   }, [tab.id]);
+  // The panel follows the selection. A node that no longer exists shows nothing.
+  const panelNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
+  // Any other selection ends the focus request, so a later open does not steal focus.
+  useEffect(() => {
+    setLabelFocusNodeId((current) => (current === panelNodeId ? current : null));
+  }, [panelNodeId]);
   // Set by the popover's onCommit, so closing the popover can tell a commit
   // from a cancel.
   const committedEdgeIdRef = useRef<string | null>(null);
@@ -217,6 +226,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const handleAddNode = (node: FlowNode) => {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
     setSelectedNodeIds(new Set([node.id]));
+    setLabelFocusNodeId(node.id);
   };
 
   // Returns whether the save succeeded, so Run can stop on a failed save.
@@ -280,8 +290,6 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     ? tab.nodes.find((n) => n.id === pendingEdge.targetNodeId)
     : undefined;
 
-  // The panel follows the selection. A node that no longer exists shows nothing.
-  const panelNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
   const panelNode = panelNodeId ? tab.nodes.find((n) => n.id === panelNodeId) : undefined;
 
   return (
@@ -369,6 +377,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               node={panelNode}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
               onClose={() => setSelectedNodeIds(new Set())}
+              autoFocusLabel={panelNode.id === labelFocusNodeId}
             />
           </ResizablePanel>
         </>
