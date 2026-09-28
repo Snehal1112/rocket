@@ -14,6 +14,12 @@ pub struct HistoryEntry {
     pub timestamp: DateTime<Utc>,
     pub collection: Option<String>,
     pub request_name: Option<String>,
+    /// Distinguishes a manual send from a Collection Runner step, a load
+    /// test, a Flow node, or an agent-driven tool call. Defaults to `Manual`
+    /// so a `HistoryEntry` persisted before this field existed still
+    /// deserializes correctly.
+    #[serde(default)]
+    pub run_source: rocket_shared::RunSource,
 }
 
 impl HistoryEntry {
@@ -34,6 +40,7 @@ impl HistoryEntry {
             timestamp: Utc::now(),
             collection: None,
             request_name: None,
+            run_source: rocket_shared::RunSource::Manual,
         }
     }
 
@@ -44,6 +51,12 @@ impl HistoryEntry {
     ) -> Self {
         self.collection = Some(collection.into());
         self.request_name = Some(request_name.into());
+        self
+    }
+
+    /// Builder method: tag this entry with how its execution was triggered.
+    pub fn with_run_source(mut self, source: rocket_shared::RunSource) -> Self {
+        self.run_source = source;
         self
     }
 }
@@ -104,5 +117,38 @@ mod tests {
         let a = HistoryEntry::new("GET", "/", 200, 10, 0);
         let b = HistoryEntry::new("GET", "/", 200, 10, 0);
         assert_ne!(a.id, b.id, "each entry must get a unique UUID");
+    }
+
+    #[test]
+    fn new_entry_defaults_run_source_to_manual() {
+        let entry = HistoryEntry::new("GET", "https://api.example.com", 200, 150, 1024);
+        assert_eq!(entry.run_source, rocket_shared::RunSource::Manual);
+    }
+
+    #[test]
+    fn with_run_source_overrides_the_default() {
+        let entry = HistoryEntry::new("GET", "/", 200, 10, 0)
+            .with_run_source(rocket_shared::RunSource::Agent);
+        assert_eq!(entry.run_source, rocket_shared::RunSource::Agent);
+    }
+
+    #[test]
+    fn old_json_without_run_source_deserializes_to_manual() {
+        // Backward compat: a HistoryEntry persisted before this field existed
+        // must still load, defaulting to Manual rather than failing.
+        let json = r#"{"id":"1","method":"GET","url":"/","status":200,"durationMs":10,"responseSize":0,"timestamp":"2024-01-01T00:00:00Z","collection":null,"requestName":null}"#;
+        let entry: HistoryEntry = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(entry.run_source, rocket_shared::RunSource::Manual);
+    }
+
+    #[test]
+    fn run_source_serializes_as_camel_case_run_source_key() {
+        let entry = HistoryEntry::new("GET", "/", 200, 10, 0)
+            .with_run_source(rocket_shared::RunSource::LoadTest);
+        let json = serde_json::to_string(&entry).expect("serialize");
+        assert!(
+            json.contains(r#""runSource":"load_test""#),
+            "expected camelCase runSource field with snake_case value, got {json}"
+        );
     }
 }
