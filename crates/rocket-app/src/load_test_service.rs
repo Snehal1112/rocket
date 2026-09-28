@@ -353,6 +353,7 @@ mod tests {
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
             skip_folder_scripts: false,
+            run_source: rocket_shared::RunSource::Manual,
         };
 
         // One short Hold phase to keep the test fast.
@@ -452,6 +453,7 @@ mod tests {
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
             skip_folder_scripts: false,
+            run_source: rocket_shared::RunSource::Manual,
         };
         let config = LoadTestConfigV2 {
             phases: vec![LoadTestPhase {

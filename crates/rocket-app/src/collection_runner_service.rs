@@ -387,6 +387,7 @@ impl CollectionRunnerService {
             input.environment_name.as_deref(),
             input.global_env_name.as_deref(),
             input.request_guard_policy.clone(),
+            rocket_shared::RunSource::Runner,
         );
 
         let mut state = match exec.begin_phases(&step_input, external_secrets) {

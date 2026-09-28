@@ -116,6 +116,12 @@ pub struct ExecuteRequestInput {
     /// sets it, because it runs none of the request's own scripts either.
     #[serde(default)]
     pub skip_folder_scripts: bool,
+    /// Who initiated this execution. Defaults to `Manual` for any caller
+    /// that does not set it explicitly (the plain Tauri `execute_request`
+    /// command and load test commands), which is correct for those two
+    /// paths. Every history entry this run produces carries this tag.
+    #[serde(default)]
+    pub run_source: rocket_shared::RunSource,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -2032,7 +2038,8 @@ impl RequestExecutionService {
             response.status,
             response.duration_ms,
             response.size_bytes,
-        );
+        )
+        .with_run_source(input.run_source);
         if let (Some(col), Some(name)) = (&input.collection, &input.request_name) {
             entry = entry.with_collection(col, name);
         }
@@ -2911,6 +2918,7 @@ mod tests {
             path_params: vec![],
             actions: vec![],
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            run_source: rocket_shared::RunSource::Manual,
         }
     }
 
@@ -3614,6 +3622,33 @@ mod tests {
             "expected the redaction marker in place of the secret, got: {}",
             saved[0].url
         );
+    }
+
+    #[tokio::test]
+    async fn history_entry_carries_the_input_run_source() {
+        let history_repo = Box::new(MockHistoryRepo::new());
+        let history_arc = history_repo.saved_entries_handle();
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("prod"))),
+            Arc::new(MockExecutor::new(200)),
+            history_repo,
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://api.example.com/ping", None);
+        input.run_source = rocket_shared::RunSource::Agent;
+
+        svc.execute(input).await.expect("execute");
+
+        let saved = history_arc.lock().expect("lock saved entries");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].run_source, rocket_shared::RunSource::Agent);
     }
 
     #[tokio::test]

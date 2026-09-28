@@ -518,6 +518,7 @@ pub fn build_execute_request_input(
         environment_name,
         global_env_name,
         rocket_workspace::RequestGuardPolicy::default(),
+        rocket_shared::RunSource::Flow,
     ))
 }
 
@@ -2785,6 +2786,12 @@ mod tests {
                 .expect("saved source must resolve");
 
         assert_eq!(input.global_env_name.as_deref(), Some("shared-global"));
+    }
+
+    #[test]
+    fn built_input_is_tagged_run_source_flow() {
+        let input = sample_execute_input();
+        assert_eq!(input.run_source, rocket_shared::RunSource::Flow);
     }
 
     #[test]

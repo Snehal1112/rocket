@@ -172,12 +172,19 @@ fn folder_dir_name(folder: &Folder) -> &str {
 /// `request_guard.rs` / Item 6's request-mutation host guard spec) — the
 /// runner must apply the same policy to every step's BeforeRequest script as
 /// a single send would, not silently default to permissive.
+///
+/// `run_source` is passed in, not hard-coded, because this function has two
+/// callers: `collection_runner_service::run_step` (passes `Runner`) and
+/// `flow_execution_service::build_execute_request_input` (passes `Flow`).
+/// Hard-coding either value here would mislabel the other caller's history
+/// entries.
 pub fn build_step_input(
     item: &RunItem,
     collection: &str,
     environment_name: Option<&str>,
     global_env_name: Option<&str>,
     request_guard_policy: rocket_workspace::RequestGuardPolicy,
+    run_source: rocket_shared::RunSource,
 ) -> ExecuteRequestInput {
     let request = &item.request;
     ExecuteRequestInput {
@@ -207,6 +214,7 @@ pub fn build_step_input(
         skip_history: false,
         flow_vars: std::collections::HashMap::new(),
         skip_folder_scripts: false,
+        run_source,
     }
 }
 
@@ -349,6 +357,7 @@ mod tests {
             Some("dev"),
             Some("shared-global"),
             rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Runner,
         );
 
         assert_eq!(input.collection.as_deref(), Some("my-api"));
@@ -400,6 +409,7 @@ mod tests {
             None,
             None,
             rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Runner,
         );
         assert_eq!(input.options.timeout_ms, 5000);
         assert!(!input.options.follow_redirects);
@@ -425,7 +435,14 @@ mod tests {
             also_block_private_ranges: true,
         };
 
-        let input = build_step_input(&item, "my-api", None, None, policy.clone());
+        let input = build_step_input(
+            &item,
+            "my-api",
+            None,
+            None,
+            policy.clone(),
+            rocket_shared::RunSource::Runner,
+        );
         assert_eq!(input.request_guard_policy, policy);
     }
 
@@ -448,6 +465,7 @@ mod tests {
             None,
             None,
             rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Runner,
         );
         assert!(!input.options.encode_url);
 
@@ -458,6 +476,7 @@ mod tests {
             None,
             None,
             rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Runner,
         );
         assert!(
             input.options.encode_url,
@@ -537,5 +556,25 @@ mod tests {
         let items = flatten_run_set(&collection, None).expect("flatten");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "Login");
+    }
+
+    #[test]
+    fn step_input_carries_the_run_source_it_was_given() {
+        let item = RunItem::http(
+            "Login".into(),
+            "login.yml".into(),
+            req("Login", "login.yml"),
+        );
+
+        let input = build_step_input(
+            &item,
+            "my-api",
+            None,
+            None,
+            rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Flow,
+        );
+
+        assert_eq!(input.run_source, rocket_shared::RunSource::Flow);
     }
 }
