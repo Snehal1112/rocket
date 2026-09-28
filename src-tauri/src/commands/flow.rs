@@ -272,6 +272,7 @@ pub struct RunFlowInputDto {
     pub collection: String,
     pub flow_name: String,
     pub environment_name: Option<String>,
+    pub global_env_name: Option<String>,
 }
 impl From<RunFlowInputDto> for RunFlowInput {
     fn from(i: RunFlowInputDto) -> Self {
@@ -279,6 +280,7 @@ impl From<RunFlowInputDto> for RunFlowInput {
             collection: i.collection,
             flow_name: i.flow_name,
             environment_name: i.environment_name,
+            global_env_name: i.global_env_name,
         }
     }
 }

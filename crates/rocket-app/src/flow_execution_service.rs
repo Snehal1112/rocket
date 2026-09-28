@@ -81,6 +81,7 @@ pub fn build_execute_request_input(
     collection_repo: &dyn rocket_collection::CollectionRepository,
     collection: &str,
     environment_name: Option<&str>,
+    global_env_name: Option<&str>,
     node: &FlowNode,
 ) -> DomainResult<ExecuteRequestInput> {
     let FlowNodeKind::Request { label, source } = &node.kind else {
@@ -110,7 +111,7 @@ pub fn build_execute_request_input(
         &item,
         collection,
         environment_name,
-        None,
+        global_env_name,
         rocket_workspace::RequestGuardPolicy::default(),
     ))
 }
@@ -288,6 +289,7 @@ pub struct RunFlowInput {
     pub collection: String,
     pub flow_name: String,
     pub environment_name: Option<String>,
+    pub global_env_name: Option<String>,
 }
 
 /// One node's outcome within a run, as reported in `FlowRunSummary::steps`
@@ -578,6 +580,7 @@ impl FlowExecutionService {
                     self.collection_repo.as_ref(),
                     &input.collection,
                     input.environment_name.as_deref(),
+                    input.global_env_name.as_deref(),
                     node,
                 )?;
 
@@ -1064,7 +1067,7 @@ mod tests {
         let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
 
         let node = saved_flow_node("n1", "auth/login.yml");
-        let input = build_execute_request_input(&repo, "my-api", Some("dev"), &node)
+        let input = build_execute_request_input(&repo, "my-api", Some("dev"), None, &node)
             .expect("saved source must resolve");
 
         assert_eq!(input.method, HttpMethod::Get);
@@ -1076,11 +1079,29 @@ mod tests {
     }
 
     #[test]
+    fn build_execute_request_input_threads_global_env_name() {
+        let mut saved = Request::new(
+            "Get Auth Token",
+            HttpMethod::Get,
+            "https://api.example.com/login",
+        );
+        saved.tags = vec!["auth".to_string()];
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+
+        let node = saved_flow_node("n1", "auth/login.yml");
+        let input =
+            build_execute_request_input(&repo, "my-api", Some("dev"), Some("shared-global"), &node)
+                .expect("saved source must resolve");
+
+        assert_eq!(input.global_env_name.as_deref(), Some("shared-global"));
+    }
+
+    #[test]
     fn saved_source_propagates_not_found_instead_of_defaulting() {
         let repo = FakeCollectionRepo::new();
         let node = saved_flow_node("n1", "does/not/exist.yml");
 
-        let err = build_execute_request_input(&repo, "my-api", None, &node)
+        let err = build_execute_request_input(&repo, "my-api", None, None, &node)
             .expect_err("a missing saved request must error, not silently build an empty request");
 
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -1091,7 +1112,7 @@ mod tests {
         let repo = FakeCollectionRepo::new();
         let node = inline_flow_node("n2");
 
-        let input = build_execute_request_input(&repo, "my-api", None, &node)
+        let input = build_execute_request_input(&repo, "my-api", None, None, &node)
             .expect("inline source must build");
 
         assert_eq!(input.method, HttpMethod::Post);
@@ -1116,7 +1137,7 @@ mod tests {
             request.method = "FETCH".to_string();
         }
 
-        let err = build_execute_request_input(&repo, "my-api", None, &node)
+        let err = build_execute_request_input(&repo, "my-api", None, None, &node)
             .expect_err("an invalid method string must be InvalidInput");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1133,7 +1154,7 @@ mod tests {
             position: NodePosition { x: 0.0, y: 0.0 },
         };
 
-        let err = build_execute_request_input(&repo, "my-api", None, &node)
+        let err = build_execute_request_input(&repo, "my-api", None, None, &node)
             .expect_err("an Output node has no request to build");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1151,7 +1172,7 @@ mod tests {
 
     fn sample_execute_input() -> ExecuteRequestInput {
         let repo = FakeCollectionRepo::new();
-        build_execute_request_input(&repo, "my-api", None, &inline_flow_node("n2"))
+        build_execute_request_input(&repo, "my-api", None, None, &inline_flow_node("n2"))
             .expect("build sample input")
     }
 
@@ -1626,6 +1647,7 @@ mod tests {
                     collection: "my-api".to_string(),
                     flow_name: "empty".to_string(),
                     environment_name: None,
+                    global_env_name: None,
                 },
             )
             .await
@@ -1650,6 +1672,7 @@ mod tests {
                     collection: "my-api".to_string(),
                     flow_name: "one-node".to_string(),
                     environment_name: None,
+                    global_env_name: None,
                 },
             )
             .await
@@ -1676,6 +1699,7 @@ mod tests {
                     collection: "my-api".to_string(),
                     flow_name: "does-not-exist".to_string(),
                     environment_name: None,
+                    global_env_name: None,
                 },
             )
             .await
@@ -1708,6 +1732,7 @@ mod tests {
                     collection: "my-api".to_string(),
                     flow_name: "two-nodes".to_string(),
                     environment_name: None,
+                    global_env_name: None,
                 },
             )
             .await
@@ -1744,6 +1769,7 @@ mod tests {
                     collection: "my-api".to_string(),
                     flow_name: "skip-cascade".to_string(),
                     environment_name: None,
+                    global_env_name: None,
                 },
             )
             .await
@@ -1800,7 +1826,45 @@ mod tests {
             collection: "my-api".to_string(),
             flow_name: flow_name.to_string(),
             environment_name: None,
+            global_env_name: None,
         }
+    }
+
+    #[tokio::test]
+    async fn a_run_resolves_a_global_env_placeholder_in_an_inline_requests_url() {
+        let mut global_env = rocket_environment::Environment::new("shared-global");
+        global_env.set_variable(rocket_environment::Variable::new("ORG_ID", "acme"));
+
+        let executor = RecordingExecutor::new();
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(global_env)),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let flow = Flow {
+            name: "global-env-flow".to_string(),
+            nodes: vec![request_flow_node("a", "https://api.example.com/{{ORG_ID}}")],
+            edges: Vec::new(),
+        };
+        let service = service_with_flow(flow);
+
+        let mut input = run_input("global-env-flow");
+        input.global_env_name = Some("shared-global".to_string());
+        let summary = service.run(&exec, input).await.expect("run must succeed");
+
+        assert_eq!(summary.steps[0].status_code, Some(200));
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/acme".to_string()],
+            "the flow-executed request must resolve {{ORG_ID}} against the global environment"
+        );
     }
 
     /// Builds an execution service around a shared `RecordingExecutor` and a
